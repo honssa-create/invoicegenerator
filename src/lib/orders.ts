@@ -20,6 +20,7 @@ export interface CoreColumns {
   phone: string;
   shipping_address: string;
   notes: string;
+  carton_count: string;
 }
 
 export const ORDER_STATUSES = [
@@ -74,6 +75,7 @@ export const ORDER_FIELDS: OrderFieldDef[] = [
   { key: 'tracking_no', label: 'Tracking Number 運單號', type: 'text', placeholder: 'e.g. SF5120793357800' },
   { key: 'shipping_method', label: 'Shipping 寄出方式', type: 'select', options: ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] },
   { key: 'other_craft', label: '其他加工', type: 'text' },
+  { key: 'carton_count', label: 'Number of Cartons / 箱數', type: 'text', col: 'carton_count', placeholder: 'e.g. 5' },
 ];
 
 export interface OrderFile {

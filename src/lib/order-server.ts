@@ -14,6 +14,7 @@ interface OrderRow {
   phone: string | null;
   shipping_address: string | null;
   notes: string | null;
+  carton_count: string | null;
   fields_json: string | null;
   created_at: string;
   updated_at: string;
@@ -53,6 +54,7 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
     phone: row.phone || '',
     shipping_address: row.shipping_address || '',
     notes: row.notes || '',
+    carton_count: row.carton_count || '',
     fields,
     files,
     activities,

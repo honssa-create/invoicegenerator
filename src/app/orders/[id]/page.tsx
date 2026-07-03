@@ -123,7 +123,12 @@ export default function OrderDetailPage() {
 
   return (
     <AppLayout>
-      <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium mb-4">← Back to orders</button>
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to orders</button>
+        <Link href={`/orders/${order.id}/delivery-note`} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+          🚚 Generate Delivery Note
+        </Link>
+      </div>
 
       <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:h-[calc(100vh-7rem)]">
         {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}

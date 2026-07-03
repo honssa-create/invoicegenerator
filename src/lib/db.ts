@@ -193,6 +193,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_order_activities_order ON order_activities(order_id);
 `);
 
+// Carton count on orders (for delivery notes).
+{
+  const orderCols = db.prepare('PRAGMA table_info(orders)').all() as { name: string }[];
+  if (!orderCols.some((c) => c.name === 'carton_count')) {
+    db.exec('ALTER TABLE orders ADD COLUMN carton_count TEXT');
+  }
+}
+
 // Unified activity log shared by Orders, Invoices and Quotations (ClickUp-style feed).
 db.exec(`
   CREATE TABLE IF NOT EXISTS activity_logs (

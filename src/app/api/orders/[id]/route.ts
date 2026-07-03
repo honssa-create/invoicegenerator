@@ -13,6 +13,7 @@ const CORE_COLUMNS = [
   'phone',
   'shipping_address',
   'notes',
+  'carton_count',
 ];
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {

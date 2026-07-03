@@ -109,6 +109,53 @@ export interface Order extends CoreColumns {
   updated_at: string;
 }
 
+// Dynamic Order Type + the bird's-nest reactive production formulas.
+export const ORDER_TYPES = ['訂製襟章', '燕窩回禮燉製'] as const;
+export type OrderType = (typeof ORDER_TYPES)[number];
+
+export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'];
+
+export const BIRD_NEST_FLAVORS: { key: string; label: string }[] = [
+  { key: 'qty_rock_sugar', label: '客人訂冰糖味 (樽)' },
+  { key: 'qty_osmanthus', label: '客人訂桂花味 (樽)' },
+  { key: 'qty_red_date', label: '客人訂紅棗味 (樽)' },
+];
+
+// Grams of 燕餅 per production bottle (capacity label).
+export const BIRD_CAKE_GRAMS_PER_BOTTLE = 0.8;
+
+export interface BirdNestTotals {
+  totalOrdered: number; // 客人訂總數量
+  productionBottles: number; // 總生產樽數
+  birdCakeGrams: number; // 燕餅 (g)
+  roundTag: number; // 圓形tag
+  sticker: number; // 貼紙
+  goldString: number; // 金繩
+  weddingLogoTag: number; // Wedding Logo Tag
+}
+
+// Pure reactive formula: derive totals + packing-checklist counts from the raw fields.
+export function computeBirdNestTotals(fields: Record<string, string | boolean>): BirdNestTotals {
+  const n = (k: string) => {
+    const v = fields[k];
+    const num = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const totalOrdered = n('qty_rock_sugar') + n('qty_osmanthus') + n('qty_red_date');
+  const hasProd = fields.production_bottles !== undefined && String(fields.production_bottles).trim() !== '';
+  const productionBottles = hasProd ? n('production_bottles') : totalOrdered;
+  const birdCakeGrams = Math.round(productionBottles * BIRD_CAKE_GRAMS_PER_BOTTLE * 100) / 100;
+  return {
+    totalOrdered,
+    productionBottles,
+    birdCakeGrams,
+    roundTag: productionBottles,
+    sticker: productionBottles,
+    goldString: productionBottles,
+    weddingLogoTag: productionBottles,
+  };
+}
+
 export function orderTitle(o: {
   po_number?: string | null;
   name?: string | null;

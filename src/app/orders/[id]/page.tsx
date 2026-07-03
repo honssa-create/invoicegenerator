@@ -10,6 +10,10 @@ import { compressPdfToImages } from '@/lib/pdfCompression';
 import {
   ORDER_FIELDS,
   ORDER_STATUSES,
+  ORDER_TYPES,
+  PAYMENT_STATUS_LABELS,
+  BIRD_NEST_FLAVORS,
+  computeBirdNestTotals,
   STATUS_COLORS,
   orderTitle,
   type Order,
@@ -115,6 +119,37 @@ export default function OrderDetailPage() {
 
   const cellCls = 'w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 rounded px-2 py-1 text-sm outline-none transition-colors';
 
+  // Helpers for the structured section boxes (values stored in fields_json).
+  const softInput = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-colors';
+  const fVal = (k: string) => (order.fields[k] as string) ?? '';
+  const fInput = (key: string, type = 'text', placeholder = '') => (
+    <input
+      type={type}
+      value={fVal(key)}
+      onChange={(e) => setFieldLocal(key, e.target.value)}
+      onBlur={(e) => patch({ fields: { [key]: e.target.value } })}
+      placeholder={placeholder}
+      className={softInput}
+    />
+  );
+  const labeled = (label: string, node: React.ReactNode, hint?: string) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1.5">
+        {label}
+        {hint ? <span className="text-gray-400 font-normal"> · {hint}</span> : null}
+      </label>
+      {node}
+    </div>
+  );
+  const readOnly = (label: string, value: React.ReactNode) => (
+    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5">
+      <p className="text-[11px] uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{value}</p>
+    </div>
+  );
+  const orderType = fVal('order_type');
+  const bn = computeBirdNestTotals(order.fields);
+
   const renderField = (f: OrderFieldDef) => {
     const value = f.col ? (order[f.col] as string) : order.fields[f.key];
     if (f.type === 'checkbox') {
@@ -198,6 +233,159 @@ export default function OrderDetailPage() {
               <textarea value={order.notes} onChange={(e) => setCoreLocal('notes', e.target.value)} onBlur={(e) => patch({ core: { notes: e.target.value } })} rows={2} placeholder="Add notes… (manually input or edited)" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
             </div>
           </div>
+
+          {/* BOX 1 — Order Detail (dynamic by Order Type) */}
+          <section className="bg-white rounded-2xl border border-gray-200 p-8">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 1</p>
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Order Detail 訂單詳情</h2>
+
+            <div className="max-w-sm mb-8">
+              {labeled(
+                'Order Type 訂單類型',
+                <select
+                  value={orderType}
+                  onChange={(e) => { setFieldLocal('order_type', e.target.value); patch({ fields: { order_type: e.target.value } }); }}
+                  className={softInput}
+                >
+                  <option value="">Select type…</option>
+                  {ORDER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
+            </div>
+
+            {orderType === '訂製襟章' && (
+              <div className="space-y-6">
+                <div className="grid md:grid-cols-2 gap-5">
+                  {labeled('Badge Style 襟章款式', fInput('badge_style', 'text', 'e.g. 亞加力雙面'))}
+                  {labeled('Quantity 數量', fInput('badge_quantity', 'number', 'e.g. 100'))}
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-2">Image Preview 圖片預覽</p>
+                  {order.files.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {order.files.map((f) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={f.id} src={`/api/order-files/${f.id}`} alt="preview" onClick={() => setLightbox(`/api/order-files/${f.id}`)} className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">Upload proofs in the “Design Proofs” section below.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {orderType === '燕窩回禮燉製' && (
+              <div className="space-y-8">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Dates 日期</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+                    {labeled(
+                      'Big Day',
+                      <input
+                        type="date"
+                        value={fVal('big_day')}
+                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
+                        onBlur={(e) => {
+                          const v = e.target.value;
+                          const upd: Record<string, string> = { big_day: v };
+                          if (v && !fVal('expiry_date')) {
+                            const d = new Date(v);
+                            d.setDate(d.getDate() + 28);
+                            const iso = d.toISOString().slice(0, 10);
+                            upd.expiry_date = iso;
+                            setFieldLocal('expiry_date', iso);
+                          }
+                          patch({ fields: upd });
+                        }}
+                        className={softInput}
+                      />
+                    )}
+                    {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
+                    {labeled('生產日期', fInput('production_date', 'date'))}
+                    {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Client Quantities 客人訂購數量</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
+                    {BIRD_NEST_FLAVORS.map((f) => (
+                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
+                    ))}
+                    {readOnly('客人訂總數量', bn.totalOrdered)}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Inventory & Production 本地模擬計算</h3>
+                  <div className="max-w-xs mb-4">
+                    {labeled('總生產樽數', fInput('production_bottles', 'number', `default ${bn.totalOrdered}`), 'defaults to 客人訂總數量')}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                    {readOnly('燕餅 (g)', `${bn.birdCakeGrams} g`)}
+                    {readOnly('圓形tag', bn.roundTag)}
+                    {readOnly('貼紙', bn.sticker)}
+                    {readOnly('金繩', bn.goldString)}
+                    {readOnly('Wedding Logo Tag', bn.weddingLogoTag)}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-3">Auto-derived from 總生產樽數 (= {bn.productionBottles}) to simplify Tracy’s packing checklist. 燕餅 = 樽數 × {`${0.8}`}g.</p>
+                </div>
+              </div>
+            )}
+
+            {!orderType && <p className="text-sm text-gray-400">Choose an Order Type to reveal its fields.</p>}
+          </section>
+
+          {/* BOX 2 — Payment Detail */}
+          <section className="bg-white rounded-2xl border border-gray-200 p-8">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 2</p>
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Payment Detail 付款詳情</h2>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {labeled(
+                'Payment Status 付款狀態',
+                <select
+                  value={fVal('payment_status_label')}
+                  onChange={(e) => { setFieldLocal('payment_status_label', e.target.value); patch({ fields: { payment_status_label: e.target.value } }); }}
+                  className={softInput}
+                >
+                  <option value="">—</option>
+                  {PAYMENT_STATUS_LABELS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              <div />
+              <div />
+              {labeled('第一次Payment 日期', fInput('payment1_date', 'date'))}
+              {labeled('第一次Payment 金額', fInput('payment1_amount', 'number', '0.00'))}
+              <div />
+              {labeled('第二次Payment 日期', fInput('payment2_date', 'date'))}
+              {labeled('第二次Payment 金額', fInput('payment2_amount', 'number', '0.00'))}
+            </div>
+          </section>
+
+          {/* BOX 3 — Shipment Detail */}
+          <section className="bg-white rounded-2xl border border-gray-200 p-8">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 3</p>
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Shipment Detail 送貨詳情</h2>
+            <div className="grid md:grid-cols-2 gap-5">
+              {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
+              {labeled('客人收件時間', fInput('receiving_time', 'text', 'e.g. 2-6pm'))}
+              {labeled('聯絡方式', fInput('contact_method', 'text', 'Phone / WhatsApp / WeChat'))}
+              {labeled('Tracking Number 運單號', fInput('tracking_no', 'text', 'e.g. SF5120793357800'))}
+              <div className="md:col-span-2">
+                {labeled(
+                  '送貨地址 Shipping Address',
+                  <textarea
+                    value={order.shipping_address}
+                    onChange={(e) => setCoreLocal('shipping_address', e.target.value)}
+                    onBlur={(e) => patch({ core: { shipping_address: e.target.value } })}
+                    rows={3}
+                    className={softInput}
+                  />
+                )}
+              </div>
+            </div>
+          </section>
 
           {/* Client / Shipping info */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">

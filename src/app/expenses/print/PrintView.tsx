@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CATEGORY_LABELS, formatMoney } from '@/lib/expenses';
+import { categoryLabel, formatMoney } from '@/lib/expenses';
 import type { Expense } from '@/lib/types';
 
 export default function PrintView() {
@@ -90,28 +90,31 @@ export default function PrintView() {
               </div>
 
               <div className="px-6 py-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div><span className="text-gray-500">Category:</span> {CATEGORY_LABELS[e.category] || e.category}</div>
+                <div><span className="text-gray-500">Reason (支出原因):</span> {categoryLabel(e.category)}</div>
                 <div><span className="text-gray-500">Status:</span> <span className="capitalize">{e.payment_status}</span></div>
                 <div><span className="text-gray-500">Amount (HKD):</span> {formatMoney(e.amount_hkd, 'HKD')}</div>
                 <div><span className="text-gray-500">Amount (RMB):</span> {formatMoney(e.amount_rmb, 'CNY')}</div>
-                <div><span className="text-gray-500">Order No.:</span> {e.order_no || '—'}</div>
+                <div><span className="text-gray-500">Payment (支付方式):</span> {e.payment_method || '—'}</div>
                 <div><span className="text-gray-500">Platform (消費平台):</span> {e.platform || '—'}</div>
+                <div><span className="text-gray-500">Order No.:</span> {e.order_no || '—'}</div>
                 {e.notes && <div className="col-span-2"><span className="text-gray-500">Notes:</span> {e.notes}</div>}
               </div>
 
-              <div className="px-6 pb-6">
-                {e.receipt_path ? (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border-b border-gray-200">
-                      {e.receipt_no || `EXP-${e.id}`} — {e.merchant || ''}
+              <div className="px-6 pb-6 space-y-4">
+                {(e.receipts || []).length ? (
+                  (e.receipts || []).map((r, ri) => (
+                    <div key={r.id} className="border border-gray-200 rounded-lg overflow-hidden break-inside-avoid">
+                      <div className="bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border-b border-gray-200">
+                        {e.receipt_no || `EXP-${e.id}`} · #{ri + 1} — {e.merchant || ''}
+                      </div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/receipts/${r.id}`}
+                        alt={`Receipt ${e.receipt_no || e.id} #${ri + 1}`}
+                        className="w-full object-contain max-h-[70vh] print:max-h-none"
+                      />
                     </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/expenses/${e.id}/receipt`}
-                      alt={`Receipt ${e.receipt_no || e.id}`}
-                      className="w-full object-contain max-h-[70vh] print:max-h-none"
-                    />
-                  </div>
+                  ))
                 ) : (
                   <div className="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 text-sm">
                     No receipt image uploaded for this expense.

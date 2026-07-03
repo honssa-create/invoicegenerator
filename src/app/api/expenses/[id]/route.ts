@@ -1,15 +1,10 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { attachReceipts, normalizeNumber, receiptPathsFromBody } from '@/lib/expense-server';
+import type { Expense } from '@/lib/types';
 
-const CATEGORIES = ['ingredients', 'packaging', 'marketing', 'rent', 'other'];
 const STATUSES = ['unpaid', 'pending', 'paid'];
-
-function normalizeNumber(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -19,11 +14,12 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const expense = db
     .prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, session.userId) as Expense | undefined;
 
   if (!expense) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
+  attachReceipts([expense]);
   return NextResponse.json({ expense });
 }
 
@@ -43,37 +39,54 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
   try {
     const body = await request.json();
-    const category = CATEGORIES.includes(body.category) ? body.category : 'other';
+    const category = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : 'other';
     const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'unpaid';
     const amount_hkd = normalizeNumber(body.amount_hkd);
     const amount_rmb = normalizeNumber(body.amount_rmb);
+    const receiptPaths = receiptPathsFromBody(body);
 
     if (amount_hkd === null && amount_rmb === null) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
     }
 
-    db.prepare(
-      `UPDATE expenses SET
-         category = ?, merchant = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
-         order_no = ?, platform = ?, notes = ?, payment_status = ?, receipt_path = ?,
-         updated_at = datetime('now')
-       WHERE id = ? AND user_id = ?`
-    ).run(
-      category,
-      body.merchant?.trim() || null,
-      amount_hkd,
-      amount_rmb,
-      body.paid_date?.trim() || null,
-      body.order_no?.trim() || null,
-      body.platform?.trim() || null,
-      body.notes?.trim() || null,
-      payment_status,
-      body.receipt_path?.trim() || null,
-      params.id,
-      session.userId
-    );
+    const update = db.transaction(() => {
+      db.prepare(
+        `UPDATE expenses SET
+           category = ?, merchant = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
+           order_no = ?, platform = ?, payment_method = ?, notes = ?, payment_status = ?, receipt_path = ?,
+           updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`
+      ).run(
+        category,
+        body.merchant?.trim() || null,
+        amount_hkd,
+        amount_rmb,
+        body.paid_date?.trim() || null,
+        body.order_no?.trim() || null,
+        body.platform?.trim() || null,
+        body.payment_method?.trim() || null,
+        body.notes?.trim() || null,
+        payment_status,
+        receiptPaths[0] || null,
+        params.id,
+        session.userId
+      );
 
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(params.id);
+      // Replace receipt attachments with the provided set.
+      db.prepare('DELETE FROM expense_receipts WHERE expense_id = ? AND user_id = ?').run(
+        params.id,
+        session.userId
+      );
+      const insertReceipt = db.prepare(
+        'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
+      );
+      for (const p of receiptPaths) insertReceipt.run(params.id, session.userId, p);
+    });
+
+    update();
+
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(params.id) as Expense;
+    attachReceipts([expense]);
     return NextResponse.json({ expense });
   } catch {
     return NextResponse.json({ error: 'Failed to update expense' }, { status: 500 });

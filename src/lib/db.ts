@@ -127,4 +127,56 @@ if (unnumbered.length) {
   backfill();
 }
 
+// Migration: add payment_method column to expenses.
+if (!db.prepare('PRAGMA table_info(expenses)').all().some((c) => (c as { name: string }).name === 'payment_method')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
+}
+
+// Tables for multiple receipt images per expense and user-managed dropdown options.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    expense_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_expense_receipts_expense ON expense_receipts(expense_id);
+
+  CREATE TABLE IF NOT EXISTS expense_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, type, value),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_expense_options_user ON expense_options(user_id, type);
+`);
+
+// Backfill: move any single receipt_path into the expense_receipts table once.
+const legacyReceipts = db
+  .prepare(
+    `SELECT e.id, e.user_id, e.receipt_path
+     FROM expenses e
+     WHERE e.receipt_path IS NOT NULL AND e.receipt_path <> ''
+       AND NOT EXISTS (SELECT 1 FROM expense_receipts r WHERE r.expense_id = e.id)`
+  )
+  .all() as { id: number; user_id: number; receipt_path: string }[];
+
+if (legacyReceipts.length) {
+  const insert = db.prepare(
+    'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
+  );
+  const migrate = db.transaction(() => {
+    for (const r of legacyReceipts) insert.run(r.id, r.user_id, r.receipt_path);
+  });
+  migrate();
+}
+
 export default db;

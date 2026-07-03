@@ -58,24 +58,29 @@ export interface InvoiceWithDetails extends Invoice {
   total: number;
 }
 
-export type ExpenseCategory = 'ingredients' | 'packaging' | 'marketing' | 'rent' | 'other';
-
 export type PaymentStatus = 'unpaid' | 'pending' | 'paid';
+
+export interface ExpenseReceipt {
+  id: number;
+  path: string;
+}
 
 export interface Expense {
   id: number;
   user_id: number;
   receipt_no: string | null;
-  category: ExpenseCategory;
+  category: string;
   merchant: string | null;
   amount_hkd: number | null;
   amount_rmb: number | null;
   paid_date: string | null;
   order_no: string | null;
   platform: string | null;
+  payment_method: string | null;
   notes: string | null;
   payment_status: PaymentStatus;
   receipt_path: string | null;
+  receipts: ExpenseReceipt[];
   created_at: string;
   updated_at: string;
 }

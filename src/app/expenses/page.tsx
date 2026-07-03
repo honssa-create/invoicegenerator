@@ -4,29 +4,32 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
+import TagSelect from '@/components/TagSelect';
 import {
-  EXPENSE_CATEGORIES,
   PAYMENT_STATUSES,
-  CATEGORY_LABELS,
   EXPENSE_STATUS_COLORS,
+  categoryLabel,
   formatMoney,
+  type OptionType,
 } from '@/lib/expenses';
 import type { Expense } from '@/lib/types';
 
 const EMPTY_FORM = {
-  category: 'ingredients',
+  category: '',
   merchant: '',
   amount_hkd: '',
   amount_rmb: '',
   paid_date: '',
   order_no: '',
   platform: '',
+  payment_method: '',
   notes: '',
   payment_status: 'unpaid',
-  receipt_path: '',
 };
 
 type FormState = typeof EMPTY_FORM;
+type FormReceipt = { id?: number; path: string; url: string };
+type Options = Record<OptionType, string[]>;
 
 export default function ExpensesPage() {
   const router = useRouter();
@@ -35,19 +38,20 @@ export default function ExpensesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [formReceipts, setFormReceipts] = useState<FormReceipt[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [preview, setPreview] = useState<{ src: string; label: string } | null>(null);
+  const [gallery, setGallery] = useState<Expense | null>(null);
+  const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [] });
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
-  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadExpenses = () => {
-    const url = categoryFilter === 'all' ? '/api/expenses' : `/api/expenses?category=${categoryFilter}`;
+    const url = categoryFilter === 'all' ? '/api/expenses' : `/api/expenses?category=${encodeURIComponent(categoryFilter)}`;
     setLoading(true);
     fetch(url)
       .then((res) => res.json())
@@ -60,14 +64,37 @@ export default function ExpensesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryFilter]);
 
+  useEffect(() => {
+    fetch('/api/expense-options')
+      .then((res) => res.json())
+      .then((data) => data.options && setOptions(data.options))
+      .catch(() => {});
+  }, []);
+
+  const addOption = async (type: OptionType, value: string) => {
+    const res = await fetch('/api/expense-options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, value }),
+    });
+    const data = await res.json();
+    if (res.ok && data.options) {
+      setOptions((prev) => ({ ...prev, [type]: data.options }));
+    }
+  };
+
   const totalHkd = expenses.reduce((sum, e) => sum + (e.amount_hkd || 0), 0);
   const totalRmb = expenses.reduce((sum, e) => sum + (e.amount_rmb || 0), 0);
   const unpaidCount = expenses.filter((e) => e.payment_status !== 'paid').length;
 
+  const categoryChips = Array.from(
+    new Set([...(options.category || []), ...expenses.map((e) => e.category).filter(Boolean)])
+  );
+
   const openCreate = () => {
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, category: options.category[0] || '' });
+    setFormReceipts([]);
     setEditingId(null);
-    setReceiptPreview(null);
     setScanMessage('');
     setError('');
     setShowForm(true);
@@ -75,64 +102,74 @@ export default function ExpensesPage() {
 
   const openEdit = (e: Expense) => {
     setForm({
-      category: e.category,
+      category: e.category || '',
       merchant: e.merchant || '',
       amount_hkd: e.amount_hkd?.toString() || '',
       amount_rmb: e.amount_rmb?.toString() || '',
       paid_date: e.paid_date || '',
       order_no: e.order_no || '',
       platform: e.platform || '',
+      payment_method: e.payment_method || '',
       notes: e.notes || '',
       payment_status: e.payment_status,
-      receipt_path: e.receipt_path || '',
     });
+    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: `/api/receipts/${r.id}` })));
     setEditingId(e.id);
-    setReceiptPreview(e.receipt_path ? `/api/expenses/${e.id}/receipt` : null);
     setScanMessage('');
     setError('');
     setShowForm(true);
   };
 
-  const handleScan = async (file: File) => {
+  const handleFiles = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    if (!files.length) return;
     setScanning(true);
-    setScanMessage('Scanning receipt…');
+    setScanMessage(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning…`);
     setError('');
-    setReceiptPreview(URL.createObjectURL(file));
 
+    const localUrls = files.map((f) => URL.createObjectURL(f));
     const fd = new FormData();
-    fd.append('receipt', file);
+    files.forEach((f) => fd.append('receipt', f));
 
     try {
       const res = await fetch('/api/expenses/scan', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to scan receipt');
+        setError(data.error || 'Failed to scan receipts');
         setScanMessage('');
         return;
       }
-      const r = data.result;
-      setForm((prev) => ({
-        ...prev,
-        merchant: r.merchant || prev.merchant,
-        paid_date: r.date || prev.paid_date,
-        amount_hkd: r.amount_hkd != null ? String(r.amount_hkd) : prev.amount_hkd,
-        amount_rmb: r.amount_rmb != null ? String(r.amount_rmb) : prev.amount_rmb,
-        receipt_path: r.receipt_path || prev.receipt_path,
-      }));
 
-      const found: string[] = [];
-      if (r.merchant) found.push('merchant');
-      if (r.date) found.push('date');
-      if (r.amount_hkd != null) found.push('HKD');
-      if (r.amount_rmb != null) found.push('RMB');
-      const via = r.source === 'ai' ? 'AI vision' : 'OCR';
-      setScanMessage(
-        found.length
-          ? `Extracted via ${via}: ${found.join(', ')}. Review and fill any blanks.`
-          : `No fields could be extracted (${via}). Please enter the values manually.`
+      const newReceipts: FormReceipt[] = (data.receipts || []).map(
+        (r: { path: string }, i: number) => ({ path: r.path, url: localUrls[i] || `` })
       );
+      setFormReceipts((prev) => [...prev, ...newReceipts]);
+
+      const r = data.result;
+      if (r) {
+        setForm((prev) => ({
+          ...prev,
+          merchant: prev.merchant || r.merchant || '',
+          paid_date: prev.paid_date || r.date || '',
+          amount_hkd: prev.amount_hkd || (r.amount_hkd != null ? String(r.amount_hkd) : ''),
+          amount_rmb: prev.amount_rmb || (r.amount_rmb != null ? String(r.amount_rmb) : ''),
+        }));
+        const found: string[] = [];
+        if (r.merchant) found.push('merchant');
+        if (r.date) found.push('date');
+        if (r.amount_hkd != null) found.push('HKD');
+        if (r.amount_rmb != null) found.push('RMB');
+        const via = r.source === 'ai' ? 'AI vision' : 'OCR';
+        setScanMessage(
+          found.length
+            ? `${newReceipts.length} attached. Extracted via ${via}: ${found.join(', ')}. Review & fill any blanks.`
+            : `${newReceipts.length} attached. No fields auto-extracted (${via}). Enter values manually.`
+        );
+      } else {
+        setScanMessage(`${newReceipts.length} file(s) attached.`);
+      }
     } catch {
-      setError('Failed to scan receipt');
+      setError('Failed to scan receipts');
       setScanMessage('');
     } finally {
       setScanning(false);
@@ -140,14 +177,17 @@ export default function ExpensesPage() {
   };
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleScan(file);
+    if (e.target.files?.length) handleFiles(e.target.files);
+    e.target.value = '';
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleScan(file);
+    if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files);
+  };
+
+  const removeFormReceipt = (idx: number) => {
+    setFormReceipts((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -163,7 +203,7 @@ export default function ExpensesPage() {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, receipt_paths: formReceipts.map((r) => r.path) }),
     });
     const data = await res.json();
     setSaving(false);
@@ -211,6 +251,37 @@ export default function ExpensesPage() {
   const inputCls =
     'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
 
+  const renderReceiptsCell = (e: Expense) => {
+    const rs = e.receipts || [];
+    if (!rs.length) {
+      return <span className="text-gray-300 text-xs whitespace-nowrap">— no image</span>;
+    }
+    const shown = rs.length <= 3 ? rs : rs.slice(0, 2);
+    const extra = rs.length <= 3 ? 0 : rs.length - 2;
+    return (
+      <div className="flex items-center gap-1">
+        {shown.map((r) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={r.id}
+            src={`/api/receipts/${r.id}`}
+            alt="Receipt"
+            onClick={() => setGallery(e)}
+            className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400 transition"
+          />
+        ))}
+        {extra > 0 && (
+          <button
+            onClick={() => setGallery(e)}
+            className="h-10 w-10 rounded border border-gray-200 bg-gray-100 text-gray-600 text-xs font-semibold hover:bg-gray-200"
+          >
+            +{extra}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <AppLayout>
       <div className="flex items-center justify-between mb-8">
@@ -257,15 +328,15 @@ export default function ExpensesPage() {
         >
           All
         </button>
-        {EXPENSE_CATEGORIES.map((c) => (
+        {categoryChips.map((c) => (
           <button
-            key={c.value}
-            onClick={() => setCategoryFilter(c.value)}
+            key={c}
+            onClick={() => setCategoryFilter(c)}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-              categoryFilter === c.value ? 'bg-brand-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+              categoryFilter === c ? 'bg-brand-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
             }`}
           >
-            {c.label}
+            {categoryLabel(c)}
           </button>
         ))}
       </div>
@@ -280,7 +351,7 @@ export default function ExpensesPage() {
             <p>No expenses yet. Add one and scan a receipt to auto-fill the details.</p>
           </div>
         ) : (
-          <table className="w-full min-w-[1000px]">
+          <table className="w-full min-w-[1100px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-4 py-3">
@@ -293,13 +364,14 @@ export default function ExpensesPage() {
                   />
                 </th>
                 <th className="px-4 py-3">Receipt No.</th>
-                <th className="px-4 py-3">Receipt</th>
-                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Receipts 付款收據</th>
+                <th className="px-4 py-3">Reason 支出原因</th>
                 <th className="px-4 py-3">Merchant</th>
+                <th className="px-4 py-3">Payment 支付方式</th>
                 <th className="px-4 py-3">HKD</th>
                 <th className="px-4 py-3">RMB</th>
                 <th className="px-4 py-3">Paid Date</th>
-                <th className="px-4 py-3">Platform</th>
+                <th className="px-4 py-3">Platform 消費平台</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
@@ -317,25 +389,14 @@ export default function ExpensesPage() {
                     />
                   </td>
                   <td className="px-4 py-3 text-sm font-mono text-gray-700 whitespace-nowrap">{e.receipt_no || '—'}</td>
-                  <td className="px-4 py-3">
-                    {e.receipt_path ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/expenses/${e.id}/receipt`}
-                        alt="Receipt thumbnail"
-                        onClick={() => setPreview({ src: `/api/expenses/${e.id}/receipt`, label: e.receipt_no || '' })}
-                        className="h-12 w-12 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400 transition"
-                      />
-                    ) : (
-                      <span className="text-gray-300 text-xs">No image</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{CATEGORY_LABELS[e.category] || e.category}</td>
+                  <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{e.merchant || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.payment_method || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_hkd, 'HKD')}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_rmb, 'CNY')}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{e.paid_date || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{e.platform || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.paid_date || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.platform || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[e.payment_status]}`}>
                       {e.payment_status}
@@ -362,35 +423,71 @@ export default function ExpensesPage() {
               onClick={() => fileInputRef.current?.click()}
               onDrop={onDrop}
               onDragOver={(ev) => ev.preventDefault()}
-              className="mb-5 border-2 border-dashed border-gray-300 rounded-xl p-5 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors"
+              className="mb-4 border-2 border-dashed border-gray-300 rounded-xl p-5 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors"
             >
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
-              {receiptPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={receiptPreview} alt="Receipt preview" className="max-h-40 mx-auto rounded-lg mb-2" />
-              ) : (
-                <div className="text-3xl mb-1">📷</div>
-              )}
+              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={onFileChange} />
+              <div className="text-3xl mb-1">📎</div>
               <p className="text-sm font-medium text-gray-700">
-                {scanning ? 'Scanning…' : 'Scan Receipt 收據掃描 — click or drop an image'}
+                {scanning ? 'Scanning…' : 'Scan Receipts 收據掃描 — click or drop one or more images'}
               </p>
-              <p className="text-xs text-gray-400 mt-1">AI/OCR auto-extracts date, merchant &amp; amount</p>
+              <p className="text-xs text-gray-400 mt-1">Multiple files supported · AI/OCR auto-extracts date, merchant &amp; amount from the first</p>
               {scanMessage && <p className="text-xs text-brand-700 mt-2">{scanMessage}</p>}
             </div>
+
+            {formReceipts.length > 0 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {formReceipts.map((r, i) => (
+                  <div key={i} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={r.url} alt="Attached receipt" className="h-16 w-16 object-cover rounded-lg border border-gray-200" />
+                    <button
+                      type="button"
+                      onClick={() => removeFormReceipt(i)}
+                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center hover:bg-red-600"
+                      aria-label="Remove receipt"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Category 類別</label>
-                  <select value={form.category} onChange={(ev) => setForm({ ...form, category: ev.target.value })} className={inputCls}>
-                    {EXPENSE_CATEGORIES.map((c) => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>
+                  <TagSelect
+                    value={form.category}
+                    options={options.category}
+                    onChange={(v) => setForm((f) => ({ ...f, category: v }))}
+                    onAdd={(v) => addOption('category', v)}
+                    placeholder="Select or add a reason"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Merchant 商戶</label>
                   <input value={form.merchant} onChange={(ev) => setForm({ ...form, merchant: ev.target.value })} className={inputCls} placeholder="Merchant name" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method 支付方式</label>
+                  <TagSelect
+                    value={form.payment_method}
+                    options={options.payment_method}
+                    onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))}
+                    onAdd={(v) => addOption('payment_method', v)}
+                    placeholder="Select or add a method"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Shopping Platform 消費平台</label>
+                  <TagSelect
+                    value={form.platform}
+                    options={options.platform}
+                    onChange={(v) => setForm((f) => ({ ...f, platform: v }))}
+                    onAdd={(v) => addOption('platform', v)}
+                    placeholder="Select or add a platform"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Amount (HKD) 港幣</label>
@@ -407,10 +504,6 @@ export default function ExpensesPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Order No. 訂單編號</label>
                   <input value={form.order_no} onChange={(ev) => setForm({ ...form, order_no: ev.target.value })} className={inputCls} placeholder="Order / reference no." />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Platform 消費平台</label>
-                  <input value={form.platform} onChange={(ev) => setForm({ ...form, platform: ev.target.value })} className={inputCls} placeholder="e.g. Taobao, Meituan, 淘寶" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Payment Status 付款狀態</label>
@@ -439,25 +532,39 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {preview && (
+      {gallery && (
         <div
-          onClick={() => setPreview(null)}
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 cursor-zoom-out"
+          onClick={() => setGallery(null)}
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 overflow-y-auto cursor-zoom-out"
         >
-          <div className="max-w-3xl w-full text-center" onClick={(ev) => ev.stopPropagation()}>
-            {preview.label && (
-              <div className="mb-2 inline-block bg-white/90 px-3 py-1 rounded-full text-sm font-mono font-semibold text-gray-800">
-                {preview.label}
+          <div className="bg-white rounded-xl w-full max-w-4xl my-8 p-6" onClick={(ev) => ev.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-400">Receipt No.</p>
+                <p className="text-xl font-bold font-mono text-gray-900">{gallery.receipt_no || `EXP-${gallery.id}`}</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {gallery.merchant || 'Unnamed'} · {(gallery.receipts || []).length} image(s)
+                </p>
+              </div>
+              <button onClick={() => setGallery(null)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200">
+                Close
+              </button>
+            </div>
+            {(gallery.receipts || []).length === 0 ? (
+              <p className="text-gray-400 text-sm py-12 text-center">No receipt images for this expense.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(gallery.receipts || []).map((r, i) => (
+                  <div key={r.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border-b border-gray-200">
+                      {gallery.receipt_no || `EXP-${gallery.id}`} · #{i + 1}
+                    </div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/receipts/${r.id}`} alt={`Receipt ${i + 1}`} className="w-full object-contain max-h-[60vh] bg-white" />
+                  </div>
+                ))}
               </div>
             )}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview.src} alt="Receipt preview" className="max-h-[80vh] w-auto mx-auto rounded-lg shadow-2xl bg-white" />
-            <button
-              onClick={() => setPreview(null)}
-              className="mt-3 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-100"
-            >
-              Close
-            </button>
           </div>
         </div>
       )}

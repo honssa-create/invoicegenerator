@@ -1,6 +1,7 @@
-import type { ExpenseCategory, PaymentStatus } from './types';
+import type { PaymentStatus } from './types';
 
-export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
+// Legacy category values (kept so older records still display a friendly label).
+export const EXPENSE_CATEGORIES: { value: string; label: string }[] = [
   { value: 'ingredients', label: 'Ingredients (食材)' },
   { value: 'packaging', label: 'Packaging (包裝)' },
   { value: 'marketing', label: 'Marketing (市場推廣)' },
@@ -23,6 +24,37 @@ export const EXPENSE_STATUS_COLORS: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-700',
   paid: 'bg-green-100 text-green-700',
 };
+
+// Dynamic dropdown option types + their built-in defaults. Users can add more
+// (stored in the expense_options table) and they merge with these.
+export type OptionType = 'payment_method' | 'category' | 'platform';
+
+export const OPTION_TYPES: OptionType[] = ['payment_method', 'category', 'platform'];
+
+export const DEFAULT_OPTIONS: Record<OptionType, string[]> = {
+  payment_method: ['Credit Card 0860', '現金', '淘寶', '拼多多', '其他，請註明', 'Hing現金'],
+  category: [
+    '包裝用品',
+    '公司用品',
+    '快遞費用',
+    '燕南豐包裝物資',
+    'Honour打版',
+    'Honour貨款月結',
+    'Honour貨款(單次)',
+  ],
+  platform: ['淘寶', '拼多多', '支付寶', 'e-print', '其他，見收據', '其他'],
+};
+
+export const OPTION_LABELS: Record<OptionType, string> = {
+  payment_method: 'Payment Method 支付方式',
+  category: 'Expense Reason 支出原因',
+  platform: 'Shopping Platform 消費平台',
+};
+
+export function categoryLabel(value: string | null | undefined): string {
+  if (!value) return '—';
+  return CATEGORY_LABELS[value] || value;
+}
 
 export function formatMoney(amount: number | null | undefined, currency: 'HKD' | 'CNY'): string {
   if (amount === null || amount === undefined) return '—';

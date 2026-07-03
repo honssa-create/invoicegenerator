@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { categoryLabel } from '@/lib/expenses';
@@ -22,52 +22,31 @@ export async function GET(request: Request) {
     )
     .all(session.userId) as (Expense & { receipt_count: number })[];
 
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'InvoiceFlow';
-  const ws = wb.addWorksheet('Expenses');
+  const data = expenses.map((e) => ({
+    'Receipt No.': e.receipt_no || '',
+    'Expense Reason (支出原因)': categoryLabel(e.category),
+    'Merchant / Supplier (供應商)': e.merchant || '',
+    'Payment Method (支付方式)': e.payment_method || '',
+    'Amount (HKD)': e.amount_hkd ?? null,
+    'Amount (RMB)': e.amount_rmb ?? null,
+    'Paid Date (支出日期)': e.paid_date || '',
+    'Order No.': e.order_no || '',
+    'Platform (消費平台)': e.platform || '',
+    'Payment Status': e.payment_status,
+    Receipts: e.receipt_count,
+    Notes: e.notes || '',
+  }));
 
-  ws.columns = [
-    { header: 'Receipt No.', key: 'receipt_no', width: 18 },
-    { header: 'Expense Reason (支出原因)', key: 'category', width: 22 },
-    { header: 'Merchant', key: 'merchant', width: 24 },
-    { header: 'Payment Method (支付方式)', key: 'payment_method', width: 22 },
-    { header: 'Amount (HKD)', key: 'amount_hkd', width: 15 },
-    { header: 'Amount (RMB)', key: 'amount_rmb', width: 15 },
-    { header: 'Paid Date', key: 'paid_date', width: 14 },
-    { header: 'Order No.', key: 'order_no', width: 18 },
-    { header: 'Platform (消費平台)', key: 'platform', width: 20 },
-    { header: 'Payment Status', key: 'payment_status', width: 16 },
-    { header: 'Receipts', key: 'receipt_count', width: 10 },
-    { header: 'Notes', key: 'notes', width: 30 },
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [
+    { wch: 16 }, { wch: 22 }, { wch: 24 }, { wch: 22 }, { wch: 14 }, { wch: 14 },
+    { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 15 }, { wch: 10 }, { wch: 30 },
   ];
 
-  expenses.forEach((e) => {
-    ws.addRow({
-      receipt_no: e.receipt_no || '',
-      category: categoryLabel(e.category),
-      merchant: e.merchant || '',
-      payment_method: e.payment_method || '',
-      amount_hkd: e.amount_hkd ?? '',
-      amount_rmb: e.amount_rmb ?? '',
-      paid_date: e.paid_date || '',
-      order_no: e.order_no || '',
-      platform: e.platform || '',
-      payment_status: e.payment_status,
-      receipt_count: e.receipt_count,
-      notes: e.notes || '',
-    });
-  });
-
-  const header = ws.getRow(1);
-  header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16A34A' } };
-  header.alignment = { vertical: 'middle' };
-
-  ws.getColumn('amount_hkd').numFmt = '#,##0.00';
-  ws.getColumn('amount_rmb').numFmt = '#,##0.00';
-  ws.views = [{ state: 'frozen', ySplit: 1 }];
-
-  const buffer = await wb.xlsx.writeBuffer();
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
+  // Standard SpreadsheetML output — opens cleanly in Excel, LibreOffice, Google Sheets.
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   const date = new Date().toISOString().split('T')[0];
 
   return new Response(buffer, {

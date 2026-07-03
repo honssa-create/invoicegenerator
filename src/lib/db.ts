@@ -95,36 +95,63 @@ if (!expenseColumns.some((c) => c.name === 'receipt_no')) {
   db.exec('ALTER TABLE expenses ADD COLUMN receipt_no TEXT');
 }
 
-// Backfill any expenses that predate the receipt-number feature.
-const unnumbered = db
-  .prepare(
-    `SELECT id, user_id, created_at FROM expenses
-     WHERE receipt_no IS NULL OR receipt_no = ''
-     ORDER BY user_id, created_at, id`
-  )
-  .all() as { id: number; user_id: number; created_at: string | null }[];
+// Receipt numbers use the EXP-YYYYMM-XXX format, where YYYYMM is derived from the
+// expense date. Renumber any records that are missing a number or still use an
+// older format so historical/backfilled data slots into the right month.
+const NEW_NUMBER_RE = /^EXP-\d{6}-\d{3,}$/;
+const numberYm = (row: { paid_date: string | null; created_at: string | null }) => {
+  const src = row.paid_date && /^\d{4}-\d{2}/.test(row.paid_date) ? row.paid_date : row.created_at || '';
+  const ym = src.slice(0, 7);
+  return ym ? ym.replace('-', '') : new Date().toISOString().slice(0, 7).replace('-', '');
+};
 
-if (unnumbered.length) {
+const numberRows = db
+  .prepare('SELECT id, user_id, receipt_no, paid_date, created_at FROM expenses')
+  .all() as { id: number; user_id: number; receipt_no: string | null; paid_date: string | null; created_at: string | null }[];
+
+const needsNumber = numberRows.filter((r) => !r.receipt_no || !NEW_NUMBER_RE.test(r.receipt_no));
+
+if (needsNumber.length) {
   const counters = new Map<string, number>();
+  // Seed counters from records already using the new format.
+  for (const r of numberRows) {
+    if (r.receipt_no && NEW_NUMBER_RE.test(r.receipt_no)) {
+      const key = `${r.user_id}-${r.receipt_no.slice(4, 10)}`;
+      const serial = parseInt(r.receipt_no.slice(11), 10);
+      counters.set(key, Math.max(counters.get(key) || 0, serial));
+    }
+  }
+
+  const sortDate = (r: { paid_date: string | null; created_at: string | null }) =>
+    r.paid_date || r.created_at || '';
+  needsNumber.sort(
+    (a, b) =>
+      a.user_id - b.user_id ||
+      numberYm(a).localeCompare(numberYm(b)) ||
+      sortDate(a).localeCompare(sortDate(b)) ||
+      a.id - b.id
+  );
+
   const update = db.prepare('UPDATE expenses SET receipt_no = ? WHERE id = ?');
   const backfill = db.transaction(() => {
-    for (const row of unnumbered) {
-      const year = (row.created_at || '').slice(0, 4) || String(new Date().getFullYear());
-      const key = `${row.user_id}-${year}`;
-      if (!counters.has(key)) {
-        const existing = db
-          .prepare(
-            `SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND receipt_no LIKE ?`
-          )
-          .get(row.user_id, `EXP-${year}-%`) as { count: number };
-        counters.set(key, existing.count);
-      }
-      const next = counters.get(key)! + 1;
+    for (const row of needsNumber) {
+      const ym = numberYm(row);
+      const key = `${row.user_id}-${ym}`;
+      const next = (counters.get(key) || 0) + 1;
       counters.set(key, next);
-      update.run(`EXP-${year}-${String(next).padStart(4, '0')}`, row.id);
+      update.run(`EXP-${ym}-${String(next).padStart(3, '0')}`, row.id);
     }
   });
   backfill();
+}
+
+// Enforce uniqueness of receipt numbers per user (guarded so a boot never crashes).
+try {
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_user_receipt_no ON expenses(user_id, receipt_no)'
+  );
+} catch (err) {
+  console.error('Could not create unique receipt_no index:', err);
 }
 
 // Migration: add payment_method column to expenses.

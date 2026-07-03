@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
     }
 
-    const receiptNo = generateReceiptNumber(session.userId);
+    const receiptNo = generateReceiptNumber(session.userId, body.paid_date?.trim() || null);
 
     const create = db.transaction(() => {
       const result = db

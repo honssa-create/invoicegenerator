@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
 import TagSelect from '@/components/TagSelect';
+import FilterBar from '@/components/FilterBar';
 import {
   PAYMENT_STATUSES,
   EXPENSE_STATUS_COLORS,
@@ -30,6 +31,9 @@ const EMPTY_FORM = {
 type FormState = typeof EMPTY_FORM;
 type FormReceipt = { id?: number; path: string; url: string };
 type Options = Record<OptionType, string[]>;
+type SortKey = 'date' | 'number' | 'amount';
+
+const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
 
 export default function ExpensesPage() {
   const router = useRouter();
@@ -41,35 +45,46 @@ export default function ExpensesPage() {
   const [formReceipts, setFormReceipts] = useState<FormReceipt[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [gallery, setGallery] = useState<Expense | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [] });
+
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const loadExpenses = () => {
-    const url = categoryFilter === 'all' ? '/api/expenses' : `/api/expenses?category=${encodeURIComponent(categoryFilter)}`;
     setLoading(true);
-    fetch(url)
+    fetch('/api/expenses')
       .then((res) => res.json())
       .then((data) => setExpenses(data.expenses || []))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    loadExpenses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryFilter]);
-
-  useEffect(() => {
+  const loadOptions = () => {
     fetch('/api/expense-options')
       .then((res) => res.json())
       .then((data) => data.options && setOptions(data.options))
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadExpenses();
+    loadOptions();
   }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const addOption = async (type: OptionType, value: string) => {
     const res = await fetch('/api/expense-options', {
@@ -78,18 +93,53 @@ export default function ExpensesPage() {
       body: JSON.stringify({ type, value }),
     });
     const data = await res.json();
-    if (res.ok && data.options) {
-      setOptions((prev) => ({ ...prev, [type]: data.options }));
-    }
+    if (res.ok && data.options) setOptions((prev) => ({ ...prev, [type]: data.options }));
   };
 
-  const totalHkd = expenses.reduce((sum, e) => sum + (e.amount_hkd || 0), 0);
-  const totalRmb = expenses.reduce((sum, e) => sum + (e.amount_rmb || 0), 0);
-  const unpaidCount = expenses.filter((e) => e.payment_status !== 'paid').length;
+  const reasonOptions = Array.from(new Set([...(options.category || []), ...expenses.map((e) => e.category).filter(Boolean)]));
+  const paymentOptions = Array.from(new Set([...(options.payment_method || []), ...expenses.map((e) => e.payment_method).filter(Boolean) as string[]]));
+  const platformOptions = Array.from(new Set([...(options.platform || []), ...expenses.map((e) => e.platform).filter(Boolean) as string[]]));
 
-  const categoryChips = Array.from(
-    new Set([...(options.category || []), ...expenses.map((e) => e.category).filter(Boolean)])
-  );
+  const displayed = useMemo(() => {
+    const q = filters.search.trim().toLowerCase();
+    let list = expenses.filter((e) => {
+      if (filters.dateStart && (!e.paid_date || e.paid_date < filters.dateStart)) return false;
+      if (filters.dateEnd && (!e.paid_date || e.paid_date > filters.dateEnd)) return false;
+      if (filters.paymentMethod && e.payment_method !== filters.paymentMethod) return false;
+      if (filters.reason && e.category !== filters.reason) return false;
+      if (filters.platform && e.platform !== filters.platform) return false;
+      if (q) {
+        const hay = [e.receipt_no, e.merchant, e.platform, e.payment_method, e.category]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    list = [...list].sort((a, b) => {
+      if (sort.key === 'number') return dir * String(a.receipt_no || '').localeCompare(String(b.receipt_no || ''));
+      if (sort.key === 'amount') {
+        const av = a.amount_hkd ?? a.amount_rmb ?? 0;
+        const bv = b.amount_hkd ?? b.amount_rmb ?? 0;
+        return dir * (av - bv);
+      }
+      const ad = a.paid_date || a.created_at || '';
+      const bd = b.paid_date || b.created_at || '';
+      return dir * ad.localeCompare(bd);
+    });
+    return list;
+  }, [expenses, filters, sort]);
+
+  const totalHkd = displayed.reduce((sum, e) => sum + (e.amount_hkd || 0), 0);
+  const totalRmb = displayed.reduce((sum, e) => sum + (e.amount_rmb || 0), 0);
+  const unpaidCount = displayed.filter((e) => e.payment_status !== 'paid').length;
+
+  const toggleSort = (key: SortKey) => {
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  };
+  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '');
 
   const openCreate = () => {
     setForm({ ...EMPTY_FORM, category: options.category[0] || '' });
@@ -124,7 +174,7 @@ export default function ExpensesPage() {
     const files = Array.from(fileList);
     if (!files.length) return;
     setScanning(true);
-    setScanMessage(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning…`);
+    setScanMessage(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning the first…`);
     setError('');
 
     const localUrls = files.map((f) => URL.createObjectURL(f));
@@ -139,9 +189,8 @@ export default function ExpensesPage() {
         setScanMessage('');
         return;
       }
-
       const newReceipts: FormReceipt[] = (data.receipts || []).map(
-        (r: { path: string }, i: number) => ({ path: r.path, url: localUrls[i] || `` })
+        (r: { path: string }, i: number) => ({ path: r.path, url: localUrls[i] || '' })
       );
       setFormReceipts((prev) => [...prev, ...newReceipts]);
 
@@ -162,7 +211,7 @@ export default function ExpensesPage() {
         const via = r.source === 'ai' ? 'AI vision' : 'OCR';
         setScanMessage(
           found.length
-            ? `${newReceipts.length} attached. Extracted via ${via}: ${found.join(', ')}. Review & fill any blanks.`
+            ? `${newReceipts.length} attached. Extracted from 1st file via ${via}: ${found.join(', ')}. Review & fill any blanks.`
             : `${newReceipts.length} attached. No fields auto-extracted (${via}). Enter values manually.`
         );
       } else {
@@ -180,14 +229,38 @@ export default function ExpensesPage() {
     if (e.target.files?.length) handleFiles(e.target.files);
     e.target.value = '';
   };
-
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files);
   };
+  const removeFormReceipt = (idx: number) => setFormReceipts((prev) => prev.filter((_, i) => i !== idx));
 
-  const removeFormReceipt = (idx: number) => {
-    setFormReceipts((prev) => prev.filter((_, i) => i !== idx));
+  const handleImport = async (file: File) => {
+    setImporting(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/api/expenses/import', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setToast({ msg: data.error || 'Import failed', kind: 'error' });
+        return;
+      }
+      let msg = `Imported ${data.imported} row(s), skipped ${data.skipped}`;
+      if (data.tagsAdded?.length) msg += ` · added ${data.tagsAdded.length} new tag(s)`;
+      setToast({ msg, kind: 'success' });
+      loadOptions();
+      loadExpenses();
+    } catch {
+      setToast({ msg: 'Import failed', kind: 'error' });
+    } finally {
+      setImporting(false);
+    }
+  };
+  const onImportChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleImport(f);
+    e.target.value = '';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -236,26 +309,21 @@ export default function ExpensesPage() {
       return next;
     });
   };
-
-  const allSelected = expenses.length > 0 && expenses.every((e) => selected.has(e.id));
-  const toggleSelectAll = () => {
-    setSelected(allSelected ? new Set() : new Set(expenses.map((e) => e.id)));
-  };
+  const allSelected = displayed.length > 0 && displayed.every((e) => selected.has(e.id));
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(displayed.map((e) => e.id)));
 
   const printSelected = () => {
     if (!selected.size) return;
-    const ids = expenses.filter((e) => selected.has(e.id)).map((e) => e.id);
+    const ids = displayed.filter((e) => selected.has(e.id)).map((e) => e.id);
     router.push(`/expenses/print?ids=${ids.join(',')}`);
   };
 
-  const inputCls =
-    'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
+  const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
+  const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   const renderReceiptsCell = (e: Expense) => {
     const rs = e.receipts || [];
-    if (!rs.length) {
-      return <span className="text-gray-300 text-xs whitespace-nowrap">— no image</span>;
-    }
+    if (!rs.length) return <span className="text-gray-300 text-xs whitespace-nowrap">— no image</span>;
     const shown = rs.length <= 3 ? rs : rs.slice(0, 2);
     const extra = rs.length <= 3 ? 0 : rs.length - 2;
     return (
@@ -284,12 +352,12 @@ export default function ExpensesPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Expenses 支出紀錄</h1>
-          <p className="text-gray-500 mt-1">Track costs, scan receipts, and export your books</p>
+          <p className="text-gray-500 mt-1">Track costs, scan receipts, import sheets, and export your books</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <button
             onClick={printSelected}
             disabled={selected.size === 0}
@@ -297,6 +365,19 @@ export default function ExpensesPage() {
           >
             🖨 Print Selected{selected.size > 0 ? ` (${selected.size})` : ''}
           </button>
+          <div
+            onClick={() => importInputRef.current?.click()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
+            title="Drag a .csv / .xlsx / .xls file here or click to select"
+          >
+            {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
+            <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
+          </div>
           <a
             href="/api/expenses/export"
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
@@ -315,78 +396,77 @@ export default function ExpensesPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Total (HKD)" value={formatMoney(totalHkd, 'HKD')} icon="💰" color="bg-green-50 text-green-600" />
         <StatCard title="Total (RMB)" value={formatMoney(totalRmb, 'CNY')} icon="💴" color="bg-red-50 text-red-600" />
-        <StatCard title="Records" value={String(expenses.length)} icon="🧾" />
+        <StatCard title="Records" value={String(displayed.length)} icon="🧾" />
         <StatCard title="Unpaid / Pending" value={String(unpaidCount)} icon="⏳" color="bg-yellow-50 text-yellow-600" />
       </div>
 
-      <div className="flex gap-2 mb-6 flex-wrap">
-        <button
-          onClick={() => setCategoryFilter('all')}
-          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-            categoryFilter === 'all' ? 'bg-brand-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          All
-        </button>
-        {categoryChips.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCategoryFilter(c)}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-              categoryFilter === c ? 'bg-brand-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            {categoryLabel(c)}
-          </button>
-        ))}
-      </div>
+      <FilterBar
+        dateStart={filters.dateStart}
+        dateEnd={filters.dateEnd}
+        onDateStart={(v) => setFilters((f) => ({ ...f, dateStart: v }))}
+        onDateEnd={(v) => setFilters((f) => ({ ...f, dateEnd: v }))}
+        search={filters.search}
+        onSearch={(v) => setFilters((f) => ({ ...f, search: v }))}
+        searchPlaceholder="Search number, supplier, platform…"
+        onClear={() => setFilters(EMPTY_FILTERS)}
+      >
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Payment 支付方式</label>
+          <select value={filters.paymentMethod} onChange={(e) => setFilters((f) => ({ ...f, paymentMethod: e.target.value }))} className={selectCls}>
+            <option value="">All</option>
+            {paymentOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Reason 支出原因</label>
+          <select value={filters.reason} onChange={(e) => setFilters((f) => ({ ...f, reason: e.target.value }))} className={selectCls}>
+            <option value="">All</option>
+            {reasonOptions.map((o) => <option key={o} value={o}>{categoryLabel(o)}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Platform 消費平台</label>
+          <select value={filters.platform} onChange={(e) => setFilters((f) => ({ ...f, platform: e.target.value }))} className={selectCls}>
+            <option value="">All</option>
+            {platformOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      </FilterBar>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         {loading ? (
           <div className="p-12 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
           </div>
-        ) : expenses.length === 0 ? (
+        ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No expenses yet. Add one and scan a receipt to auto-fill the details.</p>
+            <p>No expenses match. Add one, import a sheet, or clear filters.</p>
           </div>
         ) : (
           <table className="w-full min-w-[1100px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleSelectAll}
-                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-                    aria-label="Select all"
-                  />
+                  <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                <th className="px-4 py-3">Receipt No.</th>
+                <th className="px-4 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('number')}>Receipt No.{arrow('number')}</th>
                 <th className="px-4 py-3">Receipts 付款收據</th>
                 <th className="px-4 py-3">Reason 支出原因</th>
-                <th className="px-4 py-3">Merchant</th>
+                <th className="px-4 py-3">Supplier 供應商</th>
                 <th className="px-4 py-3">Payment 支付方式</th>
-                <th className="px-4 py-3">HKD</th>
+                <th className="px-4 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('amount')}>Amount{arrow('amount')}</th>
                 <th className="px-4 py-3">RMB</th>
-                <th className="px-4 py-3">Paid Date</th>
+                <th className="px-4 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('date')}>Paid Date{arrow('date')}</th>
                 <th className="px-4 py-3">Platform 消費平台</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {expenses.map((e) => (
+              {displayed.map((e) => (
                 <tr key={e.id} className={`hover:bg-gray-50 ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}>
                   <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(e.id)}
-                      onChange={() => toggleSelect(e.id)}
-                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-                      aria-label={`Select ${e.receipt_no || e.id}`}
-                    />
+                    <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label={`Select ${e.receipt_no || e.id}`} />
                   </td>
                   <td className="px-4 py-3 text-sm font-mono text-gray-700 whitespace-nowrap">{e.receipt_no || '—'}</td>
                   <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
@@ -430,7 +510,7 @@ export default function ExpensesPage() {
               <p className="text-sm font-medium text-gray-700">
                 {scanning ? 'Scanning…' : 'Scan Receipts 收據掃描 — click or drop one or more images'}
               </p>
-              <p className="text-xs text-gray-400 mt-1">Multiple files supported · AI/OCR auto-extracts date, merchant &amp; amount from the first</p>
+              <p className="text-xs text-gray-400 mt-1">Multiple files supported · OCR/AI reads the first file only</p>
               {scanMessage && <p className="text-xs text-brand-700 mt-2">{scanMessage}</p>}
             </div>
 
@@ -439,7 +519,13 @@ export default function ExpensesPage() {
                 {formReceipts.map((r, i) => (
                   <div key={i} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={r.url} alt="Attached receipt" className="h-16 w-16 object-cover rounded-lg border border-gray-200" />
+                    <img
+                      src={r.url}
+                      alt="Attached receipt"
+                      onClick={() => setLightbox(r.url)}
+                      className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
+                      title="Click to enlarge"
+                    />
                     <button
                       type="button"
                       onClick={() => removeFormReceipt(i)}
@@ -457,37 +543,19 @@ export default function ExpensesPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>
-                  <TagSelect
-                    value={form.category}
-                    options={options.category}
-                    onChange={(v) => setForm((f) => ({ ...f, category: v }))}
-                    onAdd={(v) => addOption('category', v)}
-                    placeholder="Select or add a reason"
-                  />
+                  <TagSelect value={form.category} options={options.category} onChange={(v) => setForm((f) => ({ ...f, category: v }))} onAdd={(v) => addOption('category', v)} placeholder="Select or add a reason" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Merchant 商戶</label>
-                  <input value={form.merchant} onChange={(ev) => setForm({ ...form, merchant: ev.target.value })} className={inputCls} placeholder="Merchant name" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Supplier 供應商</label>
+                  <input value={form.merchant} onChange={(ev) => setForm({ ...form, merchant: ev.target.value })} className={inputCls} placeholder="Supplier / merchant name" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method 支付方式</label>
-                  <TagSelect
-                    value={form.payment_method}
-                    options={options.payment_method}
-                    onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))}
-                    onAdd={(v) => addOption('payment_method', v)}
-                    placeholder="Select or add a method"
-                  />
+                  <TagSelect value={form.payment_method} options={options.payment_method} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Shopping Platform 消費平台</label>
-                  <TagSelect
-                    value={form.platform}
-                    options={options.platform}
-                    onChange={(v) => setForm((f) => ({ ...f, platform: v }))}
-                    onAdd={(v) => addOption('platform', v)}
-                    placeholder="Select or add a platform"
-                  />
+                  <TagSelect value={form.platform} options={options.platform} onChange={(v) => setForm((f) => ({ ...f, platform: v }))} onAdd={(v) => addOption('platform', v)} placeholder="Select or add a platform" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Amount (HKD) 港幣</label>
@@ -498,8 +566,9 @@ export default function ExpensesPage() {
                   <input type="number" step="0.01" min="0" value={form.amount_rmb} onChange={(ev) => setForm({ ...form, amount_rmb: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 付款日期</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
+                  <p className="text-[11px] text-gray-400 mt-1">Receipt No. uses this month (EXP-YYYYMM-XXX)</p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Order No. 訂單編號</label>
@@ -508,9 +577,7 @@ export default function ExpensesPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Payment Status 付款狀態</label>
                   <select value={form.payment_status} onChange={(ev) => setForm({ ...form, payment_status: ev.target.value })} className={inputCls}>
-                    {PAYMENT_STATUSES.map((s) => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
+                    {PAYMENT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
                 </div>
               </div>
@@ -533,22 +600,15 @@ export default function ExpensesPage() {
       )}
 
       {gallery && (
-        <div
-          onClick={() => setGallery(null)}
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 overflow-y-auto cursor-zoom-out"
-        >
+        <div onClick={() => setGallery(null)} className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 overflow-y-auto cursor-zoom-out">
           <div className="bg-white rounded-xl w-full max-w-4xl my-8 p-6" onClick={(ev) => ev.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <p className="text-xs uppercase tracking-wider text-gray-400">Receipt No.</p>
                 <p className="text-xl font-bold font-mono text-gray-900">{gallery.receipt_no || `EXP-${gallery.id}`}</p>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  {gallery.merchant || 'Unnamed'} · {(gallery.receipts || []).length} image(s)
-                </p>
+                <p className="text-sm text-gray-500 mt-0.5">{gallery.merchant || 'Unnamed'} · {(gallery.receipts || []).length} image(s)</p>
               </div>
-              <button onClick={() => setGallery(null)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200">
-                Close
-              </button>
+              <button onClick={() => setGallery(null)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200">Close</button>
             </div>
             {(gallery.receipts || []).length === 0 ? (
               <p className="text-gray-400 text-sm py-12 text-center">No receipt images for this expense.</p>
@@ -560,12 +620,25 @@ export default function ExpensesPage() {
                       {gallery.receipt_no || `EXP-${gallery.id}`} · #{i + 1}
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/receipts/${r.id}`} alt={`Receipt ${i + 1}`} className="w-full object-contain max-h-[60vh] bg-white" />
+                    <img src={`/api/receipts/${r.id}`} alt={`Receipt ${i + 1}`} onClick={() => setLightbox(`/api/receipts/${r.id}`)} className="w-full object-contain max-h-[60vh] bg-white cursor-zoom-in" />
                   </div>
                 ))}
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 cursor-zoom-out">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Enlarged receipt" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
+        </div>
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[80] px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+          {toast.msg}
         </div>
       )}
     </AppLayout>

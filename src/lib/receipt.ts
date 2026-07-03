@@ -156,6 +156,11 @@ async function ocrExtract(buffer: Buffer): Promise<string> {
   }
 }
 
+// Public raw OCR (used by the Scan-to-Table fallback when no AI key is set).
+export async function ocrImageText(buffer: Buffer): Promise<string> {
+  return ocrExtract(buffer);
+}
+
 async function aiExtract(
   buffer: Buffer,
   mimeType: string

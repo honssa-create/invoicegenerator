@@ -1,35 +1,84 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import FilterBar from '@/components/FilterBar';
 import { StatusBadge, formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
 
-const STATUS_FILTERS = ['all', 'draft', 'sent', 'paid', 'overdue'] as const;
+type SortKey = 'date' | 'number' | 'amount';
+const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
 
 export default function InvoicesList() {
   const searchParams = useSearchParams();
   const [invoices, setInvoices] = useState<InvoiceWithDetails[]>([]);
-  const [filter, setFilter] = useState(searchParams.get('status') || 'all');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const url = filter === 'all' ? '/api/invoices' : `/api/invoices?status=${filter}`;
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
+  const [client, setClient] = useState('');
+  const [status, setStatus] = useState(searchParams.get('status') || '');
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
+
+  const loadInvoices = () => {
     setLoading(true);
-    fetch(url)
+    fetch('/api/invoices')
       .then((res) => res.json())
       .then((data) => setInvoices(data.invoices || []))
       .finally(() => setLoading(false));
-  }, [filter]);
+  };
+
+  useEffect(() => {
+    loadInvoices();
+  }, []);
+
+  const clientOptions = Array.from(new Set(invoices.map((i) => i.customer_name).filter(Boolean)));
+
+  const displayed = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = invoices.filter((inv) => {
+      if (dateStart && inv.issue_date < dateStart) return false;
+      if (dateEnd && inv.issue_date > dateEnd) return false;
+      if (client && inv.customer_name !== client) return false;
+      if (status && inv.status !== status) return false;
+      if (q) {
+        const hay = [inv.invoice_number, inv.customer_name].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    list = [...list].sort((a, b) => {
+      if (sort.key === 'number') return dir * a.invoice_number.localeCompare(b.invoice_number);
+      if (sort.key === 'amount') return dir * (a.total - b.total);
+      return dir * a.issue_date.localeCompare(b.issue_date);
+    });
+    return list;
+  }, [invoices, dateStart, dateEnd, client, status, search, sort]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '');
 
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this invoice?')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     setInvoices((prev) => prev.filter((i) => i.id !== id));
   };
+
+  const clearFilters = () => {
+    setDateStart('');
+    setDateEnd('');
+    setClient('');
+    setStatus('');
+    setSearch('');
+  };
+
+  const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
     <AppLayout>
@@ -39,69 +88,69 @@ export default function InvoicesList() {
           <p className="text-gray-500 mt-1">Create and manage your invoices</p>
         </div>
         <div className="flex gap-3">
-          <a
-            href="/api/invoices/export"
-            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
-          >
+          <a href="/api/invoices/export" className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             ⬇ Export to Excel
           </a>
-          <Link
-            href="/invoices/new"
-            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
-          >
+          <Link href="/invoices/new" className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
             + New Invoice
           </Link>
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6">
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`px-3 py-1.5 text-sm rounded-lg capitalize transition-colors ${
-              filter === s
-                ? 'bg-brand-600 text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
+      <FilterBar
+        dateStart={dateStart}
+        dateEnd={dateEnd}
+        onDateStart={setDateStart}
+        onDateEnd={setDateEnd}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search invoice # or client…"
+        onClear={clearFilters}
+      >
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Client</label>
+          <select value={client} onChange={(e) => setClient(e.target.value)} className={selectCls}>
+            <option value="">All</option>
+            {clientOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Status</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+            <option value="">All</option>
+            {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
+          </select>
+        </div>
+      </FilterBar>
 
       <div className="bg-white rounded-xl border border-gray-200">
         {loading ? (
           <div className="p-12 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
           </div>
-        ) : invoices.length === 0 ? (
+        ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No invoices found.</p>
-            <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">
-              Create an invoice
-            </Link>
+            <p>No invoices match your filters.</p>
+            <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">Create an invoice</Link>
           </div>
         ) : (
           <table className="w-full">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3">Invoice #</th>
+                <th className="px-6 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('number')}>Invoice #{arrow('number')}</th>
                 <th className="px-6 py-3">Customer</th>
-                <th className="px-6 py-3">Issue Date</th>
+                <th className="px-6 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('date')}>Issue Date{arrow('date')}</th>
                 <th className="px-6 py-3">Due Date</th>
-                <th className="px-6 py-3">Amount</th>
+                <th className="px-6 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('amount')}>Amount{arrow('amount')}</th>
                 <th className="px-6 py-3">Status</th>
                 <th className="px-6 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {invoices.map((inv) => (
+              {displayed.map((inv) => (
                 <tr key={inv.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-                      {inv.invoice_number}
-                    </Link>
+                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{inv.invoice_number}</Link>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700">{inv.customer_name}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.issue_date)}</td>
@@ -109,15 +158,9 @@ export default function InvoicesList() {
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(inv.total)}</td>
                   <td className="px-6 py-4"><StatusBadge status={inv.status} /></td>
                   <td className="px-6 py-4 text-sm space-x-3">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">
-                      View
-                    </Link>
-                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">
-                      Print
-                    </Link>
-                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">
-                      Delete
-                    </button>
+                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">View</Link>
+                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">Print</Link>
+                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
                   </td>
                 </tr>
               ))}

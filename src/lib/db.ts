@@ -145,6 +145,54 @@ if (needsNumber.length) {
   backfill();
 }
 
+// Order Management module tables (ClickUp-style order detail).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    po_number TEXT,
+    name TEXT,
+    description TEXT,
+    status TEXT DEFAULT '草稿',
+    delivery_date TEXT,
+    customer_email TEXT,
+    phone TEXT,
+    shipping_address TEXT,
+    notes TEXT,
+    fields_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS order_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    original_name TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS order_activities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'comment',
+    author TEXT,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+  CREATE INDEX IF NOT EXISTS idx_order_files_order ON order_files(order_id);
+  CREATE INDEX IF NOT EXISTS idx_order_activities_order ON order_activities(order_id);
+`);
+
 // Enforce uniqueness of receipt numbers per user (guarded so a boot never crashes).
 try {
   db.exec(

@@ -2,6 +2,16 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getInvoiceWithDetails } from '@/lib/invoices';
+import { logActivity } from '@/lib/activity';
+
+function linkedOrder(orderId: number | null | undefined, userId: number) {
+  if (!orderId) return null;
+  return (
+    db
+      .prepare('SELECT id, po_number, name, description FROM orders WHERE id = ? AND user_id = ?')
+      .get(orderId, userId) || null
+  );
+}
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -18,7 +28,15 @@ export async function GET(request: Request, { params }: { params: { id: string }
     .prepare('SELECT name, company_name, email FROM users WHERE id = ?')
     .get(session.userId);
 
-  return NextResponse.json({ invoice, business: user });
+  const orderRow = db
+    .prepare('SELECT order_id FROM invoices WHERE id = ?')
+    .get(params.id) as { order_id: number | null };
+
+  return NextResponse.json({
+    invoice: { ...invoice, order_id: orderRow?.order_id ?? null },
+    business: user,
+    linkedOrder: linkedOrder(orderRow?.order_id, session.userId),
+  });
 }
 
 export async function PUT(request: Request, { params }: { params: { id: string } }) {
@@ -28,8 +46,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   }
 
   const existing = db
-    .prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .prepare('SELECT id, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
+    .get(params.id, session.userId) as { id: number; status: string; order_id: number | null } | undefined;
 
   if (!existing) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
@@ -37,7 +55,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
   try {
     const body = await request.json();
-    const { customer_id, issue_date, due_date, tax_rate, notes, terms, status, items } = body;
+    const { customer_id, issue_date, due_date, tax_rate, notes, terms, status, items, order_id } = body;
 
     if (customer_id) {
       const customer = db
@@ -59,6 +77,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       if (notes !== undefined) { fields.push('notes = ?'); values.push(notes?.trim() || null); }
       if (terms !== undefined) { fields.push('terms = ?'); values.push(terms?.trim() || null); }
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
+      if (order_id !== undefined) { fields.push('order_id = ?'); values.push(order_id || null); }
 
       fields.push("updated_at = datetime('now')");
       values.push(params.id, session.userId);
@@ -82,6 +101,20 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     });
 
     updateInvoice();
+
+    // Activity logging on the invoice, plus mirror to the linked order.
+    if (status !== undefined && status !== existing.status) {
+      logActivity('invoice', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
+    }
+    if (order_id !== undefined && (order_id || null) !== existing.order_id) {
+      if (order_id) {
+        logActivity('invoice', params.id, session.userId, 'activity', session.name, `linked to order #${order_id}`);
+        logActivity('order', order_id, session.userId, 'activity', session.name, `linked invoice #${params.id}`);
+      } else {
+        logActivity('invoice', params.id, session.userId, 'activity', session.name, 'unlinked from order');
+      }
+    }
+
     const invoice = getInvoiceWithDetails(Number(params.id), session.userId);
     return NextResponse.json({ invoice });
   } catch {

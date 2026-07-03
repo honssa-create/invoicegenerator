@@ -1,5 +1,6 @@
 import db from './db';
 import type { Order } from './orders';
+import { getActivities, logActivity as logActivityUnified } from './activity';
 
 interface OrderRow {
   id: number;
@@ -32,13 +33,13 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
         .all(row.id) as Order['files'])
     : [];
 
-  const activities = withRelations
+  const activities = withRelations ? (getActivities('order', row.id) as Order['activities']) : [];
+
+  const linkedInvoice = withRelations
     ? (db
-        .prepare(
-          'SELECT id, kind, author, body, created_at FROM order_activities WHERE order_id = ? ORDER BY created_at ASC, id ASC'
-        )
-        .all(row.id) as Order['activities'])
-    : [];
+        .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
+        .get(row.id) as Order['linked_invoice'] | undefined) || null
+    : null;
 
   return {
     id: row.id,
@@ -55,6 +56,7 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
     fields,
     files,
     activities,
+    linked_invoice: linkedInvoice,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -81,7 +83,5 @@ export function logActivity(
   author: string,
   body: string
 ) {
-  db.prepare(
-    'INSERT INTO order_activities (order_id, user_id, kind, author, body) VALUES (?, ?, ?, ?, ?)'
-  ).run(orderId, userId, kind, author, body);
+  logActivityUnified('order', orderId, userId, kind, author, body);
 }

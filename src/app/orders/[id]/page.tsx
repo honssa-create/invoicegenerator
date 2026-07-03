@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import ActivityFeed from '@/components/ActivityFeed';
 import {
   ORDER_FIELDS,
   ORDER_STATUSES,
@@ -19,8 +21,6 @@ export default function OrderDetailPage() {
 
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
-  const [comment, setComment] = useState('');
-  const [posting, setPosting] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,21 +63,12 @@ export default function OrderDetailPage() {
     if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
   };
 
-  const postComment = async () => {
-    const text = comment.trim();
-    if (!text) return;
-    setPosting(true);
-    const res = await fetch(`/api/orders/${id}/activities`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: text }),
-    });
-    setPosting(false);
-    if (res.ok) {
-      const data = await res.json();
-      setOrder((o) => (o ? { ...o, activities: data.activities } : o));
-      setComment('');
-    }
+  const paymentBadge = () => {
+    const inv = order?.linked_invoice;
+    if (!inv) return { text: 'No invoice linked', cls: 'bg-gray-100 text-gray-600' };
+    if (inv.status === 'paid') return { text: '✓ Paid · 100% Payment (全數付清)', cls: 'bg-green-100 text-green-700' };
+    if (inv.status === 'overdue') return { text: '⚠ Overdue / 逾期未付', cls: 'bg-red-100 text-red-700' };
+    return { text: '未付款 / 待核對 Unpaid', cls: 'bg-red-100 text-red-700' };
   };
 
   if (loading) {
@@ -152,6 +143,15 @@ export default function OrderDetailPage() {
                 🚚 交貨
                 <input value={order.delivery_date} onChange={(e) => setCoreLocal('delivery_date', e.target.value)} onBlur={(e) => patch({ core: { delivery_date: e.target.value } })} placeholder="22/1" className="w-16 bg-transparent outline-none text-red-600 placeholder-red-300" />
               </span>
+              {(() => { const b = paymentBadge(); return (
+                order.linked_invoice ? (
+                  <Link href={`/invoices/${order.linked_invoice.id}`} className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-3 py-1 ${b.cls}`}>
+                    💳 {b.text}
+                  </Link>
+                ) : (
+                  <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-3 py-1 ${b.cls}`}>💳 {b.text}</span>
+                )
+              ); })()}
             </div>
             <h1 className="text-2xl font-bold text-gray-900">{orderTitle(order)}</h1>
             <input
@@ -230,64 +230,7 @@ export default function OrderDetailPage() {
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}
         <div className="w-full lg:w-[30%] lg:h-full">
-          <div className="bg-white rounded-xl border border-gray-200 flex flex-col lg:h-full max-h-[75vh] lg:max-h-none">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">Activity</h2>
-              <span className="text-xs text-gray-400">{order.activities.length}</span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {order.activities.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-8">No activity yet. Start the conversation below.</p>
-              ) : (
-                order.activities.map((a) => (
-                  <div key={a.id} className="flex gap-2">
-                    <div className="h-7 w-7 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold flex items-center justify-center flex-shrink-0">
-                      {(a.author || '?').slice(0, 1).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      {a.kind === 'activity' ? (
-                        <p className="text-xs text-gray-500">
-                          <span className="font-medium text-gray-700">{a.author}</span> {a.body}
-                          <span className="text-gray-300"> · {a.created_at?.slice(5, 16)}</span>
-                        </p>
-                      ) : (
-                        <div>
-                          <p className="text-xs text-gray-500"><span className="font-medium text-gray-700">{a.author}</span><span className="text-gray-300"> · {a.created_at?.slice(5, 16)}</span></p>
-                          <p className="text-sm text-gray-800 whitespace-pre-wrap break-words mt-0.5">{a.body}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Composer */}
-            <div className="border-t border-gray-200 p-3">
-              <div className="border border-gray-200 rounded-lg focus-within:ring-2 focus-within:ring-brand-500">
-                <textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) postComment(); }}
-                  rows={2}
-                  placeholder="Write a comment…"
-                  className="w-full px-3 py-2 text-sm outline-none resize-none rounded-t-lg"
-                />
-                <div className="flex items-center justify-between px-2 py-1.5 border-t border-gray-100">
-                  <div className="flex items-center gap-1 text-gray-400">
-                    <button type="button" title="Attach" className="hover:text-gray-600 px-1">📎</button>
-                    <button type="button" title="Mention" className="hover:text-gray-600 px-1">@</button>
-                    <button type="button" title="Emoji" className="hover:text-gray-600 px-1">😊</button>
-                    <button type="button" title="Image" className="hover:text-gray-600 px-1">🖼️</button>
-                  </div>
-                  <button onClick={postComment} disabled={posting || !comment.trim()} className="px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
-                    {posting ? '…' : 'Send'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ActivityFeed entityType="order" entityId={order.id} className="lg:h-full max-h-[75vh] lg:max-h-none" />
         </div>
       </div>
 

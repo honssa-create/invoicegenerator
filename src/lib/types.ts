@@ -25,6 +25,7 @@ export interface Invoice {
   id: number;
   user_id: number;
   customer_id: number;
+  order_id: number | null;
   invoice_number: string;
   status: InvoiceStatus;
   issue_date: string;
@@ -34,6 +35,13 @@ export interface Invoice {
   terms: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface LinkedOrderSummary {
+  id: number;
+  po_number: string | null;
+  name: string | null;
+  description: string | null;
 }
 
 export interface InvoiceItem {

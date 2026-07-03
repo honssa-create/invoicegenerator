@@ -193,6 +193,82 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_order_activities_order ON order_activities(order_id);
 `);
 
+// Unified activity log shared by Orders, Invoices and Quotations (ClickUp-style feed).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'comment',
+    author TEXT,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type, entity_id);
+`);
+
+// One-time backfill: fold legacy order_activities into the unified table.
+try {
+  const legacyCount = (db.prepare("SELECT COUNT(*) c FROM order_activities").get() as { c: number }).c;
+  const migratedOrders = (db
+    .prepare("SELECT COUNT(*) c FROM activity_logs WHERE entity_type = 'order'")
+    .get() as { c: number }).c;
+  if (legacyCount > 0 && migratedOrders === 0) {
+    db.exec(`
+      INSERT INTO activity_logs (entity_type, entity_id, user_id, kind, author, body, created_at)
+      SELECT 'order', order_id, user_id, kind, author, body, created_at FROM order_activities
+    `);
+  }
+} catch {
+  // order_activities may not exist on a very old DB — ignore.
+}
+
+// Invoice ↔ Order relation + reminder tracking.
+{
+  const invoiceCols = db.prepare('PRAGMA table_info(invoices)').all() as { name: string }[];
+  if (!invoiceCols.some((c) => c.name === 'order_id')) {
+    db.exec('ALTER TABLE invoices ADD COLUMN order_id INTEGER');
+  }
+  if (!invoiceCols.some((c) => c.name === 'last_reminder_at')) {
+    db.exec('ALTER TABLE invoices ADD COLUMN last_reminder_at TEXT');
+  }
+}
+
+// Quotation module.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS quotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    customer_id INTEGER,
+    quote_number TEXT NOT NULL,
+    status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'approved', 'rejected')),
+    issue_date TEXT NOT NULL,
+    valid_until TEXT,
+    tax_rate REAL DEFAULT 0,
+    notes TEXT,
+    terms TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS quotation_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 1,
+    unit_price REAL NOT NULL DEFAULT 0,
+    amount REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_quotations_user ON quotations(user_id);
+  CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
+`);
+
 // Enforce uniqueness of receipt numbers per user (guarded so a boot never crashes).
 try {
   db.exec(

@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import ActivityFeed from '@/components/ActivityFeed';
 import { StatusBadge, formatCurrency } from '@/components/ui';
 import { formatDate, calculateInvoiceTotals } from '@/lib/utils';
-import type { InvoiceWithDetails } from '@/lib/types';
+import type { InvoiceWithDetails, LinkedOrderSummary } from '@/lib/types';
+import { orderTitle, type Order } from '@/lib/orders';
 
 interface LineItem {
   description: string;
@@ -25,6 +27,8 @@ export default function InvoiceDetailPage() {
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('');
   const [saving, setSaving] = useState(false);
+  const [linkedOrder, setLinkedOrder] = useState<LinkedOrderSummary | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
 
   const loadInvoice = () => {
     fetch(`/api/invoices/${id}`)
@@ -41,11 +45,24 @@ export default function InvoiceDetailPage() {
           setStatus(data.invoice.status);
           setNotes(data.invoice.notes || '');
           setTerms(data.invoice.terms || '');
+          setLinkedOrder(data.linkedOrder || null);
         }
       });
   };
 
   useEffect(() => { loadInvoice(); }, [id]);
+  useEffect(() => {
+    fetch('/api/orders').then((r) => r.json()).then((d) => setOrders(d.orders || [])).catch(() => {});
+  }, []);
+
+  const linkOrder = async (orderId: string) => {
+    await fetch(`/api/invoices/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId ? Number(orderId) : null }),
+    });
+    loadInvoice();
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -228,6 +245,24 @@ export default function InvoiceDetailPage() {
 
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-3">Linked Order 關聯訂單</h3>
+            {linkedOrder ? (
+              <Link href={`/orders/${linkedOrder.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
+                🔗 {orderTitle(linkedOrder)}
+              </Link>
+            ) : (
+              <p className="text-sm text-gray-500 mb-2">No order linked.</p>
+            )}
+            <select
+              value={linkedOrder?.id || ''}
+              onChange={(e) => linkOrder(e.target.value)}
+              className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+            >
+              <option value="">— Not linked —</option>
+              {orders.map((o) => <option key={o.id} value={o.id}>{orderTitle(o)}</option>)}
+            </select>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h3 className="font-semibold text-gray-900 mb-3">Notes</h3>
             {editing ? (
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
@@ -245,6 +280,7 @@ export default function InvoiceDetailPage() {
               <p className="text-sm text-gray-600">{invoice.terms || 'No terms specified'}</p>
             )}
           </div>
+          <ActivityFeed entityType="invoice" entityId={invoice.id} className="max-h-[520px]" />
         </div>
       </div>
     </AppLayout>

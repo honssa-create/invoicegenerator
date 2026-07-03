@@ -90,16 +90,27 @@ export interface OrderActivity {
   created_at: string;
 }
 
+export interface LinkedInvoice {
+  id: number;
+  invoice_number: string;
+  status: string;
+}
+
 export interface Order extends CoreColumns {
   id: number;
   user_id: number;
   fields: Record<string, string | boolean>;
   files: OrderFile[];
   activities: OrderActivity[];
+  linked_invoice: LinkedInvoice | null;
   created_at: string;
   updated_at: string;
 }
 
-export function orderTitle(o: Pick<CoreColumns, 'po_number' | 'name' | 'description'>): string {
+export function orderTitle(o: {
+  po_number?: string | null;
+  name?: string | null;
+  description?: string | null;
+}): string {
   return [o.po_number, o.name, o.description].filter(Boolean).join(' - ') || 'Untitled order';
 }

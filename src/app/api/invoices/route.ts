@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { generateInvoiceNumber, getInvoiceWithDetails } from '@/lib/invoices';
+import { logActivity } from '@/lib/activity';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
     });
 
     const invoiceId = createInvoice();
+    logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
     const invoice = getInvoiceWithDetails(invoiceId, session.userId);
 
     return NextResponse.json({ invoice }, { status: 201 });

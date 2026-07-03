@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: '/quotations', label: 'Quotations', icon: '📝' },
   { href: '/invoices', label: 'Invoices', icon: '📄' },
   { href: '/orders', label: 'Orders', icon: '📦' },
+  { href: '/inbound', label: 'Inbound', icon: '📥' },
   { href: '/expenses', label: 'Expenses', icon: '🧾' },
   { href: '/scan-table', label: 'Scan to Table', icon: '📊' },
   { href: '/customers', label: 'Customers', icon: '👥' },

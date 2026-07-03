@@ -277,6 +277,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
 `);
 
+// Inbound Shipment Tracker (到件紀錄) — arriving supplier shipments.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS inbound_shipments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    waybill_number TEXT,
+    sender TEXT,
+    arrival_date TEXT,
+    photo_path TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_inbound_shipments_user ON inbound_shipments(user_id);
+`);
+
 // Enforce uniqueness of receipt numbers per user (guarded so a boot never crashes).
 try {
   db.exec(

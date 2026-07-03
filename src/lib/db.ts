@@ -65,9 +65,28 @@ db.exec(`
     FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL DEFAULT 'other',
+    merchant TEXT,
+    amount_hkd REAL,
+    amount_rmb REAL,
+    paid_date TEXT,
+    order_no TEXT,
+    platform TEXT,
+    notes TEXT,
+    payment_status TEXT DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'pending', 'paid')),
+    receipt_path TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_customers_user ON customers(user_id);
   CREATE INDEX IF NOT EXISTS idx_invoices_user ON invoices(user_id);
   CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
+  CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id);
 `);
 
 export default db;

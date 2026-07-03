@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { StatCard, StatusBadge, formatCurrency } from '@/components/ui';
+import { formatMoney } from '@/lib/expenses';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
 
@@ -14,6 +15,9 @@ interface DashboardData {
   overdueCount: number;
   customerCount: number;
   recentInvoices: InvoiceWithDetails[];
+  expenseCount: number;
+  totalExpensesHkd: number;
+  totalExpensesRmb: number;
 }
 
 export default function DashboardPage() {
@@ -50,11 +54,18 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <StatCard title="Total Revenue" value={formatCurrency(data.totalRevenue)} icon="💵" color="bg-green-50 text-green-600" />
         <StatCard title="Pending" value={formatCurrency(data.pendingAmount)} icon="⏳" color="bg-yellow-50 text-yellow-600" />
         <StatCard title="Invoices" value={String(data.totalInvoices)} icon="📄" />
         <StatCard title="Customers" value={String(data.customerCount)} icon="👥" color="bg-blue-50 text-blue-600" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatCard title="Expenses (HKD)" value={formatMoney(data.totalExpensesHkd, 'HKD')} icon="💰" color="bg-red-50 text-red-600" />
+        <StatCard title="Expenses (RMB)" value={formatMoney(data.totalExpensesRmb, 'CNY')} icon="💴" color="bg-red-50 text-red-600" />
+        <StatCard title="Expense Records" value={String(data.expenseCount)} icon="🧾" />
+        <StatCard title="Net (HKD)" value={formatCurrency(data.totalRevenue - data.totalExpensesHkd)} icon="📈" color="bg-blue-50 text-blue-600" />
       </div>
 
       {data.overdueCount > 0 && (

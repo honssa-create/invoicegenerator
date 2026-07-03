@@ -7,6 +7,7 @@ import { useAuth } from './AuthProvider';
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: '📊' },
   { href: '/invoices', label: 'Invoices', icon: '📄' },
+  { href: '/expenses', label: 'Expenses', icon: '🧾' },
   { href: '/customers', label: 'Customers', icon: '👥' },
 ];
 
@@ -21,7 +22,7 @@ export default function Sidebar() {
           <span className="text-2xl">💰</span>
           <div>
             <h1 className="font-bold text-lg text-gray-900">InvoiceFlow</h1>
-            <p className="text-xs text-gray-500">Invoice Manager</p>
+            <p className="text-xs text-gray-500">Finance Manager</p>
           </div>
         </Link>
       </div>

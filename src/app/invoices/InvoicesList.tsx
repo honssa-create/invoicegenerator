@@ -38,12 +38,20 @@ export default function InvoicesList() {
           <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
           <p className="text-gray-500 mt-1">Create and manage your invoices</p>
         </div>
-        <Link
-          href="/invoices/new"
-          className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
-        >
-          + New Invoice
-        </Link>
+        <div className="flex gap-3">
+          <a
+            href="/api/invoices/export"
+            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            ⬇ Export to Excel
+          </a>
+          <Link
+            href="/invoices/new"
+            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
+          >
+            + New Invoice
+          </Link>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6">

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { compressImage } from '@/lib/imageCompression';
 import type { InboundShipment } from '@/lib/inbound';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -31,9 +32,23 @@ export default function InboundPage() {
     setWaybill(''); setSender(''); setArrival(today()); setPhotoPath(''); setPreview(null); setScanMsg('');
   };
 
-  const handlePhoto = async (file: File) => {
+  const handlePhoto = async (rawFile: File) => {
     setScanning(true);
-    setScanMsg('Scanning shipping label…');
+    setScanMsg('Compressing image…');
+
+    // Compress on the client (max 1200px, target < 300KB, clean JPEG) before upload.
+    let file = rawFile;
+    let compressNote = '';
+    try {
+      const c = await compressImage(rawFile, { maxDim: 1200, targetBytes: 300 * 1024, mimeType: 'image/jpeg' });
+      file = c.file;
+      const kb = (n: number) => `${Math.round(n / 1024)}KB`;
+      compressNote = c.compressed ? `Compressed ${kb(c.originalBytes)} → ${kb(c.outputBytes)}. ` : `Photo ${kb(c.outputBytes)}. `;
+    } catch {
+      // fall back to the original file if compression fails
+    }
+
+    setScanMsg(`${compressNote}Scanning shipping label…`);
     setPreview(URL.createObjectURL(file));
     const fd = new FormData();
     fd.append('photo', file);
@@ -47,7 +62,7 @@ export default function InboundPage() {
       if (r.sender) setSender(r.sender);
       const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
       const found = [r.waybill_number && 'waybill', r.sender && 'sender'].filter(Boolean);
-      setScanMsg(found.length ? `Extracted via ${via}: ${found.join(', ')}. Review & edit if needed.` : `No fields auto-extracted (${via}). Enter manually.`);
+      setScanMsg(`${compressNote}${found.length ? `Extracted via ${via}: ${found.join(', ')}. Review & edit if needed.` : `No fields auto-extracted (${via}). Enter manually.`}`);
     } catch {
       setScanMsg(''); setToast('Scan failed');
     } finally {

@@ -40,7 +40,7 @@ export default function InboundPage() {
     let file = rawFile;
     let compressNote = '';
     try {
-      const c = await compressImage(rawFile, { maxDim: 1200, targetBytes: 300 * 1024, mimeType: 'image/jpeg' });
+      const c = await compressImage(rawFile, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg' });
       file = c.file;
       const kb = (n: number) => `${Math.round(n / 1024)}KB`;
       compressNote = c.compressed ? `Compressed ${kb(c.originalBytes)} → ${kb(c.outputBytes)}. ` : `Photo ${kb(c.outputBytes)}. `;

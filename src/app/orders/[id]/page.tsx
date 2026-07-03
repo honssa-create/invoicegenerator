@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import { compressImage } from '@/lib/imageCompression';
+import { compressPdfToImages } from '@/lib/pdfCompression';
 import {
   ORDER_FIELDS,
   ORDER_STATUSES,
@@ -48,14 +50,39 @@ export default function OrderDetailPage() {
   const setFieldLocal = (key: string, value: unknown) =>
     setOrder((o) => (o ? { ...o, fields: { ...o.fields, [key]: value as string | boolean } } : o));
 
+  const [uploadMsg, setUploadMsg] = useState('');
   const uploadFiles = async (files: FileList) => {
+    setUploadMsg('Optimising files…');
+    // Compress images (≤1600px JPEG) and convert heavy PDFs (>2MB) into compressed
+    // JPEG page images so we store a lightweight image array, never the raw monster PDF.
+    const prepared: File[] = [];
+    for (const f of Array.from(files)) {
+      try {
+        if (f.type === 'application/pdf') {
+          setUploadMsg(`Compressing PDF “${f.name}” pages…`);
+          const pages = await compressPdfToImages(f);
+          prepared.push(...pages);
+        } else if (f.type.startsWith('image/')) {
+          const c = await compressImage(f, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg' });
+          prepared.push(c.file);
+        } else {
+          prepared.push(f);
+        }
+      } catch {
+        prepared.push(f);
+      }
+    }
+    if (!prepared.length) { setUploadMsg(''); return; }
+
+    setUploadMsg(`Uploading ${prepared.length} image(s)…`);
     const fd = new FormData();
-    Array.from(files).forEach((f) => fd.append('file', f));
+    prepared.forEach((f) => fd.append('file', f));
     const res = await fetch(`/api/orders/${id}/files`, { method: 'POST', body: fd });
     if (res.ok) {
       const data = await res.json();
       setOrder((o) => (o ? { ...o, files: data.files } : o));
     }
+    setUploadMsg('');
   };
 
   const deleteFile = async (fileId: number) => {
@@ -198,13 +225,16 @@ export default function OrderDetailPage() {
           {/* Visual assets / image grid */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900">Design Proofs 設計圖 / Image Preview</h2>
-              <button onClick={() => fileInputRef.current?.click()} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Upload images</button>
-              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
+              <div>
+                <h2 className="font-semibold text-gray-900">Design Proofs 設計圖 / Image Preview</h2>
+                {uploadMsg && <p className="text-xs text-brand-700 mt-0.5">{uploadMsg}</p>}
+              </div>
+              <button onClick={() => fileInputRef.current?.click()} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Upload images / PDF</button>
+              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
             </div>
             {order.files.length === 0 ? (
               <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400 text-sm cursor-pointer hover:border-brand-400 hover:bg-brand-50/40">
-                Click to upload product design proof images
+                Click to upload product design proofs (images or PDF — heavy PDFs are auto-compressed to page images)
               </div>
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">

@@ -14,8 +14,10 @@ export interface CompressResult {
   outputBytes: number;
 }
 
+// Standard Quality (default): ~1600px on the longest edge, high compression,
+// output clean JPEG. Canvas re-encoding also drops source metadata (e.g. EXIF).
 const DEFAULTS: Required<CompressOptions> = {
-  maxDim: 1200,
+  maxDim: 1600,
   targetBytes: 300 * 1024,
   mimeType: 'image/jpeg',
 };

@@ -134,9 +134,9 @@ export default function OrderDetailPage() {
     <AppLayout>
       <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium mb-4">← Back to orders</button>
 
-      <div className="flex flex-col lg:flex-row gap-6 items-start">
-        {/* LEFT COLUMN — 70% */}
-        <div className="w-full lg:w-[70%] space-y-6">
+      <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:h-[calc(100vh-7rem)]">
+        {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}
+        <div className="w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2">
           {/* Header */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-center gap-3 flex-wrap mb-3">
@@ -228,9 +228,9 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN — 30% activity feed */}
-        <div className="w-full lg:w-[30%] lg:sticky lg:top-6">
-          <div className="bg-white rounded-xl border border-gray-200 flex flex-col max-h-[calc(100vh-6rem)]">
+        {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}
+        <div className="w-full lg:w-[30%] lg:h-full">
+          <div className="bg-white rounded-xl border border-gray-200 flex flex-col lg:h-full max-h-[75vh] lg:max-h-none">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-semibold text-gray-900">Activity</h2>
               <span className="text-xs text-gray-400">{order.activities.length}</span>

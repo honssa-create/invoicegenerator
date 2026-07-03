@@ -18,6 +18,7 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 - **Invoice ↔ Order linkage** — Link an invoice to its order; the order shows a live payment badge (green Paid / red Unpaid) derived from the linked invoice, and each page cross-links to the other
 - **Automated 30-day payment reminders** — A daily-runnable job emails clients whose invoices are unpaid after 30 days and logs a `[System]` entry into the invoice's and linked order's activity feed
 - **Isolated activity logs** — Every Order, Invoice, and Quotation has its own ClickUp-style activity sidebar that auto-logs creation, status/field changes, exports, and system events, plus free-text comments
+- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; AI vision (Gemini, OCR fallback) extracts the waybill number and sender, defaults the arrival date to today, and saves the record with the cargo photo
 - **Scan to Table (掃描成表格)** — Upload an image or PDF of any printed table and extract it into an editable grid (Google Gemini vision when `GEMINI_API_KEY` is set, otherwise on-device OCR), then export it
 - **Receipt scanning (收據掃描)** — Upload one or more receipt images; the first is auto-scanned to extract merchant, date, and total (AI vision when `OPENAI_API_KEY` is set, otherwise on-device OCR); blanks are left for manual entry
 - **Multiple receipts per expense (多檔案上傳)** — Attach several receipt images; the table shows up to 3 thumbnails (2 + a `+N` badge when more), and a gallery modal shows all images with the receipt number

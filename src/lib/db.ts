@@ -277,6 +277,57 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
 `);
 
+// Integrated Kitchen Scheduling & Two-Tier Inventory System.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS kitchen_finished (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    sku TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, sku),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS kitchen_raw (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    unit TEXT,
+    total_stock REAL NOT NULL DEFAULT 0,
+    allocated_stock REAL NOT NULL DEFAULT 0,
+    UNIQUE(user_id, name),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS kitchen_daily_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    source TEXT DEFAULT 'manual',
+    customer TEXT,
+    sku TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT '無現貨 (Out of Stock)',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS kitchen_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    flavor TEXT NOT NULL,
+    capacity TEXT NOT NULL,
+    brewing_date TEXT,
+    bottle_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_kitchen_daily_user ON kitchen_daily_orders(user_id);
+  CREATE INDEX IF NOT EXISTS idx_kitchen_batches_user ON kitchen_batches(user_id);
+`);
+
 // Inbound Shipment Tracker (到件紀錄) — arriving supplier shipments.
 db.exec(`
   CREATE TABLE IF NOT EXISTS inbound_shipments (

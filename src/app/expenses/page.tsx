@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
 import {
@@ -28,6 +29,7 @@ const EMPTY_FORM = {
 type FormState = typeof EMPTY_FORM;
 
 export default function ExpensesPage() {
+  const router = useRouter();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -36,6 +38,8 @@ export default function ExpensesPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [preview, setPreview] = useState<{ src: string; label: string } | null>(null);
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
@@ -174,7 +178,34 @@ export default function ExpensesPage() {
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this expense?')) return;
     const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
-    if (res.ok) loadExpenses();
+    if (res.ok) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      loadExpenses();
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = expenses.length > 0 && expenses.every((e) => selected.has(e.id));
+  const toggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(expenses.map((e) => e.id)));
+  };
+
+  const printSelected = () => {
+    if (!selected.size) return;
+    const ids = expenses.filter((e) => selected.has(e.id)).map((e) => e.id);
+    router.push(`/expenses/print?ids=${ids.join(',')}`);
   };
 
   const inputCls =
@@ -188,6 +219,13 @@ export default function ExpensesPage() {
           <p className="text-gray-500 mt-1">Track costs, scan receipts, and export your books</p>
         </div>
         <div className="flex gap-3">
+          <button
+            onClick={printSelected}
+            disabled={selected.size === 0}
+            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            🖨 Print Selected{selected.size > 0 ? ` (${selected.size})` : ''}
+          </button>
           <a
             href="/api/expenses/export"
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
@@ -242,9 +280,20 @@ export default function ExpensesPage() {
             <p>No expenses yet. Add one and scan a receipt to auto-fill the details.</p>
           </div>
         ) : (
-          <table className="w-full min-w-[900px]">
+          <table className="w-full min-w-[1000px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                <th className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                    aria-label="Select all"
+                  />
+                </th>
+                <th className="px-4 py-3">Receipt No.</th>
+                <th className="px-4 py-3">Receipt</th>
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Merchant</th>
                 <th className="px-4 py-3">HKD</th>
@@ -252,13 +301,35 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3">Paid Date</th>
                 <th className="px-4 py-3">Platform</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Receipt</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {expenses.map((e) => (
-                <tr key={e.id} className="hover:bg-gray-50">
+                <tr key={e.id} className={`hover:bg-gray-50 ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}>
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(e.id)}
+                      onChange={() => toggleSelect(e.id)}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                      aria-label={`Select ${e.receipt_no || e.id}`}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-700 whitespace-nowrap">{e.receipt_no || '—'}</td>
+                  <td className="px-4 py-3">
+                    {e.receipt_path ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/expenses/${e.id}/receipt`}
+                        alt="Receipt thumbnail"
+                        onClick={() => setPreview({ src: `/api/expenses/${e.id}/receipt`, label: e.receipt_no || '' })}
+                        className="h-12 w-12 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400 transition"
+                      />
+                    ) : (
+                      <span className="text-gray-300 text-xs">No image</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{CATEGORY_LABELS[e.category] || e.category}</td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{e.merchant || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_hkd, 'HKD')}</td>
@@ -269,15 +340,6 @@ export default function ExpensesPage() {
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[e.payment_status]}`}>
                       {e.payment_status}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm">
-                    {e.receipt_path ? (
-                      <a href={`/api/expenses/${e.id}/receipt`} target="_blank" rel="noreferrer" className="text-brand-600 hover:text-brand-700 font-medium">
-                        View
-                      </a>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
                   </td>
                   <td className="px-4 py-3 text-sm space-x-3 whitespace-nowrap">
                     <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
@@ -373,6 +435,29 @@ export default function ExpensesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div
+          onClick={() => setPreview(null)}
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 cursor-zoom-out"
+        >
+          <div className="max-w-3xl w-full text-center" onClick={(ev) => ev.stopPropagation()}>
+            {preview.label && (
+              <div className="mb-2 inline-block bg-white/90 px-3 py-1 rounded-full text-sm font-mono font-semibold text-gray-800">
+                {preview.label}
+              </div>
+            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview.src} alt="Receipt preview" className="max-h-[80vh] w-auto mx-auto rounded-lg shadow-2xl bg-white" />
+            <button
+              onClick={() => setPreview(null)}
+              className="mt-3 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-100"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

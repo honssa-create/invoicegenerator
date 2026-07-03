@@ -65,6 +65,7 @@ export type PaymentStatus = 'unpaid' | 'pending' | 'paid';
 export interface Expense {
   id: number;
   user_id: number;
+  receipt_no: string | null;
   category: ExpenseCategory;
   merchant: string | null;
   amount_hkd: number | null;

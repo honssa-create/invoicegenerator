@@ -89,4 +89,42 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id);
 `);
 
+// Migration: add sequential receipt numbers to the expenses table.
+const expenseColumns = db.prepare('PRAGMA table_info(expenses)').all() as { name: string }[];
+if (!expenseColumns.some((c) => c.name === 'receipt_no')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN receipt_no TEXT');
+}
+
+// Backfill any expenses that predate the receipt-number feature.
+const unnumbered = db
+  .prepare(
+    `SELECT id, user_id, created_at FROM expenses
+     WHERE receipt_no IS NULL OR receipt_no = ''
+     ORDER BY user_id, created_at, id`
+  )
+  .all() as { id: number; user_id: number; created_at: string | null }[];
+
+if (unnumbered.length) {
+  const counters = new Map<string, number>();
+  const update = db.prepare('UPDATE expenses SET receipt_no = ? WHERE id = ?');
+  const backfill = db.transaction(() => {
+    for (const row of unnumbered) {
+      const year = (row.created_at || '').slice(0, 4) || String(new Date().getFullYear());
+      const key = `${row.user_id}-${year}`;
+      if (!counters.has(key)) {
+        const existing = db
+          .prepare(
+            `SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND receipt_no LIKE ?`
+          )
+          .get(row.user_id, `EXP-${year}-%`) as { count: number };
+        counters.set(key, existing.count);
+      }
+      const next = counters.get(key)! + 1;
+      counters.set(key, next);
+      update.run(`EXP-${year}-${String(next).padStart(4, '0')}`, row.id);
+    }
+  });
+  backfill();
+}
+
 export default db;

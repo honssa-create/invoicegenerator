@@ -11,6 +11,14 @@ function normalizeNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function generateReceiptNumber(userId: number): string {
+  const year = new Date().getFullYear();
+  const row = db
+    .prepare(`SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND receipt_no LIKE ?`)
+    .get(userId, `EXP-${year}-%`) as { count: number };
+  return `EXP-${year}-${String(row.count + 1).padStart(4, '0')}`;
+}
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) {
@@ -59,14 +67,17 @@ export async function POST(request: Request) {
       );
     }
 
+    const receiptNo = generateReceiptNumber(session.userId);
+
     const result = db
       .prepare(
         `INSERT INTO expenses
-          (user_id, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, notes, payment_status, receipt_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, notes, payment_status, receipt_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         session.userId,
+        receiptNo,
         category,
         body.merchant?.trim() || null,
         amount_hkd,

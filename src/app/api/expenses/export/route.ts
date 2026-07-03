@@ -24,6 +24,7 @@ export async function GET(request: Request) {
   const ws = wb.addWorksheet('Expenses');
 
   ws.columns = [
+    { header: 'Receipt No.', key: 'receipt_no', width: 18 },
     { header: 'Category', key: 'category', width: 20 },
     { header: 'Merchant', key: 'merchant', width: 24 },
     { header: 'Amount (HKD)', key: 'amount_hkd', width: 15 },
@@ -37,6 +38,7 @@ export async function GET(request: Request) {
 
   expenses.forEach((e) => {
     ws.addRow({
+      receipt_no: e.receipt_no || '',
       category: CATEGORY_LABELS[e.category] || e.category,
       merchant: e.merchant || '',
       amount_hkd: e.amount_hkd ?? '',
@@ -54,8 +56,8 @@ export async function GET(request: Request) {
   header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16A34A' } };
   header.alignment = { vertical: 'middle' };
 
-  ws.getColumn('C').numFmt = '#,##0.00';
-  ws.getColumn('D').numFmt = '#,##0.00';
+  ws.getColumn('amount_hkd').numFmt = '#,##0.00';
+  ws.getColumn('amount_rmb').numFmt = '#,##0.00';
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 
   const buffer = await wb.xlsx.writeBuffer();

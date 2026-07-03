@@ -89,7 +89,7 @@ export default function QuotationDetailPage() {
       return;
     }
     setToast({ text: 'Successfully copied Quotation to a new Invoice!', kind: 'success' });
-    setTimeout(() => router.push(`/invoices/${data.id}`), 900);
+    setTimeout(() => router.push(`/invoices/${data.id}`), 1500);
   };
 
   const del = async () => {

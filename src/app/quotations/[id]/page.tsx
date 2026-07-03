@@ -27,6 +27,8 @@ export default function QuotationDetailPage() {
   const [items, setItems] = useState<LineItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  const [copying, setCopying] = useState(false);
 
   const load = () => {
     fetch(`/api/quotations/${id}`)
@@ -73,6 +75,23 @@ export default function QuotationDetailPage() {
     router.push(target === 'invoice' ? `/invoices/${data.id}` : `/orders/${data.id}`);
   };
 
+  // Copy this quotation into a brand-new invoice without modifying the original.
+  const copyToInvoice = async () => {
+    setCopying(true);
+    // Persist any in-progress edits so the copy reflects the latest line items.
+    await save();
+    const res = await fetch(`/api/quotations/${id}/copy-to-invoice`, { method: 'POST' });
+    const data = await res.json();
+    setCopying(false);
+    if (!res.ok) {
+      setToast({ text: data.error || 'Failed to copy quotation', kind: 'error' });
+      setTimeout(() => setToast(null), 5000);
+      return;
+    }
+    setToast({ text: 'Successfully copied Quotation to a new Invoice!', kind: 'success' });
+    setTimeout(() => router.push(`/invoices/${data.id}`), 900);
+  };
+
   const del = async () => {
     if (!confirm('Delete this quotation?')) return;
     await fetch(`/api/quotations/${id}`, { method: 'DELETE' });
@@ -103,7 +122,7 @@ export default function QuotationDetailPage() {
         <div className="flex gap-2 flex-wrap">
           <Link href={`/quotations/${id}/print`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">🧾 Generate PDF</Link>
           <a href={`/api/quotations/${id}/export`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">⬇ Export Excel</a>
-          <button onClick={() => convert('invoice')} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">→ Convert to Invoice</button>
+          <button onClick={copyToInvoice} disabled={copying} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">{copying ? 'Copying…' : '📋 Copy to New Invoice'}</button>
           <button onClick={() => convert('order')} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">→ Convert to Order</button>
           <button onClick={save} disabled={saving} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
           <button onClick={del} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">Delete</button>
@@ -187,6 +206,12 @@ export default function QuotationDetailPage() {
           <ActivityFeed entityType="quotation" entityId={quote.id} className="max-h-[600px]" />
         </div>
       </div>
+
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[80] px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+          {toast.text}
+        </div>
+      )}
     </AppLayout>
   );
 }

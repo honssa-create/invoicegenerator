@@ -1,6 +1,6 @@
 # InvoiceFlow
 
-A QuickBooks-like invoice generator with multi-user authentication. Each user gets their own secure account with isolated customers and invoices.
+A QuickBooks-like financial dashboard with multi-user authentication. Each user gets their own secure account with isolated customers, invoices, and expenses.
 
 ## Features
 
@@ -8,7 +8,10 @@ A QuickBooks-like invoice generator with multi-user authentication. Each user ge
 - **Customer management** — Add, edit, and delete clients with contact details
 - **Invoice creation** — Line items, tax calculations, notes, and terms
 - **Invoice statuses** — Draft, Sent, Paid, Overdue
-- **Dashboard** — Revenue, pending amounts, and recent invoice overview
+- **Expense tracking (支出紀錄)** — Record expenses by category (ingredients, packaging, marketing, rent, other) with HKD & RMB amounts, paid date, order no., 消費平台, notes, and payment status
+- **Receipt scanning (收據掃描)** — Upload a receipt image and auto-extract merchant, date, and total (AI vision when `OPENAI_API_KEY` is set, otherwise on-device OCR); blanks are left for manual entry
+- **Export to Excel (匯出至 Excel)** — Download invoices or expenses as a formatted `.xlsx` file
+- **Dashboard** — Revenue, pending amounts, expense totals (HKD/RMB), net, and recent invoices
 - **Print / PDF** — Professional print-ready invoice view (use browser Print → Save as PDF)
 
 ## Tech Stack
@@ -38,6 +41,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `JWT_SECRET` | Secret for signing session tokens | dev default (change in production) |
+| `OPENAI_API_KEY` | Enables AI vision receipt extraction; falls back to on-device OCR when unset | _(unset)_ |
+| `OPENAI_VISION_MODEL` | Vision model used when `OPENAI_API_KEY` is set | `gpt-4o-mini` |
+| `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng` |
 
 ## Production
 

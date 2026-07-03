@@ -14,6 +14,10 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 - **Smart receipt numbers (EXP-YYYYMM-XXX)** — Each expense gets a unique ID whose month comes from the expense date (not the upload date), with a per-month serial that continues correctly for backfilled historical records
 - **Global filters & sorting** — Both the Expense and Invoice tables have a filter bar (date range, category/status/client, keyword search, Clear Filters) and sortable Date / Number / Amount columns; default sort is by date descending
 - **Order management (訂單管理)** — ClickUp-style order detail page: a two-pane layout with editable header/status/notes, client & shipping info, a design-proof image grid, a full custom-field list, and a live Activity feed with a comment composer
+- **Quotations (報價單)** — Quotation dashboard + detail with line items; Generate PDF, Export to Excel, and one-click convert to an Order or Invoice (carries line items + client)
+- **Invoice ↔ Order linkage** — Link an invoice to its order; the order shows a live payment badge (green Paid / red Unpaid) derived from the linked invoice, and each page cross-links to the other
+- **Automated 30-day payment reminders** — A daily-runnable job emails clients whose invoices are unpaid after 30 days and logs a `[System]` entry into the invoice's and linked order's activity feed
+- **Isolated activity logs** — Every Order, Invoice, and Quotation has its own ClickUp-style activity sidebar that auto-logs creation, status/field changes, exports, and system events, plus free-text comments
 - **Scan to Table (掃描成表格)** — Upload an image or PDF of any printed table and extract it into an editable grid (Google Gemini vision when `GEMINI_API_KEY` is set, otherwise on-device OCR), then export it
 - **Receipt scanning (收據掃描)** — Upload one or more receipt images; the first is auto-scanned to extract merchant, date, and total (AI vision when `OPENAI_API_KEY` is set, otherwise on-device OCR); blanks are left for manual entry
 - **Multiple receipts per expense (多檔案上傳)** — Attach several receipt images; the table shows up to 3 thumbnails (2 + a `+N` badge when more), and a gallery modal shows all images with the receipt number
@@ -54,6 +58,10 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng` |
 | `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table (and PDF parsing); falls back to on-device OCR when unset | _(unset)_ |
 | `GEMINI_MODEL` | Gemini model used for Scan-to-Table | `gemini-2.5-flash` |
+| `RESEND_API_KEY` | Enables sending real reminder emails via Resend; without it reminders are logged to activity feeds only | _(unset)_ |
+| `REMINDER_FROM_EMAIL` | From address for reminder emails | `InvoiceFlow <onboarding@resend.dev>` |
+| `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
+| `CRON_SECRET` | Bearer token that lets an external scheduler run reminders for all users via `/api/cron/payment-reminders` | _(unset)_ |
 
 ## Production
 

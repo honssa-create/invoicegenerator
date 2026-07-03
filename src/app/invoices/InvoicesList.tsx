@@ -9,7 +9,7 @@ import { StatusBadge, formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
 
-type SortKey = 'date' | 'number' | 'amount';
+type SortKey = 'number' | 'customer' | 'date' | 'due' | 'amount' | 'status';
 const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
 
 export default function InvoicesList() {
@@ -53,16 +53,43 @@ export default function InvoicesList() {
     });
     const dir = sort.dir === 'asc' ? 1 : -1;
     list = [...list].sort((a, b) => {
-      if (sort.key === 'number') return dir * a.invoice_number.localeCompare(b.invoice_number);
-      if (sort.key === 'amount') return dir * (a.total - b.total);
-      return dir * a.issue_date.localeCompare(b.issue_date);
+      let base: number;
+      switch (sort.key) {
+        case 'number':
+          base = a.invoice_number.localeCompare(b.invoice_number);
+          break;
+        case 'customer':
+          base = a.customer_name.localeCompare(b.customer_name);
+          break;
+        case 'due':
+          base = a.due_date.localeCompare(b.due_date);
+          break;
+        case 'amount':
+          base = a.total - b.total;
+          break;
+        case 'status':
+          base = a.status.localeCompare(b.status);
+          break;
+        default:
+          base = a.issue_date.localeCompare(b.issue_date);
+      }
+      return dir * base;
     });
     return list;
   }, [invoices, dateStart, dateEnd, client, status, search, sort]);
 
   const toggleSort = (key: SortKey) =>
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
-  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '');
+  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
+  const sortTh = (key: SortKey, label: string) => (
+    <th
+      onClick={() => toggleSort(key)}
+      className={`px-6 py-3 cursor-pointer select-none whitespace-nowrap hover:text-gray-700 ${sort.key === key ? 'text-brand-700' : ''}`}
+    >
+      {label}
+      <span className="text-gray-400">{arrow(key)}</span>
+    </th>
+  );
 
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this invoice?')) return;
@@ -137,12 +164,12 @@ export default function InvoicesList() {
           <table className="w-full">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('number')}>Invoice #{arrow('number')}</th>
-                <th className="px-6 py-3">Customer</th>
-                <th className="px-6 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('date')}>Issue Date{arrow('date')}</th>
-                <th className="px-6 py-3">Due Date</th>
-                <th className="px-6 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('amount')}>Amount{arrow('amount')}</th>
-                <th className="px-6 py-3">Status</th>
+                {sortTh('number', 'Invoice #')}
+                {sortTh('customer', 'Customer')}
+                {sortTh('date', 'Issue Date')}
+                {sortTh('due', 'Due Date')}
+                {sortTh('amount', 'Amount')}
+                {sortTh('status', 'Status')}
                 <th className="px-6 py-3">Actions</th>
               </tr>
             </thead>

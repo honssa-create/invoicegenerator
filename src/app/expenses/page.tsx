@@ -31,7 +31,7 @@ const EMPTY_FORM = {
 type FormState = typeof EMPTY_FORM;
 type FormReceipt = { id?: number; path: string; url: string };
 type Options = Record<OptionType, string[]>;
-type SortKey = 'date' | 'number' | 'amount';
+type SortKey = 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
 
@@ -119,15 +119,36 @@ export default function ExpensesPage() {
     });
     const dir = sort.dir === 'asc' ? 1 : -1;
     list = [...list].sort((a, b) => {
-      if (sort.key === 'number') return dir * String(a.receipt_no || '').localeCompare(String(b.receipt_no || ''));
-      if (sort.key === 'amount') {
-        const av = a.amount_hkd ?? a.amount_rmb ?? 0;
-        const bv = b.amount_hkd ?? b.amount_rmb ?? 0;
-        return dir * (av - bv);
+      let base: number;
+      switch (sort.key) {
+        case 'number':
+          base = String(a.receipt_no || '').localeCompare(String(b.receipt_no || ''));
+          break;
+        case 'reason':
+          base = categoryLabel(a.category).localeCompare(categoryLabel(b.category));
+          break;
+        case 'supplier':
+          base = String(a.merchant || '').localeCompare(String(b.merchant || ''));
+          break;
+        case 'payment':
+          base = String(a.payment_method || '').localeCompare(String(b.payment_method || ''));
+          break;
+        case 'platform':
+          base = String(a.platform || '').localeCompare(String(b.platform || ''));
+          break;
+        case 'status':
+          base = String(a.payment_status).localeCompare(String(b.payment_status));
+          break;
+        case 'hkd':
+          base = (a.amount_hkd ?? -Infinity) - (b.amount_hkd ?? -Infinity);
+          break;
+        case 'rmb':
+          base = (a.amount_rmb ?? -Infinity) - (b.amount_rmb ?? -Infinity);
+          break;
+        default:
+          base = (a.paid_date || a.created_at || '').localeCompare(b.paid_date || b.created_at || '');
       }
-      const ad = a.paid_date || a.created_at || '';
-      const bd = b.paid_date || b.created_at || '';
-      return dir * ad.localeCompare(bd);
+      return dir * base;
     });
     return list;
   }, [expenses, filters, sort]);
@@ -139,7 +160,16 @@ export default function ExpensesPage() {
   const toggleSort = (key: SortKey) => {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   };
-  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '');
+  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
+  const sortTh = (key: SortKey, label: string) => (
+    <th
+      onClick={() => toggleSort(key)}
+      className={`px-4 py-3 cursor-pointer select-none whitespace-nowrap hover:text-gray-700 ${sort.key === key ? 'text-brand-700' : ''}`}
+    >
+      {label}
+      <span className="text-gray-400">{arrow(key)}</span>
+    </th>
+  );
 
   const openCreate = () => {
     setForm({ ...EMPTY_FORM, category: options.category[0] || '' });
@@ -449,16 +479,16 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                <th className="px-4 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('number')}>Receipt No.{arrow('number')}</th>
+                {sortTh('number', 'Receipt No.')}
                 <th className="px-4 py-3">Receipts 付款收據</th>
-                <th className="px-4 py-3">Reason 支出原因</th>
-                <th className="px-4 py-3">Supplier 供應商</th>
-                <th className="px-4 py-3">Payment 支付方式</th>
-                <th className="px-4 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('amount')}>Amount{arrow('amount')}</th>
-                <th className="px-4 py-3">RMB</th>
-                <th className="px-4 py-3 cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('date')}>Paid Date{arrow('date')}</th>
-                <th className="px-4 py-3">Platform 消費平台</th>
-                <th className="px-4 py-3">Status</th>
+                {sortTh('reason', 'Reason 支出原因')}
+                {sortTh('supplier', 'Supplier 供應商')}
+                {sortTh('payment', 'Payment 支付方式')}
+                {sortTh('hkd', 'Amount HKD')}
+                {sortTh('rmb', 'RMB')}
+                {sortTh('date', 'Paid Date')}
+                {sortTh('platform', 'Platform 消費平台')}
+                {sortTh('status', 'Status')}
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>

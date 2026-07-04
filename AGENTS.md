@@ -5,7 +5,7 @@
 InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLite** file via `better-sqlite3`. There are no other services to run.
 
 ### Running / building / testing
-- Dev server: `npm run dev` (serves http://localhost:3000). This is the command to use during development.
+- Dev server: `npm run dev` (serves http://localhost:3000). This is the command to use during development. If pages return 500 or JS/CSS 404, run `npm run dev:clean` (deletes `.next` then starts dev — `npm run build` while dev is running can corrupt the cache).
 - Build: `npm run build` — also runs TypeScript type-checking, so it doubles as the type check.
 - Production run: `npm start` (only after a build; not needed for development).
 - Lint: `npm run lint` is **not configured** in this repo — `next lint` will prompt interactively to create an ESLint config. There is no committed ESLint config, so treat lint as unavailable unless you intentionally add one.

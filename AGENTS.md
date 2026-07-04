@@ -45,6 +45,10 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLi
 - The custom-field list is defined once in `src/lib/orders.ts` (`ORDER_FIELDS`, client-safe); fields with a `col` map to a first-class column, the rest live in `fields_json`. Server hydration/helpers are in `src/lib/order-server.ts` (never import into client components).
 - Detail page `/orders/[id]` is a two-pane layout: the left (~70%) content column scrolls independently and the right (~30%) Activity panel is a fixed full-height sidebar (`lg:h-[calc(100vh-7rem)]` on the row, `lg:overflow-y-auto` on the left) — this replaced `sticky`, which left a blank gap next to the long fields list. Fields autosave on blur (text) / change (select, checkbox) via `PATCH /api/orders/[id]` (`{core?, fields?}`); status changes auto-log an activity.
 
+### Payment receipts + Accounting reconciliation
+- Order **Box 2 (Payment Detail)** has a payment-receipt upload zone: images/PDF are compressed client-side (`compressImage`/`compressPdfToImages`, 1600px, quality **0.65**, <300KB) then sent to `POST /api/payments/scan`, which extracts payment date / amount / bank·platform / method / reference via Gemini (OCR fallback) and pre-fills the fields. Fields + `payment_receipt_path` (+ later `payment_verified`) live in the order `fields_json`; the receipt image is served auth-scoped at `GET /api/orders/[id]/payment-receipt`.
+- **Accounting Reconciliation Dashboard** (`/accounting`, `GET /api/accounting`) aggregates every order that has any payment field into one table (receipt thumbnail, order #, customer, type, date, amount, bank, method, reference, verified). "Confirm Entry" toggles `fields.payment_verified` via `PATCH /api/orders/[id]` (Pending Verification ↔ Verified).
+
 ### Kitchen scheduling & two-tier inventory (`/kitchen`)
 - Three linked pillars in `src/lib/kitchen-server.ts` (state managers) with client-safe constants/formulas in `src/lib/kitchen.ts`:
   1. **Order routing** (`createDailyOrder`): if `FinishedBottleInventory[sku] >= qty` → deduct + status `Ready to Ship`; else status `無現貨 (Out of Stock)` and backlog (no auto brewing).

@@ -1,6 +1,8 @@
 # InvoiceFlow
 
-A QuickBooks-like financial dashboard with multi-user authentication. Each user gets their own secure account with isolated customers, invoices, and expenses.
+**Version 1.0.0** — A QuickBooks-like financial dashboard with multi-user authentication. Each user gets their own secure account with isolated customers, invoices, expenses, orders, and operations tooling.
+
+> **Full feature reference:** see [FEATURES.md](./FEATURES.md) for the complete current-version capability list organized by module.
 
 ## Features
 
@@ -13,7 +15,7 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 - **Custom dropdown options (自行增加選項)** — Payment method, expense reason, and platform are tag-style dropdowns with built-in defaults; type a new value and "+ Add" it to persist it for future use
 - **Smart receipt numbers (EXP-YYYYMM-XXX)** — Each expense gets a unique ID whose month comes from the expense date (not the upload date), with a per-month serial that continues correctly for backfilled historical records
 - **Global filters & sorting** — Both the Expense and Invoice tables have a filter bar (date range, category/status/client, keyword search, Clear Filters) and sortable Date / Number / Amount columns; default sort is by date descending
-- **Order management (訂單管理)** — ClickUp-style order detail page: a two-pane layout with editable header/status/notes, client & shipping info, a design-proof image grid, a full custom-field list, and a live Activity feed with a comment composer
+- **Order management (訂單管理)** — ClickUp-style order detail page: two-pane layout, dynamic Order/Payment/Shipment section boxes (badge orders, bird's-nest production formulas), design-proof image/PDF grid, 30+ custom fields with autosave, delivery note (出貨單) print view with carton count, and a live Activity feed
 - **Kitchen scheduling & two-tier inventory (智能廚房排程)** — Daily-order stock routing (auto-deduct or 無現貨 backlog), manual large-batch brewing with a live 大字報 raw-material calculator, and a two-tier inventory (finished goods + raw materials with Available = Total − Allocated); completing a batch restocks finished goods and auto-fulfils backlog orders
 - **Payment receipts + Accounting reconciliation (會計入帳一覽表)** — Upload a payment receipt on an order; AI (Gemini/OCR) extracts date, amount, bank/platform, method, and reference; a central Accounting dashboard aggregates all order payments with receipt thumbnails and one-click "Confirm Entry" verification
 - **Cash Flow & Reconciliation (營運收支中央看板)** — Monthly Product Sales / Other Income / Gross Revenue cards, an "Add Income" modal (category, date, amount, account, remarks, compressed voucher upload), and a unified ledger of all revenue (Product Sale vs Other Income badges) with receipt thumbnails and Pending/Verified toggles
@@ -21,7 +23,7 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 - **Invoice ↔ Order linkage** — Link an invoice to its order; the order shows a live payment badge (green Paid / red Unpaid) derived from the linked invoice, and each page cross-links to the other
 - **Automated 30-day payment reminders** — A daily-runnable job emails clients whose invoices are unpaid after 30 days and logs a `[System]` entry into the invoice's and linked order's activity feed
 - **Isolated activity logs** — Every Order, Invoice, and Quotation has its own ClickUp-style activity sidebar that auto-logs creation, status/field changes, exports, and system events, plus free-text comments
-- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; AI vision (Gemini, OCR fallback) extracts the waybill number and sender, defaults the arrival date to today, and saves the record with the cargo photo. Cargo photos are auto-compressed in the browser (≤1200px, &lt;300KB JPEG) before upload
+- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; AI vision (Gemini, OCR fallback) extracts the waybill number and sender, defaults the arrival date to today, and saves the record with the cargo photo. Cargo photos are auto-compressed in the browser (max 1600px, &lt;300KB JPEG) before upload
 - **Scan to Table (掃描成表格)** — Upload an image or PDF of any printed table and extract it into an editable grid (Google Gemini vision when `GEMINI_API_KEY` is set, otherwise on-device OCR), then export it
 - **Receipt scanning (收據掃描)** — Upload one or more receipt images; the first is auto-scanned to extract merchant, date, and total (AI vision when `OPENAI_API_KEY` is set, otherwise on-device OCR); blanks are left for manual entry
 - **Multiple receipts per expense (多檔案上傳)** — Attach several receipt images; the table shows up to 3 thumbnails (2 + a `+N` badge when more), and a gallery modal shows all images with the receipt number

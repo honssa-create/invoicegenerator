@@ -96,6 +96,22 @@ export default function KitchenPrepDetailPage() {
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
 
+      {order.status === 'completed' && order.actual_yield != null && (
+        <div className={`mb-6 rounded-xl border-2 p-5 ${order.expected_yield != null && order.actual_yield !== order.expected_yield ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
+          <p className="text-sm font-semibold text-gray-700">Production Completed 已完成燉製</p>
+          <p className="text-2xl font-bold mt-1">
+            Actual {order.actual_yield} 樽
+            {order.expected_yield != null && (
+              <span className={order.actual_yield !== order.expected_yield ? 'text-red-600' : 'text-gray-600'}>
+                {' '}/ Expected {order.expected_yield}
+              </span>
+            )}
+          </p>
+          {order.completion_remarks && <p className="text-sm text-gray-700 mt-2">Remarks: {order.completion_remarks}</p>}
+          {order.completed_by && <p className="text-xs text-gray-500 mt-2">By {order.completed_by}{order.completed_at ? ` · ${order.completed_at}` : ''}</p>}
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-gray-200 p-8 mb-6">
         <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Ingredient Calculator 備料詳情與計算</p>
         <h1 className="text-2xl font-bold text-gray-900 font-mono mb-6">{order.order_code}</h1>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import CompletionModal from '@/components/kitchen-prep/CompletionModal';
 import {
   PREP_CAPACITIES,
   PREP_CAPACITY_LABELS,
@@ -50,6 +51,7 @@ export default function KitchenPrepListPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
 
   const load = () =>
     fetch('/api/kitchen-prep')
@@ -111,6 +113,7 @@ export default function KitchenPrepListPage() {
                 <th className="px-4 py-3">Order Type 訂單類型</th>
                 <th className="px-4 py-3">Capacity</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -136,6 +139,27 @@ export default function KitchenPrepListPage() {
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>
                       {PREP_STATUS_LABELS[o.status]}
                     </span>
+                    {o.status === 'completed' && o.actual_yield != null && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Yield {o.actual_yield}
+                        {o.expected_yield != null && o.actual_yield !== o.expected_yield && (
+                          <span className="text-red-600 font-medium"> / exp {o.expected_yield}</span>
+                        )}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {o.status !== 'completed' ? (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
+                        className="inline-flex items-center justify-center min-h-[48px] px-4 py-2.5 text-sm sm:text-base font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
+                      >
+                        完成燉製
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -143,6 +167,17 @@ export default function KitchenPrepListPage() {
           </table>
         )}
       </div>
+
+      {completeOrder && (
+        <CompletionModal
+          order={completeOrder}
+          onClose={() => setCompleteOrder(null)}
+          onCompleted={(updated) => {
+            setCompleteOrder(null);
+            setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+          }}
+        />
+      )}
 
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">

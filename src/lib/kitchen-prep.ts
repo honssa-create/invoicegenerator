@@ -100,6 +100,29 @@ export const FORMULA_45G = {
 
 export const WEDDING_BUFFER = 3;
 
+/** Quick-tap exception tags for the completion modal (tablet UI). */
+export const COMPLETION_EXCEPTION_TAGS = [
+  { id: 'broken_glass', label: 'Broken Glass 爆樽', text: '爆樽' },
+  { id: 'ingredient_shortage', label: 'Ingredient Shortage 配料不足', text: '配料不足' },
+  { id: 'quality_issue', label: 'Quality Issue 品質異常', text: '品質異常' },
+] as const;
+
+export const KITCHEN_COMPLETION_ACTIVITY_PREFIX = '[Kitchen Production Completed]';
+
+export function buildKitchenCompletionActivityBody(
+  orderCode: string,
+  expected: number,
+  actual: number,
+  remarks: string | null
+): string {
+  const variance = actual !== expected;
+  const detail = variance
+    ? `Expected: ${expected}, Actual: ${actual} ⚠️`
+    : `Expected: ${expected}, Actual: ${actual}`;
+  const remarkPart = remarks?.trim() ? ` Remarks: ${remarks.trim()}` : '';
+  return `${KITCHEN_COMPLETION_ACTIVITY_PREFIX} ${orderCode} — ${detail}.${remarkPart}`;
+}
+
 export interface PrepFlavorQty {
   osmanthus: number;
   red_date: number;
@@ -119,6 +142,11 @@ export interface PrepOrder {
   qty_red_date: number;
   qty_rock_sugar: number;
   notes: string | null;
+  expected_yield: number | null;
+  actual_yield: number | null;
+  completion_remarks: string | null;
+  completed_at: string | null;
+  completed_by: string | null;
   created_at: string;
   updated_at: string;
 }

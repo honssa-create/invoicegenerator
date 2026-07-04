@@ -370,6 +370,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_kitchen_prep_date ON kitchen_prep_orders(user_id, stewing_date);
 `);
 
+const kitchenPrepCompletionCols = [
+  'expected_yield INTEGER',
+  'actual_yield INTEGER',
+  'completion_remarks TEXT',
+  'completed_at TEXT',
+  'completed_by TEXT',
+] as const;
+for (const col of kitchenPrepCompletionCols) {
+  try {
+    db.exec(`ALTER TABLE kitchen_prep_orders ADD COLUMN ${col}`);
+  } catch {
+    /* column exists */
+  }
+}
+
 // Inbound Shipment Tracker (到件紀錄) — arriving supplier shipments.
 db.exec(`
   CREATE TABLE IF NOT EXISTS inbound_shipments (

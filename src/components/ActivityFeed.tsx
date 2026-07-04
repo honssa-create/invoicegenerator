@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { KITCHEN_COMPLETION_ACTIVITY_PREFIX } from '@/lib/kitchen-prep';
 
 interface Activity {
   id: number;
@@ -52,6 +53,28 @@ export default function ActivityFeed({ entityType, entityId, className = '' }: A
 
   const isSystem = (a: Activity) => a.kind === 'activity' && (a.author === 'System' || a.body.startsWith('['));
 
+  const renderActivityBody = (body: string) => {
+    if (!body.startsWith(KITCHEN_COMPLETION_ACTIVITY_PREFIX)) {
+      return <span>{body}</span>;
+    }
+    const match = body.match(/Expected:\s*(\d+),\s*Actual:\s*(\d+)/);
+    if (!match) return <span>{body}</span>;
+    const expected = Number(match[1]);
+    const actual = Number(match[2]);
+    const hasVariance = expected !== actual;
+    const before = body.slice(0, match.index);
+    const after = body.slice((match.index ?? 0) + match[0].length);
+    return (
+      <span>
+        {before}
+        <span className={hasVariance ? 'text-red-600 font-semibold' : ''}>
+          Expected: {expected}, Actual: {actual}
+        </span>
+        {after}
+      </span>
+    );
+  };
+
   return (
     <div className={`bg-white rounded-xl border border-gray-200 flex flex-col ${className}`}>
       <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
@@ -71,7 +94,8 @@ export default function ActivityFeed({ entityType, entityId, className = '' }: A
               <div className="min-w-0 flex-1">
                 {a.kind === 'activity' ? (
                   <p className="text-xs text-gray-500">
-                    <span className="font-medium text-gray-700">{a.author}</span> {a.body}
+                    <span className="font-medium text-gray-700">{a.author}</span>{' '}
+                    {renderActivityBody(a.body)}
                     <span className="text-gray-300"> · {a.created_at?.slice(5, 16)}</span>
                   </p>
                 ) : (

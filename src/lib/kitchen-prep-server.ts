@@ -1,6 +1,7 @@
 import db from './db';
 import type { PrepCapacity, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
-import { isRedDateAllowed } from './kitchen-prep';
+import { buildKitchenCompletionActivityBody, computePrepCalculation, isRedDateAllowed } from './kitchen-prep';
+import { logActivity } from './activity';
 
 interface PrepRow {
   id: number;
@@ -15,6 +16,11 @@ interface PrepRow {
   qty_red_date: number;
   qty_rock_sugar: number;
   notes: string | null;
+  expected_yield: number | null;
+  actual_yield: number | null;
+  completion_remarks: string | null;
+  completed_at: string | null;
+  completed_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,6 +39,11 @@ function hydrate(row: PrepRow): PrepOrder {
     qty_red_date: row.qty_red_date,
     qty_rock_sugar: row.qty_rock_sugar,
     notes: row.notes,
+    expected_yield: row.expected_yield ?? null,
+    actual_yield: row.actual_yield ?? null,
+    completion_remarks: row.completion_remarks ?? null,
+    completed_at: row.completed_at ?? null,
+    completed_by: row.completed_by ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -157,6 +168,51 @@ export function updatePrepOrder(
 export function deletePrepOrder(id: number | string, userId: number): boolean {
   const res = db.prepare('DELETE FROM kitchen_prep_orders WHERE id = ? AND user_id = ?').run(id, userId);
   return res.changes > 0;
+}
+
+export function completePrepProduction(
+  id: number | string,
+  userId: number,
+  operatorName: string,
+  input: { actual_yield: number; completion_remarks?: string | null }
+): PrepOrder | null {
+  const existing = getPrepOrder(id, userId);
+  if (!existing) return null;
+  if (existing.status === 'completed') return null;
+
+  const calculation = computePrepCalculation(existing.capacity, existing.order_type, {
+    osmanthus: existing.qty_osmanthus,
+    red_date: existing.qty_red_date,
+    rock_sugar: existing.qty_rock_sugar,
+  });
+  const expectedYield = calculation.totals.bottles;
+  const actualYield = Math.max(0, Math.round(input.actual_yield));
+  const remarks = input.completion_remarks?.trim() || null;
+
+  db.prepare(
+    `UPDATE kitchen_prep_orders SET
+       status = 'completed',
+       expected_yield = ?,
+       actual_yield = ?,
+       completion_remarks = ?,
+       completed_at = datetime('now'),
+       completed_by = ?,
+       updated_at = datetime('now')
+     WHERE id = ? AND user_id = ?`
+  ).run(expectedYield, actualYield, remarks, operatorName, id, userId);
+
+  const activityBody = buildKitchenCompletionActivityBody(
+    existing.order_code,
+    expectedYield,
+    actualYield,
+    remarks
+  );
+
+  if (existing.linked_order_id) {
+    logActivity('order', existing.linked_order_id, userId, 'activity', operatorName, activityBody);
+  }
+
+  return getPrepOrder(id, userId);
 }
 
 /** Import a bird's-nest order (燕窩回禮燉製) into the prep schedule. */

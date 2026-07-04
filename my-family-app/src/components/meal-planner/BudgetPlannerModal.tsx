@@ -10,7 +10,7 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import type { BudgetMode } from '@/types';
+import type { BudgetMode, FlatId } from '@/types';
 import { BUDGET_MODE_OPTIONS } from '@/utils/budgetPlanner';
 
 import { AppModal } from '@/components/common/AppModal';
@@ -19,12 +19,14 @@ interface BudgetPlannerModalProps {
   visible: boolean;
   onClose: () => void;
   selectedDate: string;
+  flatId: FlatId;
 }
 
 export function BudgetPlannerModal({
   visible,
   onClose,
   selectedDate,
+  flatId,
 }: BudgetPlannerModalProps) {
   const { suggestDishesForBudget, applyBudgetPlan } = useAppContext();
   const [budget, setBudget] = useState('100');
@@ -33,11 +35,14 @@ export function BudgetPlannerModal({
   const [preview, setPreview] = useState<ReturnType<typeof suggestDishesForBudget>>([]);
 
   const handlePreview = () => {
-    const picks = suggestDishesForBudget({
-      budget: Number(budget) || 0,
-      dishCount: Number(dishCount) || 1,
-      mode,
-    });
+    const picks = suggestDishesForBudget(
+      {
+        budget: Number(budget) || 0,
+        dishCount: Number(dishCount) || 1,
+        mode,
+      },
+      flatId,
+    );
     setPreview(picks);
   };
 
@@ -49,6 +54,7 @@ export function BudgetPlannerModal({
         mode,
       },
       selectedDate,
+      flatId,
     );
     onClose();
   };

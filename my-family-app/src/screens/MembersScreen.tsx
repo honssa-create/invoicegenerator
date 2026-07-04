@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
+import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { FloatingActionButton } from '@/components/common/FloatingActionButton';
 import { AddMemberModal } from '@/components/members/AddMemberModal';
 import { MemberCard } from '@/components/members/MemberCard';
@@ -15,7 +15,8 @@ import {
 import type { FamilyMember } from '@/types';
 
 export function MembersScreen() {
-  const { members } = useAppContext();
+  const { activeFlat, setActiveFlat, getMembersForFlat } = useAppContext();
+  const members = getMembersForFlat(activeFlat);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
 
@@ -36,9 +37,11 @@ export function MembersScreen() {
           <Text style={styles.label}>Members</Text>
           <Text style={styles.title}>Our Family</Text>
           <Text style={styles.subtitle}>
-            The people gathered around your table.
+            Flat {activeFlat} — the people gathered around your table.
           </Text>
         </View>
+
+        <FlatSwitcher activeFlat={activeFlat} onChange={setActiveFlat} />
 
         {members.length > 0 ? (
           members.map((member) => (
@@ -46,7 +49,7 @@ export function MembersScreen() {
           ))
         ) : (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No members yet. Tap + to add.</Text>
+            <Text style={styles.emptyText}>No members in {activeFlat} yet. Tap + to add.</Text>
           </View>
         )}
       </ScreenContainer>
@@ -67,7 +70,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    marginBottom: FamilySpacing.xl,
+    marginBottom: FamilySpacing.lg,
     gap: FamilySpacing.sm,
   },
   label: {

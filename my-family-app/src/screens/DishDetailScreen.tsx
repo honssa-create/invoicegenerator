@@ -16,19 +16,25 @@ import {
 } from '@/constants/familyTheme';
 import { formatBudget, formatCookingTime } from '@/utils/budgetPlanner';
 import { formatDisplayDate, toDateString } from '@/utils/date';
+import type { FlatId } from '@/types';
 
 export function DishDetailScreen() {
   const router = useRouter();
-  const { id, date } = useLocalSearchParams<{ id: string; date?: string }>();
+  const { id, date, flat } = useLocalSearchParams<{
+    id: string;
+    date?: string;
+    flat?: string;
+  }>();
   const {
     getDishById,
     updateDishBudget,
     getDishActivities,
-    mealPlan,
+    flatMealPlans,
   } = useAppContext();
 
   const dish = id ? getDishById(id) : undefined;
   const activityDate = date ?? toDateString();
+  const flatId = (flat as FlatId) ?? dish?.flatId ?? '10J';
   const [budgetInput, setBudgetInput] = useState(
     dish ? String(dish.estimatedBudget) : '0',
   );
@@ -43,7 +49,7 @@ export function DishDetailScreen() {
   }
 
   const activities = getDishActivities(dish.id);
-  const isPlannedToday = (mealPlan[activityDate] ?? []).includes(dish.id);
+  const isPlannedForDate = (flatMealPlans[flatId]?.[activityDate] ?? []).includes(dish.id);
 
   const handleSaveBudget = () => {
     const value = Number(budgetInput);
@@ -61,7 +67,7 @@ export function DishDetailScreen() {
       <Image source={{ uri: dish.imageUri }} style={styles.hero} contentFit="cover" />
 
       <View style={styles.header}>
-        <Text style={styles.label}>{dish.category}</Text>
+        <Text style={styles.label}>{dish.category} · {flatId}</Text>
         <Text style={styles.title}>{dish.name}</Text>
       </View>
 
@@ -110,8 +116,8 @@ export function DishDetailScreen() {
         </Pressable>
       ) : null}
 
-      {isPlannedToday ? (
-        <DishCommentSection dishId={dish.id} date={activityDate} />
+      {isPlannedForDate ? (
+        <DishCommentSection dishId={dish.id} date={activityDate} flatId={flatId} />
       ) : null}
 
       <View style={styles.section}>

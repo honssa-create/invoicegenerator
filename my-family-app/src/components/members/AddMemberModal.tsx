@@ -13,7 +13,8 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import type { FamilyMember } from '@/types';
+import type { FamilyMember, FlatId } from '@/types';
+import { FLATS } from '@/types';
 
 interface AddMemberModalProps {
   visible: boolean;
@@ -22,14 +23,16 @@ interface AddMemberModalProps {
 }
 
 export function AddMemberModal({ visible, onClose, member }: AddMemberModalProps) {
-  const { addMember, updateMember } = useAppContext();
+  const { activeFlat, addMember, updateMember } = useAppContext();
   const [name, setName] = useState(member?.name ?? '');
   const [birthday, setBirthday] = useState(member?.birthday ?? '');
+  const [flatId, setFlatId] = useState<FlatId>(member?.flatId ?? activeFlat);
   const [avatarUri, setAvatarUri] = useState(member?.avatarUri ?? '');
 
   const resetAndClose = () => {
     setName('');
     setBirthday('');
+    setFlatId(activeFlat);
     setAvatarUri('');
     onClose();
   };
@@ -62,6 +65,7 @@ export function AddMemberModal({ visible, onClose, member }: AddMemberModalProps
     const payload = {
       name: name.trim(),
       birthday: birthday.trim() || '—',
+      flatId,
       avatarUri: avatarUri || undefined,
     };
 
@@ -88,6 +92,24 @@ export function AddMemberModal({ visible, onClose, member }: AddMemberModalProps
           </View>
         )}
       </Pressable>
+
+      <FormField label="Flat">
+        <View style={styles.flatRow}>
+          {FLATS.map((flat) => {
+            const active = flatId === flat.id;
+            return (
+              <Pressable
+                key={flat.id}
+                onPress={() => setFlatId(flat.id)}
+                style={[styles.flatChip, active && styles.flatChipActive]}>
+                <Text style={[styles.flatText, active && styles.flatTextActive]}>
+                  {flat.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </FormField>
 
       <FormField label="Name">
         <FormInput
@@ -139,5 +161,31 @@ const styles = StyleSheet.create({
     ...FamilyTypography.caption,
     textAlign: 'center',
     color: FamilyPalette.champagne,
+  },
+  flatRow: {
+    flexDirection: 'row',
+    gap: FamilySpacing.sm,
+  },
+  flatChip: {
+    flex: 1,
+    paddingVertical: FamilySpacing.sm,
+    borderRadius: FamilyRadius.md,
+    borderWidth: 1,
+    borderColor: FamilyPalette.border,
+    backgroundColor: FamilyPalette.cream,
+    alignItems: 'center',
+  },
+  flatChipActive: {
+    borderColor: FamilyPalette.champagne,
+    backgroundColor: FamilyPalette.champagneLight,
+  },
+  flatText: {
+    ...FamilyTypography.body,
+    fontSize: 15,
+    color: FamilyPalette.charcoalMuted,
+  },
+  flatTextActive: {
+    color: FamilyPalette.charcoal,
+    fontWeight: '500',
   },
 });

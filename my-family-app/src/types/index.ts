@@ -1,3 +1,10 @@
+export type FlatId = '10J' | '20C';
+
+export const FLATS: { id: FlatId; label: string }[] = [
+  { id: '10J', label: '10J' },
+  { id: '20C', label: '20C' },
+];
+
 export type DishCategory = 'breakfast' | 'lunch' | 'dinner' | 'hotpot' | 'dessert';
 
 export type DishCategoryFilter = DishCategory | 'all';
@@ -14,6 +21,7 @@ export interface FamilyMember {
   id: string;
   name: string;
   birthday: string;
+  flatId: FlatId;
   avatarUri?: string;
 }
 
@@ -24,6 +32,7 @@ export interface Dish {
   id: string;
   name: string;
   category: DishCategory;
+  flatId: FlatId;
   imageUri: string;
   recipe: string;
   ingredients: string[];
@@ -40,6 +49,7 @@ export type Meal = Dish;
 export interface DishComment {
   id: string;
   dishId: string;
+  flatId: FlatId;
   date: string;
   author: string;
   comment: string;
@@ -49,6 +59,7 @@ export interface DishComment {
 export interface DishActivity {
   id: string;
   dishId: string;
+  flatId: FlatId;
   type: DishActivityType;
   date: string;
   message: string;
@@ -65,21 +76,26 @@ export interface HotpotIngredient {
 export interface HotpotSet {
   id: string;
   name: string;
+  flatId: FlatId;
   soupBase: SoupBase;
   ingredientIds: string[];
 }
 
 export type MealPlan = Record<string, string[]>;
 
+export type MealPlansByFlat = Record<FlatId, MealPlan>;
+
 export interface AddMemberInput {
   name: string;
   birthday: string;
+  flatId: FlatId;
   avatarUri?: string;
 }
 
 export interface AddDishInput {
   name: string;
   category: DishCategory;
+  flatId: FlatId;
   imageUri: string;
   recipe: string;
   ingredients: string[];
@@ -90,6 +106,7 @@ export interface AddDishInput {
 
 export interface AddHotpotSetInput {
   name: string;
+  flatId: FlatId;
   soupBase: SoupBase;
   ingredientIds: string[];
 }

@@ -26,7 +26,7 @@ interface AddDishModalProps {
 const CATEGORY_OPTIONS = DISH_CATEGORIES.filter((c) => c.id !== 'all');
 
 export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
-  const { addDish, updateDish } = useAppContext();
+  const { activeFlat, addDish, updateDish } = useAppContext();
   const [name, setName] = useState(dish?.name ?? '');
   const [category, setCategory] = useState<DishCategory>(dish?.category ?? 'dinner');
   const [imageUri, setImageUri] = useState(dish?.imageUri ?? '');
@@ -108,6 +108,7 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
     const payload = {
       name: name.trim(),
       category,
+      flatId: dish?.flatId ?? activeFlat,
       imageUri: imageUri || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
       recipe: recipe.trim(),
       ingredients: ingredientsText

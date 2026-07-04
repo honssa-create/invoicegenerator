@@ -28,6 +28,7 @@ export function MemberCard({ member, onPress }: MemberCardProps) {
       )}
 
       <View style={styles.info}>
+        <Text style={styles.flatBadge}>{member.flatId}</Text>
         <Text style={styles.name}>{member.name}</Text>
         <Text style={styles.birthday}>{member.birthday}</Text>
       </View>
@@ -68,6 +69,11 @@ const styles = StyleSheet.create({
   info: {
     flex: 1,
     gap: FamilySpacing.xs,
+  },
+  flatBadge: {
+    ...FamilyTypography.label,
+    fontSize: 11,
+    color: FamilyPalette.champagne,
   },
   name: {
     ...FamilyTypography.heading,

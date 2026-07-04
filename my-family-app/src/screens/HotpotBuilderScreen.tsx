@@ -20,7 +20,7 @@ import type { HotpotIngredientCategory, SoupBase } from '@/types';
 
 export function HotpotBuilderScreen() {
   const router = useRouter();
-  const { hotpotIngredients, addHotpotSet } = useAppContext();
+  const { activeFlat, hotpotIngredients, addHotpotSet } = useAppContext();
   const [name, setName] = useState('');
   const [soupBase, setSoupBase] = useState<SoupBase>('miso');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -43,6 +43,7 @@ export function HotpotBuilderScreen() {
 
     addHotpotSet({
       name: name.trim(),
+      flatId: activeFlat,
       soupBase,
       ingredientIds: selectedIds,
     });

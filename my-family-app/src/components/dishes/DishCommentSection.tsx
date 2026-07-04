@@ -12,12 +12,15 @@ import {
 } from '@/constants/familyTheme';
 import { formatDisplayDate } from '@/utils/date';
 
+import type { FlatId } from '@/types';
+
 interface DishCommentSectionProps {
   dishId: string;
   date: string;
+  flatId: FlatId;
 }
 
-export function DishCommentSection({ dishId, date }: DishCommentSectionProps) {
+export function DishCommentSection({ dishId, date, flatId }: DishCommentSectionProps) {
   const { members, getDishComments, addDishComment } = useAppContext();
   const [author, setAuthor] = useState(members[0]?.name ?? 'Family');
   const [comment, setComment] = useState('');
@@ -26,7 +29,7 @@ export function DishCommentSection({ dishId, date }: DishCommentSectionProps) {
 
   const handleSubmit = () => {
     if (!comment.trim()) return;
-    addDishComment(dishId, date, author.trim(), comment.trim());
+    addDishComment(dishId, date, author.trim(), comment.trim(), flatId);
     setComment('');
   };
 

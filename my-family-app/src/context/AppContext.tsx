@@ -8,6 +8,7 @@ import {
 } from 'react';
 
 import {
+  INITIAL_MEAL_PLANS,
   MOCK_ACTIVITIES,
   MOCK_COMMENTS,
   MOCK_DISHES,
@@ -23,21 +24,27 @@ import type {
   DishActivity,
   DishComment,
   FamilyMember,
+  FlatId,
   HotpotIngredient,
   HotpotSet,
   MealPlan,
+  MealPlansByFlat,
 } from '@/types';
 import { suggestDishesForBudget } from '@/utils/budgetPlanner';
 import { toDateString } from '@/utils/date';
 
 interface AppContextValue {
+  activeFlat: FlatId;
+  setActiveFlat: (flat: FlatId) => void;
   members: FamilyMember[];
   dishes: Dish[];
   hotpotIngredients: HotpotIngredient[];
   hotpotSets: HotpotSet[];
-  mealPlan: MealPlan;
+  flatMealPlans: MealPlansByFlat;
   dishComments: DishComment[];
   dishActivities: DishActivity[];
+  getMembersForFlat: (flatId: FlatId) => FamilyMember[];
+  getDishesForFlat: (flatId: FlatId) => Dish[];
   addMember: (input: AddMemberInput) => void;
   updateMember: (id: string, input: AddMemberInput) => void;
   deleteMember: (id: string) => void;
@@ -46,14 +53,20 @@ interface AppContextValue {
   updateDishBudget: (id: string, budget: number) => void;
   deleteDish: (id: string) => void;
   getDishById: (id: string) => Dish | undefined;
-  addDishToDate: (dishId: string, date?: string) => void;
-  removeDishFromDate: (dishId: string, date: string) => void;
-  getDishesForDate: (date: string) => Dish[];
-  getDatesWithMeals: () => string[];
-  getRandomDish: () => Dish | null;
-  suggestDishesForBudget: (request: BudgetPlanRequest) => Dish[];
-  applyBudgetPlan: (request: BudgetPlanRequest, date?: string) => Dish[];
-  addDishComment: (dishId: string, date: string, author: string, comment: string) => void;
+  addDishToDate: (dishId: string, date: string, flatId?: FlatId) => void;
+  removeDishFromDate: (dishId: string, date: string, flatId?: FlatId) => void;
+  getDishesForDate: (date: string, flatId: FlatId) => Dish[];
+  getDatesWithMeals: (flatId: FlatId) => string[];
+  getRandomDish: (flatId?: FlatId) => Dish | null;
+  suggestDishesForBudget: (request: BudgetPlanRequest, flatId?: FlatId) => Dish[];
+  applyBudgetPlan: (request: BudgetPlanRequest, date: string, flatId?: FlatId) => Dish[];
+  addDishComment: (
+    dishId: string,
+    date: string,
+    author: string,
+    comment: string,
+    flatId?: FlatId,
+  ) => void;
   getDishComments: (dishId: string, date?: string) => DishComment[];
   getDishActivities: (dishId: string) => DishActivity[];
   addHotpotSet: (input: AddHotpotSetInput) => HotpotSet;
@@ -67,23 +80,20 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-const INITIAL_MEAL_PLAN: MealPlan = {
-  [toDateString()]: ['d2'],
-  [toDateString(new Date(Date.now() - 86400000))]: ['d1', 'd4'],
-};
-
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [activeFlat, setActiveFlat] = useState<FlatId>('10J');
   const [members, setMembers] = useState<FamilyMember[]>(MOCK_MEMBERS);
   const [dishes, setDishes] = useState<Dish[]>(MOCK_DISHES);
   const [hotpotIngredients] = useState<HotpotIngredient[]>(MOCK_HOTPOT_INGREDIENTS);
   const [hotpotSets, setHotpotSets] = useState<HotpotSet[]>([]);
-  const [mealPlan, setMealPlan] = useState<MealPlan>(INITIAL_MEAL_PLAN);
+  const [flatMealPlans, setFlatMealPlans] = useState<MealPlansByFlat>(INITIAL_MEAL_PLANS);
   const [dishComments, setDishComments] = useState<DishComment[]>(MOCK_COMMENTS);
   const [dishActivities, setDishActivities] = useState<DishActivity[]>(MOCK_ACTIVITIES);
 
   const logActivity = useCallback(
     (
       dishId: string,
+      flatId: FlatId,
       type: DishActivity['type'],
       date: string,
       message: string,
@@ -92,6 +102,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const entry: DishActivity = {
         id: createId('act'),
         dishId,
+        flatId,
         type,
         date,
         message,
@@ -114,6 +125,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: `hotpot-set-${set.id}`,
       name: set.name,
       category: 'hotpot',
+      flatId: set.flatId,
       imageUri: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?w=400&q=80',
       recipe: `Soup base: ${set.soupBase.replace('-', ' ')}.\nSwirl ingredients at the table and enjoy together.`,
       ingredients: ingredientNames,
@@ -134,6 +146,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [allDishes],
   );
 
+  const getMembersForFlat = useCallback(
+    (flatId: FlatId) => members.filter((member) => member.flatId === flatId),
+    [members],
+  );
+
+  const getDishesForFlat = useCallback(
+    (flatId: FlatId) => allDishes.filter((dish) => dish.flatId === flatId),
+    [allDishes],
+  );
+
   const addMember = useCallback((input: AddMemberInput) => {
     setMembers((prev) => [...prev, { id: createId('m'), ...input }]);
   }, []);
@@ -148,11 +170,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMembers((prev) => prev.filter((member) => member.id !== id));
   }, []);
 
-  const addDish = useCallback((input: AddDishInput) => {
-    const id = createId('d');
-    setDishes((prev) => [...prev, { id, tags: [], ...input }]);
-    logActivity(id, 'created', toDateString(), 'Dish added to collection');
-  }, [logActivity]);
+  const addDish = useCallback(
+    (input: AddDishInput) => {
+      const id = createId('d');
+      setDishes((prev) => [...prev, { id, tags: [], ...input }]);
+      logActivity(id, input.flatId, 'created', toDateString(), 'Dish added to collection');
+    },
+    [logActivity],
+  );
 
   const updateDish = useCallback((id: string, input: AddDishInput) => {
     setDishes((prev) =>
@@ -162,103 +187,135 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateDishBudget = useCallback(
     (id: string, budget: number) => {
+      const dish = allDishes.find((item) => item.id === id);
       setDishes((prev) =>
-        prev.map((dish) =>
-          dish.id === id ? { ...dish, estimatedBudget: budget } : dish,
+        prev.map((item) =>
+          item.id === id ? { ...item, estimatedBudget: budget } : item,
         ),
       );
-      logActivity(
-        id,
-        'budget_updated',
-        toDateString(),
-        `Budget updated to $${budget}`,
-      );
+      if (dish) {
+        logActivity(
+          id,
+          dish.flatId,
+          'budget_updated',
+          toDateString(),
+          `Budget updated to $${budget}`,
+        );
+      }
     },
-    [logActivity],
+    [allDishes, logActivity],
   );
 
   const deleteDish = useCallback((id: string) => {
     setDishes((prev) => prev.filter((dish) => dish.id !== id));
-    setMealPlan((prev) => {
-      const next: MealPlan = {};
-      for (const [date, ids] of Object.entries(prev)) {
-        const filtered = ids.filter((dishId) => dishId !== id);
-        if (filtered.length > 0) next[date] = filtered;
+    setFlatMealPlans((prev) => {
+      const next: MealPlansByFlat = { '10J': {}, '20C': {} };
+      for (const flat of ['10J', '20C'] as FlatId[]) {
+        const plan = prev[flat] ?? {};
+        const cleaned: MealPlan = {};
+        for (const [date, ids] of Object.entries(plan)) {
+          const filtered = ids.filter((dishId) => dishId !== id);
+          if (filtered.length > 0) cleaned[date] = filtered;
+        }
+        next[flat] = cleaned;
       }
       return next;
     });
   }, []);
 
   const addDishToDate = useCallback(
-    (dishId: string, date = toDateString()) => {
-      setMealPlan((prev) => {
-        const existing = prev[date] ?? [];
+    (dishId: string, date: string, flatId: FlatId = activeFlat) => {
+      setFlatMealPlans((prev) => {
+        const plan = prev[flatId] ?? {};
+        const existing = plan[date] ?? [];
         if (existing.includes(dishId)) return prev;
-        return { ...prev, [date]: [...existing, dishId] };
+        return {
+          ...prev,
+          [flatId]: { ...plan, [date]: [...existing, dishId] },
+        };
       });
       const dish = allDishes.find((item) => item.id === dishId);
       logActivity(
         dishId,
+        flatId,
         'planned',
         date,
         `Planned for ${date}${dish ? `: ${dish.name}` : ''}`,
       );
     },
-    [allDishes, logActivity],
+    [activeFlat, allDishes, logActivity],
   );
 
-  const removeDishFromDate = useCallback((dishId: string, date: string) => {
-    setMealPlan((prev) => {
-      const existing = prev[date] ?? [];
-      const filtered = existing.filter((id) => id !== dishId);
-      if (filtered.length === 0) {
-        const { [date]: _, ...rest } = prev;
-        return rest;
-      }
-      return { ...prev, [date]: filtered };
-    });
-  }, []);
+  const removeDishFromDate = useCallback(
+    (dishId: string, date: string, flatId: FlatId = activeFlat) => {
+      setFlatMealPlans((prev) => {
+        const plan = prev[flatId] ?? {};
+        const existing = plan[date] ?? [];
+        const filtered = existing.filter((id) => id !== dishId);
+        if (filtered.length === 0) {
+          const { [date]: _, ...rest } = plan;
+          return { ...prev, [flatId]: rest };
+        }
+        return { ...prev, [flatId]: { ...plan, [date]: filtered } };
+      });
+    },
+    [activeFlat],
+  );
 
   const getDishesForDate = useCallback(
-    (date: string) => {
-      const ids = mealPlan[date] ?? [];
+    (date: string, flatId: FlatId) => {
+      const ids = flatMealPlans[flatId]?.[date] ?? [];
       return ids
         .map((id) => allDishes.find((dish) => dish.id === id))
         .filter((dish): dish is Dish => Boolean(dish));
     },
-    [mealPlan, allDishes],
+    [flatMealPlans, allDishes],
   );
 
   const getDatesWithMeals = useCallback(
-    () => Object.keys(mealPlan).filter((date) => (mealPlan[date]?.length ?? 0) > 0),
-    [mealPlan],
+    (flatId: FlatId) =>
+      Object.keys(flatMealPlans[flatId] ?? {}).filter(
+        (date) => (flatMealPlans[flatId]?.[date]?.length ?? 0) > 0,
+      ),
+    [flatMealPlans],
   );
 
-  const getRandomDish = useCallback(() => {
-    const pool = allDishes.filter((dish) => !dish.isHotpotSet);
-    if (pool.length === 0) return null;
-    return pool[Math.floor(Math.random() * pool.length)];
-  }, [allDishes]);
+  const getRandomDish = useCallback(
+    (flatId: FlatId = activeFlat) => {
+      const pool = getDishesForFlat(flatId).filter((dish) => !dish.isHotpotSet);
+      if (pool.length === 0) return null;
+      return pool[Math.floor(Math.random() * pool.length)];
+    },
+    [activeFlat, getDishesForFlat],
+  );
 
   const suggestBudget = useCallback(
-    (request: BudgetPlanRequest) => suggestDishesForBudget(allDishes, request),
-    [allDishes],
+    (request: BudgetPlanRequest, flatId: FlatId = activeFlat) =>
+      suggestDishesForBudget(getDishesForFlat(flatId), request),
+    [activeFlat, getDishesForFlat],
   );
 
   const applyBudgetPlan = useCallback(
-    (request: BudgetPlanRequest, date = toDateString()) => {
-      const picks = suggestDishesForBudget(allDishes, request);
-      picks.forEach((dish) => addDishToDate(dish.id, date));
+    (request: BudgetPlanRequest, date: string, flatId: FlatId = activeFlat) => {
+      const picks = suggestDishesForBudget(getDishesForFlat(flatId), request);
+      picks.forEach((dish) => addDishToDate(dish.id, date, flatId));
       return picks;
     },
-    [allDishes, addDishToDate],
+    [activeFlat, getDishesForFlat, addDishToDate],
   );
 
   const addDishComment = useCallback(
-    (dishId: string, date: string, author: string, comment: string) => {
+    (
+      dishId: string,
+      date: string,
+      author: string,
+      comment: string,
+      flatId: FlatId = activeFlat,
+    ) => {
       const entry: DishComment = {
         id: createId('cmt'),
         dishId,
+        flatId,
         date,
         author,
         comment,
@@ -267,13 +324,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setDishComments((prev) => [entry, ...prev]);
       logActivity(
         dishId,
+        flatId,
         'comment',
         date,
         `${author} commented: ${comment}`,
         author,
       );
     },
-    [logActivity],
+    [activeFlat, logActivity],
   );
 
   const getDishComments = useCallback(
@@ -304,13 +362,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppContextValue>(
     () => ({
+      activeFlat,
+      setActiveFlat,
       members,
       dishes: allDishes,
       hotpotIngredients,
       hotpotSets,
-      mealPlan,
+      flatMealPlans,
       dishComments,
       dishActivities,
+      getMembersForFlat,
+      getDishesForFlat,
       addMember,
       updateMember,
       deleteMember,
@@ -334,13 +396,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       hotpotSetToDish,
     }),
     [
+      activeFlat,
       members,
       allDishes,
       hotpotIngredients,
       hotpotSets,
-      mealPlan,
+      flatMealPlans,
       dishComments,
       dishActivities,
+      getMembersForFlat,
+      getDishesForFlat,
       addMember,
       updateMember,
       deleteMember,

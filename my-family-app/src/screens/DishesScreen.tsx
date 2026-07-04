@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
+import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { FloatingActionButton } from '@/components/common/FloatingActionButton';
 import { AddDishModal } from '@/components/dishes/AddDishModal';
 import { CategoryFilter, useDishFilter } from '@/components/dishes/CategoryFilter';
 import { DishCard } from '@/components/dishes/DishCard';
+import { ScheduleDishModal } from '@/components/dishes/ScheduleDishModal';
 import { useAppContext } from '@/context/AppContext';
 import {
   FamilyPalette,
@@ -14,19 +16,29 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
+import { formatDisplayDate } from '@/utils/date';
+import type { Dish } from '@/types';
 
 export function DishesScreen() {
   const router = useRouter();
-  const { dishes, addDishToDate } = useAppContext();
-  const { selectedCategory, setSelectedCategory, filteredItems } = useDishFilter(dishes);
+  const { activeFlat, setActiveFlat, getDishesForFlat, addDishToDate } = useAppContext();
+  const flatDishes = getDishesForFlat(activeFlat);
+  const { selectedCategory, setSelectedCategory, filteredItems } = useDishFilter(flatDishes);
   const [modalVisible, setModalVisible] = useState(false);
-
-  const handleSelectTonight = (dishId: string) => {
-    addDishToDate(dishId);
-  };
+  const [schedulingDish, setSchedulingDish] = useState<Dish | null>(null);
 
   const openDetail = (dishId: string) => {
     router.push(`/dish/${dishId}`);
+  };
+
+  const handleSchedule = (date: string) => {
+    if (!schedulingDish) return;
+    addDishToDate(schedulingDish.id, date, activeFlat);
+    Alert.alert(
+      'Scheduled',
+      `${schedulingDish.name} added to ${formatDisplayDate(date)} (${activeFlat}).`,
+    );
+    setSchedulingDish(null);
   };
 
   return (
@@ -36,9 +48,11 @@ export function DishesScreen() {
           <Text style={styles.label}>Dishes</Text>
           <Text style={styles.title}>The Collection</Text>
           <Text style={styles.subtitle}>
-            Tap any dish for full recipe, ingredients, time & budget.
+            Tap a dish for details · Schedule for today, tomorrow, or any date.
           </Text>
         </View>
+
+        <FlatSwitcher activeFlat={activeFlat} onChange={setActiveFlat} />
 
         <CategoryFilter selected={selectedCategory} onSelect={setSelectedCategory} />
 
@@ -57,7 +71,7 @@ export function DishesScreen() {
                 key={dish.id}
                 dish={dish}
                 onPress={() => openDetail(dish.id)}
-                onSelectTonight={() => handleSelectTonight(dish.id)}
+                onSchedule={() => setSchedulingDish(dish)}
               />
             ))
           ) : (
@@ -70,6 +84,13 @@ export function DishesScreen() {
 
       <FloatingActionButton onPress={() => setModalVisible(true)} />
       <AddDishModal visible={modalVisible} onClose={() => setModalVisible(false)} />
+
+      <ScheduleDishModal
+        visible={Boolean(schedulingDish)}
+        dishName={schedulingDish?.name ?? ''}
+        onClose={() => setSchedulingDish(null)}
+        onSchedule={handleSchedule}
+      />
     </View>
   );
 }
@@ -79,7 +100,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    marginBottom: FamilySpacing.xl,
+    marginBottom: FamilySpacing.lg,
     gap: FamilySpacing.sm,
   },
   label: {

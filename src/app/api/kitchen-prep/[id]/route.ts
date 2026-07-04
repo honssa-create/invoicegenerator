@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { deletePrepOrder, getPrepOrder, updatePrepOrder } from '@/lib/kitchen-prep-server';
-import { PREP_CAPACITIES, PREP_ORDER_TYPES, PREP_STATUSES, computePrepCalculation, isRedDateAllowed } from '@/lib/kitchen-prep';
+import {
+  PREP_CAPACITIES,
+  PREP_ORDER_TYPES,
+  PREP_STATUSES,
+  computePrepCalculation,
+  validatePrepFlavorQtys,
+} from '@/lib/kitchen-prep';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -29,9 +35,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const capacity = PREP_CAPACITIES.includes(body.capacity) ? body.capacity : existing.capacity;
-    const qtyRed = body.qty_red_date !== undefined ? Number(body.qty_red_date) : existing.qty_red_date;
-    if (qtyRed > 0 && !isRedDateAllowed(capacity)) {
-      return NextResponse.json({ error: 'Red Date (紅棗) is not allowed for 25g capacity' }, { status: 400 });
+    const qtys = {
+      osmanthus: body.qty_osmanthus !== undefined ? Number(body.qty_osmanthus) : existing.qty_osmanthus,
+      red_date: body.qty_red_date !== undefined ? Number(body.qty_red_date) : existing.qty_red_date,
+      rock_sugar: body.qty_rock_sugar !== undefined ? Number(body.qty_rock_sugar) : existing.qty_rock_sugar,
+    };
+    const validationErr = validatePrepFlavorQtys(capacity, qtys);
+    if (validationErr) {
+      return NextResponse.json({ error: validationErr }, { status: 400 });
     }
 
     const order = updatePrepOrder(params.id, session.userId, {
@@ -39,9 +50,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       order_type: PREP_ORDER_TYPES.includes(body.order_type) ? body.order_type : undefined,
       capacity,
       status: PREP_STATUSES.includes(body.status) ? body.status : undefined,
-      qty_osmanthus: body.qty_osmanthus !== undefined ? Number(body.qty_osmanthus) : undefined,
-      qty_red_date: body.qty_red_date !== undefined ? qtyRed : undefined,
-      qty_rock_sugar: body.qty_rock_sugar !== undefined ? Number(body.qty_rock_sugar) : undefined,
+      qty_osmanthus: qtys.osmanthus,
+      qty_red_date: qtys.red_date,
+      qty_rock_sugar: qtys.rock_sugar,
       notes: body.notes,
     });
 
@@ -52,8 +63,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     });
 
     return NextResponse.json({ order, calculation });
-  } catch {
-    return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to update';
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }
 

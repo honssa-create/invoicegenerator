@@ -23,4 +23,12 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+  .prep-summary-table {
+    font-size: 15px !important;
+    line-height: 1.35 !important;
+  }
+  .prep-summary-table th,
+  .prep-summary-table td {
+    padding: 0.65rem 0.85rem !important;
+  }
 }

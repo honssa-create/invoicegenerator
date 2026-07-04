@@ -71,20 +71,20 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
     osmanthus: {
       birdNest: 0.8,
       flavorIngredient: 0.13,
-      rockSugar: 3.57,
+      rockSugar: 0,
       slabSugar: 5.03,
     },
     red_date: {
       birdNest: 0.8,
       flavorIngredient: 1.8,
       rockSugar: 3.57,
-      slabSugar: 5.03,
+      slabSugar: 0,
     },
     rock_sugar: {
       birdNest: 0.8,
       flavorIngredient: 3.57,
       rockSugar: 3.57,
-      slabSugar: 5.03,
+      slabSugar: 0,
     },
   },
 };
@@ -109,18 +109,28 @@ export const COMPLETION_EXCEPTION_TAGS = [
 
 export const KITCHEN_COMPLETION_ACTIVITY_PREFIX = '[Kitchen Production Completed]';
 
+export interface PrepCompletionSplit {
+  label: string;
+  qty: number;
+}
+
 export function buildKitchenCompletionActivityBody(
   orderCode: string,
   expected: number,
   actual: number,
-  remarks: string | null
+  remarks: string | null,
+  splits?: PrepCompletionSplit[] | null
 ): string {
   const variance = actual !== expected;
   const detail = variance
     ? `Expected: ${expected}, Actual: ${actual} ⚠️`
     : `Expected: ${expected}, Actual: ${actual}`;
+  const splitPart =
+    splits && splits.length > 0
+      ? ` Split: ${splits.map((s) => `${s.label} ${s.qty}`).join(' + ')}.`
+      : '';
   const remarkPart = remarks?.trim() ? ` Remarks: ${remarks.trim()}` : '';
-  return `${KITCHEN_COMPLETION_ACTIVITY_PREFIX} ${orderCode} — ${detail}.${remarkPart}`;
+  return `${KITCHEN_COMPLETION_ACTIVITY_PREFIX} ${orderCode} — ${detail}.${splitPart}${remarkPart}`;
 }
 
 export interface PrepFlavorQty {
@@ -147,6 +157,7 @@ export interface PrepOrder {
   completion_remarks: string | null;
   completed_at: string | null;
   completed_by: string | null;
+  completion_splits: PrepCompletionSplit[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -301,7 +312,64 @@ export function formulaSummaryForCapacity(capacity: PrepCapacity): string {
     return '25g: 桂花 → 燕餅 0.4g · 桂花 0.072g · 片糖 2.79g | 冰糖 → 燕餅 0.4g · 冰糖 1.98g';
   }
   if (capacity === '45g') {
-    return '45g: 燕餅 0.8g · 桂花 0.13g · 紅棗 1.8g · 冰糖 3.57g · 片糖 5.03g per bottle';
+    return '45g: 桂花 → 片糖 5.03g | 紅棗/冰糖 → 冰糖 3.57g (no 片糖 in 紅棗 & 冰糖; no 冰糖 in 桂花)';
   }
   return `${PREP_CAPACITY_LABELS[capacity]} formula pending configuration`;
 }
+
+/** Sum of flavor order quantities (excludes wedding buffer). */
+export function originalOrderQuantity(qtys: PrepFlavorQty): number {
+  return Math.max(0, qtys.osmanthus) + Math.max(0, qtys.red_date) + Math.max(0, qtys.rock_sugar);
+}
+
+/** Rule A: 紅棗 & 冰糖 — no 片糖. Rule B: 桂花 — no 冰糖. */
+export function validateFormulaBusinessRules(
+  flavor: PrepFlavor,
+  formula: FlavorFormulaPerBottle
+): string | null {
+  if ((flavor === 'red_date' || flavor === 'rock_sugar') && formula.slabSugar > 0) {
+    return `${PREP_FLAVOR_LABELS[flavor]} cannot include 片糖 Slab Sugar`;
+  }
+  if (flavor === 'osmanthus' && formula.rockSugar > 0) {
+    return '桂花 Osmanthus cannot include 冰糖 Rock Sugar';
+  }
+  return null;
+}
+
+export function validatePrepFlavorQtys(
+  capacity: PrepCapacity,
+  qtys: PrepFlavorQty
+): string | null {
+  if (qtys.red_date > 0 && !isRedDateAllowed(capacity)) {
+    return 'Red Date (紅棗) is not allowed for 25g capacity';
+  }
+  for (const flavor of PREP_FLAVORS) {
+    const qty = qtys[flavor];
+    if (qty <= 0) continue;
+    const formula = getFlavorFormula(capacity, flavor);
+    if (!formula) {
+      return `No formula configured for ${PREP_FLAVOR_LABELS[flavor]} at ${PREP_CAPACITY_LABELS[capacity]}`;
+    }
+    const ruleErr = validateFormulaBusinessRules(flavor, formula);
+    if (ruleErr) return ruleErr;
+  }
+  if (originalOrderQuantity(qtys) === 0) {
+    return 'At least one flavor quantity is required';
+  }
+  return null;
+}
+
+/** Shared typography tokens for Kitchen Summary screen + print. */
+export const PREP_SUMMARY_TYPO = {
+  table: 'prep-summary-table w-full border-collapse text-[15px] leading-snug',
+  thead: 'text-xs uppercase tracking-wider',
+  th: 'px-4 py-3 font-semibold',
+  flavorCell: 'text-lg font-bold',
+  qtyCell: 'text-lg font-semibold tabular-nums',
+  actualQtyCell: 'text-2xl font-bold tabular-nums',
+  gramCell: 'text-lg font-bold tabular-nums',
+  totalLabel: 'text-base font-bold',
+  totalQty: 'text-xl font-bold tabular-nums',
+  totalGram: 'text-lg font-bold tabular-nums',
+  capacityBadge: 'text-sm font-semibold',
+} as const;

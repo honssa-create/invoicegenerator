@@ -1,6 +1,11 @@
 import db from './db';
-import type { PrepCapacity, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
-import { buildKitchenCompletionActivityBody, computePrepCalculation, isRedDateAllowed } from './kitchen-prep';
+import type { PrepCapacity, PrepCompletionSplit, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
+import {
+  buildKitchenCompletionActivityBody,
+  computePrepCalculation,
+  isRedDateAllowed,
+  validatePrepFlavorQtys,
+} from './kitchen-prep';
 import { logActivity } from './activity';
 
 interface PrepRow {
@@ -21,8 +26,19 @@ interface PrepRow {
   completion_remarks: string | null;
   completed_at: string | null;
   completed_by: string | null;
+  completion_splits_json: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parseSplits(raw: string | null): PrepCompletionSplit[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as PrepCompletionSplit[];
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function hydrate(row: PrepRow): PrepOrder {
@@ -44,6 +60,7 @@ function hydrate(row: PrepRow): PrepOrder {
     completion_remarks: row.completion_remarks ?? null,
     completed_at: row.completed_at ?? null,
     completed_by: row.completed_by ?? null,
+    completion_splits: parseSplits(row.completion_splits_json),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -98,7 +115,17 @@ export function createPrepOrder(
   }
 ): PrepOrder {
   const capacity = input.capacity;
+  const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? 0);
   const qtyRed = isRedDateAllowed(capacity) ? Math.max(0, input.qty_red_date ?? 0) : 0;
+  const qtyRock = Math.max(0, input.qty_rock_sugar ?? 0);
+
+  const validationErr = validatePrepFlavorQtys(capacity, {
+    osmanthus: qtyOsmanthus,
+    red_date: qtyRed,
+    rock_sugar: qtyRock,
+  });
+  if (validationErr) throw new Error(validationErr);
+
   const res = db
     .prepare(
       `INSERT INTO kitchen_prep_orders
@@ -114,12 +141,70 @@ export function createPrepOrder(
       input.order_type,
       capacity,
       input.status || 'scheduled',
-      Math.max(0, input.qty_osmanthus ?? 0),
+      qtyOsmanthus,
       qtyRed,
-      Math.max(0, input.qty_rock_sugar ?? 0),
+      qtyRock,
       input.notes?.trim() || null
     );
   return getPrepOrder(Number(res.lastInsertRowid), userId)!;
+}
+
+export interface PrepCapacityLine {
+  capacity: PrepCapacity;
+  qty_osmanthus?: number;
+  qty_red_date?: number;
+  qty_rock_sugar?: number;
+}
+
+export function createPrepOrdersBatch(
+  userId: number,
+  input: {
+    stewing_date: string;
+    order_type: PrepOrderType;
+    linked_order_id?: number | null;
+    order_code?: string;
+    notes?: string | null;
+    status?: PrepStatus;
+    lines: PrepCapacityLine[];
+  }
+): PrepOrder[] {
+  const baseCode = input.order_code?.trim();
+  const created: PrepOrder[] = [];
+
+  for (let i = 0; i < input.lines.length; i++) {
+    const line = input.lines[i];
+    const qtys = {
+      osmanthus: Math.max(0, line.qty_osmanthus ?? 0),
+      red_date: Math.max(0, line.qty_red_date ?? 0),
+      rock_sugar: Math.max(0, line.qty_rock_sugar ?? 0),
+    };
+    const validationErr = validatePrepFlavorQtys(line.capacity, qtys);
+    if (validationErr) throw new Error(validationErr);
+
+    let orderCode: string | undefined;
+    if (baseCode) {
+      orderCode = input.lines.length > 1 ? `${baseCode}-${line.capacity}` : baseCode;
+    } else if (input.lines.length > 1) {
+      orderCode = `${nextOrderCode(userId)}-${line.capacity}`;
+    }
+
+    created.push(
+      createPrepOrder(userId, {
+        stewing_date: input.stewing_date,
+        order_type: input.order_type,
+        capacity: line.capacity,
+        qty_osmanthus: qtys.osmanthus,
+        qty_red_date: qtys.red_date,
+        qty_rock_sugar: qtys.rock_sugar,
+        linked_order_id: input.linked_order_id ?? null,
+        order_code: orderCode,
+        notes: input.notes,
+        status: input.status,
+      })
+    );
+  }
+
+  return created;
 }
 
 export function updatePrepOrder(
@@ -140,9 +225,18 @@ export function updatePrepOrder(
   if (!existing) return null;
 
   const capacity = input.capacity ?? existing.capacity;
+  const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
   const qtyRed = isRedDateAllowed(capacity)
     ? Math.max(0, input.qty_red_date ?? existing.qty_red_date)
     : 0;
+  const qtyRock = Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar);
+
+  const validationErr = validatePrepFlavorQtys(capacity, {
+    osmanthus: qtyOsmanthus,
+    red_date: qtyRed,
+    rock_sugar: qtyRock,
+  });
+  if (validationErr) throw new Error(validationErr);
 
   db.prepare(
     `UPDATE kitchen_prep_orders SET
@@ -155,9 +249,9 @@ export function updatePrepOrder(
     input.order_type ?? existing.order_type,
     capacity,
     input.status ?? existing.status,
-    Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus),
+    qtyOsmanthus,
     qtyRed,
-    Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar),
+    qtyRock,
     input.notes !== undefined ? input.notes : existing.notes,
     id,
     userId
@@ -174,7 +268,11 @@ export function completePrepProduction(
   id: number | string,
   userId: number,
   operatorName: string,
-  input: { actual_yield: number; completion_remarks?: string | null }
+  input: {
+    actual_yield: number;
+    completion_remarks?: string | null;
+    splits?: PrepCompletionSplit[];
+  }
 ): PrepOrder | null {
   const existing = getPrepOrder(id, userId);
   if (!existing) return null;
@@ -188,6 +286,19 @@ export function completePrepProduction(
   const expectedYield = calculation.totals.bottles;
   const actualYield = Math.max(0, Math.round(input.actual_yield));
   const remarks = input.completion_remarks?.trim() || null;
+  const splits = (input.splits ?? []).map((s, i) => ({
+    label: s.label?.trim() || `Sub-order ${i + 1}`,
+    qty: Math.max(0, Math.round(s.qty)),
+  }));
+
+  if (splits.length > 0) {
+    const splitSum = splits.reduce((sum, s) => sum + s.qty, 0);
+    if (splitSum !== actualYield) {
+      throw new Error(`Split quantities must sum to actual yield (${actualYield} 樽)`);
+    }
+  }
+
+  const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;
 
   db.prepare(
     `UPDATE kitchen_prep_orders SET
@@ -195,17 +306,19 @@ export function completePrepProduction(
        expected_yield = ?,
        actual_yield = ?,
        completion_remarks = ?,
+       completion_splits_json = ?,
        completed_at = datetime('now'),
        completed_by = ?,
        updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(expectedYield, actualYield, remarks, operatorName, id, userId);
+  ).run(expectedYield, actualYield, remarks, splitsJson, operatorName, id, userId);
 
   const activityBody = buildKitchenCompletionActivityBody(
     existing.order_code,
     expectedYield,
     actualYield,
-    remarks
+    remarks,
+    splits
   );
 
   if (existing.linked_order_id) {

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { completePrepProduction, getPrepOrder } from '@/lib/kitchen-prep-server';
-import { computePrepCalculation } from '@/lib/kitchen-prep';
+import { computePrepCalculation, type PrepCompletionSplit } from '@/lib/kitchen-prep';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -20,9 +20,17 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Actual yield must be a non-negative number' }, { status: 400 });
     }
 
+    const splits: PrepCompletionSplit[] | undefined = Array.isArray(body.splits)
+      ? body.splits.map((s: { label?: string; qty?: number }, i: number) => ({
+          label: s.label || `Sub-order ${i + 1}`,
+          qty: Number(s.qty) || 0,
+        }))
+      : undefined;
+
     const order = completePrepProduction(params.id, session.userId, session.name, {
       actual_yield: actualYield,
       completion_remarks: body.completion_remarks ?? null,
+      splits,
     });
 
     if (!order) {
@@ -36,7 +44,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     });
 
     return NextResponse.json({ order, calculation });
-  } catch {
-    return NextResponse.json({ error: 'Failed to complete production' }, { status: 500 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to complete production';
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

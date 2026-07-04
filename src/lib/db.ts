@@ -376,6 +376,7 @@ const kitchenPrepCompletionCols = [
   'completion_remarks TEXT',
   'completed_at TEXT',
   'completed_by TEXT',
+  'completion_splits_json TEXT',
 ] as const;
 for (const col of kitchenPrepCompletionCols) {
   try {

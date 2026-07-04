@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import PrepSummaryTable from '@/components/kitchen-prep/PrepSummaryTable';
 import {
   PREP_CAPACITIES,
   PREP_CAPACITY_LABELS,
@@ -12,8 +13,6 @@ import {
   PREP_STATUSES,
   PREP_STATUS_LABELS,
   WEDDING_BUFFER,
-  computePrepCalculation,
-  formatGrams,
   formulaSummaryForCapacity,
   isRedDateAllowed,
   type PrepCalculation,
@@ -108,6 +107,11 @@ export default function KitchenPrepDetailPage() {
             )}
           </p>
           {order.completion_remarks && <p className="text-sm text-gray-700 mt-2">Remarks: {order.completion_remarks}</p>}
+          {order.completion_splits && order.completion_splits.length > 0 && (
+            <p className="text-sm text-gray-700 mt-2">
+              Splits: {order.completion_splits.map((s) => `${s.label} ${s.qty}`).join(' · ')}
+            </p>
+          )}
           {order.completed_by && <p className="text-xs text-gray-500 mt-2">By {order.completed_by}{order.completed_at ? ` · ${order.completed_at}` : ''}</p>}
         </div>
       )}
@@ -176,57 +180,11 @@ export default function KitchenPrepDetailPage() {
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-          <h2 className="text-lg font-bold text-gray-900">Kitchen Summary 備料重量總表</h2>
-          <p className="text-sm text-gray-500">{formulaSummaryForCapacity(order.capacity)}</p>
+          <h2 className="text-lg font-bold text-gray-900">Kitchen Summary 廚房總結</h2>
+          <p className="text-sm text-gray-500 mt-1">{formulaSummaryForCapacity(order.capacity)}</p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[800px]">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-4">Flavor 口味</th>
-                <th className="px-6 py-4 text-right">Order Qty</th>
-                <th className="px-6 py-4 text-right">Actual Qty 實際生產樽數</th>
-                <th className="px-6 py-4 text-right">燕餅 Bird&apos;s Nest</th>
-                <th className="px-6 py-4 text-right">Flavor Ingredient</th>
-                <th className="px-6 py-4 text-right">冰糖 Rock Sugar</th>
-                <th className="px-6 py-4 text-right">片糖 Slab Sugar</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {calc.rows.filter((r) => r.orderQty > 0).map((r) => (
-                <tr key={r.flavor} className="hover:bg-gray-50">
-                  <td className="px-6 py-5 text-xl font-bold text-gray-900">{r.label}</td>
-                  <td className="px-6 py-5 text-right text-2xl font-semibold text-gray-700">{r.orderQty}</td>
-                  <td className="px-6 py-5 text-right">
-                    <span className="text-3xl font-bold text-brand-700">{r.actualQty}</span>
-                    {r.weddingBuffer > 0 && (
-                      <p className="text-xs text-gray-500 mt-1">{r.orderQty} + {r.weddingBuffer} buffer</p>
-                    )}
-                  </td>
-                  <td className="px-6 py-5 text-right text-2xl font-bold text-gray-900">{formatGrams(r.birdNestGrams)}</td>
-                  <td className="px-6 py-5 text-right text-2xl font-bold text-gray-900">{formatGrams(r.flavorGrams)}</td>
-                  <td className="px-6 py-5 text-right text-xl font-semibold text-gray-700">{formatGrams(r.rockSugarGrams)}</td>
-                  <td className="px-6 py-5 text-right text-xl font-semibold text-gray-700">{formatGrams(r.slabSugarGrams)}</td>
-                </tr>
-              ))}
-              {calc.rows.filter((r) => r.orderQty > 0).length === 0 && (
-                <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400">Enter order quantities above to see calculations.</td></tr>
-              )}
-            </tbody>
-            {calc.rows.some((r) => r.orderQty > 0) && calc.formulaReady && (
-              <tfoot className="bg-brand-50 border-t-2 border-brand-200">
-                <tr>
-                  <td className="px-6 py-4 text-lg font-bold text-brand-900">TOTAL 合計</td>
-                  <td className="px-6 py-4" />
-                  <td className="px-6 py-4 text-right text-2xl font-bold text-brand-800">{calc.totals.bottles} 樽</td>
-                  <td className="px-6 py-4 text-right text-2xl font-bold text-brand-800">{formatGrams(calc.totals.birdNestGrams)}</td>
-                  <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.flavorGrams)}</td>
-                  <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.rockSugarGrams)}</td>
-                  <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.slabSugarGrams)}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
+        <div className="overflow-x-auto p-2">
+          <PrepSummaryTable calc={calc} capacity={order.capacity} variant="screen" />
         </div>
       </div>
 

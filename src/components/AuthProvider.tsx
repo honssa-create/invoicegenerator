@@ -8,13 +8,20 @@ interface User {
   email: string;
   name: string;
   company_name: string | null;
+  role: 'sales' | 'accountant';
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (data: { email: string; password: string; name: string; company_name?: string }) => Promise<void>;
+  register: (data: {
+    email: string;
+    password: string;
+    name: string;
+    company_name?: string;
+    role?: 'sales' | 'accountant';
+  }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -53,7 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/dashboard');
   };
 
-  const register = async (formData: { email: string; password: string; name: string; company_name?: string }) => {
+  const register = async (formData: {
+    email: string;
+    password: string;
+    name: string;
+    company_name?: string;
+    role?: 'sales' | 'accountant';
+  }) => {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -28,6 +28,8 @@ export default function NewInvoicePage() {
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('Payment due within 30 days.');
   const [status, setStatus] = useState('draft');
+  const [orderSource, setOrderSource] = useState<'manual' | 'woocommerce' | 'wedding'>('manual');
+  const [externalOrderId, setExternalOrderId] = useState('');
   const [items, setItems] = useState<LineItem[]>([{ ...DEFAULT_ITEM }]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -65,6 +67,8 @@ export default function NewInvoicePage() {
         notes,
         terms,
         status,
+        order_source: orderSource,
+        external_order_id: externalOrderId || undefined,
         items: items.filter((i) => i.description.trim()),
       }),
     });
@@ -141,6 +145,21 @@ export default function NewInvoicePage() {
                   <option value="paid">Paid</option>
                   <option value="overdue">Overdue</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Order Source</label>
+                <select value={orderSource} onChange={(e) => setOrderSource(e.target.value as typeof orderSource)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+                  <option value="manual">Manual</option>
+                  <option value="woocommerce">WooCommerce</option>
+                  <option value="wedding">Wedding</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">External Order ID</label>
+                <input type="text" value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)}
+                  placeholder="e.g. 1024"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none" />
               </div>
             </div>
           </div>

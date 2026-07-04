@@ -1,9 +1,116 @@
+export type UserRole = 'sales' | 'accountant';
+
 export interface User {
   id: number;
   email: string;
   name: string;
   company_name: string | null;
+  role: UserRole;
   created_at: string;
+}
+
+export type PaymentStatus = 'pending_verification' | 'bank_cleared';
+
+export interface Payment {
+  id: number;
+  user_id: number;
+  invoice_id: number;
+  amount: number;
+  payment_date: string;
+  receipt_note: string | null;
+  receipt_filename: string | null;
+  status: PaymentStatus;
+  verified_at: string | null;
+  verified_by: number | null;
+  locked: number;
+  created_by: number;
+  created_at: string;
+}
+
+export interface PaymentWithDetails extends Payment {
+  invoice_number: string;
+  customer_name: string;
+  created_by_name: string;
+  verified_by_name: string | null;
+}
+
+export type UnclaimedDepositStatus = 'unclaimed' | 'claimed';
+
+export interface UnclaimedDeposit {
+  id: number;
+  user_id: number;
+  deposit_date: string;
+  amount: number;
+  bank: string;
+  remarks: string | null;
+  status: UnclaimedDepositStatus;
+  claimed_invoice_id: number | null;
+  claimed_payment_id: number | null;
+  claimed_at: string | null;
+  claimed_by: number | null;
+  created_by: number;
+  created_at: string;
+}
+
+export interface UnclaimedDepositWithDetails extends UnclaimedDeposit {
+  created_by_name: string;
+  claimed_by_name: string | null;
+  claimed_invoice_number: string | null;
+}
+
+export interface ReconciliationData {
+  unclaimedDeposits: UnclaimedDepositWithDetails[];
+  unclaimedTotal: number;
+  pendingPayments: PaymentWithDetails[];
+  pendingTotal: number;
+  bankClearedPayments: PaymentWithDetails[];
+  bankClearedTotal: number;
+  pendingVerificationCount: number;
+  ledger: LedgerEntry[];
+}
+
+export type LedgerEntryType = 'product_sale' | 'other_income' | 'unclaimed_deposit';
+
+export type OrderSource = 'woocommerce' | 'wedding' | 'manual';
+
+export interface OtherIncome {
+  id: number;
+  user_id: number;
+  category: string;
+  amount: number;
+  income_date: string;
+  remarks: string | null;
+  created_by: number;
+  created_at: string;
+}
+
+export interface OtherIncomeWithDetails extends OtherIncome {
+  created_by_name: string;
+}
+
+export interface LedgerSource {
+  type: 'order' | 'other_income' | 'unlinked' | 'linked_order';
+  label: string;
+  href?: string;
+  icon: string;
+  invoiceId?: number;
+  customerName?: string;
+  orderNumber?: string;
+  category?: string;
+}
+
+export interface LedgerEntry {
+  id: string;
+  entryType: LedgerEntryType;
+  date: string;
+  amount: number;
+  description: string;
+  status: PaymentStatus | 'unclaimed' | 'recorded';
+  source: LedgerSource;
+  paymentId?: number;
+  depositId?: number;
+  otherIncomeId?: number;
+  invoiceId?: number;
 }
 
 export interface Customer {
@@ -32,6 +139,8 @@ export interface Invoice {
   tax_rate: number;
   notes: string | null;
   terms: string | null;
+  order_source: OrderSource;
+  external_order_id: string | null;
   created_at: string;
   updated_at: string;
 }

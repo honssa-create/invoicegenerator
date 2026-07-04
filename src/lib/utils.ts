@@ -26,3 +26,13 @@ export const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-green-100 text-green-700',
   overdue: 'bg-red-100 text-red-700',
 };
+
+export const PAYMENT_STATUS_COLORS: Record<string, string> = {
+  pending_verification: 'bg-yellow-100 text-yellow-800',
+  bank_cleared: 'bg-green-100 text-green-800',
+};
+
+export const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  pending_verification: 'Pending Verification',
+  bank_cleared: 'Bank Cleared',
+};

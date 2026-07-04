@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { generateInvoiceNumber, getInvoiceWithDetails } from '@/lib/invoices';
+import { getTeamUserIds } from '@/lib/team';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -11,6 +12,25 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
+  const linkable = searchParams.get('linkable');
+
+  if (linkable === '1') {
+    const teamIds = getTeamUserIds(session.userId);
+    const placeholders = teamIds.map(() => '?').join(', ');
+    const rows = db
+      .prepare(
+        `SELECT i.id FROM invoices i
+         WHERE i.user_id IN (${placeholders}) AND i.status != 'paid'
+         ORDER BY i.created_at DESC`
+      )
+      .all(...teamIds) as { id: number }[];
+
+    const invoices = rows
+      .map((r) => getInvoiceWithDetails(r.id, session.userId))
+      .filter(Boolean);
+
+    return NextResponse.json({ invoices });
+  }
 
   let query = 'SELECT id FROM invoices WHERE user_id = ?';
   const queryParams: (string | number)[] = [session.userId];
@@ -45,7 +65,12 @@ export async function POST(request: Request) {
       terms,
       status = 'draft',
       items = [],
+      order_source = 'manual',
+      external_order_id,
     } = body;
+
+    const validOrderSource =
+      order_source === 'woocommerce' || order_source === 'wedding' ? order_source : 'manual';
 
     if (!customer_id || !issue_date || !due_date) {
       return NextResponse.json(
@@ -71,8 +96,8 @@ export async function POST(request: Request) {
     const createInvoice = db.transaction(() => {
       const result = db
         .prepare(
-          `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms, order_source, external_order_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           session.userId,
@@ -83,7 +108,9 @@ export async function POST(request: Request) {
           due_date,
           tax_rate,
           notes?.trim() || null,
-          terms?.trim() || null
+          terms?.trim() || null,
+          validOrderSource,
+          external_order_id?.trim() || null
         );
 
       const invoiceId = result.lastInsertRowid as number;

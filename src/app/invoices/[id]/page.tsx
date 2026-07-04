@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
-import { StatusBadge, formatCurrency } from '@/components/ui';
+import { StatusBadge, PaymentStatusBadge, formatCurrency } from '@/components/ui';
 import { formatDate, calculateInvoiceTotals } from '@/lib/utils';
-import type { InvoiceWithDetails } from '@/lib/types';
+import { useAuth } from '@/components/AuthProvider';
+import type { InvoiceWithDetails, PaymentWithDetails } from '@/lib/types';
 
 interface LineItem {
   description: string;
@@ -17,8 +18,18 @@ interface LineItem {
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
+  const [payments, setPayments] = useState<PaymentWithDetails[]>([]);
   const [editing, setEditing] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    payment_date: new Date().toISOString().slice(0, 10),
+    receipt_note: '',
+    receipt_filename: '',
+  });
+  const [verifyingId, setVerifyingId] = useState<number | null>(null);
   const [items, setItems] = useState<LineItem[]>([]);
   const [taxRate, setTaxRate] = useState(0);
   const [status, setStatus] = useState('draft');
@@ -41,8 +52,15 @@ export default function InvoiceDetailPage() {
           setStatus(data.invoice.status);
           setNotes(data.invoice.notes || '');
           setTerms(data.invoice.terms || '');
+          setPaymentForm((prev) => ({
+            ...prev,
+            amount: String(data.invoice.total),
+          }));
         }
       });
+    fetch(`/api/payments?invoice_id=${id}`)
+      .then((res) => res.json())
+      .then((data) => setPayments(data.payments || []));
   };
 
   useEffect(() => { loadInvoice(); }, [id]);
@@ -66,6 +84,43 @@ export default function InvoiceDetailPage() {
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     router.push('/invoices');
   };
+
+  const handleUploadReceipt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoice_id: Number(id),
+        ...paymentForm,
+        amount: Number(paymentForm.amount),
+      }),
+    });
+    if (res.ok) {
+      setShowPaymentForm(false);
+      loadInvoice();
+    }
+  };
+
+  const handleReceiptFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPaymentForm((prev) => ({
+        ...prev,
+        receipt_filename: file.name,
+        receipt_note: prev.receipt_note || `Receipt: ${file.name}`,
+      }));
+    }
+  };
+
+  const handleVerifyPayment = async (paymentId: number) => {
+    setVerifyingId(paymentId);
+    const res = await fetch(`/api/payments/${paymentId}/verify`, { method: 'POST' });
+    setVerifyingId(null);
+    if (res.ok) loadInvoice();
+  };
+
+  const isAccountant = user?.role === 'accountant';
 
   if (!invoice) {
     return (
@@ -243,6 +298,110 @@ export default function InvoiceDetailPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
             ) : (
               <p className="text-sm text-gray-600">{invoice.terms || 'No terms specified'}</p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-gray-900">Payment Flow</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Upload receipt → Pending Verification → Bank Cleared</p>
+              </div>
+              {!showPaymentForm && invoice.status !== 'paid' && (
+                <button
+                  onClick={() => setShowPaymentForm(true)}
+                  className="px-3 py-1.5 bg-yellow-500 text-white text-xs font-medium rounded-lg hover:bg-yellow-600"
+                >
+                  + Upload Receipt
+                </button>
+              )}
+            </div>
+
+            {showPaymentForm && (
+              <form onSubmit={handleUploadReceipt} className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg space-y-3">
+                <div>
+                  <label className="text-xs text-gray-600">Amount</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                    required
+                    className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Payment Date</label>
+                  <input
+                    type="date"
+                    value={paymentForm.payment_date}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
+                    required
+                    className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Receipt File</label>
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={handleReceiptFile}
+                    className="w-full mt-1 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Notes</label>
+                  <input
+                    type="text"
+                    value={paymentForm.receipt_note}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, receipt_note: e.target.value })}
+                    className="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                    placeholder="Payment reference or notes"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" className="px-3 py-1.5 bg-yellow-600 text-white text-xs font-medium rounded-lg hover:bg-yellow-700">
+                    Submit for Verification
+                  </button>
+                  <button type="button" onClick={() => setShowPaymentForm(false)} className="px-3 py-1.5 border border-gray-300 text-xs font-medium rounded-lg hover:bg-gray-50">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {payments.length === 0 ? (
+              <p className="text-sm text-gray-500">No payments recorded yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {payments.map((pay) => (
+                  <div key={pay.id} className="p-3 border border-gray-100 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{formatCurrency(pay.amount)}</span>
+                      <PaymentStatusBadge status={pay.status} />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{formatDate(pay.payment_date)}</p>
+                    {pay.receipt_filename && (
+                      <p className="text-xs text-gray-500">📎 {pay.receipt_filename}</p>
+                    )}
+                    {pay.receipt_note && (
+                      <p className="text-xs text-gray-600 mt-1">{pay.receipt_note}</p>
+                    )}
+                    {pay.status === 'pending_verification' && isAccountant && (
+                      <button
+                        onClick={() => handleVerifyPayment(pay.id)}
+                        disabled={verifyingId === pay.id}
+                        className="mt-2 px-3 py-1 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {verifyingId === pay.id ? 'Verifying...' : 'Verify (Bank Cleared)'}
+                      </button>
+                    )}
+                    {pay.status === 'bank_cleared' && pay.verified_by_name && (
+                      <p className="text-xs text-green-700 mt-1">Verified by {pay.verified_by_name}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

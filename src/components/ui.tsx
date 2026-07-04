@@ -1,5 +1,5 @@
-import { formatCurrency, STATUS_COLORS } from '@/lib/utils';
-import type { InvoiceStatus } from '@/lib/types';
+import { formatCurrency, STATUS_COLORS, PAYMENT_STATUS_COLORS, PAYMENT_STATUS_LABELS } from '@/lib/utils';
+import type { InvoiceStatus, PaymentStatus } from '@/lib/types';
 
 interface StatusBadgeProps {
   status: InvoiceStatus;
@@ -9,6 +9,20 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   return (
     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[status]}`}>
       {status}
+    </span>
+  );
+}
+
+interface PaymentStatusBadgeProps {
+  status: PaymentStatus;
+}
+
+export function PaymentStatusBadge({ status }: PaymentStatusBadgeProps) {
+  return (
+    <span
+      className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_COLORS[status]}`}
+    >
+      {PAYMENT_STATUS_LABELS[status]}
     </span>
   );
 }

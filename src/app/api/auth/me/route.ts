@@ -9,12 +9,14 @@ export async function GET(request: Request) {
   }
 
   const user = db
-    .prepare('SELECT id, email, name, company_name, created_at FROM users WHERE id = ?')
+    .prepare('SELECT id, email, name, company_name, role, created_at FROM users WHERE id = ?')
     .get(session.userId);
 
   if (!user) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ user });
+  const userWithRole = { ...user, role: (user as { role?: string }).role || 'sales' };
+
+  return NextResponse.json({ user: userWithRole });
 }

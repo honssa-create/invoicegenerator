@@ -1,9 +1,71 @@
+export type UserRole = 'sales' | 'accountant';
+
 export interface User {
   id: number;
   email: string;
   name: string;
   company_name: string | null;
+  role: UserRole;
   created_at: string;
+}
+
+export type PaymentStatus = 'pending_verification' | 'bank_cleared';
+
+export interface Payment {
+  id: number;
+  user_id: number;
+  invoice_id: number;
+  amount: number;
+  payment_date: string;
+  receipt_note: string | null;
+  receipt_filename: string | null;
+  status: PaymentStatus;
+  verified_at: string | null;
+  verified_by: number | null;
+  locked: number;
+  created_by: number;
+  created_at: string;
+}
+
+export interface PaymentWithDetails extends Payment {
+  invoice_number: string;
+  customer_name: string;
+  created_by_name: string;
+  verified_by_name: string | null;
+}
+
+export type UnclaimedDepositStatus = 'unclaimed' | 'claimed';
+
+export interface UnclaimedDeposit {
+  id: number;
+  user_id: number;
+  deposit_date: string;
+  amount: number;
+  bank: string;
+  remarks: string | null;
+  status: UnclaimedDepositStatus;
+  claimed_invoice_id: number | null;
+  claimed_payment_id: number | null;
+  claimed_at: string | null;
+  claimed_by: number | null;
+  created_by: number;
+  created_at: string;
+}
+
+export interface UnclaimedDepositWithDetails extends UnclaimedDeposit {
+  created_by_name: string;
+  claimed_by_name: string | null;
+  claimed_invoice_number: string | null;
+}
+
+export interface ReconciliationData {
+  unclaimedDeposits: UnclaimedDepositWithDetails[];
+  unclaimedTotal: number;
+  pendingPayments: PaymentWithDetails[];
+  pendingTotal: number;
+  bankClearedPayments: PaymentWithDetails[];
+  bankClearedTotal: number;
+  pendingVerificationCount: number;
 }
 
 export interface Customer {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { generateInvoiceNumber, getInvoiceWithDetails } from '@/lib/invoices';
+import { getTeamUserIds } from '@/lib/team';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -11,6 +12,25 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
+  const linkable = searchParams.get('linkable');
+
+  if (linkable === '1') {
+    const teamIds = getTeamUserIds(session.userId);
+    const placeholders = teamIds.map(() => '?').join(', ');
+    const rows = db
+      .prepare(
+        `SELECT i.id FROM invoices i
+         WHERE i.user_id IN (${placeholders}) AND i.status != 'paid'
+         ORDER BY i.created_at DESC`
+      )
+      .all(...teamIds) as { id: number }[];
+
+    const invoices = rows
+      .map((r) => getInvoiceWithDetails(r.id, session.userId))
+      .filter(Boolean);
+
+    return NextResponse.json({ invoices });
+  }
 
   let query = 'SELECT id FROM invoices WHERE user_id = ?';
   const queryParams: (string | number)[] = [session.userId];

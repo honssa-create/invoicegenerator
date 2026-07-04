@@ -6,7 +6,13 @@ import { useAuth } from '@/components/AuthProvider';
 
 export default function RegisterPage() {
   const { register } = useAuth();
-  const [form, setForm] = useState({ name: '', email: '', password: '', company_name: '' });
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    company_name: '',
+    role: 'sales' as 'sales' | 'accountant',
+  });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -74,6 +80,17 @@ export default function RegisterPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
                 placeholder="you@company.com"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value as 'sales' | 'accountant' })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+              >
+                <option value="sales">Sales (upload receipts, claim deposits)</option>
+                <option value="accountant">Accountant (verify bank, log unclaimed)</option>
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>

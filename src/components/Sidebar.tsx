@@ -6,6 +6,7 @@ import { useAuth } from './AuthProvider';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: '📊' },
+  { href: '/reconciliation', label: 'Cash Flow', icon: '🏦' },
   { href: '/invoices', label: 'Invoices', icon: '📄' },
   { href: '/customers', label: 'Customers', icon: '👥' },
 ];
@@ -50,6 +51,9 @@ export default function Sidebar() {
         <div className="px-4 py-2 mb-2">
           <p className="text-sm font-medium text-gray-900 truncate">{user?.name}</p>
           <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+          {user?.role && (
+            <p className="text-xs text-brand-600 mt-0.5 capitalize">{user.role}</p>
+          )}
         </div>
         <button
           onClick={logout}

@@ -18,6 +18,47 @@ interface ReconciliationData {
   pendingVerificationCount: number;
 }
 
+interface ImportSummary {
+  totalRows: number;
+  exactMatches: number;
+  suggestedMatches: number;
+  unclaimedCreated: number;
+  skipped: number;
+}
+
+interface ImportResult {
+  summary: ImportSummary;
+  exactMatches: {
+    rowIndex: number;
+    date: string;
+    amount: number;
+    description: string;
+    paymentId: number;
+    invoiceNumber: string;
+    customerName: string;
+    matchType: string;
+  }[];
+  suggestedMatches: {
+    rowIndex: number;
+    date: string;
+    amount: number;
+    description: string;
+    paymentId: number;
+    invoiceNumber: string;
+    customerName: string;
+    paymentDate: string;
+    daysDiff: number;
+    matchType: string;
+  }[];
+  unclaimedCreated: {
+    rowIndex: number;
+    date: string;
+    amount: number;
+    description: string;
+    depositId: number;
+  }[];
+}
+
 export default function ReconciliationPage() {
   const { user } = useAuth();
   const [data, setData] = useState<ReconciliationData | null>(null);
@@ -33,6 +74,11 @@ export default function ReconciliationPage() {
     remarks: '',
   });
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState('');
+  const [selectedSuggested, setSelectedSuggested] = useState<Set<number>>(new Set());
+  const [confirming, setConfirming] = useState(false);
 
   const isAccountant = user?.role === 'accountant';
 
@@ -97,6 +143,74 @@ export default function ReconciliationPage() {
     if (res.ok) loadData();
   };
 
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportError('');
+    setImportResult(null);
+    setSelectedSuggested(new Set());
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/api/bank-statement/import', {
+      method: 'POST',
+      body: formData,
+    });
+    const json = await res.json();
+    setImporting(false);
+    e.target.value = '';
+
+    if (!res.ok) {
+      setImportError(json.error || 'Import failed');
+      return;
+    }
+
+    setImportResult(json);
+    loadData();
+  };
+
+  const toggleSuggested = (paymentId: number) => {
+    setSelectedSuggested((prev) => {
+      const next = new Set(prev);
+      if (next.has(paymentId)) next.delete(paymentId);
+      else next.add(paymentId);
+      return next;
+    });
+  };
+
+  const handleConfirmSuggested = async () => {
+    if (selectedSuggested.size === 0) return;
+    setConfirming(true);
+    const res = await fetch('/api/bank-statement/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_ids: Array.from(selectedSuggested) }),
+    });
+    setConfirming(false);
+    if (res.ok) {
+      setImportResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              suggestedMatches: prev.suggestedMatches.filter(
+                (m) => !selectedSuggested.has(m.paymentId)
+              ),
+              summary: {
+                ...prev.summary,
+                suggestedMatches:
+                  prev.summary.suggestedMatches - selectedSuggested.size,
+              },
+            }
+          : null
+      );
+      setSelectedSuggested(new Set());
+      loadData();
+    }
+  };
+
   if (!data) {
     return (
       <AppLayout>
@@ -109,12 +223,172 @@ export default function ReconciliationPage() {
 
   return (
     <AppLayout>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Cash Flow &amp; Reconciliation</h1>
-        <p className="text-gray-500 mt-1">
-          雙重核對機制 — Bridge receipt uploads with verified bank deposits
-        </p>
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Cash Flow &amp; Reconciliation</h1>
+          <p className="text-gray-500 mt-1">
+            雙重核對機制 — Bridge receipt uploads with verified bank deposits
+          </p>
+        </div>
+        {isAccountant && (
+          <div className="flex items-center gap-3">
+            <label className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer">
+              {importing ? 'Importing...' : 'Import Bank Statement (CSV/Excel)'}
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls,.txt"
+                onChange={handleImportFile}
+                disabled={importing}
+                className="hidden"
+              />
+            </label>
+          </div>
+        )}
       </div>
+
+      {importError && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+          {importError}
+        </div>
+      )}
+
+      {importResult && (
+        <div className="mb-8 bg-indigo-50 border-2 border-indigo-200 rounded-xl overflow-hidden">
+          <div className="px-6 py-4 bg-indigo-100 border-b border-indigo-200">
+            <h2 className="font-bold text-indigo-900 text-lg">Bank Statement Import Results</h2>
+            <p className="text-sm text-indigo-700 mt-1">月結單匯入 — Auto-reconciliation summary</p>
+          </div>
+          <div className="p-6 bg-white grid grid-cols-2 md:grid-cols-5 gap-4 border-b border-indigo-100">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-900">{importResult.summary.totalRows}</p>
+              <p className="text-xs text-gray-500">Deposit Rows</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-green-600">{importResult.summary.exactMatches}</p>
+              <p className="text-xs text-gray-500">Auto-Matched</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-blue-600">{importResult.summary.suggestedMatches}</p>
+              <p className="text-xs text-gray-500">Suggested</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-amber-600">{importResult.summary.unclaimedCreated}</p>
+              <p className="text-xs text-gray-500">→ Unclaimed Pool</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-400">{importResult.summary.skipped}</p>
+              <p className="text-xs text-gray-500">Skipped (dupes)</p>
+            </div>
+          </div>
+
+          {importResult.exactMatches.length > 0 && (
+            <div className="p-6 bg-white border-b border-indigo-100">
+              <h3 className="font-semibold text-green-800 mb-3">
+                Rule A — Exact Reference Matches (Bank Cleared)
+              </h3>
+              <div className="space-y-2">
+                {importResult.exactMatches.map((m) => (
+                  <div key={m.paymentId} className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
+                    <span className="text-green-600 font-bold">✓</span>
+                    <span className="font-medium">{m.invoiceNumber}</span>
+                    <span className="text-gray-500">{m.customerName}</span>
+                    <span className="font-medium">{formatCurrency(m.amount)}</span>
+                    <span className="text-gray-400 truncate flex-1">{m.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {importResult.suggestedMatches.length > 0 && (
+            <div className="p-6 bg-white border-b border-indigo-100">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-blue-800">
+                  Rule B — Suggested Matches (confirm to mark Bank Cleared)
+                </h3>
+                {isAccountant && (
+                  <button
+                    onClick={handleConfirmSuggested}
+                    disabled={selectedSuggested.size === 0 || confirming}
+                    className="px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {confirming
+                      ? 'Confirming...'
+                      : `Confirm Selected (${selectedSuggested.size})`}
+                  </button>
+                )}
+              </div>
+              <table className="w-full">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500 uppercase">
+                    <th className="pb-2 w-8"></th>
+                    <th className="pb-2">Bank Row</th>
+                    <th className="pb-2">Invoice</th>
+                    <th className="pb-2">Amount</th>
+                    <th className="pb-2">Date Diff</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-blue-50">
+                  {importResult.suggestedMatches.map((m) => (
+                    <tr key={m.paymentId} className="text-sm">
+                      <td className="py-3">
+                        {isAccountant && (
+                          <input
+                            type="checkbox"
+                            checked={selectedSuggested.has(m.paymentId)}
+                            onChange={() => toggleSuggested(m.paymentId)}
+                            className="rounded border-gray-300"
+                          />
+                        )}
+                      </td>
+                      <td className="py-3">
+                        <p className="text-gray-600 truncate max-w-xs">{m.description}</p>
+                        <p className="text-xs text-gray-400">{formatDate(m.date)}</p>
+                      </td>
+                      <td className="py-3">
+                        <span className="font-medium">{m.invoiceNumber}</span>
+                        <span className="text-gray-500 ml-1">{m.customerName}</span>
+                      </td>
+                      <td className="py-3 font-medium">{formatCurrency(m.amount)}</td>
+                      <td className="py-3 text-gray-500">
+                        ±{m.daysDiff} day{m.daysDiff !== 1 ? 's' : ''}
+                        <span className="text-xs block">Payment: {formatDate(m.paymentDate)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {importResult.unclaimedCreated.length > 0 && (
+            <div className="p-6 bg-white">
+              <h3 className="font-semibold text-amber-800 mb-3">
+                Unmatched Rows → Auto-added to Unclaimed Pool
+              </h3>
+              <div className="space-y-2">
+                {importResult.unclaimedCreated.map((u) => (
+                  <div key={u.depositId} className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+                    <span className="text-amber-600 font-bold">+</span>
+                    <span className="font-medium">{formatCurrency(u.amount)}</span>
+                    <span className="text-gray-500">{formatDate(u.date)}</span>
+                    <span className="text-gray-400 truncate flex-1">{u.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="px-6 py-3 bg-indigo-50 text-right">
+            <button
+              onClick={() => setImportResult(null)}
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <StatCard

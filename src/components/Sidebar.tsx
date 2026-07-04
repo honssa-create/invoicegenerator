@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/kitchen', label: 'Kitchen', icon: '🍲' },
   { href: '/expenses', label: 'Expenses', icon: '🧾' },
   { href: '/accounting', label: 'Accounting', icon: '📒' },
+  { href: '/cashflow', label: 'Cash Flow', icon: '💹' },
   { href: '/scan-table', label: 'Scan to Table', icon: '📊' },
   { href: '/customers', label: 'Customers', icon: '👥' },
 ];

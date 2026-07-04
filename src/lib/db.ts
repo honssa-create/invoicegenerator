@@ -277,6 +277,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
 `);
 
+// Other Income (non-product revenue) for the Cash Flow dashboard.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS other_income (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category TEXT,
+    txn_date TEXT,
+    amount REAL NOT NULL DEFAULT 0,
+    account TEXT,
+    remarks TEXT,
+    receipt_path TEXT,
+    verified INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_other_income_user ON other_income(user_id);
+`);
+
 // Integrated Kitchen Scheduling & Two-Tier Inventory System.
 db.exec(`
   CREATE TABLE IF NOT EXISTS kitchen_finished (

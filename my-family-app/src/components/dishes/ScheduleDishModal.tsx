@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppModal } from '@/components/common/AppModal';
 import { GoldButton } from '@/components/common/GoldButton';
@@ -10,7 +10,14 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import { formatDisplayDate, shiftDate, toDateString } from '@/utils/date';
+import {
+  formatDisplayDate,
+  isWithinScheduleWindow,
+  maxScheduleDate,
+  SCHEDULE_MAX_DAYS,
+  shiftDate,
+  toDateString,
+} from '@/utils/date';
 
 interface ScheduleDishModalProps {
   visible: boolean;
@@ -27,31 +34,43 @@ export function ScheduleDishModal({
 }: ScheduleDishModalProps) {
   const today = toDateString();
   const tomorrow = shiftDate(today, 1);
+  const maxDate = maxScheduleDate();
   const [selectedDate, setSelectedDate] = useState(today);
 
-  const handleConfirm = () => {
-    onSchedule(selectedDate);
-    onClose();
+  const handleDayPress = (day: { dateString: string }) => {
+    if (isWithinScheduleWindow(day.dateString)) {
+      setSelectedDate(day.dateString);
+    }
   };
 
-  const quickPick = (date: string) => {
-    setSelectedDate(date);
+  const handleConfirm = () => {
+    if (!isWithinScheduleWindow(selectedDate)) {
+      Alert.alert(
+        'Date out of range',
+        `You can only schedule up to ${SCHEDULE_MAX_DAYS} days ahead.`,
+      );
+      return;
+    }
+    onSchedule(selectedDate);
+    onClose();
   };
 
   return (
     <AppModal visible={visible} title="Schedule Dish" onClose={onClose}>
       <Text style={styles.dishName}>{dishName}</Text>
-      <Text style={styles.hint}>Choose when this dish will be served.</Text>
+      <Text style={styles.hint}>
+        Pick today, tomorrow, or any date within the next {SCHEDULE_MAX_DAYS} days.
+      </Text>
 
       <View style={styles.quickRow}>
         <GoldButton
           label="Today"
-          onPress={() => quickPick(today)}
+          onPress={() => setSelectedDate(today)}
           variant={selectedDate === today ? 'filled' : 'outline'}
         />
         <GoldButton
           label="Tomorrow"
-          onPress={() => quickPick(tomorrow)}
+          onPress={() => setSelectedDate(tomorrow)}
           variant={selectedDate === tomorrow ? 'filled' : 'outline'}
         />
       </View>
@@ -59,13 +78,15 @@ export function ScheduleDishModal({
       <View style={styles.calendarWrap}>
         <MealCalendar
           selectedDate={selectedDate}
+          minDate={today}
+          maxDate={maxDate}
           markedDates={{
             [selectedDate]: {
               selected: true,
               selectedColor: FamilyPalette.champagne,
             },
           }}
-          onDayPress={(day) => setSelectedDate(day.dateString)}
+          onDayPress={handleDayPress}
         />
       </View>
 

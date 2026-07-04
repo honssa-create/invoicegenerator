@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { getCuisineLabel } from '@/constants/cuisines';
 import {
   FamilyPalette,
   FamilyRadius,
@@ -12,16 +13,18 @@ import type { Dish } from '@/types';
 
 interface DishCardProps {
   dish: Dish;
+  ownerFlatName?: string;
   onPress?: () => void;
   onSchedule?: () => void;
-  showSchedule?: boolean;
+  canSchedule?: boolean;
 }
 
 export function DishCard({
   dish,
+  ownerFlatName,
   onPress,
   onSchedule,
-  showSchedule = true,
+  canSchedule = false,
 }: DishCardProps) {
   const handleYouTubePress = () => {
     if (dish.youtubeUrl) Linking.openURL(dish.youtubeUrl);
@@ -45,9 +48,14 @@ export function DishCard({
           </Text>
 
           <View style={styles.meta}>
+            <Text style={styles.metaText}>{getCuisineLabel(dish.cuisine)}</Text>
             <Text style={styles.metaText}>{formatCookingTime(dish.cookingTimeMinutes)}</Text>
             <Text style={styles.metaText}>{formatBudget(dish.estimatedBudget)}</Text>
           </View>
+
+          {ownerFlatName ? (
+            <Text style={styles.owner}>Flat {ownerFlatName}</Text>
+          ) : null}
 
           <View style={styles.tags}>
             <View style={styles.tag}>
@@ -69,10 +77,12 @@ export function DishCard({
       </Pressable>
 
       <View style={styles.actions}>
-        {showSchedule && onSchedule ? (
+        {canSchedule && onSchedule ? (
           <Pressable onPress={onSchedule} style={styles.scheduleButton}>
             <Text style={styles.scheduleText}>Schedule</Text>
           </Pressable>
+        ) : ownerFlatName ? (
+          <Text style={styles.viewOnly}>View only — owned by Flat {ownerFlatName}</Text>
         ) : null}
 
         {dish.youtubeUrl ? (
@@ -102,7 +112,7 @@ const styles = StyleSheet.create({
   },
   image: {
     width: 112,
-    minHeight: 140,
+    minHeight: 148,
     backgroundColor: FamilyPalette.champagneLight,
   },
   body: {
@@ -117,11 +127,17 @@ const styles = StyleSheet.create({
   },
   meta: {
     flexDirection: 'row',
-    gap: FamilySpacing.md,
+    flexWrap: 'wrap',
+    gap: FamilySpacing.sm,
   },
   metaText: {
     ...FamilyTypography.caption,
+    color: FamilyPalette.champagne,
+  },
+  owner: {
+    ...FamilyTypography.caption,
     color: FamilyPalette.charcoalMuted,
+    fontStyle: 'italic',
   },
   tags: {
     flexDirection: 'row',
@@ -136,7 +152,7 @@ const styles = StyleSheet.create({
   },
   tagText: {
     fontSize: 11,
-    color: FamilyPalette.champagne,
+    color: FamilyPalette.charcoalMuted,
     letterSpacing: 0.3,
     textTransform: 'capitalize',
   },
@@ -147,6 +163,7 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: FamilySpacing.md,
     paddingHorizontal: FamilySpacing.md,
     paddingBottom: FamilySpacing.md,
@@ -167,6 +184,12 @@ const styles = StyleSheet.create({
     color: FamilyPalette.champagne,
     fontWeight: '500',
     letterSpacing: 0.3,
+  },
+  viewOnly: {
+    ...FamilyTypography.caption,
+    fontStyle: 'italic',
+    color: FamilyPalette.charcoalMuted,
+    flex: 1,
   },
   youtubeButton: {
     paddingVertical: FamilySpacing.xs,

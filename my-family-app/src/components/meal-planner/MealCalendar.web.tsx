@@ -6,39 +6,52 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import { formatDisplayDate } from '@/utils/date';
+import { formatDisplayDate, shiftDate } from '@/utils/date';
 
 interface MealCalendarProps {
   selectedDate: string;
   markedDates: Record<string, object>;
   onDayPress: (day: { dateString: string }) => void;
+  minDate?: string;
+  maxDate?: string;
 }
 
-function shiftDate(dateString: string, days: number) {
-  const date = new Date(`${dateString}T12:00:00`);
-  date.setDate(date.getDate() + days);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-export function MealCalendar({ selectedDate, markedDates, onDayPress }: MealCalendarProps) {
+export function MealCalendar({
+  selectedDate,
+  markedDates,
+  onDayPress,
+  minDate,
+  maxDate,
+}: MealCalendarProps) {
   const hasMeals = Boolean(markedDates[selectedDate]);
+
+  const canGoBack = !minDate || selectedDate > minDate;
+  const canGoForward = !maxDate || selectedDate < maxDate;
+
+  const step = (days: number) => {
+    const next = shiftDate(selectedDate, days);
+    if (minDate && next < minDate) return;
+    if (maxDate && next > maxDate) return;
+    onDayPress({ dateString: next });
+  };
 
   return (
     <View style={styles.wrap}>
       <View style={styles.header}>
-        <Pressable onPress={() => onDayPress({ dateString: shiftDate(selectedDate, -1) })}>
-          <Text style={styles.arrow}>‹</Text>
+        <Pressable onPress={() => canGoBack && step(-1)} disabled={!canGoBack}>
+          <Text style={[styles.arrow, !canGoBack && styles.arrowDisabled]}>‹</Text>
         </Pressable>
         <Text style={styles.month}>{formatDisplayDate(selectedDate)}</Text>
-        <Pressable onPress={() => onDayPress({ dateString: shiftDate(selectedDate, 1) })}>
-          <Text style={styles.arrow}>›</Text>
+        <Pressable onPress={() => canGoForward && step(1)} disabled={!canGoForward}>
+          <Text style={[styles.arrow, !canGoForward && styles.arrowDisabled]}>›</Text>
         </Pressable>
       </View>
       {hasMeals ? <View style={styles.dot} /> : null}
-      <Text style={styles.hint}>Use arrows to browse days with meal history.</Text>
+      {maxDate ? (
+        <Text style={styles.hint}>Schedule up to {formatDisplayDate(maxDate)}</Text>
+      ) : (
+        <Text style={styles.hint}>Use arrows to pick a date.</Text>
+      )}
     </View>
   );
 }
@@ -60,6 +73,9 @@ const styles = StyleSheet.create({
     color: FamilyPalette.champagne,
     paddingHorizontal: FamilySpacing.md,
     fontWeight: '300',
+  },
+  arrowDisabled: {
+    color: FamilyPalette.border,
   },
   month: {
     ...FamilyTypography.heading,

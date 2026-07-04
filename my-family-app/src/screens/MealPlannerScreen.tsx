@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { GoldButton } from '@/components/common/GoldButton';
+import { AddFlatModal } from '@/components/flats/AddFlatModal';
 import { BudgetPlannerModal } from '@/components/meal-planner/BudgetPlannerModal';
 import { MealCalendar } from '@/components/meal-planner/MealCalendar';
 import { RandomPickModal } from '@/components/meal-planner/RandomPickModal';
@@ -18,15 +19,17 @@ import {
 import { formatBudget } from '@/utils/budgetPlanner';
 import { formatDisplayDate, toDateString } from '@/utils/date';
 import type { FlatId } from '@/types';
-import { FLATS } from '@/types';
 
 export function MealPlannerScreen() {
   const router = useRouter();
   const {
+    flats,
     activeFlat,
     setActiveFlat,
+    getFlatName,
     getDishesForDate,
     getDatesWithMeals,
+    getOtherFlats,
     getRandomDish,
   } = useAppContext();
   const [selectedDate, setSelectedDate] = useState(toDateString());
@@ -34,9 +37,14 @@ export function MealPlannerScreen() {
   const [randomDish, setRandomDish] = useState<ReturnType<typeof getRandomDish>>(null);
   const [randomVisible, setRandomVisible] = useState(false);
   const [budgetVisible, setBudgetVisible] = useState(false);
+  const [flatModalVisible, setFlatModalVisible] = useState(false);
 
-  const otherFlat = FLATS.find((f) => f.id !== viewingFlat)?.id ?? '20C';
+  useEffect(() => {
+    setViewingFlat(activeFlat);
+  }, [activeFlat]);
+
   const isReadOnly = viewingFlat !== activeFlat;
+  const otherFlats = getOtherFlats(viewingFlat);
 
   const markedDates = useMemo(() => {
     const marks: Record<string, object> = {};
@@ -57,11 +65,6 @@ export function MealPlannerScreen() {
   }, [getDatesWithMeals, viewingFlat, selectedDate]);
 
   const mealsForDay = getDishesForDate(selectedDate, viewingFlat);
-  const otherFlatMeals = getDishesForDate(selectedDate, otherFlat);
-
-  const handleDayPress = (day: { dateString: string }) => {
-    setSelectedDate(day.dateString);
-  };
 
   const handleRandomPick = () => {
     setRandomDish(getRandomDish(activeFlat));
@@ -79,17 +82,20 @@ export function MealPlannerScreen() {
           <Text style={styles.label}>Meal Planner</Text>
           <Text style={styles.title}>What We Ate</Text>
           <Text style={styles.subtitle}>
-            Each flat runs independently — peek at what neighbours are eating.
+            Shared dish library · Each flat schedules only their own dishes.
           </Text>
         </View>
 
         <FlatSwitcher
+          flats={flats}
           activeFlat={activeFlat}
           onChange={setActiveFlat}
+          onAddFlat={() => setFlatModalVisible(true)}
           label="Your Flat (manage)"
         />
 
         <FlatSwitcher
+          flats={flats}
           activeFlat={viewingFlat}
           onChange={setViewingFlat}
           label="Viewing Plan"
@@ -97,7 +103,7 @@ export function MealPlannerScreen() {
 
         {isReadOnly ? (
           <Text style={styles.readOnly}>
-            Viewing {viewingFlat} — read only. Switch to your flat ({activeFlat}) to edit.
+            Viewing {getFlatName(viewingFlat)} — read only. Your flat: {getFlatName(activeFlat)}.
           </Text>
         ) : null}
 
@@ -120,13 +126,13 @@ export function MealPlannerScreen() {
           <MealCalendar
             selectedDate={selectedDate}
             markedDates={markedDates}
-            onDayPress={handleDayPress}
+            onDayPress={(day) => setSelectedDate(day.dateString)}
           />
         </View>
 
         <View style={styles.timeline}>
           <Text style={styles.dateHeading}>
-            {viewingFlat} · {formatDisplayDate(selectedDate)}
+            {getFlatName(viewingFlat)} · {formatDisplayDate(selectedDate)}
           </Text>
 
           {mealsForDay.length > 0 ? (
@@ -152,24 +158,29 @@ export function MealPlannerScreen() {
           )}
         </View>
 
-        <View style={styles.otherSection}>
-          <Text style={styles.otherHeading}>
-            {otherFlat} is eating · {formatDisplayDate(selectedDate)}
-          </Text>
-          {otherFlatMeals.length > 0 ? (
-            otherFlatMeals.map((dish) => (
-              <Pressable
-                key={`${otherFlat}-${dish.id}`}
-                onPress={() => openDishDetail(dish.id, otherFlat)}
-                style={styles.otherItem}>
-                <Text style={styles.otherName}>{dish.name}</Text>
-                <Text style={styles.otherMeta}>{formatBudget(dish.estimatedBudget)}</Text>
-              </Pressable>
-            ))
-          ) : (
-            <Text style={styles.empty}>No meals tracked in {otherFlat}.</Text>
-          )}
-        </View>
+        {otherFlats.map((flat) => {
+          const meals = getDishesForDate(selectedDate, flat.id);
+          return (
+            <View key={flat.id} style={styles.otherSection}>
+              <Text style={styles.otherHeading}>
+                {flat.name} is eating · {formatDisplayDate(selectedDate)}
+              </Text>
+              {meals.length > 0 ? (
+                meals.map((dish) => (
+                  <Pressable
+                    key={`${flat.id}-${dish.id}`}
+                    onPress={() => openDishDetail(dish.id, flat.id)}
+                    style={styles.otherItem}>
+                    <Text style={styles.otherName}>{dish.name}</Text>
+                    <Text style={styles.otherMeta}>{formatBudget(dish.estimatedBudget)}</Text>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.empty}>No meals tracked in {flat.name}.</Text>
+              )}
+            </View>
+          );
+        })}
       </ScreenContainer>
 
       <RandomPickModal
@@ -185,6 +196,8 @@ export function MealPlannerScreen() {
         selectedDate={selectedDate}
         flatId={activeFlat}
       />
+
+      <AddFlatModal visible={flatModalVisible} onClose={() => setFlatModalVisible(false)} />
     </View>
   );
 }
@@ -278,7 +291,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: FamilyPalette.border,
     gap: FamilySpacing.sm,
-    paddingBottom: FamilySpacing.xl,
+    paddingBottom: FamilySpacing.md,
   },
   otherHeading: {
     ...FamilyTypography.label,

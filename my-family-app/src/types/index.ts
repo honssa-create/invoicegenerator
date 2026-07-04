@@ -1,9 +1,19 @@
-export type FlatId = '10J' | '20C';
+export type FlatId = string;
 
-export const FLATS: { id: FlatId; label: string }[] = [
-  { id: '10J', label: '10J' },
-  { id: '20C', label: '20C' },
-];
+export interface Flat {
+  id: FlatId;
+  name: string;
+}
+
+export type Cuisine =
+  | 'chinese'
+  | 'western'
+  | 'se-asian'
+  | 'japanese'
+  | 'korean'
+  | 'hotpot-cuisine'
+  | 'fusion'
+  | 'other';
 
 export type DishCategory = 'breakfast' | 'lunch' | 'dinner' | 'hotpot' | 'dessert';
 
@@ -32,7 +42,9 @@ export interface Dish {
   id: string;
   name: string;
   category: DishCategory;
-  flatId: FlatId;
+  cuisine: Cuisine;
+  /** Flat that owns this dish — only they can schedule it */
+  ownerFlatId: FlatId;
   imageUri: string;
   recipe: string;
   ingredients: string[];
@@ -95,7 +107,8 @@ export interface AddMemberInput {
 export interface AddDishInput {
   name: string;
   category: DishCategory;
-  flatId: FlatId;
+  cuisine: Cuisine;
+  ownerFlatId: FlatId;
   imageUri: string;
   recipe: string;
   ingredients: string[];

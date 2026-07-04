@@ -3,41 +3,50 @@ import type {
   DishActivity,
   DishComment,
   FamilyMember,
+  Flat,
   HotpotIngredient,
   MealPlansByFlat,
 } from '@/types';
 import { toDateString } from '@/utils/date';
 
+export const FLAT_10J = 'flat-10j';
+export const FLAT_20C = 'flat-20c';
+
 const today = toDateString();
 const yesterday = toDateString(new Date(Date.now() - 86400000));
+
+export const MOCK_FLATS: Flat[] = [
+  { id: FLAT_10J, name: '10J' },
+  { id: FLAT_20C, name: '20C' },
+];
 
 export const MOCK_MEMBERS: FamilyMember[] = [
   {
     id: 'm1',
     name: 'Elena Chen',
     birthday: '1990-03-14',
-    flatId: '10J',
+    flatId: FLAT_10J,
     avatarUri: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80',
   },
   {
     id: 'm2',
     name: 'James Chen',
     birthday: '1988-07-22',
-    flatId: '10J',
+    flatId: FLAT_10J,
     avatarUri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80',
   },
   {
     id: 'm3',
     name: 'Sophie Wong',
     birthday: '1992-11-05',
-    flatId: '20C',
+    flatId: FLAT_20C,
     avatarUri: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&q=80',
   },
   {
     id: 'm4',
     name: 'Marcus Lee',
     birthday: '1985-01-18',
-    flatId: '20C',
+    flatId: FLAT_20C,
   },
 ];
 
@@ -46,7 +55,8 @@ export const MOCK_DISHES: Dish[] = [
     id: 'd1',
     name: 'Shakshuka',
     category: 'breakfast',
-    flatId: '10J',
+    cuisine: 'western',
+    ownerFlatId: FLAT_10J,
     imageUri: 'https://images.unsplash.com/photo-1590412207108-878670de6f6c?w=400&q=80',
     recipe: '1. Sauté onion and peppers.\n2. Add tomatoes and spices.\n3. Crack eggs into wells and cover until set.',
     ingredients: ['eggs', 'tomatoes', 'onion', 'paprika', 'feta', 'parsley'],
@@ -59,7 +69,8 @@ export const MOCK_DISHES: Dish[] = [
     id: 'd2',
     name: 'Herb-Crusted Salmon',
     category: 'dinner',
-    flatId: '10J',
+    cuisine: 'western',
+    ownerFlatId: FLAT_10J,
     imageUri: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?w=400&q=80',
     recipe: '1. Season salmon.\n2. Press herb crust.\n3. Roast at 200°C for 12 minutes.',
     ingredients: ['salmon fillet', 'dill', 'lemon', 'butter', 'breadcrumbs', 'garlic'],
@@ -72,7 +83,8 @@ export const MOCK_DISHES: Dish[] = [
     id: 'd3',
     name: 'Tom Yum Soup',
     category: 'lunch',
-    flatId: '10J',
+    cuisine: 'se-asian',
+    ownerFlatId: FLAT_10J,
     imageUri: 'https://images.unsplash.com/photo-1548943487-a2e4e43b4853?w=400&q=80',
     recipe: '1. Simmer lemongrass broth.\n2. Add mushrooms and shrimp.\n3. Finish with lime and chili.',
     ingredients: ['lemongrass', 'galangal', 'shrimp', 'mushrooms', 'lime leaves', 'fish sauce'],
@@ -84,7 +96,8 @@ export const MOCK_DISHES: Dish[] = [
     id: 'd4',
     name: 'Tiramisu',
     category: 'dessert',
-    flatId: '20C',
+    cuisine: 'western',
+    ownerFlatId: FLAT_20C,
     imageUri: 'https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=400&q=80',
     recipe: '1. Whisk mascarpone cream.\n2. Dip ladyfingers in espresso.\n3. Layer and chill overnight.',
     ingredients: ['mascarpone', 'espresso', 'ladyfingers', 'cocoa', 'eggs', 'sugar'],
@@ -96,7 +109,8 @@ export const MOCK_DISHES: Dish[] = [
     id: 'd5',
     name: 'Classic Shabu-Shabu',
     category: 'hotpot',
-    flatId: '20C',
+    cuisine: 'hotpot-cuisine',
+    ownerFlatId: FLAT_20C,
     imageUri: 'https://images.unsplash.com/photo-1590301157893-3e5ee1b9c6f8?w=400&q=80',
     recipe: '1. Prepare kombu broth.\n2. Slice beef paper-thin.\n3. Swirl ingredients at the table.',
     ingredients: ['thin beef', 'napa cabbage', 'tofu', 'enoki', 'ponzu', 'kombu broth'],
@@ -109,7 +123,8 @@ export const MOCK_DISHES: Dish[] = [
     id: 'd6',
     name: 'Garlic Noodles',
     category: 'dinner',
-    flatId: '20C',
+    cuisine: 'chinese',
+    ownerFlatId: FLAT_20C,
     imageUri: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=400&q=80',
     recipe: '1. Boil noodles.\n2. Toss with garlic butter.\n3. Finish with scallions.',
     ingredients: ['noodles', 'garlic', 'butter', 'soy sauce', 'scallions', 'sesame oil'],
@@ -123,7 +138,7 @@ export const MOCK_COMMENTS: DishComment[] = [
   {
     id: 'c1',
     dishId: 'd2',
-    flatId: '10J',
+    flatId: FLAT_10J,
     date: today,
     author: 'Elena',
     comment: 'Salmon was perfectly flaky — kids loved it.',
@@ -135,7 +150,7 @@ export const MOCK_ACTIVITIES: DishActivity[] = [
   {
     id: 'a1',
     dishId: 'd2',
-    flatId: '10J',
+    flatId: FLAT_10J,
     type: 'planned',
     date: today,
     message: 'Added to meal plan',
@@ -144,7 +159,7 @@ export const MOCK_ACTIVITIES: DishActivity[] = [
   {
     id: 'a2',
     dishId: 'd2',
-    flatId: '10J',
+    flatId: FLAT_10J,
     type: 'comment',
     date: today,
     message: 'Elena commented: Salmon was perfectly flaky — kids loved it.',
@@ -154,11 +169,11 @@ export const MOCK_ACTIVITIES: DishActivity[] = [
 ];
 
 export const INITIAL_MEAL_PLANS: MealPlansByFlat = {
-  '10J': {
+  [FLAT_10J]: {
     [today]: ['d2'],
     [yesterday]: ['d1', 'd3'],
   },
-  '20C': {
+  [FLAT_20C]: {
     [today]: ['d6'],
     [yesterday]: ['d4', 'd5'],
   },

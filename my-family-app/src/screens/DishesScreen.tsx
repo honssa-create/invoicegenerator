@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { FloatingActionButton } from '@/components/common/FloatingActionButton';
+import { AddFlatModal } from '@/components/flats/AddFlatModal';
 import { AddDishModal } from '@/components/dishes/AddDishModal';
 import { CategoryFilter, useDishFilter } from '@/components/dishes/CategoryFilter';
 import { DishCard } from '@/components/dishes/DishCard';
@@ -21,10 +22,18 @@ import type { Dish } from '@/types';
 
 export function DishesScreen() {
   const router = useRouter();
-  const { activeFlat, setActiveFlat, getDishesForFlat, addDishToDate } = useAppContext();
-  const flatDishes = getDishesForFlat(activeFlat);
-  const { selectedCategory, setSelectedCategory, filteredItems } = useDishFilter(flatDishes);
+  const {
+    flats,
+    activeFlat,
+    setActiveFlat,
+    dishes,
+    getFlatName,
+    canScheduleDish,
+    addDishToDate,
+  } = useAppContext();
+  const { selectedCategory, setSelectedCategory, filteredItems } = useDishFilter(dishes);
   const [modalVisible, setModalVisible] = useState(false);
+  const [flatModalVisible, setFlatModalVisible] = useState(false);
   const [schedulingDish, setSchedulingDish] = useState<Dish | null>(null);
 
   const openDetail = (dishId: string) => {
@@ -33,11 +42,15 @@ export function DishesScreen() {
 
   const handleSchedule = (date: string) => {
     if (!schedulingDish) return;
-    addDishToDate(schedulingDish.id, date, activeFlat);
-    Alert.alert(
-      'Scheduled',
-      `${schedulingDish.name} added to ${formatDisplayDate(date)} (${activeFlat}).`,
-    );
+    const ok = addDishToDate(schedulingDish.id, date, activeFlat);
+    if (ok) {
+      Alert.alert(
+        'Scheduled',
+        `${schedulingDish.name} added to ${formatDisplayDate(date)} (${getFlatName(activeFlat)}).`,
+      );
+    } else {
+      Alert.alert('Cannot schedule', 'This dish belongs to another flat.');
+    }
     setSchedulingDish(null);
   };
 
@@ -46,13 +59,19 @@ export function DishesScreen() {
       <ScreenContainer>
         <View style={styles.header}>
           <Text style={styles.label}>Dishes</Text>
-          <Text style={styles.title}>The Collection</Text>
+          <Text style={styles.title}>Shared Library</Text>
           <Text style={styles.subtitle}>
-            Tap a dish for details · Schedule for today, tomorrow, or any date.
+            Browse all flats&apos; recipes · Schedule only your flat&apos;s dishes.
           </Text>
         </View>
 
-        <FlatSwitcher activeFlat={activeFlat} onChange={setActiveFlat} />
+        <FlatSwitcher
+          flats={flats}
+          activeFlat={activeFlat}
+          onChange={setActiveFlat}
+          onAddFlat={() => setFlatModalVisible(true)}
+          label="Your Flat"
+        />
 
         <CategoryFilter selected={selectedCategory} onSelect={setSelectedCategory} />
 
@@ -70,8 +89,10 @@ export function DishesScreen() {
               <DishCard
                 key={dish.id}
                 dish={dish}
+                ownerFlatName={getFlatName(dish.ownerFlatId)}
                 onPress={() => openDetail(dish.id)}
                 onSchedule={() => setSchedulingDish(dish)}
+                canSchedule={canScheduleDish(dish.id, activeFlat)}
               />
             ))
           ) : (
@@ -84,6 +105,7 @@ export function DishesScreen() {
 
       <FloatingActionButton onPress={() => setModalVisible(true)} />
       <AddDishModal visible={modalVisible} onClose={() => setModalVisible(false)} />
+      <AddFlatModal visible={flatModalVisible} onClose={() => setFlatModalVisible(false)} />
 
       <ScheduleDishModal
         visible={Boolean(schedulingDish)}

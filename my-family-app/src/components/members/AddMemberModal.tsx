@@ -14,7 +14,6 @@ import {
   FamilyTypography,
 } from '@/constants/familyTheme';
 import type { FamilyMember, FlatId } from '@/types';
-import { FLATS } from '@/types';
 
 interface AddMemberModalProps {
   visible: boolean;
@@ -23,7 +22,7 @@ interface AddMemberModalProps {
 }
 
 export function AddMemberModal({ visible, onClose, member }: AddMemberModalProps) {
-  const { activeFlat, addMember, updateMember } = useAppContext();
+  const { flats, activeFlat, addMember, updateMember } = useAppContext();
   const [name, setName] = useState(member?.name ?? '');
   const [birthday, setBirthday] = useState(member?.birthday ?? '');
   const [flatId, setFlatId] = useState<FlatId>(member?.flatId ?? activeFlat);
@@ -95,7 +94,7 @@ export function AddMemberModal({ visible, onClose, member }: AddMemberModalProps
 
       <FormField label="Flat">
         <View style={styles.flatRow}>
-          {FLATS.map((flat) => {
+          {flats.map((flat) => {
             const active = flatId === flat.id;
             return (
               <Pressable
@@ -103,7 +102,7 @@ export function AddMemberModal({ visible, onClose, member }: AddMemberModalProps
                 onPress={() => setFlatId(flat.id)}
                 style={[styles.flatChip, active && styles.flatChipActive]}>
                 <Text style={[styles.flatText, active && styles.flatTextActive]}>
-                  {flat.label}
+                  {flat.name}
                 </Text>
               </Pressable>
             );
@@ -164,16 +163,16 @@ const styles = StyleSheet.create({
   },
   flatRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: FamilySpacing.sm,
   },
   flatChip: {
-    flex: 1,
+    paddingHorizontal: FamilySpacing.md,
     paddingVertical: FamilySpacing.sm,
     borderRadius: FamilyRadius.md,
     borderWidth: 1,
     borderColor: FamilyPalette.border,
     backgroundColor: FamilyPalette.cream,
-    alignItems: 'center',
   },
   flatChipActive: {
     borderColor: FamilyPalette.champagne,

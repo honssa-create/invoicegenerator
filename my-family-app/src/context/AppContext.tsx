@@ -8,10 +8,12 @@ import {
 } from 'react';
 
 import {
+  FLAT_10J,
   INITIAL_MEAL_PLANS,
   MOCK_ACTIVITIES,
   MOCK_COMMENTS,
   MOCK_DISHES,
+  MOCK_FLATS,
   MOCK_HOTPOT_INGREDIENTS,
   MOCK_MEMBERS,
 } from '@/constants/mockData';
@@ -24,6 +26,7 @@ import type {
   DishActivity,
   DishComment,
   FamilyMember,
+  Flat,
   FlatId,
   HotpotIngredient,
   HotpotSet,
@@ -31,11 +34,14 @@ import type {
   MealPlansByFlat,
 } from '@/types';
 import { suggestDishesForBudget } from '@/utils/budgetPlanner';
-import { toDateString } from '@/utils/date';
+import { isWithinScheduleWindow, toDateString } from '@/utils/date';
 
 interface AppContextValue {
+  flats: Flat[];
   activeFlat: FlatId;
   setActiveFlat: (flat: FlatId) => void;
+  addFlat: (name: string) => FlatId;
+  getFlatName: (flatId: FlatId) => string;
   members: FamilyMember[];
   dishes: Dish[];
   hotpotIngredients: HotpotIngredient[];
@@ -44,7 +50,8 @@ interface AppContextValue {
   dishComments: DishComment[];
   dishActivities: DishActivity[];
   getMembersForFlat: (flatId: FlatId) => FamilyMember[];
-  getDishesForFlat: (flatId: FlatId) => Dish[];
+  getOwnedDishesForFlat: (flatId: FlatId) => Dish[];
+  canScheduleDish: (dishId: string, flatId?: FlatId) => boolean;
   addMember: (input: AddMemberInput) => void;
   updateMember: (id: string, input: AddMemberInput) => void;
   deleteMember: (id: string) => void;
@@ -53,10 +60,11 @@ interface AppContextValue {
   updateDishBudget: (id: string, budget: number) => void;
   deleteDish: (id: string) => void;
   getDishById: (id: string) => Dish | undefined;
-  addDishToDate: (dishId: string, date: string, flatId?: FlatId) => void;
+  addDishToDate: (dishId: string, date: string, flatId?: FlatId) => boolean;
   removeDishFromDate: (dishId: string, date: string, flatId?: FlatId) => void;
   getDishesForDate: (date: string, flatId: FlatId) => Dish[];
   getDatesWithMeals: (flatId: FlatId) => string[];
+  getOtherFlats: (flatId: FlatId) => Flat[];
   getRandomDish: (flatId?: FlatId) => Dish | null;
   suggestDishesForBudget: (request: BudgetPlanRequest, flatId?: FlatId) => Dish[];
   applyBudgetPlan: (request: BudgetPlanRequest, date: string, flatId?: FlatId) => Dish[];
@@ -81,7 +89,8 @@ function createId(prefix: string) {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [activeFlat, setActiveFlat] = useState<FlatId>('10J');
+  const [flats, setFlats] = useState<Flat[]>(MOCK_FLATS);
+  const [activeFlat, setActiveFlat] = useState<FlatId>(FLAT_10J);
   const [members, setMembers] = useState<FamilyMember[]>(MOCK_MEMBERS);
   const [dishes, setDishes] = useState<Dish[]>(MOCK_DISHES);
   const [hotpotIngredients] = useState<HotpotIngredient[]>(MOCK_HOTPOT_INGREDIENTS);
@@ -89,6 +98,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [flatMealPlans, setFlatMealPlans] = useState<MealPlansByFlat>(INITIAL_MEAL_PLANS);
   const [dishComments, setDishComments] = useState<DishComment[]>(MOCK_COMMENTS);
   const [dishActivities, setDishActivities] = useState<DishActivity[]>(MOCK_ACTIVITIES);
+
+  const getFlatName = useCallback(
+    (flatId: FlatId) => flats.find((flat) => flat.id === flatId)?.name ?? flatId,
+    [flats],
+  );
+
+  const addFlat = useCallback((name: string) => {
+    const trimmed = name.trim();
+    const id = createId('flat');
+    const newFlat: Flat = { id, name: trimmed };
+    setFlats((prev) => [...prev, newFlat]);
+    setFlatMealPlans((prev) => ({ ...prev, [id]: {} }));
+    setActiveFlat(id);
+    return id;
+  }, []);
 
   const logActivity = useCallback(
     (
@@ -125,7 +149,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: `hotpot-set-${set.id}`,
       name: set.name,
       category: 'hotpot',
-      flatId: set.flatId,
+      cuisine: 'hotpot-cuisine',
+      ownerFlatId: set.flatId,
       imageUri: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?w=400&q=80',
       recipe: `Soup base: ${set.soupBase.replace('-', ' ')}.\nSwirl ingredients at the table and enjoy together.`,
       ingredients: ingredientNames,
@@ -151,9 +176,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [members],
   );
 
-  const getDishesForFlat = useCallback(
-    (flatId: FlatId) => allDishes.filter((dish) => dish.flatId === flatId),
+  const getOwnedDishesForFlat = useCallback(
+    (flatId: FlatId) => allDishes.filter((dish) => dish.ownerFlatId === flatId),
     [allDishes],
+  );
+
+  const canScheduleDish = useCallback(
+    (dishId: string, flatId: FlatId = activeFlat) => {
+      const dish = allDishes.find((item) => item.id === dishId);
+      return dish?.ownerFlatId === flatId;
+    },
+    [activeFlat, allDishes],
+  );
+
+  const getOtherFlats = useCallback(
+    (flatId: FlatId) => flats.filter((flat) => flat.id !== flatId),
+    [flats],
   );
 
   const addMember = useCallback((input: AddMemberInput) => {
@@ -174,7 +212,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (input: AddDishInput) => {
       const id = createId('d');
       setDishes((prev) => [...prev, { id, tags: [], ...input }]);
-      logActivity(id, input.flatId, 'created', toDateString(), 'Dish added to collection');
+      logActivity(
+        id,
+        input.ownerFlatId,
+        'created',
+        toDateString(),
+        'Dish added to shared library',
+      );
     },
     [logActivity],
   );
@@ -196,7 +240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (dish) {
         logActivity(
           id,
-          dish.flatId,
+          dish.ownerFlatId,
           'budget_updated',
           toDateString(),
           `Budget updated to $${budget}`,
@@ -209,22 +253,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteDish = useCallback((id: string) => {
     setDishes((prev) => prev.filter((dish) => dish.id !== id));
     setFlatMealPlans((prev) => {
-      const next: MealPlansByFlat = { '10J': {}, '20C': {} };
-      for (const flat of ['10J', '20C'] as FlatId[]) {
-        const plan = prev[flat] ?? {};
+      const next: MealPlansByFlat = { ...prev };
+      for (const flatId of Object.keys(next)) {
+        const plan = next[flatId] ?? {};
         const cleaned: MealPlan = {};
         for (const [date, ids] of Object.entries(plan)) {
           const filtered = ids.filter((dishId) => dishId !== id);
           if (filtered.length > 0) cleaned[date] = filtered;
         }
-        next[flat] = cleaned;
+        next[flatId] = cleaned;
       }
       return next;
     });
   }, []);
 
   const addDishToDate = useCallback(
-    (dishId: string, date: string, flatId: FlatId = activeFlat) => {
+    (dishId: string, date: string, flatId: FlatId = activeFlat): boolean => {
+      const dish = allDishes.find((item) => item.id === dishId);
+      if (!dish || dish.ownerFlatId !== flatId) return false;
+      if (!isWithinScheduleWindow(date)) return false;
+
       setFlatMealPlans((prev) => {
         const plan = prev[flatId] ?? {};
         const existing = plan[date] ?? [];
@@ -234,14 +282,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           [flatId]: { ...plan, [date]: [...existing, dishId] },
         };
       });
-      const dish = allDishes.find((item) => item.id === dishId);
+
       logActivity(
         dishId,
         flatId,
         'planned',
         date,
-        `Planned for ${date}${dish ? `: ${dish.name}` : ''}`,
+        `Planned for ${date}: ${dish.name}`,
       );
+      return true;
     },
     [activeFlat, allDishes, logActivity],
   );
@@ -282,26 +331,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const getRandomDish = useCallback(
     (flatId: FlatId = activeFlat) => {
-      const pool = getDishesForFlat(flatId).filter((dish) => !dish.isHotpotSet);
+      const pool = getOwnedDishesForFlat(flatId).filter((dish) => !dish.isHotpotSet);
       if (pool.length === 0) return null;
       return pool[Math.floor(Math.random() * pool.length)];
     },
-    [activeFlat, getDishesForFlat],
+    [activeFlat, getOwnedDishesForFlat],
   );
 
   const suggestBudget = useCallback(
     (request: BudgetPlanRequest, flatId: FlatId = activeFlat) =>
-      suggestDishesForBudget(getDishesForFlat(flatId), request),
-    [activeFlat, getDishesForFlat],
+      suggestDishesForBudget(getOwnedDishesForFlat(flatId), request),
+    [activeFlat, getOwnedDishesForFlat],
   );
 
   const applyBudgetPlan = useCallback(
     (request: BudgetPlanRequest, date: string, flatId: FlatId = activeFlat) => {
-      const picks = suggestDishesForBudget(getDishesForFlat(flatId), request);
+      const picks = suggestDishesForBudget(getOwnedDishesForFlat(flatId), request);
       picks.forEach((dish) => addDishToDate(dish.id, date, flatId));
       return picks;
     },
-    [activeFlat, getDishesForFlat, addDishToDate],
+    [activeFlat, getOwnedDishesForFlat, addDishToDate],
   );
 
   const addDishComment = useCallback(
@@ -362,8 +411,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppContextValue>(
     () => ({
+      flats,
       activeFlat,
       setActiveFlat,
+      addFlat,
+      getFlatName,
       members,
       dishes: allDishes,
       hotpotIngredients,
@@ -372,7 +424,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dishComments,
       dishActivities,
       getMembersForFlat,
-      getDishesForFlat,
+      getOwnedDishesForFlat,
+      canScheduleDish,
       addMember,
       updateMember,
       deleteMember,
@@ -385,6 +438,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       removeDishFromDate,
       getDishesForDate,
       getDatesWithMeals,
+      getOtherFlats,
       getRandomDish,
       suggestDishesForBudget: suggestBudget,
       applyBudgetPlan,
@@ -396,7 +450,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       hotpotSetToDish,
     }),
     [
+      flats,
       activeFlat,
+      addFlat,
+      getFlatName,
       members,
       allDishes,
       hotpotIngredients,
@@ -405,7 +462,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dishComments,
       dishActivities,
       getMembersForFlat,
-      getDishesForFlat,
+      getOwnedDishesForFlat,
+      canScheduleDish,
       addMember,
       updateMember,
       deleteMember,
@@ -418,6 +476,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       removeDishFromDate,
       getDishesForDate,
       getDatesWithMeals,
+      getOtherFlats,
       getRandomDish,
       suggestBudget,
       applyBudgetPlan,

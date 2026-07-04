@@ -27,3 +27,15 @@ export function isToday(dateString: string): boolean {
 export function isTomorrow(dateString: string): boolean {
   return dateString === shiftDate(toDateString(), 1);
 }
+
+export const SCHEDULE_MAX_DAYS = 14;
+
+export function maxScheduleDate(from: Date = new Date()): string {
+  return shiftDate(toDateString(from), SCHEDULE_MAX_DAYS);
+}
+
+export function isWithinScheduleWindow(dateString: string, from: Date = new Date()): boolean {
+  const today = toDateString(from);
+  const max = maxScheduleDate(from);
+  return dateString >= today && dateString <= max;
+}

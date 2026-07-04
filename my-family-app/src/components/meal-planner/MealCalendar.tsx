@@ -6,14 +6,24 @@ interface MealCalendarProps {
   selectedDate: string;
   markedDates: Record<string, object>;
   onDayPress: (day: DateData) => void;
+  minDate?: string;
+  maxDate?: string;
 }
 
-export function MealCalendar({ selectedDate, markedDates, onDayPress }: MealCalendarProps) {
+export function MealCalendar({
+  selectedDate,
+  markedDates,
+  onDayPress,
+  minDate,
+  maxDate,
+}: MealCalendarProps) {
   return (
     <Calendar
       current={selectedDate}
       onDayPress={onDayPress}
       markedDates={markedDates}
+      minDate={minDate}
+      maxDate={maxDate}
       theme={{
         backgroundColor: FamilyPalette.softWhite,
         calendarBackground: FamilyPalette.softWhite,

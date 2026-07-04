@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { FloatingActionButton } from '@/components/common/FloatingActionButton';
+import { AddFlatModal } from '@/components/flats/AddFlatModal';
 import { AddMemberModal } from '@/components/members/AddMemberModal';
 import { MemberCard } from '@/components/members/MemberCard';
 import { useAppContext } from '@/context/AppContext';
@@ -15,9 +16,10 @@ import {
 import type { FamilyMember } from '@/types';
 
 export function MembersScreen() {
-  const { activeFlat, setActiveFlat, getMembersForFlat } = useAppContext();
+  const { flats, activeFlat, setActiveFlat, getFlatName, getMembersForFlat } = useAppContext();
   const members = getMembersForFlat(activeFlat);
   const [modalVisible, setModalVisible] = useState(false);
+  const [flatModalVisible, setFlatModalVisible] = useState(false);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
 
   const openAdd = () => {
@@ -37,19 +39,31 @@ export function MembersScreen() {
           <Text style={styles.label}>Members</Text>
           <Text style={styles.title}>Our Family</Text>
           <Text style={styles.subtitle}>
-            Flat {activeFlat} — the people gathered around your table.
+            Flat {getFlatName(activeFlat)} — the people gathered around your table.
           </Text>
         </View>
 
-        <FlatSwitcher activeFlat={activeFlat} onChange={setActiveFlat} />
+        <FlatSwitcher
+          flats={flats}
+          activeFlat={activeFlat}
+          onChange={setActiveFlat}
+          onAddFlat={() => setFlatModalVisible(true)}
+        />
 
         {members.length > 0 ? (
           members.map((member) => (
-            <MemberCard key={member.id} member={member} onPress={() => openEdit(member)} />
+            <MemberCard
+              key={member.id}
+              member={member}
+              flatName={getFlatName(member.flatId)}
+              onPress={() => openEdit(member)}
+            />
           ))
         ) : (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No members in {activeFlat} yet. Tap + to add.</Text>
+            <Text style={styles.emptyText}>
+              No members in {getFlatName(activeFlat)} yet. Tap + to add.
+            </Text>
           </View>
         )}
       </ScreenContainer>
@@ -61,6 +75,7 @@ export function MembersScreen() {
         onClose={() => setModalVisible(false)}
         member={editingMember}
       />
+      <AddFlatModal visible={flatModalVisible} onClose={() => setFlatModalVisible(false)} />
     </View>
   );
 }

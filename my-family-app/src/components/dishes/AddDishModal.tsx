@@ -7,6 +7,7 @@ import { AppModal } from '@/components/common/AppModal';
 import { FormField, FormInput } from '@/components/common/FormField';
 import { GoldButton } from '@/components/common/GoldButton';
 import { DISH_CATEGORIES } from '@/constants/mockData';
+import { CUISINE_OPTIONS } from '@/constants/cuisines';
 import { useAppContext } from '@/context/AppContext';
 import {
   FamilyPalette,
@@ -15,7 +16,7 @@ import {
   FamilyTypography,
 } from '@/constants/familyTheme';
 import { extractRecipeFromYoutube } from '@/services/youtubeRecipeExtractor';
-import type { Dish, DishCategory } from '@/types';
+import type { Cuisine, Dish, DishCategory } from '@/types';
 
 interface AddDishModalProps {
   visible: boolean;
@@ -29,6 +30,7 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
   const { activeFlat, addDish, updateDish } = useAppContext();
   const [name, setName] = useState(dish?.name ?? '');
   const [category, setCategory] = useState<DishCategory>(dish?.category ?? 'dinner');
+  const [cuisine, setCuisine] = useState<Cuisine>(dish?.cuisine ?? 'chinese');
   const [imageUri, setImageUri] = useState(dish?.imageUri ?? '');
   const [ingredientsText, setIngredientsText] = useState(
     dish?.ingredients?.join(', ') ?? '',
@@ -46,6 +48,7 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
   const resetAndClose = () => {
     setName('');
     setCategory('dinner');
+    setCuisine('chinese');
     setImageUri('');
     setIngredientsText('');
     setCookingTime('30');
@@ -108,7 +111,8 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
     const payload = {
       name: name.trim(),
       category,
-      flatId: dish?.flatId ?? activeFlat,
+      cuisine,
+      ownerFlatId: dish?.ownerFlatId ?? activeFlat,
       imageUri: imageUri || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
       recipe: recipe.trim(),
       ingredients: ingredientsText
@@ -173,7 +177,27 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
         <FormInput value={name} onChangeText={setName} placeholder="Dish name" />
       </FormField>
 
-      <FormField label="Category">
+      <FormField label="菜系 Cuisine">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.categoryRow}>
+            {CUISINE_OPTIONS.map((option) => {
+              const active = cuisine === option.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => setCuisine(option.id)}
+                  style={[styles.chip, active && styles.chipActive]}>
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </FormField>
+
+      <FormField label="Meal Type">
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={styles.categoryRow}>
             {CATEGORY_OPTIONS.map((option) => {

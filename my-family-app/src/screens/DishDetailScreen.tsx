@@ -14,6 +14,7 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
+import { getCuisineLabel } from '@/constants/cuisines';
 import { formatBudget, formatCookingTime } from '@/utils/budgetPlanner';
 import { formatDisplayDate, toDateString } from '@/utils/date';
 import type { FlatId } from '@/types';
@@ -27,6 +28,7 @@ export function DishDetailScreen() {
   }>();
   const {
     getDishById,
+    getFlatName,
     updateDishBudget,
     getDishActivities,
     flatMealPlans,
@@ -34,7 +36,7 @@ export function DishDetailScreen() {
 
   const dish = id ? getDishById(id) : undefined;
   const activityDate = date ?? toDateString();
-  const flatId = (flat as FlatId) ?? dish?.flatId ?? '10J';
+  const flatId = (flat as FlatId) ?? dish?.ownerFlatId ?? '';
   const [budgetInput, setBudgetInput] = useState(
     dish ? String(dish.estimatedBudget) : '0',
   );
@@ -67,7 +69,9 @@ export function DishDetailScreen() {
       <Image source={{ uri: dish.imageUri }} style={styles.hero} contentFit="cover" />
 
       <View style={styles.header}>
-        <Text style={styles.label}>{dish.category} · {flatId}</Text>
+        <Text style={styles.label}>
+          {dish.category} · {getCuisineLabel(dish.cuisine)} · Flat {getFlatName(dish.ownerFlatId)}
+        </Text>
         <Text style={styles.title}>{dish.name}</Text>
       </View>
 

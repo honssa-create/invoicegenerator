@@ -11,10 +11,11 @@ import type { FamilyMember } from '@/types';
 
 interface MemberCardProps {
   member: FamilyMember;
+  flatName?: string;
   onPress?: () => void;
 }
 
-export function MemberCard({ member, onPress }: MemberCardProps) {
+export function MemberCard({ member, flatName, onPress }: MemberCardProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -28,7 +29,7 @@ export function MemberCard({ member, onPress }: MemberCardProps) {
       )}
 
       <View style={styles.info}>
-        <Text style={styles.flatBadge}>{member.flatId}</Text>
+        <Text style={styles.flatBadge}>{flatName ?? member.flatId}</Text>
         <Text style={styles.name}>{member.name}</Text>
         <Text style={styles.birthday}>{member.birthday}</Text>
       </View>

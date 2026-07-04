@@ -112,6 +112,26 @@ export const KITCHEN_COMPLETION_ACTIVITY_PREFIX = '[Kitchen Production Completed
 export interface PrepCompletionSplit {
   label: string;
   qty: number;
+  flavor?: PrepFlavor;
+}
+
+/** One split row per active flavor: label = 口味 + 容量, qty = 實際生產樽數. */
+export function defaultCompletionSplits(
+  calc: PrepCalculation,
+  capacity: PrepCapacity
+): PrepCompletionSplit[] {
+  const capLabel = PREP_CAPACITY_LABELS[capacity];
+  return calc.rows
+    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .map((r) => ({
+      label: `${r.label} ${capLabel}`,
+      qty: r.actualQty,
+      flavor: r.flavor,
+    }));
+}
+
+export function completionSplitsTotal(splits: PrepCompletionSplit[]): number {
+  return splits.reduce((sum, row) => sum + Math.max(0, row.qty), 0);
 }
 
 export function buildKitchenCompletionActivityBody(

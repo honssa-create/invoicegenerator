@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   COMPLETION_EXCEPTION_TAGS,
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
+  completionSplitsTotal,
   computePrepCalculation,
+  defaultCompletionSplits,
   originalOrderQuantity,
   type PrepCompletionSplit,
   type PrepOrder,
@@ -17,16 +19,16 @@ interface CompletionModalProps {
   onCompleted: (order: PrepOrder) => void;
 }
 
-function defaultSplits(orderQty: number): PrepCompletionSplit[] {
-  return [{ label: 'Sub-order 1', qty: orderQty }];
-}
-
 export default function CompletionModal({ order, onClose, onCompleted }: CompletionModalProps) {
-  const calc = computePrepCalculation(order.capacity, order.order_type, {
-    osmanthus: order.qty_osmanthus,
-    red_date: order.qty_red_date,
-    rock_sugar: order.qty_rock_sugar,
-  });
+  const calc = useMemo(
+    () =>
+      computePrepCalculation(order.capacity, order.order_type, {
+        osmanthus: order.qty_osmanthus,
+        red_date: order.qty_red_date,
+        rock_sugar: order.qty_rock_sugar,
+      }),
+    [order]
+  );
   const expectedQty = calc.totals.bottles;
   const orderQty = originalOrderQuantity({
     osmanthus: order.qty_osmanthus,
@@ -34,24 +36,21 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
     rock_sugar: order.qty_rock_sugar,
   });
 
-  const [actualQty, setActualQty] = useState(expectedQty);
+  const [splits, setSplits] = useState<PrepCompletionSplit[]>(() =>
+    defaultCompletionSplits(calc, order.capacity)
+  );
   const [remarks, setRemarks] = useState('');
-  const [splits, setSplits] = useState<PrepCompletionSplit[]>(() => defaultSplits(orderQty));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setActualQty(expectedQty);
+    setSplits(defaultCompletionSplits(calc, order.capacity));
     setRemarks('');
-    setSplits(defaultSplits(orderQty));
     setError('');
-  }, [order.id, expectedQty, orderQty]);
+  }, [order.id, calc, order.capacity]);
 
-  const splitSum = splits.reduce((s, row) => s + row.qty, 0);
-
-  const step = (delta: number) => {
-    setActualQty((v) => Math.max(0, v + delta));
-  };
+  const actualQty = completionSplitsTotal(splits);
+  const hasVariance = actualQty !== expectedQty;
 
   const appendTag = (text: string) => {
     setRemarks((prev) => {
@@ -62,22 +61,22 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
     });
   };
 
-  const updateSplit = (index: number, patch: Partial<PrepCompletionSplit>) => {
-    setSplits((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  const updateSplitQty = (index: number, qty: number) => {
+    setSplits((rows) => rows.map((row, i) => (i === index ? { ...row, qty: Math.max(0, qty) } : row)));
   };
 
-  const addSplit = () => {
-    setSplits((rows) => [...rows, { label: `Sub-order ${rows.length + 1}`, qty: 0 }]);
-  };
-
-  const removeSplit = (index: number) => {
-    setSplits((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)));
+  const stepSplit = (index: number, delta: number) => {
+    setSplits((rows) =>
+      rows.map((row, i) =>
+        i === index ? { ...row, qty: Math.max(0, row.qty + delta) } : row
+      )
+    );
   };
 
   const submit = async () => {
     setError('');
-    if (splitSum !== actualQty) {
-      setError(`Split quantities must sum to actual yield (${actualQty} 樽). Current sum: ${splitSum} 樽.`);
+    if (splits.length === 0) {
+      setError('No flavor lines to complete — add order quantities first.');
       return;
     }
     setSubmitting(true);
@@ -99,8 +98,6 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
     onCompleted(data.order);
   };
 
-  const hasVariance = actualQty !== expectedQty;
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
       <div
@@ -121,117 +118,98 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             <div className="p-4 bg-red-50 text-red-700 text-base rounded-xl border border-red-200">{error}</div>
           )}
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-5">
-              <p className="text-sm font-medium text-gray-500 mb-2">Expected Production Qty 預期產量</p>
-              <p className="text-5xl font-bold text-gray-900 tabular-nums">{expectedQty}</p>
-              <p className="text-sm text-gray-500 mt-2">樽 (actual production incl. buffer)</p>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-500 mb-1">Expected 預期產量</p>
+              <p className="text-4xl font-bold text-gray-900 tabular-nums">{expectedQty}</p>
+              <p className="text-xs text-gray-500 mt-1">樽 (incl. buffer)</p>
             </div>
-            <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-5">
-              <p className="text-sm font-medium text-gray-500 mb-2">Original Order Qty 原訂單樽數</p>
-              <p className="text-5xl font-bold text-gray-700 tabular-nums">{orderQty}</p>
-              <p className="text-sm text-gray-500 mt-2">樽 (excl. wedding +3 buffer)</p>
+            <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-500 mb-1">Original 原訂單</p>
+              <p className="text-4xl font-bold text-gray-700 tabular-nums">{orderQty}</p>
+              <p className="text-xs text-gray-500 mt-1">樽 (excl. buffer)</p>
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-600 mb-3">Actual Yield Qty 實際產出數量</label>
-            <div className="flex items-stretch gap-3">
-              <button
-                type="button"
-                onClick={() => step(-1)}
-                className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 text-3xl font-bold rounded-xl border-2 border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-800"
-                aria-label="Decrease quantity"
-              >
-                −
-              </button>
-              <input
-                type="number"
-                min={0}
-                inputMode="numeric"
-                value={actualQty}
-                onChange={(e) => setActualQty(Math.max(0, Number(e.target.value) || 0))}
-                className={`flex-1 min-w-0 text-center text-4xl sm:text-5xl font-bold rounded-xl border-2 px-2 py-4 outline-none focus:ring-4 focus:ring-brand-200 ${
-                  hasVariance ? 'border-red-400 bg-red-50 text-red-800' : 'border-brand-300 bg-white text-brand-900'
+            <div
+              className={`rounded-xl border-2 p-4 ${
+                hasVariance ? 'border-red-300 bg-red-50' : 'border-brand-300 bg-brand-50'
+              }`}
+            >
+              <p className="text-sm font-medium text-gray-500 mb-1">Actual Yield 實際產出</p>
+              <p
+                className={`text-4xl font-bold tabular-nums ${
+                  hasVariance ? 'text-red-800' : 'text-brand-800'
                 }`}
-              />
-              <button
-                type="button"
-                onClick={() => step(1)}
-                className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 text-3xl font-bold rounded-xl border-2 border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-800"
-                aria-label="Increase quantity"
               >
-                +
-              </button>
-            </div>
-            {hasVariance && (
-              <p className="mt-3 text-base font-medium text-red-600">
-                Variance 差異: {actualQty - expectedQty > 0 ? '+' : ''}{actualQty - expectedQty} 樽 vs expected
+                {actualQty}
               </p>
-            )}
+              <p className="text-xs text-gray-500 mt-1">樽 (auto-sum of splits)</p>
+            </div>
           </div>
 
+          {hasVariance && (
+            <p className="text-base font-medium text-red-600 -mt-2">
+              Variance 差異: {actualQty - expectedQty > 0 ? '+' : ''}{actualQty - expectedQty} 樽 vs expected
+            </p>
+          )}
+
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-medium text-gray-600">Quantity Split 分拆子訂單</label>
-              <button
-                type="button"
-                onClick={addSplit}
-                className="min-h-[44px] px-4 text-sm font-semibold rounded-lg border-2 border-brand-200 text-brand-700 hover:bg-brand-50"
-              >
-                + Add Split 新增分拆
-              </button>
-            </div>
+            <label className="block text-sm font-medium text-gray-600 mb-3">
+              Quantity Split 分拆子訂單（口味 + 容量）
+            </label>
             <p className="text-xs text-gray-500 mb-3">
-              Default matches original order qty ({orderQty} 樽). Split rows must sum to actual yield ({actualQty} 樽).
+              Pre-filled per flavor. Adjust qty if bottles broke — actual yield updates automatically.
             </p>
             <div className="space-y-3">
-              {splits.map((row, index) => (
-                <div key={index} className="flex flex-wrap items-center gap-3 p-4 rounded-xl border-2 border-gray-200 bg-gray-50">
-                  <input
-                    value={row.label}
-                    onChange={(e) => updateSplit(index, { label: e.target.value })}
-                    className="flex-1 min-w-[140px] px-3 py-3 text-base rounded-lg border border-gray-300"
-                    placeholder="Sub-order label"
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => updateSplit(index, { qty: Math.max(0, row.qty - 1) })}
-                      className="w-12 h-12 text-xl font-bold rounded-lg border-2 border-gray-300 bg-white"
-                    >
-                      −
-                    </button>
-                    <input
-                      type="number"
-                      min={0}
-                      value={row.qty}
-                      onChange={(e) => updateSplit(index, { qty: Math.max(0, Number(e.target.value) || 0) })}
-                      className="w-20 text-center text-2xl font-bold rounded-lg border-2 border-brand-300 py-2"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => updateSplit(index, { qty: row.qty + 1 })}
-                      className="w-12 h-12 text-xl font-bold rounded-lg border-2 border-gray-300 bg-white"
-                    >
-                      +
-                    </button>
+              {splits.map((row, index) => {
+                const calcRow = calc.rows.find((r) => r.flavor === row.flavor);
+                return (
+                  <div
+                    key={row.flavor ?? index}
+                    className="flex flex-wrap items-center gap-3 p-4 rounded-xl border-2 border-gray-200 bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-[180px]">
+                      <p className="text-base font-bold text-gray-900">{row.label}</p>
+                      {calcRow && calcRow.weddingBuffer > 0 && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Expected {calcRow.actualQty} ({calcRow.orderQty} + {calcRow.weddingBuffer} buffer)
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => stepSplit(index, -1)}
+                        className="w-14 h-14 text-2xl font-bold rounded-xl border-2 border-gray-300 bg-white hover:bg-gray-100"
+                        aria-label="Decrease"
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        inputMode="numeric"
+                        value={row.qty}
+                        onChange={(e) => updateSplitQty(index, Number(e.target.value) || 0)}
+                        className="w-24 text-center text-3xl font-bold rounded-xl border-2 border-brand-300 py-2 tabular-nums"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => stepSplit(index, 1)}
+                        className="w-14 h-14 text-2xl font-bold rounded-xl border-2 border-gray-300 bg-white hover:bg-gray-100"
+                        aria-label="Increase"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
-                  {splits.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeSplit(index)}
-                      className="min-h-[44px] px-3 text-sm text-red-600 font-medium"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
-            <p className={`mt-2 text-sm font-medium ${splitSum === actualQty ? 'text-green-700' : 'text-red-600'}`}>
-              Split total: {splitSum} / {actualQty} 樽
-            </p>
+            {splits.length === 0 && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                No flavors with order quantity — cannot complete.
+              </p>
+            )}
           </div>
 
           <div>
@@ -270,7 +248,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
           <button
             type="button"
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || splits.length === 0}
             className="order-1 sm:order-2 flex-[2] min-h-[56px] text-lg font-bold rounded-xl bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:opacity-50 shadow-lg"
           >
             {submitting ? 'Submitting…' : 'Submit & Complete 確認完成'}

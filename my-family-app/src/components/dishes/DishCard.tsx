@@ -7,21 +7,30 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
+import { formatBudget, formatCookingTime } from '@/utils/budgetPlanner';
 import type { Dish } from '@/types';
 
 interface DishCardProps {
   dish: Dish;
+  onPress?: () => void;
   onSelectTonight?: () => void;
   showSelectTonight?: boolean;
 }
 
-export function DishCard({ dish, onSelectTonight, showSelectTonight = true }: DishCardProps) {
+export function DishCard({
+  dish,
+  onPress,
+  onSelectTonight,
+  showSelectTonight = true,
+}: DishCardProps) {
   const handleYouTubePress = () => {
     if (dish.youtubeUrl) Linking.openURL(dish.youtubeUrl);
   };
 
   return (
-    <View style={styles.card}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.card, pressed && onPress && styles.pressed]}>
       <Image
         source={{ uri: dish.imageUri }}
         style={styles.image}
@@ -34,11 +43,16 @@ export function DishCard({ dish, onSelectTonight, showSelectTonight = true }: Di
           {dish.name}
         </Text>
 
+        <View style={styles.meta}>
+          <Text style={styles.metaText}>{formatCookingTime(dish.cookingTimeMinutes)}</Text>
+          <Text style={styles.metaText}>{formatBudget(dish.estimatedBudget)}</Text>
+        </View>
+
         <View style={styles.tags}>
           <View style={styles.tag}>
             <Text style={styles.tagText}>{dish.category}</Text>
           </View>
-          {dish.tags.map((tag) => (
+          {dish.tags.slice(0, 2).map((tag) => (
             <View key={tag} style={styles.tag}>
               <Text style={styles.tagText}>{tag}</Text>
             </View>
@@ -53,19 +67,29 @@ export function DishCard({ dish, onSelectTonight, showSelectTonight = true }: Di
 
         <View style={styles.actions}>
           {showSelectTonight && onSelectTonight ? (
-            <Pressable onPress={onSelectTonight} style={styles.selectButton}>
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation?.();
+                onSelectTonight();
+              }}
+              style={styles.selectButton}>
               <Text style={styles.selectText}>Select for Tonight</Text>
             </Pressable>
           ) : null}
 
           {dish.youtubeUrl ? (
-            <Pressable onPress={handleYouTubePress} style={styles.youtubeButton}>
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation?.();
+                handleYouTubePress();
+              }}
+              style={styles.youtubeButton}>
               <Text style={styles.youtubeText}>YouTube</Text>
             </Pressable>
           ) : null}
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -79,9 +103,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: FamilySpacing.md,
   },
+  pressed: {
+    opacity: 0.92,
+  },
   image: {
     width: 112,
-    minHeight: 140,
+    minHeight: 148,
     backgroundColor: FamilyPalette.champagneLight,
   },
   body: {
@@ -93,6 +120,14 @@ const styles = StyleSheet.create({
   title: {
     ...FamilyTypography.heading,
     fontSize: 17,
+  },
+  meta: {
+    flexDirection: 'row',
+    gap: FamilySpacing.md,
+  },
+  metaText: {
+    ...FamilyTypography.caption,
+    color: FamilyPalette.charcoalMuted,
   },
   tags: {
     flexDirection: 'row',

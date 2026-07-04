@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { GoldButton } from '@/components/common/GoldButton';
+import { BudgetPlannerModal } from '@/components/meal-planner/BudgetPlannerModal';
 import { MealCalendar } from '@/components/meal-planner/MealCalendar';
 import { RandomPickModal } from '@/components/meal-planner/RandomPickModal';
 import { useAppContext } from '@/context/AppContext';
@@ -12,13 +14,16 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
+import { formatBudget } from '@/utils/budgetPlanner';
 import { formatDisplayDate, toDateString } from '@/utils/date';
 
 export function MealPlannerScreen() {
+  const router = useRouter();
   const { getDishesForDate, getDatesWithMeals, getRandomDish } = useAppContext();
   const [selectedDate, setSelectedDate] = useState(toDateString());
   const [randomDish, setRandomDish] = useState<ReturnType<typeof getRandomDish>>(null);
   const [randomVisible, setRandomVisible] = useState(false);
+  const [budgetVisible, setBudgetVisible] = useState(false);
 
   const markedDates = useMemo(() => {
     const marks: Record<string, object> = {};
@@ -49,6 +54,10 @@ export function MealPlannerScreen() {
     setRandomVisible(true);
   };
 
+  const openDishDetail = (dishId: string) => {
+    router.push(`/dish/${dishId}?date=${selectedDate}`);
+  };
+
   return (
     <View style={styles.root}>
       <ScreenContainer>
@@ -60,11 +69,18 @@ export function MealPlannerScreen() {
           </Text>
         </View>
 
-        <GoldButton
-          label="Random Pick"
-          onPress={handleRandomPick}
-          variant="outline"
-        />
+        <View style={styles.actions}>
+          <GoldButton
+            label="Random Pick"
+            onPress={handleRandomPick}
+            variant="outline"
+          />
+          <GoldButton
+            label="Budget Planner"
+            onPress={() => setBudgetVisible(true)}
+            variant="outline"
+          />
+        </View>
 
         <View style={styles.calendarWrap}>
           <MealCalendar
@@ -79,13 +95,19 @@ export function MealPlannerScreen() {
 
           {mealsForDay.length > 0 ? (
             mealsForDay.map((dish) => (
-              <View key={dish.id} style={styles.timelineItem}>
+              <Pressable
+                key={dish.id}
+                onPress={() => openDishDetail(dish.id)}
+                style={styles.timelineItem}>
                 <View style={styles.dot} />
                 <View style={styles.timelineContent}>
                   <Text style={styles.dishName}>{dish.name}</Text>
-                  <Text style={styles.dishMeta}>{dish.category}</Text>
+                  <Text style={styles.dishMeta}>
+                    {dish.category} · {formatBudget(dish.estimatedBudget)}
+                  </Text>
+                  <Text style={styles.viewDetail}>View recipe & comments →</Text>
                 </View>
-              </View>
+              </Pressable>
             ))
           ) : (
             <Text style={styles.empty}>
@@ -100,6 +122,12 @@ export function MealPlannerScreen() {
         dish={randomDish}
         onClose={() => setRandomVisible(false)}
         onPickAgain={() => setRandomDish(getRandomDish())}
+      />
+
+      <BudgetPlannerModal
+        visible={budgetVisible}
+        onClose={() => setBudgetVisible(false)}
+        selectedDate={selectedDate}
       />
     </View>
   );
@@ -124,8 +152,12 @@ const styles = StyleSheet.create({
     marginTop: FamilySpacing.xs,
     marginBottom: FamilySpacing.md,
   },
+  actions: {
+    gap: FamilySpacing.sm,
+    marginBottom: FamilySpacing.md,
+  },
   calendarWrap: {
-    marginTop: FamilySpacing.lg,
+    marginTop: FamilySpacing.sm,
     marginBottom: FamilySpacing.xl,
     borderRadius: FamilyRadius.lg,
     borderWidth: 1,
@@ -170,6 +202,12 @@ const styles = StyleSheet.create({
     ...FamilyTypography.caption,
     textTransform: 'capitalize',
     marginTop: 2,
+  },
+  viewDetail: {
+    ...FamilyTypography.caption,
+    color: FamilyPalette.champagne,
+    marginTop: FamilySpacing.xs,
+    fontStyle: 'italic',
   },
   empty: {
     ...FamilyTypography.caption,

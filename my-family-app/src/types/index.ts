@@ -6,6 +6,10 @@ export type HotpotIngredientCategory = 'meat' | 'veggie' | 'seafood' | 'balls';
 
 export type SoupBase = 'miso' | 'tom-yum' | 'spicy-sichuan' | 'clear-broth' | 'herbal';
 
+export type BudgetMode = 'economy' | 'balanced' | 'luxury';
+
+export type DishActivityType = 'planned' | 'comment' | 'created' | 'budget_updated';
+
 export interface FamilyMember {
   id: string;
   name: string;
@@ -22,6 +26,9 @@ export interface Dish {
   category: DishCategory;
   imageUri: string;
   recipe: string;
+  ingredients: string[];
+  cookingTimeMinutes: number;
+  estimatedBudget: number;
   youtubeUrl?: string;
   tags: string[];
   isHotpotSet?: boolean;
@@ -29,6 +36,25 @@ export interface Dish {
 
 /** @deprecated Use Dish */
 export type Meal = Dish;
+
+export interface DishComment {
+  id: string;
+  dishId: string;
+  date: string;
+  author: string;
+  comment: string;
+  createdAt: string;
+}
+
+export interface DishActivity {
+  id: string;
+  dishId: string;
+  type: DishActivityType;
+  date: string;
+  message: string;
+  author?: string;
+  createdAt: string;
+}
 
 export interface HotpotIngredient {
   id: string;
@@ -56,6 +82,9 @@ export interface AddDishInput {
   category: DishCategory;
   imageUri: string;
   recipe: string;
+  ingredients: string[];
+  cookingTimeMinutes: number;
+  estimatedBudget: number;
   youtubeUrl?: string;
 }
 
@@ -63,4 +92,19 @@ export interface AddHotpotSetInput {
   name: string;
   soupBase: SoupBase;
   ingredientIds: string[];
+}
+
+export interface BudgetPlanRequest {
+  budget: number;
+  dishCount: number;
+  mode: BudgetMode;
+}
+
+export interface YoutubeRecipeExtraction {
+  name: string;
+  ingredients: string[];
+  recipe: string;
+  cookingTimeMinutes: number;
+  estimatedBudget: number;
+  imageUri?: string;
 }

@@ -1,4 +1,4 @@
-import type { Dish, FamilyMember, HotpotIngredient } from '@/types';
+import type { Dish, DishActivity, DishComment, FamilyMember, HotpotIngredient } from '@/types';
 
 export const MOCK_MEMBERS: FamilyMember[] = [
   {
@@ -21,7 +21,10 @@ export const MOCK_DISHES: Dish[] = [
     name: 'Shakshuka',
     category: 'breakfast',
     imageUri: 'https://images.unsplash.com/photo-1590412207108-878670de6f6c?w=400&q=80',
-    recipe: 'Eggs poached in spiced tomato sauce with herbs.',
+    recipe: '1. Sauté onion and peppers.\n2. Add tomatoes and spices.\n3. Crack eggs into wells and cover until set.',
+    ingredients: ['eggs', 'tomatoes', 'onion', 'paprika', 'feta', 'parsley'],
+    cookingTimeMinutes: 25,
+    estimatedBudget: 18,
     youtubeUrl: 'https://www.youtube.com/watch?v=example1',
     tags: ['Weekend', 'Warm'],
   },
@@ -30,7 +33,10 @@ export const MOCK_DISHES: Dish[] = [
     name: 'Herb-Crusted Salmon',
     category: 'dinner',
     imageUri: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?w=400&q=80',
-    recipe: 'Oven-roasted salmon with dill, lemon zest, and butter.',
+    recipe: '1. Season salmon.\n2. Press herb crust.\n3. Roast at 200°C for 12 minutes.',
+    ingredients: ['salmon fillet', 'dill', 'lemon', 'butter', 'breadcrumbs', 'garlic'],
+    cookingTimeMinutes: 35,
+    estimatedBudget: 42,
     youtubeUrl: 'https://www.youtube.com/watch?v=example2',
     tags: ['Healthy', 'Quick'],
   },
@@ -39,7 +45,10 @@ export const MOCK_DISHES: Dish[] = [
     name: 'Tom Yum Soup',
     category: 'lunch',
     imageUri: 'https://images.unsplash.com/photo-1548943487-a2e4e43b4853?w=400&q=80',
-    recipe: 'Fragrant lemongrass broth with shrimp and mushrooms.',
+    recipe: '1. Simmer lemongrass broth.\n2. Add mushrooms and shrimp.\n3. Finish with lime and chili.',
+    ingredients: ['lemongrass', 'galangal', 'shrimp', 'mushrooms', 'lime leaves', 'fish sauce'],
+    cookingTimeMinutes: 40,
+    estimatedBudget: 28,
     tags: ['Light', 'Spicy'],
   },
   {
@@ -47,7 +56,10 @@ export const MOCK_DISHES: Dish[] = [
     name: 'Tiramisu',
     category: 'dessert',
     imageUri: 'https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=400&q=80',
-    recipe: 'Espresso-soaked ladyfingers with mascarpone cream.',
+    recipe: '1. Whisk mascarpone cream.\n2. Dip ladyfingers in espresso.\n3. Layer and chill overnight.',
+    ingredients: ['mascarpone', 'espresso', 'ladyfingers', 'cocoa', 'eggs', 'sugar'],
+    cookingTimeMinutes: 30,
+    estimatedBudget: 22,
     tags: ['Indulgent'],
   },
   {
@@ -55,9 +67,43 @@ export const MOCK_DISHES: Dish[] = [
     name: 'Classic Shabu-Shabu',
     category: 'hotpot',
     imageUri: 'https://images.unsplash.com/photo-1590301157893-3e5ee1b9c6f8?w=400&q=80',
-    recipe: 'Thinly sliced beef swirled in light kombu broth.',
+    recipe: '1. Prepare kombu broth.\n2. Slice beef paper-thin.\n3. Swirl ingredients at the table.',
+    ingredients: ['thin beef', 'napa cabbage', 'tofu', 'enoki', 'ponzu', 'kombu broth'],
+    cookingTimeMinutes: 50,
+    estimatedBudget: 65,
     youtubeUrl: 'https://www.youtube.com/watch?v=example5',
     tags: ['Gathering'],
+  },
+];
+
+export const MOCK_COMMENTS: DishComment[] = [
+  {
+    id: 'c1',
+    dishId: 'd2',
+    date: new Date().toISOString().split('T')[0],
+    author: 'Elena',
+    comment: 'Salmon was perfectly flaky — kids loved it.',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+export const MOCK_ACTIVITIES: DishActivity[] = [
+  {
+    id: 'a1',
+    dishId: 'd2',
+    type: 'planned',
+    date: new Date().toISOString().split('T')[0],
+    message: 'Added to tonight\'s meal plan',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'a2',
+    dishId: 'd2',
+    type: 'comment',
+    date: new Date().toISOString().split('T')[0],
+    message: 'Elena commented: Salmon was perfectly flaky — kids loved it.',
+    author: 'Elena',
+    createdAt: new Date().toISOString(),
   },
 ];
 

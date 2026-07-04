@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppModal } from '@/components/common/AppModal';
 import { FormField, FormInput } from '@/components/common/FormField';
@@ -14,6 +14,7 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
+import { extractRecipeFromYoutube } from '@/services/youtubeRecipeExtractor';
 import type { Dish, DishCategory } from '@/types';
 
 interface AddDishModalProps {
@@ -29,13 +30,26 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
   const [name, setName] = useState(dish?.name ?? '');
   const [category, setCategory] = useState<DishCategory>(dish?.category ?? 'dinner');
   const [imageUri, setImageUri] = useState(dish?.imageUri ?? '');
+  const [ingredientsText, setIngredientsText] = useState(
+    dish?.ingredients?.join(', ') ?? '',
+  );
+  const [cookingTime, setCookingTime] = useState(
+    dish ? String(dish.cookingTimeMinutes) : '30',
+  );
+  const [budget, setBudget] = useState(
+    dish ? String(dish.estimatedBudget) : '25',
+  );
   const [recipe, setRecipe] = useState(dish?.recipe ?? '');
   const [youtubeUrl, setYoutubeUrl] = useState(dish?.youtubeUrl ?? '');
+  const [analyzing, setAnalyzing] = useState(false);
 
   const resetAndClose = () => {
     setName('');
     setCategory('dinner');
     setImageUri('');
+    setIngredientsText('');
+    setCookingTime('30');
+    setBudget('25');
     setRecipe('');
     setYoutubeUrl('');
     onClose();
@@ -60,6 +74,31 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
     }
   };
 
+  const handleAnalyzeYoutube = async () => {
+    if (!youtubeUrl.trim()) {
+      Alert.alert('YouTube link required', 'Paste a YouTube URL first.');
+      return;
+    }
+
+    try {
+      setAnalyzing(true);
+      const extracted = await extractRecipeFromYoutube(youtubeUrl.trim());
+      setName(extracted.name);
+      setIngredientsText(extracted.ingredients.join(', '));
+      setRecipe(extracted.recipe);
+      setCookingTime(String(extracted.cookingTimeMinutes));
+      setBudget(String(extracted.estimatedBudget));
+      if (extracted.imageUri) setImageUri(extracted.imageUri);
+    } catch (error) {
+      Alert.alert(
+        'AI extraction failed',
+        error instanceof Error ? error.message : 'Could not read this video.',
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   const handleSave = () => {
     if (!name.trim()) {
       Alert.alert('Name required', 'Please enter a dish name.');
@@ -71,6 +110,12 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
       category,
       imageUri: imageUri || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
       recipe: recipe.trim(),
+      ingredients: ingredientsText
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+      cookingTimeMinutes: Number(cookingTime) || 30,
+      estimatedBudget: Number(budget) || 20,
       youtubeUrl: youtubeUrl.trim() || undefined,
     };
 
@@ -88,6 +133,31 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
       visible={visible}
       title={dish ? 'Edit Dish' : 'Add Dish'}
       onClose={resetAndClose}>
+      <FormField label="YouTube Link">
+        <FormInput
+          value={youtubeUrl}
+          onChangeText={setYoutubeUrl}
+          placeholder="https://youtube.com/..."
+          autoCapitalize="none"
+          keyboardType="url"
+        />
+      </FormField>
+
+      <Pressable
+        onPress={handleAnalyzeYoutube}
+        disabled={analyzing}
+        style={[styles.aiButton, analyzing && styles.aiButtonDisabled]}>
+        {analyzing ? (
+          <ActivityIndicator color={FamilyPalette.champagne} />
+        ) : (
+          <Text style={styles.aiButtonText}>✦ Analyze with AI</Text>
+        )}
+      </Pressable>
+
+      <Text style={styles.aiHint}>
+        Paste a YouTube link — AI will draft ingredients, recipe, time & budget.
+      </Text>
+
       <Pressable onPress={pickImage} style={styles.imageWrap}>
         {imageUri ? (
           <Image source={{ uri: imageUri }} style={styles.image} contentFit="cover" />
@@ -122,22 +192,34 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
         </ScrollView>
       </FormField>
 
-      <FormField label="Recipe Notes">
+      <FormField label="Ingredients (comma separated)">
         <FormInput
-          value={recipe}
-          onChangeText={setRecipe}
-          placeholder="Ingredients, steps, notes..."
+          value={ingredientsText}
+          onChangeText={setIngredientsText}
+          placeholder="egg, tomato, onion..."
           multiline
         />
       </FormField>
 
-      <FormField label="YouTube Link">
+      <View style={styles.row}>
+        <View style={styles.half}>
+          <FormField label="Cooking Time (min)">
+            <FormInput value={cookingTime} onChangeText={setCookingTime} keyboardType="numeric" />
+          </FormField>
+        </View>
+        <View style={styles.half}>
+          <FormField label="Est. Budget ($)">
+            <FormInput value={budget} onChangeText={setBudget} keyboardType="numeric" />
+          </FormField>
+        </View>
+      </View>
+
+      <FormField label="Recipe Notes">
         <FormInput
-          value={youtubeUrl}
-          onChangeText={setYoutubeUrl}
-          placeholder="https://youtube.com/..."
-          autoCapitalize="none"
-          keyboardType="url"
+          value={recipe}
+          onChangeText={setRecipe}
+          placeholder="Steps and notes..."
+          multiline
         />
       </FormField>
 
@@ -147,6 +229,28 @@ export function AddDishModal({ visible, onClose, dish }: AddDishModalProps) {
 }
 
 const styles = StyleSheet.create({
+  aiButton: {
+    alignItems: 'center',
+    paddingVertical: FamilySpacing.md,
+    borderRadius: FamilyRadius.md,
+    borderWidth: 1,
+    borderColor: FamilyPalette.champagne,
+    backgroundColor: FamilyPalette.champagneLight,
+  },
+  aiButtonDisabled: {
+    opacity: 0.7,
+  },
+  aiButtonText: {
+    color: FamilyPalette.champagne,
+    fontSize: 15,
+    letterSpacing: 0.6,
+  },
+  aiHint: {
+    ...FamilyTypography.caption,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginBottom: FamilySpacing.sm,
+  },
   imageWrap: {
     alignSelf: 'stretch',
   },
@@ -194,5 +298,12 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: FamilyPalette.charcoal,
     fontWeight: '500',
+  },
+  row: {
+    flexDirection: 'row',
+    gap: FamilySpacing.md,
+  },
+  half: {
+    flex: 1,
   },
 });

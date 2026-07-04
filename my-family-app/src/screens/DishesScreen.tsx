@@ -25,6 +25,10 @@ export function DishesScreen() {
     addDishToDate(dishId);
   };
 
+  const openDetail = (dishId: string) => {
+    router.push(`/dish/${dishId}`);
+  };
+
   return (
     <View style={styles.root}>
       <ScreenContainer>
@@ -32,7 +36,7 @@ export function DishesScreen() {
           <Text style={styles.label}>Dishes</Text>
           <Text style={styles.title}>The Collection</Text>
           <Text style={styles.subtitle}>
-            Recipes curated for every moment at the table.
+            Tap any dish for full recipe, ingredients, time & budget.
           </Text>
         </View>
 
@@ -52,6 +56,7 @@ export function DishesScreen() {
               <DishCard
                 key={dish.id}
                 dish={dish}
+                onPress={() => openDetail(dish.id)}
                 onSelectTonight={() => handleSelectTonight(dish.id)}
               />
             ))

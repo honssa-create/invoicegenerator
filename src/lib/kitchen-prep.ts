@@ -36,26 +36,66 @@ export const PREP_STATUS_LABELS: Record<PrepStatus, string> = {
   completed: 'Completed 已完成',
 };
 
-/** Per-bottle ingredient weights (grams) — 45g 燕窩配方基準. */
-export interface PrepFormulaPerBottle {
+/** Per-bottle weights (grams) for one flavor line at a given capacity. */
+export interface FlavorFormulaPerBottle {
   birdNest: number;
-  osmanthus: number;
-  redDate: number;
+  /** Primary flavor ingredient (桂花 / 紅棗 / 冰糖 additive for this bottle type). */
+  flavorIngredient: number;
   rockSugar: number;
   slabSugar: number;
 }
 
-export const FORMULA_45G: PrepFormulaPerBottle = {
+/**
+ * Configuration dictionary: capacity → flavor → per-bottle formula.
+ * 25g uses flavor-specific recipes; 45g shares rock/slab sugar across flavors.
+ */
+export const CAPACITY_FLAVOR_FORMULAS: Partial<
+  Record<PrepCapacity, Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>>>
+> = {
+  '25g': {
+    osmanthus: {
+      birdNest: 0.4,
+      flavorIngredient: 0.072,
+      rockSugar: 0,
+      slabSugar: 2.79,
+    },
+    red_date: null, // disabled for 25g
+    rock_sugar: {
+      birdNest: 0.4,
+      flavorIngredient: 1.98,
+      rockSugar: 1.98,
+      slabSugar: 0,
+    },
+  },
+  '45g': {
+    osmanthus: {
+      birdNest: 0.8,
+      flavorIngredient: 0.13,
+      rockSugar: 3.57,
+      slabSugar: 5.03,
+    },
+    red_date: {
+      birdNest: 0.8,
+      flavorIngredient: 1.8,
+      rockSugar: 3.57,
+      slabSugar: 5.03,
+    },
+    rock_sugar: {
+      birdNest: 0.8,
+      flavorIngredient: 3.57,
+      rockSugar: 3.57,
+      slabSugar: 5.03,
+    },
+  },
+};
+
+/** @deprecated Use CAPACITY_FLAVOR_FORMULAS — kept for reference / 45g flat view. */
+export const FORMULA_45G = {
   birdNest: 0.8,
   osmanthus: 0.13,
   redDate: 1.8,
   rockSugar: 3.57,
   slabSugar: 5.03,
-};
-
-/** Formulas by capacity — only 45g is configured; 25g / 75g pending from business. */
-export const CAPACITY_FORMULAS: Partial<Record<PrepCapacity, PrepFormulaPerBottle>> = {
-  '45g': FORMULA_45G,
 };
 
 export const WEDDING_BUFFER = 3;
@@ -93,18 +133,19 @@ export interface FlavorCalcRow {
   flavorGrams: number;
   rockSugarGrams: number;
   slabSugarGrams: number;
+  formula: FlavorFormulaPerBottle | null;
   disabled?: boolean;
 }
 
 export interface PrepCalculation {
   capacity: PrepCapacity;
   orderType: PrepOrderType;
-  formula: PrepFormulaPerBottle | null;
   formulaReady: boolean;
   rows: FlavorCalcRow[];
   totals: {
     bottles: number;
     birdNestGrams: number;
+    flavorGrams: number;
     rockSugarGrams: number;
     slabSugarGrams: number;
   };
@@ -112,6 +153,23 @@ export interface PrepCalculation {
 
 export function isRedDateAllowed(capacity: PrepCapacity): boolean {
   return capacity !== '25g';
+}
+
+export function isCapacityFormulaReady(capacity: PrepCapacity): boolean {
+  const block = CAPACITY_FLAVOR_FORMULAS[capacity];
+  if (!block) return false;
+  return PREP_FLAVORS.some((f) => {
+    if (f === 'red_date' && !isRedDateAllowed(capacity)) return true;
+    return block[f] != null;
+  });
+}
+
+export function getFlavorFormula(
+  capacity: PrepCapacity,
+  flavor: PrepFlavor
+): FlavorFormulaPerBottle | null {
+  if (flavor === 'red_date' && !isRedDateAllowed(capacity)) return null;
+  return CAPACITY_FLAVOR_FORMULAS[capacity]?.[flavor] ?? null;
 }
 
 export function actualProductionQty(orderQty: number, orderType: PrepOrderType): number {
@@ -123,78 +181,67 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function calcRow(
+  flavor: PrepFlavor,
+  orderQty: number,
+  orderType: PrepOrderType,
+  capacity: PrepCapacity
+): FlavorCalcRow {
+  const disabled = flavor === 'red_date' && !isRedDateAllowed(capacity);
+  const safeOrderQty = disabled ? 0 : orderQty;
+  const weddingBuffer = orderType === 'wedding' && safeOrderQty > 0 ? WEDDING_BUFFER : 0;
+  const actualQty = actualProductionQty(safeOrderQty, orderType);
+  const formula = getFlavorFormula(capacity, flavor);
+
+  if (!formula || safeOrderQty <= 0) {
+    return {
+      flavor,
+      label: PREP_FLAVOR_LABELS[flavor],
+      orderQty: safeOrderQty,
+      actualQty: disabled ? 0 : actualQty,
+      weddingBuffer: disabled ? 0 : weddingBuffer,
+      birdNestGrams: 0,
+      flavorGrams: 0,
+      rockSugarGrams: 0,
+      slabSugarGrams: 0,
+      formula,
+      disabled,
+    };
+  }
+
+  return {
+    flavor,
+    label: PREP_FLAVOR_LABELS[flavor],
+    orderQty: safeOrderQty,
+    actualQty,
+    weddingBuffer,
+    birdNestGrams: round2(actualQty * formula.birdNest),
+    flavorGrams: round2(actualQty * formula.flavorIngredient),
+    rockSugarGrams: round2(actualQty * formula.rockSugar),
+    slabSugarGrams: round2(actualQty * formula.slabSugar),
+    formula,
+    disabled,
+  };
+}
+
 export function computePrepCalculation(
   capacity: PrepCapacity,
   orderType: PrepOrderType,
   qtys: PrepFlavorQty
 ): PrepCalculation {
-  const formula = CAPACITY_FORMULAS[capacity] ?? null;
   const flavorMap: { flavor: PrepFlavor; qty: number }[] = [
     { flavor: 'osmanthus', qty: qtys.osmanthus },
     { flavor: 'red_date', qty: qtys.red_date },
     { flavor: 'rock_sugar', qty: qtys.rock_sugar },
   ];
 
-  const rows: FlavorCalcRow[] = flavorMap
-    .filter(({ flavor, qty }) => qty > 0 || (flavor === 'red_date' && !isRedDateAllowed(capacity)))
-    .map(({ flavor, qty }) => {
-      const disabled = flavor === 'red_date' && !isRedDateAllowed(capacity);
-      const orderQty = disabled ? 0 : qty;
-      const weddingBuffer = orderType === 'wedding' && orderQty > 0 ? WEDDING_BUFFER : 0;
-      const actualQty = actualProductionQty(orderQty, orderType);
+  const rows = flavorMap.map(({ flavor, qty }) => calcRow(flavor, qty, orderType, capacity));
 
-      if (!formula) {
-        return {
-          flavor,
-          label: PREP_FLAVOR_LABELS[flavor],
-          orderQty,
-          actualQty,
-          weddingBuffer,
-          birdNestGrams: 0,
-          flavorGrams: 0,
-          rockSugarGrams: 0,
-          slabSugarGrams: 0,
-          disabled,
-        };
-      }
-
-      const flavorGrams =
-        flavor === 'osmanthus'
-          ? actualQty * formula.osmanthus
-          : flavor === 'red_date'
-            ? actualQty * formula.redDate
-            : actualQty * formula.rockSugar;
-
-      return {
-        flavor,
-        label: PREP_FLAVOR_LABELS[flavor],
-        orderQty,
-        actualQty,
-        weddingBuffer,
-        birdNestGrams: round2(actualQty * formula.birdNest),
-        flavorGrams: round2(flavorGrams),
-        rockSugarGrams: round2(actualQty * formula.rockSugar),
-        slabSugarGrams: round2(actualQty * formula.slabSugar),
-        disabled,
-      };
-    });
-
-  // Include zero-qty flavor rows that are still relevant for display when all zero
-  if (rows.length === 0) {
+  if (rows.every((r) => r.orderQty === 0)) {
     for (const flavor of PREP_FLAVORS) {
-      const disabled = flavor === 'red_date' && !isRedDateAllowed(capacity);
-      rows.push({
-        flavor,
-        label: PREP_FLAVOR_LABELS[flavor],
-        orderQty: 0,
-        actualQty: 0,
-        weddingBuffer: 0,
-        birdNestGrams: 0,
-        flavorGrams: 0,
-        rockSugarGrams: 0,
-        slabSugarGrams: 0,
-        disabled,
-      });
+      if (!rows.find((r) => r.flavor === flavor)) {
+        rows.push(calcRow(flavor, 0, orderType, capacity));
+      }
     }
   }
 
@@ -202,6 +249,7 @@ export function computePrepCalculation(
   const totals = {
     bottles: activeRows.reduce((s, r) => s + r.actualQty, 0),
     birdNestGrams: round2(activeRows.reduce((s, r) => s + r.birdNestGrams, 0)),
+    flavorGrams: round2(activeRows.reduce((s, r) => s + r.flavorGrams, 0)),
     rockSugarGrams: round2(activeRows.reduce((s, r) => s + r.rockSugarGrams, 0)),
     slabSugarGrams: round2(activeRows.reduce((s, r) => s + r.slabSugarGrams, 0)),
   };
@@ -209,13 +257,23 @@ export function computePrepCalculation(
   return {
     capacity,
     orderType,
-    formula,
-    formulaReady: formula !== null,
+    formulaReady: isCapacityFormulaReady(capacity),
     rows: rows.filter((r) => r.orderQty > 0 || !r.disabled),
     totals,
   };
 }
 
 export function formatGrams(n: number): string {
+  if (n === 0) return '—';
   return `${n.toFixed(2)}g`;
+}
+
+export function formulaSummaryForCapacity(capacity: PrepCapacity): string {
+  if (capacity === '25g') {
+    return '25g: 桂花 → 燕餅 0.4g · 桂花 0.072g · 片糖 2.79g | 冰糖 → 燕餅 0.4g · 冰糖 1.98g';
+  }
+  if (capacity === '45g') {
+    return '45g: 燕餅 0.8g · 桂花 0.13g · 紅棗 1.8g · 冰糖 3.57g · 片糖 5.03g per bottle';
+  }
+  return `${PREP_CAPACITY_LABELS[capacity]} formula pending configuration`;
 }

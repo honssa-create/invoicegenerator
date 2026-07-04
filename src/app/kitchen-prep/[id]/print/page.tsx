@@ -10,6 +10,7 @@ import {
   WEDDING_BUFFER,
   computePrepCalculation,
   formatGrams,
+  formulaSummaryForCapacity,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
 
@@ -65,8 +66,10 @@ export default function KitchenPrepPrintPage() {
             <p className="mb-6 text-sm font-medium text-brand-800 bg-brand-50 px-4 py-2 rounded">Wedding buffer applied: +{WEDDING_BUFFER} bottles per flavor (回禮訂單 +3 樽)</p>
           )}
 
+          <p className="mb-4 text-xs text-gray-600">{formulaSummaryForCapacity(order.capacity)}</p>
+
           {!calc.formulaReady ? (
-            <p className="text-amber-800 bg-amber-50 p-4 rounded">45g formula only — {PREP_CAPACITY_LABELS[order.capacity]} weights pending configuration.</p>
+            <p className="text-amber-800 bg-amber-50 p-4 rounded">{PREP_CAPACITY_LABELS[order.capacity]} formula pending configuration (25g and 45g are ready).</p>
           ) : (
             <table className="w-full border-collapse">
               <thead>
@@ -100,7 +103,7 @@ export default function KitchenPrepPrintPage() {
                     <td className="px-4 py-4" />
                     <td className="px-4 py-4 text-right text-2xl">{calc.totals.bottles}</td>
                     <td className="px-4 py-4 text-right text-xl">{formatGrams(calc.totals.birdNestGrams)}</td>
-                    <td className="px-4 py-4" />
+                    <td className="px-4 py-4 text-right text-xl">{formatGrams(calc.totals.flavorGrams)}</td>
                     <td className="px-4 py-4 text-right text-xl">{formatGrams(calc.totals.rockSugarGrams)}</td>
                     <td className="px-4 py-4 text-right text-xl">{formatGrams(calc.totals.slabSugarGrams)}</td>
                   </tr>

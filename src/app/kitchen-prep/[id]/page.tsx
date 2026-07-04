@@ -14,6 +14,7 @@ import {
   WEDDING_BUFFER,
   computePrepCalculation,
   formatGrams,
+  formulaSummaryForCapacity,
   isRedDateAllowed,
   type PrepCalculation,
   type PrepOrder,
@@ -152,7 +153,7 @@ export default function KitchenPrepDetailPage() {
         )}
         {!calc.formulaReady && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
-            Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet — only 45g is available. Please provide 25g / 75g formulas to complete calculations.
+            Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet — 25g and 45g are available. Please provide 75g formulas to complete calculations.
           </p>
         )}
       </div>
@@ -160,7 +161,7 @@ export default function KitchenPrepDetailPage() {
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
           <h2 className="text-lg font-bold text-gray-900">Kitchen Summary 備料重量總表</h2>
-          <p className="text-sm text-gray-500">45g formula · per-bottle basis (燕餅 0.8g · 桂花 0.13g · 紅棗 1.8g · 冰糖 3.57g · 片糖 5.03g)</p>
+          <p className="text-sm text-gray-500">{formulaSummaryForCapacity(order.capacity)}</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[800px]">
@@ -203,7 +204,7 @@ export default function KitchenPrepDetailPage() {
                   <td className="px-6 py-4" />
                   <td className="px-6 py-4 text-right text-2xl font-bold text-brand-800">{calc.totals.bottles} 樽</td>
                   <td className="px-6 py-4 text-right text-2xl font-bold text-brand-800">{formatGrams(calc.totals.birdNestGrams)}</td>
-                  <td className="px-6 py-4" />
+                  <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.flavorGrams)}</td>
                   <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.rockSugarGrams)}</td>
                   <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.slabSugarGrams)}</td>
                 </tr>

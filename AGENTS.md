@@ -62,7 +62,7 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLi
 ### Kitchen Prep — ingredient calculator (`/kitchen-prep`)
 - Independent **廚房備料系統** for stewed bird's-nest prep: `kitchen_prep_orders` table, logic in `src/lib/kitchen-prep.ts` + `src/lib/kitchen-prep-server.ts`.
 - **List** (`/kitchen-prep`): scheduled orders — stewing date, order ID, Daily/Wedding type, status; row click → detail.
-- **Detail** (`/kitchen-prep/[id]`): auto-calculates per-flavor weights from `CAPACITY_FORMULAS` (45g configured: 燕餅 0.8g, 桂花 0.13g, 紅棗 1.8g, 冰糖 3.57g, 片糖 5.03g per bottle). Wedding orders add +3 bottles per flavor. Red Date disabled for 25g capacity.
+- **Detail** (`/kitchen-prep/[id]`): auto-calculates per-flavor weights from `CAPACITY_FLAVOR_FORMULAS` (capacity → flavor → per-bottle grams). **25g**: Osmanthus → 燕餅 0.4g · 桂花 0.072g · 片糖 2.79g; Rock Sugar → 燕餅 0.4g · 冰糖 1.98g; Red Date disabled. **45g**: 燕餅 0.8g · 桂花 0.13g · 紅棗 1.8g · 冰糖 3.57g · 片糖 5.03g per bottle. Wedding orders add +3 bottles per flavor (actual qty × formula).
 - **Print** (`/kitchen-prep/[id]/print`): printer-friendly prep sheet (`no-print` toolbar). APIs: `GET/POST /api/kitchen-prep`, `GET/PATCH/DELETE /api/kitchen-prep/[id]`, `POST /api/kitchen-prep/import` (from bird's-nest order).
 
 ### Order Type + section boxes (dynamic entry)

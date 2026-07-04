@@ -115,7 +115,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
   CREATE INDEX IF NOT EXISTS idx_unclaimed_user ON unclaimed_deposits(user_id);
   CREATE INDEX IF NOT EXISTS idx_unclaimed_status ON unclaimed_deposits(status);
+
+  CREATE TABLE IF NOT EXISTS other_incomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    amount REAL NOT NULL,
+    income_date TEXT NOT NULL,
+    remarks TEXT,
+    created_by INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_other_incomes_user ON other_incomes(user_id);
 `);
+
+const invoiceColumns = db.prepare('PRAGMA table_info(invoices)').all() as { name: string }[];
+if (!invoiceColumns.some((c) => c.name === 'order_source')) {
+  db.exec(`ALTER TABLE invoices ADD COLUMN order_source TEXT DEFAULT 'manual' CHECK(order_source IN ('woocommerce', 'wedding', 'manual'))`);
+}
+if (!invoiceColumns.some((c) => c.name === 'external_order_id')) {
+  db.exec(`ALTER TABLE invoices ADD COLUMN external_order_id TEXT`);
+}
 
 const userColumns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
 if (!userColumns.some((c) => c.name === 'role')) {

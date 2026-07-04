@@ -4,9 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { StatCard, PaymentStatusBadge, formatCurrency } from '@/components/ui';
+import { LedgerSourceCell } from '@/components/LedgerSourceCell';
 import { formatDate } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
-import type { PaymentWithDetails, UnclaimedDepositWithDetails, InvoiceWithDetails } from '@/lib/types';
+import type {
+  PaymentWithDetails,
+  UnclaimedDepositWithDetails,
+  InvoiceWithDetails,
+  LedgerEntry,
+} from '@/lib/types';
 
 interface ReconciliationData {
   unclaimedDeposits: UnclaimedDepositWithDetails[];
@@ -16,6 +22,7 @@ interface ReconciliationData {
   bankClearedPayments: PaymentWithDetails[];
   bankClearedTotal: number;
   pendingVerificationCount: number;
+  ledger: LedgerEntry[];
 }
 
 interface ImportSummary {
@@ -79,6 +86,13 @@ export default function ReconciliationPage() {
   const [importError, setImportError] = useState('');
   const [selectedSuggested, setSelectedSuggested] = useState<Set<number>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [showOtherIncomeModal, setShowOtherIncomeModal] = useState(false);
+  const [otherIncomeForm, setOtherIncomeForm] = useState({
+    category: 'Rent',
+    amount: '',
+    income_date: new Date().toISOString().slice(0, 10),
+    remarks: '',
+  });
 
   const isAccountant = user?.role === 'accountant';
 
@@ -208,6 +222,40 @@ export default function ReconciliationPage() {
       );
       setSelectedSuggested(new Set());
       loadData();
+    }
+  };
+
+  const handleLogOtherIncome = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const res = await fetch('/api/other-incomes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(otherIncomeForm),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setShowOtherIncomeModal(false);
+      setOtherIncomeForm({
+        category: 'Rent',
+        amount: '',
+        income_date: new Date().toISOString().slice(0, 10),
+        remarks: '',
+      });
+      loadData();
+    }
+  };
+
+  const ledgerEntryTypeLabel = (entry: LedgerEntry) => {
+    switch (entry.entryType) {
+      case 'product_sale':
+        return 'Product Sale';
+      case 'other_income':
+        return 'Other Income';
+      case 'unclaimed_deposit':
+        return 'Unclaimed';
+      default:
+        return entry.entryType;
     }
   };
 
@@ -414,6 +462,111 @@ export default function ReconciliationPage() {
         />
       </div>
 
+      {/* Unified Financial Ledger */}
+      <div className="mb-8 bg-white border-2 border-gray-300 rounded-xl overflow-hidden shadow-sm">
+        <div className="px-6 py-4 bg-gray-900 text-white flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-lg">Financial Ledger</h2>
+            <p className="text-sm text-gray-300 mt-0.5">
+              Trace every dollar back to its exact origin
+            </p>
+          </div>
+          {isAccountant && (
+            <button
+              onClick={() => setShowOtherIncomeModal(true)}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-lg border border-white/20"
+            >
+              + Log Other Income
+            </button>
+          )}
+        </div>
+
+        {(!data.ledger || data.ledger.length === 0) ? (
+          <div className="p-12 text-center text-gray-500 text-sm">
+            No income entries yet. Payments, other income, and unclaimed deposits will appear here.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px]">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200">
+                  <th className="px-6 py-3">Date</th>
+                  <th className="px-6 py-3 bg-brand-50 text-brand-800 font-bold border-l-2 border-brand-200 min-w-[220px]">
+                    Source / Related Order
+                    <span className="block text-[10px] font-normal normal-case text-brand-600 mt-0.5">
+                      關聯單號
+                    </span>
+                  </th>
+                  <th className="px-6 py-3">Type</th>
+                  <th className="px-6 py-3">Amount</th>
+                  <th className="px-6 py-3">Description</th>
+                  <th className="px-6 py-3">Status</th>
+                  <th className="px-6 py-3">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.ledger?.map((entry) => (
+                  <tr key={entry.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
+                      {formatDate(entry.date)}
+                    </td>
+                    <td className="px-6 py-4 bg-brand-50/30 border-l-2 border-brand-100">
+                      <LedgerSourceCell source={entry.source} />
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {ledgerEntryTypeLabel(entry)}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-bold text-gray-900 whitespace-nowrap">
+                      {formatCurrency(entry.amount)}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+                      {entry.description}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {entry.status === 'unclaimed' ? (
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          Unlinked
+                        </span>
+                      ) : entry.status === 'recorded' ? (
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                          Recorded
+                        </span>
+                      ) : (
+                        <PaymentStatusBadge status={entry.status} />
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {entry.entryType === 'unclaimed_deposit' && entry.depositId && (
+                        <button
+                          onClick={() => openClaimModal(entry.depositId!)}
+                          className="px-3 py-1.5 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700"
+                        >
+                          Claim &amp; Link Order
+                        </button>
+                      )}
+                      {entry.entryType === 'product_sale' &&
+                        entry.status === 'pending_verification' &&
+                        entry.paymentId &&
+                        (isAccountant ? (
+                          <button
+                            onClick={() => handleVerify(entry.paymentId!)}
+                            disabled={verifyingId === entry.paymentId}
+                            className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+                          >
+                            {verifyingId === entry.paymentId ? 'Verifying...' : 'Verify'}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">Awaiting accountant</span>
+                        ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Unclaimed Deposits Pool */}
       <div className="mb-8 bg-amber-50 border-2 border-amber-300 rounded-xl overflow-hidden">
         <div className="px-6 py-4 bg-amber-100 border-b border-amber-300 flex items-center justify-between">
@@ -442,6 +595,10 @@ export default function ReconciliationPage() {
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-amber-200">
                 <th className="px-6 py-3">Date</th>
+                <th className="px-6 py-3 bg-brand-50 text-brand-800 font-bold min-w-[200px]">
+                  Source / Related Order
+                  <span className="block text-[10px] font-normal normal-case text-brand-600">關聯單號</span>
+                </th>
                 <th className="px-6 py-3">Amount</th>
                 <th className="px-6 py-3">Bank</th>
                 <th className="px-6 py-3">Reference / Remarks</th>
@@ -453,6 +610,9 @@ export default function ReconciliationPage() {
               {data.unclaimedDeposits.map((dep) => (
                 <tr key={dep.id} className="hover:bg-amber-50/50">
                   <td className="px-6 py-4 text-sm">{formatDate(dep.deposit_date)}</td>
+                  <td className="px-6 py-4 bg-brand-50/30">
+                    <LedgerSourceCell source={{ type: 'unlinked', icon: '🔴', label: 'Unlinked / 待認領' }} />
+                  </td>
                   <td className="px-6 py-4 text-sm font-bold text-amber-900">{formatCurrency(dep.amount)}</td>
                   <td className="px-6 py-4 text-sm">{dep.bank}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{dep.remarks || '—'}</td>
@@ -626,6 +786,79 @@ export default function ReconciliationPage() {
                 <button
                   type="button"
                   onClick={() => setShowLogModal(false)}
+                  className="flex-1 py-2 border border-gray-300 font-medium rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Log Other Income Modal */}
+      {showOtherIncomeModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Log Other Income</h3>
+            <p className="text-sm text-gray-500 mb-4">Record non-product income (e.g. rent, interest).</p>
+            <form onSubmit={handleLogOtherIncome} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                <select
+                  value={otherIncomeForm.category}
+                  onChange={(e) => setOtherIncomeForm({ ...otherIncomeForm, category: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                >
+                  <option value="Rent">Rent</option>
+                  <option value="Interest">Interest</option>
+                  <option value="Refund">Refund</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={otherIncomeForm.amount}
+                  onChange={(e) => setOtherIncomeForm({ ...otherIncomeForm, amount: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={otherIncomeForm.income_date}
+                  onChange={(e) => setOtherIncomeForm({ ...otherIncomeForm, income_date: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
+                <input
+                  type="text"
+                  value={otherIncomeForm.remarks}
+                  onChange={(e) => setOtherIncomeForm({ ...otherIncomeForm, remarks: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  placeholder="e.g. Office rent — July"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 py-2 bg-gray-900 text-white font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Log Income'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowOtherIncomeModal(false)}
                   className="flex-1 py-2 border border-gray-300 font-medium rounded-lg hover:bg-gray-50"
                 >
                   Cancel

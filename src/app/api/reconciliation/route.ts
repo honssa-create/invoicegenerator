@@ -5,6 +5,7 @@ import {
   getPaymentsByStatus,
   getUnclaimedDeposits,
 } from '@/lib/payments';
+import { buildFinancialLedger } from '@/lib/ledger';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -19,6 +20,7 @@ export async function GET(request: Request) {
   const unclaimedTotal = unclaimedDeposits.reduce((sum, d) => sum + d.amount, 0);
   const pendingTotal = pendingPayments.reduce((sum, p) => sum + p.amount, 0);
   const bankClearedTotal = bankClearedPayments.reduce((sum, p) => sum + p.amount, 0);
+  const ledger = buildFinancialLedger(session.userId);
 
   const user = db
     .prepare('SELECT role FROM users WHERE id = ?')
@@ -33,5 +35,6 @@ export async function GET(request: Request) {
     bankClearedTotal,
     pendingVerificationCount: pendingPayments.length,
     userRole: user?.role || 'sales',
+    ledger,
   });
 }

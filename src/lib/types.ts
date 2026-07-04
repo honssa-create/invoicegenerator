@@ -66,6 +66,51 @@ export interface ReconciliationData {
   bankClearedPayments: PaymentWithDetails[];
   bankClearedTotal: number;
   pendingVerificationCount: number;
+  ledger: LedgerEntry[];
+}
+
+export type LedgerEntryType = 'product_sale' | 'other_income' | 'unclaimed_deposit';
+
+export type OrderSource = 'woocommerce' | 'wedding' | 'manual';
+
+export interface OtherIncome {
+  id: number;
+  user_id: number;
+  category: string;
+  amount: number;
+  income_date: string;
+  remarks: string | null;
+  created_by: number;
+  created_at: string;
+}
+
+export interface OtherIncomeWithDetails extends OtherIncome {
+  created_by_name: string;
+}
+
+export interface LedgerSource {
+  type: 'order' | 'other_income' | 'unlinked' | 'linked_order';
+  label: string;
+  href?: string;
+  icon: string;
+  invoiceId?: number;
+  customerName?: string;
+  orderNumber?: string;
+  category?: string;
+}
+
+export interface LedgerEntry {
+  id: string;
+  entryType: LedgerEntryType;
+  date: string;
+  amount: number;
+  description: string;
+  status: PaymentStatus | 'unclaimed' | 'recorded';
+  source: LedgerSource;
+  paymentId?: number;
+  depositId?: number;
+  otherIncomeId?: number;
+  invoiceId?: number;
 }
 
 export interface Customer {
@@ -94,6 +139,8 @@ export interface Invoice {
   tax_rate: number;
   notes: string | null;
   terms: string | null;
+  order_source: OrderSource;
+  external_order_id: string | null;
   created_at: string;
   updated_at: string;
 }

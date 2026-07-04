@@ -65,7 +65,12 @@ export async function POST(request: Request) {
       terms,
       status = 'draft',
       items = [],
+      order_source = 'manual',
+      external_order_id,
     } = body;
+
+    const validOrderSource =
+      order_source === 'woocommerce' || order_source === 'wedding' ? order_source : 'manual';
 
     if (!customer_id || !issue_date || !due_date) {
       return NextResponse.json(
@@ -91,8 +96,8 @@ export async function POST(request: Request) {
     const createInvoice = db.transaction(() => {
       const result = db
         .prepare(
-          `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms, order_source, external_order_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           session.userId,
@@ -103,7 +108,9 @@ export async function POST(request: Request) {
           due_date,
           tax_rate,
           notes?.trim() || null,
-          terms?.trim() || null
+          terms?.trim() || null,
+          validOrderSource,
+          external_order_id?.trim() || null
         );
 
       const invoiceId = result.lastInsertRowid as number;

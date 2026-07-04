@@ -24,11 +24,14 @@ export default function AppTabs() {
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          <TabTrigger name="profiles" href="/" asChild>
-            <TabButton>Profiles</TabButton>
+          <TabTrigger name="members" href="/" asChild>
+            <TabButton>Members</TabButton>
           </TabTrigger>
-          <TabTrigger name="meal-planner" href="/meal-planner" asChild>
-            <TabButton>Meal Planner</TabButton>
+          <TabTrigger name="dishes" href="/dishes" asChild>
+            <TabButton>Dishes</TabButton>
+          </TabTrigger>
+          <TabTrigger name="planner" href="/meal-planner" asChild>
+            <TabButton>Planner</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
@@ -53,9 +56,7 @@ export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps
 export function CustomTabList(props: TabListProps) {
   return (
     <View {...props} style={styles.tabListContainer}>
-      <View style={styles.innerContainer}>
-        {props.children}
-      </View>
+      <View style={styles.innerContainer}>{props.children}</View>
     </View>
   );
 }
@@ -73,12 +74,12 @@ const styles = StyleSheet.create({
   },
   innerContainer: {
     paddingVertical: FamilySpacing.sm,
-    paddingHorizontal: FamilySpacing.md,
+    paddingHorizontal: FamilySpacing.sm,
     borderRadius: FamilyRadius.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: FamilySpacing.sm,
+    gap: FamilySpacing.xs,
     width: '100%',
     maxWidth: MaxContentWidth,
     backgroundColor: FamilyPalette.softWhite,
@@ -96,7 +97,7 @@ const styles = StyleSheet.create({
   tabButtonView: {
     flex: 1,
     paddingVertical: FamilySpacing.sm + 2,
-    paddingHorizontal: FamilySpacing.md,
+    paddingHorizontal: FamilySpacing.sm,
     borderRadius: FamilyRadius.md,
     alignItems: 'center',
   },
@@ -105,6 +106,7 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     color: FamilyPalette.charcoalMuted,
+    fontSize: 13,
   },
   tabLabelFocused: {
     color: FamilyPalette.charcoal,

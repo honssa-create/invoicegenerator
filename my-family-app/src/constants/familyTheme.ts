@@ -2,17 +2,17 @@ import { Platform } from 'react-native';
 
 /** Quiet Luxury palette — champagne gold, cream, soft white */
 export const FamilyPalette = {
-  champagne: '#C4A77D',
-  champagneLight: '#E8DCC8',
-  champagneMuted: '#D9CDB8',
+  champagne: '#D4AF37',
+  champagneLight: '#F5ECD7',
+  champagneMuted: '#E8D9A8',
   cream: '#FAF7F2',
   softWhite: '#FEFCF9',
   white: '#FFFFFF',
-  charcoal: '#2C2A28',
-  charcoalSoft: '#5C5854',
-  charcoalMuted: '#8A8580',
+  charcoal: '#2C2C2C',
+  charcoalSoft: '#5A5A5A',
+  charcoalMuted: '#9A9A9A',
   border: '#EDE8E0',
-  shadow: 'rgba(44, 42, 40, 0.06)',
+  shadow: 'rgba(44, 44, 44, 0.06)',
 } as const;
 
 export const FamilyTypography = {

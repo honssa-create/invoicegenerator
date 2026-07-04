@@ -26,6 +26,12 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow access to your photos to set avatars and dish images."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#FAF7F2",

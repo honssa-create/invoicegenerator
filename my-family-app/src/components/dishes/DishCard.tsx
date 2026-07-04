@@ -7,23 +7,23 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import type { Meal } from '@/types';
+import type { Dish } from '@/types';
 
-interface MealCardProps {
-  meal: Meal;
+interface DishCardProps {
+  dish: Dish;
+  onSelectTonight?: () => void;
+  showSelectTonight?: boolean;
 }
 
-export function MealCard({ meal }: MealCardProps) {
+export function DishCard({ dish, onSelectTonight, showSelectTonight = true }: DishCardProps) {
   const handleYouTubePress = () => {
-    if (meal.youtubeUrl) {
-      Linking.openURL(meal.youtubeUrl);
-    }
+    if (dish.youtubeUrl) Linking.openURL(dish.youtubeUrl);
   };
 
   return (
     <View style={styles.card}>
       <Image
-        source={{ uri: meal.imageUri }}
+        source={{ uri: dish.imageUri }}
         style={styles.image}
         contentFit="cover"
         transition={200}
@@ -31,28 +31,39 @@ export function MealCard({ meal }: MealCardProps) {
 
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={2}>
-          {meal.name}
+          {dish.name}
         </Text>
 
         <View style={styles.tags}>
-          {meal.tags.map((tag) => (
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>{dish.category}</Text>
+          </View>
+          {dish.tags.map((tag) => (
             <View key={tag} style={styles.tag}>
               <Text style={styles.tagText}>{tag}</Text>
             </View>
           ))}
         </View>
 
-        <Text style={styles.recipe} numberOfLines={2}>
-          {meal.recipe}
-        </Text>
-
-        {meal.youtubeUrl ? (
-          <Pressable
-            onPress={handleYouTubePress}
-            style={({ pressed }) => [styles.youtubeButton, pressed && styles.pressed]}>
-            <Text style={styles.youtubeText}>Watch on YouTube</Text>
-          </Pressable>
+        {dish.recipe ? (
+          <Text style={styles.recipe} numberOfLines={2}>
+            {dish.recipe}
+          </Text>
         ) : null}
+
+        <View style={styles.actions}>
+          {showSelectTonight && onSelectTonight ? (
+            <Pressable onPress={onSelectTonight} style={styles.selectButton}>
+              <Text style={styles.selectText}>Select for Tonight</Text>
+            </Pressable>
+          ) : null}
+
+          {dish.youtubeUrl ? (
+            <Pressable onPress={handleYouTubePress} style={styles.youtubeButton}>
+              <Text style={styles.youtubeText}>YouTube</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -67,22 +78,17 @@ const styles = StyleSheet.create({
     borderColor: FamilyPalette.border,
     overflow: 'hidden',
     marginBottom: FamilySpacing.md,
-    shadowColor: FamilyPalette.charcoal,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
   },
   image: {
     width: 112,
-    minHeight: 132,
+    minHeight: 140,
     backgroundColor: FamilyPalette.champagneLight,
   },
   body: {
     flex: 1,
     padding: FamilySpacing.md,
-    justifyContent: 'center',
     gap: FamilySpacing.sm,
+    justifyContent: 'center',
   },
   title: {
     ...FamilyTypography.heading,
@@ -103,14 +109,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: FamilyPalette.champagne,
     letterSpacing: 0.3,
+    textTransform: 'capitalize',
   },
   recipe: {
     ...FamilyTypography.caption,
     lineHeight: 18,
   },
-  youtubeButton: {
-    alignSelf: 'flex-start',
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: FamilySpacing.sm,
     marginTop: FamilySpacing.xs,
+  },
+  selectButton: {
+    paddingVertical: FamilySpacing.xs,
+  },
+  selectText: {
+    fontSize: 13,
+    color: FamilyPalette.champagne,
+    fontStyle: 'italic',
+    letterSpacing: 0.3,
+  },
+  youtubeButton: {
     paddingVertical: FamilySpacing.xs,
     paddingHorizontal: FamilySpacing.sm,
     borderRadius: FamilyRadius.sm,
@@ -120,9 +140,5 @@ const styles = StyleSheet.create({
   youtubeText: {
     fontSize: 12,
     color: FamilyPalette.champagne,
-    letterSpacing: 0.3,
-  },
-  pressed: {
-    opacity: 0.7,
   },
 });

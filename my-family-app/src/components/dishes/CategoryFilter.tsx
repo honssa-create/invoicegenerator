@@ -1,17 +1,18 @@
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { MEAL_CATEGORIES } from '@/constants/mealCategories';
+import { DISH_CATEGORIES } from '@/constants/mockData';
 import {
   FamilyPalette,
   FamilyRadius,
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import type { MealCategory } from '@/types';
+import type { DishCategoryFilter } from '@/types';
 
 interface CategoryFilterProps {
-  selected: MealCategory;
-  onSelect: (category: MealCategory) => void;
+  selected: DishCategoryFilter;
+  onSelect: (category: DishCategoryFilter) => void;
 }
 
 export function CategoryFilter({ selected, onSelect }: CategoryFilterProps) {
@@ -21,18 +22,13 @@ export function CategoryFilter({ selected, onSelect }: CategoryFilterProps) {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}>
-        {MEAL_CATEGORIES.map((category) => {
+        {DISH_CATEGORIES.map((category) => {
           const isActive = selected === category.id;
-
           return (
             <Pressable
               key={category.id}
               onPress={() => onSelect(category.id)}
-              style={({ pressed }) => [
-                styles.chip,
-                isActive && styles.chipActive,
-                pressed && styles.chipPressed,
-              ]}>
+              style={[styles.chip, isActive && styles.chipActive]}>
               <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
                 {category.label}
               </Text>
@@ -46,7 +42,7 @@ export function CategoryFilter({ selected, onSelect }: CategoryFilterProps) {
 
 const styles = StyleSheet.create({
   wrapper: {
-    marginBottom: FamilySpacing.xl,
+    marginBottom: FamilySpacing.lg,
   },
   scrollContent: {
     gap: FamilySpacing.sm,
@@ -64,9 +60,6 @@ const styles = StyleSheet.create({
     backgroundColor: FamilyPalette.champagneLight,
     borderColor: FamilyPalette.champagne,
   },
-  chipPressed: {
-    opacity: 0.85,
-  },
   chipText: {
     ...FamilyTypography.caption,
     color: FamilyPalette.charcoalMuted,
@@ -76,3 +69,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
+
+export function useDishFilter<T extends { category: string }>(items: T[]) {
+  const [selectedCategory, setSelectedCategory] = useState<DishCategoryFilter>('all');
+
+  const filteredItems = useMemo(() => {
+    if (selectedCategory === 'all') return items;
+    return items.filter((item) => item.category === selectedCategory);
+  }, [items, selectedCategory]);
+
+  return { selectedCategory, setSelectedCategory, filteredItems };
+}

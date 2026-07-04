@@ -38,12 +38,19 @@ export interface FamilyMember {
 /** @deprecated Use FamilyMember */
 export type FamilyProfile = FamilyMember;
 
+export interface RecipeComment {
+  id: string;
+  userName: string;
+  userAvatar: string;
+  text: string;
+  timestamp: string;
+}
+
 export interface Dish {
   id: string;
   name: string;
   category: DishCategory;
   cuisine: Cuisine;
-  /** Flat that owns this dish — only they can schedule it */
   ownerFlatId: FlatId;
   imageUri: string;
   recipe: string;
@@ -53,6 +60,28 @@ export interface Dish {
   youtubeUrl?: string;
   tags: string[];
   isHotpotSet?: boolean;
+  isPublic?: boolean;
+  comments?: RecipeComment[];
+  likesCount?: number;
+}
+
+/** Recipe shared in the global community pool (公海) */
+export interface PublicDish {
+  id: string;
+  sourceDishId?: string;
+  familyName: string;
+  name: string;
+  category: DishCategory;
+  cuisine: Cuisine;
+  imageUri: string;
+  recipe: string;
+  ingredients: string[];
+  cookingTimeMinutes: number;
+  estimatedBudget: number;
+  youtubeUrl?: string;
+  tags: string[];
+  comments: RecipeComment[];
+  likesCount: number;
 }
 
 /** @deprecated Use Dish */

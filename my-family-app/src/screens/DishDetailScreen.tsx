@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { FormField, FormInput } from '@/components/common/FormField';
 import { GoldButton } from '@/components/common/GoldButton';
+import { Toast } from '@/components/common/Toast';
 import { DishCommentSection } from '@/components/dishes/DishCommentSection';
 import { useAppContext } from '@/context/AppContext';
 import {
@@ -32,6 +33,7 @@ export function DishDetailScreen() {
     updateDishBudget,
     getDishActivities,
     flatMealPlans,
+    publishDishToGlobal,
   } = useAppContext();
 
   const dish = id ? getDishById(id) : undefined;
@@ -40,6 +42,24 @@ export function DishDetailScreen() {
   const [budgetInput, setBudgetInput] = useState(
     dish ? String(dish.estimatedBudget) : '0',
   );
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  const hideToast = useCallback(() => setToastVisible(false), []);
+
+  const handleShareWithCommunity = () => {
+    if (!dish || dish.isHotpotSet) return;
+    if (dish.isPublic) {
+      setToastMessage('This recipe is already shared with the community.');
+      setToastVisible(true);
+      return;
+    }
+    const ok = publishDishToGlobal(dish.id);
+    if (ok) {
+      setToastMessage('Shared with the Global Kitchen — 公海.');
+      setToastVisible(true);
+    }
+  };
 
   if (!dish) {
     return (
@@ -74,6 +94,21 @@ export function DishDetailScreen() {
         </Text>
         <Text style={styles.title}>{dish.name}</Text>
       </View>
+
+      {!dish.isHotpotSet ? (
+        <Pressable
+          onPress={handleShareWithCommunity}
+          style={({ pressed }) => [
+            styles.shareRow,
+            dish.isPublic && styles.shareRowActive,
+            pressed && styles.shareRowPressed,
+          ]}>
+          <Text style={[styles.shareLabel, dish.isPublic && styles.shareLabelActive]}>
+            {dish.isPublic ? '✓ Shared with Community' : 'Share with Community'}
+          </Text>
+          <Text style={styles.shareHint}>公海 · Global Kitchen</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.metaRow}>
         <View style={styles.metaCard}>
@@ -138,6 +173,8 @@ export function DishDetailScreen() {
           <Text style={styles.empty}>No activity recorded yet.</Text>
         )}
       </View>
+
+      <Toast message={toastMessage} visible={toastVisible} onHide={hideToast} />
     </ScreenContainer>
   );
 }
@@ -168,6 +205,39 @@ const styles = StyleSheet.create({
   title: {
     ...FamilyTypography.title,
     fontSize: 26,
+  },
+  shareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: FamilySpacing.md,
+    paddingHorizontal: FamilySpacing.lg,
+    marginBottom: FamilySpacing.lg,
+    borderRadius: FamilyRadius.md,
+    borderWidth: 1,
+    borderColor: FamilyPalette.champagneMuted,
+    backgroundColor: FamilyPalette.softWhite,
+  },
+  shareRowActive: {
+    borderColor: FamilyPalette.champagne,
+    backgroundColor: FamilyPalette.champagneLight,
+  },
+  shareRowPressed: {
+    opacity: 0.9,
+  },
+  shareLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: FamilyPalette.champagne,
+    letterSpacing: 0.3,
+  },
+  shareLabelActive: {
+    color: FamilyPalette.charcoal,
+  },
+  shareHint: {
+    ...FamilyTypography.caption,
+    fontSize: 11,
+    color: FamilyPalette.charcoalMuted,
   },
   metaRow: {
     flexDirection: 'row',

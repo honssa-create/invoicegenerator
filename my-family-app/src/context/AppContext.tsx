@@ -16,6 +16,7 @@ import {
   MOCK_FLATS,
   MOCK_HOTPOT_INGREDIENTS,
   MOCK_MEMBERS,
+  MOCK_PUBLIC_DISHES,
 } from '@/constants/mockData';
 import type {
   AddDishInput,
@@ -32,6 +33,8 @@ import type {
   HotpotSet,
   MealPlan,
   MealPlansByFlat,
+  PublicDish,
+  RecipeComment,
 } from '@/types';
 import { suggestDishesForBudget } from '@/utils/budgetPlanner';
 import { isWithinScheduleWindow, toDateString } from '@/utils/date';
@@ -49,6 +52,7 @@ interface AppContextValue {
   flatMealPlans: MealPlansByFlat;
   dishComments: DishComment[];
   dishActivities: DishActivity[];
+  publicDishes: PublicDish[];
   getMembersForFlat: (flatId: FlatId) => FamilyMember[];
   getOwnedDishesForFlat: (flatId: FlatId) => Dish[];
   canScheduleDish: (dishId: string) => boolean;
@@ -77,6 +81,9 @@ interface AppContextValue {
   ) => void;
   getDishComments: (dishId: string, date?: string) => DishComment[];
   getDishActivities: (dishId: string) => DishActivity[];
+  publishDishToGlobal: (dishId: string) => boolean;
+  addCommentToDish: (dishId: string, commentText: string) => void;
+  getPublicDishById: (id: string) => PublicDish | undefined;
   addHotpotSet: (input: AddHotpotSetInput) => HotpotSet;
   deleteHotpotSet: (id: string) => void;
   hotpotSetToDish: (set: HotpotSet) => Dish;
@@ -98,6 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [flatMealPlans, setFlatMealPlans] = useState<MealPlansByFlat>(INITIAL_MEAL_PLANS);
   const [dishComments, setDishComments] = useState<DishComment[]>(MOCK_COMMENTS);
   const [dishActivities, setDishActivities] = useState<DishActivity[]>(MOCK_ACTIVITIES);
+  const [publicDishes, setPublicDishes] = useState<PublicDish[]>(MOCK_PUBLIC_DISHES);
 
   const getFlatName = useCallback(
     (flatId: FlatId) => flats.find((flat) => flat.id === flatId)?.name ?? flatId,
@@ -208,7 +216,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addDish = useCallback(
     (input: AddDishInput) => {
       const id = createId('d');
-      setDishes((prev) => [...prev, { id, tags: [], ...input }]);
+      setDishes((prev) => [
+        ...prev,
+        { id, tags: [], isPublic: false, comments: [], likesCount: 0, ...input },
+      ]);
       logActivity(
         id,
         input.ownerFlatId,
@@ -406,6 +417,83 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setHotpotSets((prev) => prev.filter((set) => set.id !== id));
   }, []);
 
+  const getPublicDishById = useCallback(
+    (id: string) => publicDishes.find((dish) => dish.id === id),
+    [publicDishes],
+  );
+
+  const publishDishToGlobal = useCallback(
+    (dishId: string): boolean => {
+      const dish = dishes.find((item) => item.id === dishId);
+      if (!dish || dish.isHotpotSet) return false;
+
+      const familyName = `Flat ${getFlatName(dish.ownerFlatId)}`;
+
+      setDishes((prev) =>
+        prev.map((item) =>
+          item.id === dishId ? { ...item, isPublic: true } : item,
+        ),
+      );
+
+      setPublicDishes((prev) => {
+        const exists = prev.some(
+          (item) => item.sourceDishId === dishId || item.id === `pub-${dishId}`,
+        );
+        if (exists) return prev;
+
+        const published: PublicDish = {
+          id: `pub-${dishId}`,
+          sourceDishId: dishId,
+          familyName,
+          name: dish.name,
+          category: dish.category,
+          cuisine: dish.cuisine,
+          imageUri: dish.imageUri,
+          recipe: dish.recipe,
+          ingredients: dish.ingredients,
+          cookingTimeMinutes: dish.cookingTimeMinutes,
+          estimatedBudget: dish.estimatedBudget,
+          youtubeUrl: dish.youtubeUrl,
+          tags: dish.tags,
+          comments: dish.comments ?? [],
+          likesCount: dish.likesCount ?? 0,
+        };
+        return [published, ...prev];
+      });
+
+      return true;
+    },
+    [dishes, getFlatName],
+  );
+
+  const addCommentToDish = useCallback(
+    (dishId: string, commentText: string) => {
+      const trimmed = commentText.trim();
+      if (!trimmed) return;
+
+      const member =
+        members.find((item) => item.flatId === activeFlat) ?? members[0];
+      const comment: RecipeComment = {
+        id: createId('rc'),
+        userName: member?.name ?? 'Guest',
+        userAvatar:
+          member?.avatarUri ??
+          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&q=80',
+        text: trimmed,
+        timestamp: new Date().toISOString(),
+      };
+
+      setPublicDishes((prev) =>
+        prev.map((dish) =>
+          dish.id === dishId
+            ? { ...dish, comments: [...dish.comments, comment] }
+            : dish,
+        ),
+      );
+    },
+    [activeFlat, members],
+  );
+
   const value = useMemo<AppContextValue>(
     () => ({
       flats,
@@ -420,6 +508,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       flatMealPlans,
       dishComments,
       dishActivities,
+      publicDishes,
       getMembersForFlat,
       getOwnedDishesForFlat,
       canScheduleDish,
@@ -442,6 +531,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addDishComment,
       getDishComments,
       getDishActivities,
+      publishDishToGlobal,
+      addCommentToDish,
+      getPublicDishById,
       addHotpotSet,
       deleteHotpotSet,
       hotpotSetToDish,
@@ -458,6 +550,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       flatMealPlans,
       dishComments,
       dishActivities,
+      publicDishes,
       getMembersForFlat,
       getOwnedDishesForFlat,
       canScheduleDish,
@@ -480,6 +573,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addDishComment,
       getDishComments,
       getDishActivities,
+      publishDishToGlobal,
+      addCommentToDish,
+      getPublicDishById,
       addHotpotSet,
       deleteHotpotSet,
       hotpotSetToDish,

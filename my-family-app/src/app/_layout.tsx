@@ -16,6 +16,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="dish/[id]" />
+          <Stack.Screen name="community/[id]" />
           <Stack.Screen
             name="hotpot-builder"
             options={{ presentation: 'modal', animation: 'slide_from_bottom' }}

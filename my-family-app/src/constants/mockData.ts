@@ -6,6 +6,7 @@ import type {
   Flat,
   HotpotIngredient,
   MealPlansByFlat,
+  PublicDish,
 } from '@/types';
 import { toDateString } from '@/utils/date';
 
@@ -215,4 +216,78 @@ export const HOTPOT_INGREDIENT_GROUPS = [
   { id: 'veggie' as const, label: 'Veggie' },
   { id: 'seafood' as const, label: 'Seafood' },
   { id: 'balls' as const, label: 'Balls' },
+];
+
+export const MOCK_PUBLIC_DISHES: PublicDish[] = [
+  {
+    id: 'pub-m1',
+    familyName: 'The Yamamoto Family',
+    name: 'Miso-Glazed Eggplant',
+    category: 'dinner',
+    cuisine: 'japanese',
+    imageUri: 'https://images.unsplash.com/photo-1625944525533-473f1a3d54e7?w=600&q=80',
+    recipe:
+      '1. Score eggplant and salt for 20 minutes.\n2. Pan-sear until golden.\n3. Brush with miso-maple glaze and broil until caramelized.',
+    ingredients: ['Japanese eggplant', 'white miso', 'maple syrup', 'sesame oil', 'scallions', 'sesame seeds'],
+    cookingTimeMinutes: 35,
+    estimatedBudget: 16,
+    tags: ['Vegetarian', 'Elegant'],
+    likesCount: 128,
+    comments: [
+      {
+        id: 'rc1',
+        userName: 'Yuki',
+        userAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&q=80',
+        text: 'The miso glaze is perfection — we make this every Sunday now.',
+        timestamp: '2026-06-28T18:30:00.000Z',
+      },
+      {
+        id: 'rc2',
+        userName: 'Daniel',
+        userAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&q=80',
+        text: 'Silky texture, incredible depth. A keeper.',
+        timestamp: '2026-06-30T12:15:00.000Z',
+      },
+    ],
+  },
+  {
+    id: 'pub-m2',
+    familyName: 'Villa Romano',
+    name: 'Rosemary Focaccia',
+    category: 'lunch',
+    cuisine: 'western',
+    imageUri: 'https://images.unsplash.com/photo-1604068540195-88fdbf1f404b?w=600&q=80',
+    recipe:
+      '1. Mix dough and rest overnight.\n2. Dimple with fingertips, drizzle olive oil.\n3. Top with rosemary and flaky salt; bake at 220°C.',
+    ingredients: ['bread flour', 'olive oil', 'fresh rosemary', 'sea salt', 'yeast', 'honey'],
+    cookingTimeMinutes: 180,
+    estimatedBudget: 12,
+    tags: ['Bakery', 'Sharing'],
+    likesCount: 94,
+    comments: [
+      {
+        id: 'rc3',
+        userName: 'Giulia',
+        userAvatar: 'https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=200&q=80',
+        text: 'Crispy edges, pillowy center — nonna would approve.',
+        timestamp: '2026-07-01T09:00:00.000Z',
+      },
+    ],
+  },
+  {
+    id: 'pub-m3',
+    familyName: 'The Patel Home',
+    name: 'Coconut Lemongrass Curry',
+    category: 'dinner',
+    cuisine: 'fusion',
+    imageUri: 'https://images.unsplash.com/photo-1455619452474-d2be8b1e70cd?w=600&q=80',
+    recipe:
+      '1. Bloom curry paste in coconut oil.\n2. Simmer coconut milk with lemongrass and lime leaves.\n3. Add vegetables and chickpeas; finish with basil.',
+    ingredients: ['coconut milk', 'lemongrass', 'chickpeas', 'baby spinach', 'Thai basil', 'lime'],
+    cookingTimeMinutes: 45,
+    estimatedBudget: 20,
+    tags: ['Plant-Based', 'Aromatic'],
+    likesCount: 76,
+    comments: [],
+  },
 ];

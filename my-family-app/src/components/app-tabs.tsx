@@ -18,6 +18,11 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Icon sf="book.fill" md="menu_book" />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="community">
+        <NativeTabs.Trigger.Label>Community</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="globe" md="public" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="meal-planner">
         <NativeTabs.Trigger.Label>Planner</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="calendar" md="calendar_month" />

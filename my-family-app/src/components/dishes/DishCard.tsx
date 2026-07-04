@@ -16,7 +16,6 @@ interface DishCardProps {
   ownerFlatName?: string;
   onPress?: () => void;
   onSchedule?: () => void;
-  canSchedule?: boolean;
 }
 
 export function DishCard({
@@ -24,7 +23,6 @@ export function DishCard({
   ownerFlatName,
   onPress,
   onSchedule,
-  canSchedule = false,
 }: DishCardProps) {
   const handleYouTubePress = () => {
     if (dish.youtubeUrl) Linking.openURL(dish.youtubeUrl);
@@ -54,7 +52,7 @@ export function DishCard({
           </View>
 
           {ownerFlatName ? (
-            <Text style={styles.owner}>Flat {ownerFlatName}</Text>
+            <Text style={styles.owner}>Added by Flat {ownerFlatName}</Text>
           ) : null}
 
           <View style={styles.tags}>
@@ -77,12 +75,10 @@ export function DishCard({
       </Pressable>
 
       <View style={styles.actions}>
-        {canSchedule && onSchedule ? (
+        {onSchedule ? (
           <Pressable onPress={onSchedule} style={styles.scheduleButton}>
             <Text style={styles.scheduleText}>Schedule</Text>
           </Pressable>
-        ) : ownerFlatName ? (
-          <Text style={styles.viewOnly}>View only — owned by Flat {ownerFlatName}</Text>
         ) : null}
 
         {dish.youtubeUrl ? (
@@ -184,12 +180,6 @@ const styles = StyleSheet.create({
     color: FamilyPalette.champagne,
     fontWeight: '500',
     letterSpacing: 0.3,
-  },
-  viewOnly: {
-    ...FamilyTypography.caption,
-    fontStyle: 'italic',
-    color: FamilyPalette.charcoalMuted,
-    flex: 1,
   },
   youtubeButton: {
     paddingVertical: FamilySpacing.xs,

@@ -51,7 +51,7 @@ interface AppContextValue {
   dishActivities: DishActivity[];
   getMembersForFlat: (flatId: FlatId) => FamilyMember[];
   getOwnedDishesForFlat: (flatId: FlatId) => Dish[];
-  canScheduleDish: (dishId: string, flatId?: FlatId) => boolean;
+  canScheduleDish: (dishId: string) => boolean;
   addMember: (input: AddMemberInput) => void;
   updateMember: (id: string, input: AddMemberInput) => void;
   deleteMember: (id: string) => void;
@@ -182,11 +182,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const canScheduleDish = useCallback(
-    (dishId: string, flatId: FlatId = activeFlat) => {
-      const dish = allDishes.find((item) => item.id === dishId);
-      return dish?.ownerFlatId === flatId;
-    },
-    [activeFlat, allDishes],
+    (dishId: string) => Boolean(allDishes.find((item) => item.id === dishId)),
+    [allDishes],
   );
 
   const getOtherFlats = useCallback(
@@ -270,7 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addDishToDate = useCallback(
     (dishId: string, date: string, flatId: FlatId = activeFlat): boolean => {
       const dish = allDishes.find((item) => item.id === dishId);
-      if (!dish || dish.ownerFlatId !== flatId) return false;
+      if (!dish) return false;
       if (!isWithinScheduleWindow(date)) return false;
 
       setFlatMealPlans((prev) => {
@@ -331,26 +328,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const getRandomDish = useCallback(
     (flatId: FlatId = activeFlat) => {
-      const pool = getOwnedDishesForFlat(flatId).filter((dish) => !dish.isHotpotSet);
+      const pool = allDishes.filter((dish) => !dish.isHotpotSet);
       if (pool.length === 0) return null;
       return pool[Math.floor(Math.random() * pool.length)];
     },
-    [activeFlat, getOwnedDishesForFlat],
+    [activeFlat, allDishes],
   );
 
   const suggestBudget = useCallback(
     (request: BudgetPlanRequest, flatId: FlatId = activeFlat) =>
-      suggestDishesForBudget(getOwnedDishesForFlat(flatId), request),
-    [activeFlat, getOwnedDishesForFlat],
+      suggestDishesForBudget(allDishes.filter((d) => !d.isHotpotSet), request),
+    [activeFlat, allDishes],
   );
 
   const applyBudgetPlan = useCallback(
     (request: BudgetPlanRequest, date: string, flatId: FlatId = activeFlat) => {
-      const picks = suggestDishesForBudget(getOwnedDishesForFlat(flatId), request);
+      const picks = suggestDishesForBudget(allDishes.filter((d) => !d.isHotpotSet), request);
       picks.forEach((dish) => addDishToDate(dish.id, date, flatId));
       return picks;
     },
-    [activeFlat, getOwnedDishesForFlat, addDishToDate],
+    [activeFlat, allDishes, addDishToDate],
   );
 
   const addDishComment = useCallback(

@@ -5,7 +5,6 @@ import { useRouter } from 'expo-router';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { GoldButton } from '@/components/common/GoldButton';
-import { AddFlatModal } from '@/components/flats/AddFlatModal';
 import { BudgetPlannerModal } from '@/components/meal-planner/BudgetPlannerModal';
 import { MealCalendar } from '@/components/meal-planner/MealCalendar';
 import { RandomPickModal } from '@/components/meal-planner/RandomPickModal';
@@ -37,7 +36,6 @@ export function MealPlannerScreen() {
   const [randomDish, setRandomDish] = useState<ReturnType<typeof getRandomDish>>(null);
   const [randomVisible, setRandomVisible] = useState(false);
   const [budgetVisible, setBudgetVisible] = useState(false);
-  const [flatModalVisible, setFlatModalVisible] = useState(false);
 
   useEffect(() => {
     setViewingFlat(activeFlat);
@@ -82,7 +80,7 @@ export function MealPlannerScreen() {
           <Text style={styles.label}>Meal Planner</Text>
           <Text style={styles.title}>What We Ate</Text>
           <Text style={styles.subtitle}>
-            Shared dish library · Each flat schedules only their own dishes.
+            Shared recipes from all flats — schedule any dish to your flat&apos;s plan.
           </Text>
         </View>
 
@@ -90,7 +88,6 @@ export function MealPlannerScreen() {
           flats={flats}
           activeFlat={activeFlat}
           onChange={setActiveFlat}
-          onAddFlat={() => setFlatModalVisible(true)}
           label="Your Flat (manage)"
         />
 
@@ -196,8 +193,6 @@ export function MealPlannerScreen() {
         selectedDate={selectedDate}
         flatId={activeFlat}
       />
-
-      <AddFlatModal visible={flatModalVisible} onClose={() => setFlatModalVisible(false)} />
     </View>
   );
 }

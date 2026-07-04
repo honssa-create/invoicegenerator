@@ -5,7 +5,6 @@ import { useRouter } from 'expo-router';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { FlatSwitcher } from '@/components/common/FlatSwitcher';
 import { FloatingActionButton } from '@/components/common/FloatingActionButton';
-import { AddFlatModal } from '@/components/flats/AddFlatModal';
 import { AddDishModal } from '@/components/dishes/AddDishModal';
 import { CategoryFilter, useDishFilter } from '@/components/dishes/CategoryFilter';
 import { DishCard } from '@/components/dishes/DishCard';
@@ -17,7 +16,7 @@ import {
   FamilySpacing,
   FamilyTypography,
 } from '@/constants/familyTheme';
-import { formatDisplayDate } from '@/utils/date';
+import { formatDisplayDate, SCHEDULE_MAX_DAYS } from '@/utils/date';
 import type { Dish } from '@/types';
 
 export function DishesScreen() {
@@ -28,12 +27,10 @@ export function DishesScreen() {
     setActiveFlat,
     dishes,
     getFlatName,
-    canScheduleDish,
     addDishToDate,
   } = useAppContext();
   const { selectedCategory, setSelectedCategory, filteredItems } = useDishFilter(dishes);
   const [modalVisible, setModalVisible] = useState(false);
-  const [flatModalVisible, setFlatModalVisible] = useState(false);
   const [schedulingDish, setSchedulingDish] = useState<Dish | null>(null);
 
   const openDetail = (dishId: string) => {
@@ -49,7 +46,10 @@ export function DishesScreen() {
         `${schedulingDish.name} added to ${formatDisplayDate(date)} (${getFlatName(activeFlat)}).`,
       );
     } else {
-      Alert.alert('Cannot schedule', 'This dish belongs to another flat.');
+      Alert.alert(
+        'Cannot schedule',
+        `Please pick a date within the next ${SCHEDULE_MAX_DAYS} days.`,
+      );
     }
     setSchedulingDish(null);
   };
@@ -61,7 +61,7 @@ export function DishesScreen() {
           <Text style={styles.label}>Dishes</Text>
           <Text style={styles.title}>Shared Library</Text>
           <Text style={styles.subtitle}>
-            Browse all flats&apos; recipes · Schedule only your flat&apos;s dishes.
+            Browse and schedule any recipe from any flat — up to {SCHEDULE_MAX_DAYS} days ahead.
           </Text>
         </View>
 
@@ -69,7 +69,6 @@ export function DishesScreen() {
           flats={flats}
           activeFlat={activeFlat}
           onChange={setActiveFlat}
-          onAddFlat={() => setFlatModalVisible(true)}
           label="Your Flat"
         />
 
@@ -92,7 +91,6 @@ export function DishesScreen() {
                 ownerFlatName={getFlatName(dish.ownerFlatId)}
                 onPress={() => openDetail(dish.id)}
                 onSchedule={() => setSchedulingDish(dish)}
-                canSchedule={canScheduleDish(dish.id, activeFlat)}
               />
             ))
           ) : (
@@ -105,7 +103,6 @@ export function DishesScreen() {
 
       <FloatingActionButton onPress={() => setModalVisible(true)} />
       <AddDishModal visible={modalVisible} onClose={() => setModalVisible(false)} />
-      <AddFlatModal visible={flatModalVisible} onClose={() => setFlatModalVisible(false)} />
 
       <ScheduleDishModal
         visible={Boolean(schedulingDish)}

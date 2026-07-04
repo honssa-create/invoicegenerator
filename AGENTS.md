@@ -59,6 +59,12 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLi
   3. **Two-tier inventory**: `kitchen_finished` (ready-to-ship) and `kitchen_raw` (`total_stock`/`allocated_stock`, `available = total − allocated`). Seeded per user on first `/api/kitchen/state` call.
 - APIs: `GET /api/kitchen/state`, `POST /api/kitchen/orders`, `POST /api/kitchen/batches`, `POST /api/kitchen/batches/[id]/complete` — each mutating route returns the fresh full `state` so the dashboard stays in sync without a refetch.
 
+### Kitchen Prep — ingredient calculator (`/kitchen-prep`)
+- Independent **廚房備料系統** for stewed bird's-nest prep: `kitchen_prep_orders` table, logic in `src/lib/kitchen-prep.ts` + `src/lib/kitchen-prep-server.ts`.
+- **List** (`/kitchen-prep`): scheduled orders — stewing date, order ID, Daily/Wedding type, status; row click → detail.
+- **Detail** (`/kitchen-prep/[id]`): auto-calculates per-flavor weights from `CAPACITY_FORMULAS` (45g configured: 燕餅 0.8g, 桂花 0.13g, 紅棗 1.8g, 冰糖 3.57g, 片糖 5.03g per bottle). Wedding orders add +3 bottles per flavor. Red Date disabled for 25g capacity.
+- **Print** (`/kitchen-prep/[id]/print`): printer-friendly prep sheet (`no-print` toolbar). APIs: `GET/POST /api/kitchen-prep`, `GET/PATCH/DELETE /api/kitchen-prep/[id]`, `POST /api/kitchen-prep/import` (from bird's-nest order).
+
 ### Order Type + section boxes (dynamic entry)
 - The order detail left column has three "Quiet Luxury" section boxes above the legacy fields list: **Order Detail** (dynamic by `order_type` field: `訂製襟章` → badge style/qty/image preview; `燕窩回禮燉製` → bird's-nest dates/quantities/production), **Payment Detail**, and **Shipment Detail**. All values persist in `fields_json` via the same `PATCH /api/orders/[id]` autosave, except 送貨地址 (bound to the `shipping_address` core column). `客人送貨日期`/`tracking_no`/送貨地址 intentionally share keys with other UI so they stay in sync.
 - Bird's-nest reactive formulas live in `computeBirdNestTotals` (`src/lib/orders.ts`, pure/client-safe): 客人訂總數量 = sum of the three flavors; 總生產樽數 defaults to that total (editable); 燕餅(g) = 樽數 × 0.8; 圓形tag/貼紙/金繩/Wedding Logo Tag all = 樽數. 到期日 auto-fills to Big Day + 4 weeks when Big Day is set and 到期日 is empty.

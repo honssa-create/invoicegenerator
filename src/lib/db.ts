@@ -346,6 +346,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_kitchen_batches_user ON kitchen_batches(user_id);
 `);
 
+// Kitchen Prep (廚房備料系統) — stewing ingredient calculator.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    order_code TEXT NOT NULL,
+    linked_order_id INTEGER,
+    stewing_date TEXT NOT NULL,
+    order_type TEXT NOT NULL DEFAULT 'daily' CHECK(order_type IN ('daily', 'wedding')),
+    capacity TEXT NOT NULL DEFAULT '45g',
+    status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'in_prep', 'completed')),
+    qty_osmanthus INTEGER NOT NULL DEFAULT 0,
+    qty_red_date INTEGER NOT NULL DEFAULT 0,
+    qty_rock_sugar INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (linked_order_id) REFERENCES orders(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_kitchen_prep_user ON kitchen_prep_orders(user_id);
+  CREATE INDEX IF NOT EXISTS idx_kitchen_prep_date ON kitchen_prep_orders(user_id, stewing_date);
+`);
+
 // Inbound Shipment Tracker (到件紀錄) — arriving supplier shipments.
 db.exec(`
   CREATE TABLE IF NOT EXISTS inbound_shipments (

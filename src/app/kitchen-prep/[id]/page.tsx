@@ -1,0 +1,219 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import AppLayout from '@/components/AppLayout';
+import {
+  PREP_CAPACITIES,
+  PREP_CAPACITY_LABELS,
+  PREP_ORDER_TYPES,
+  PREP_ORDER_TYPE_LABELS,
+  PREP_STATUSES,
+  PREP_STATUS_LABELS,
+  WEDDING_BUFFER,
+  computePrepCalculation,
+  formatGrams,
+  isRedDateAllowed,
+  type PrepCalculation,
+  type PrepOrder,
+} from '@/lib/kitchen-prep';
+
+export default function KitchenPrepDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const id = params.id as string;
+
+  const [order, setOrder] = useState<PrepOrder | null>(null);
+  const [calc, setCalc] = useState<PrepCalculation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = () =>
+    fetch(`/api/kitchen-prep/${id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.order) {
+          setOrder(d.order);
+          setCalc(d.calculation);
+        }
+      })
+      .finally(() => setLoading(false));
+
+  useEffect(() => { load(); }, [id]);
+
+  const patch = async (body: Record<string, unknown>) => {
+    setSaving(true);
+    setError('');
+    const res = await fetch(`/api/kitchen-prep/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json();
+    setSaving(false);
+    if (!res.ok) { setError(d.error || 'Save failed'); return; }
+    setOrder(d.order);
+    setCalc(d.calculation);
+  };
+
+  const input = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
+
+  if (loading) {
+    return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
+  }
+  if (!order || !calc) {
+    return <AppLayout><div className="p-12 text-center text-gray-500">Prep order not found.</div></AppLayout>;
+  }
+
+  const flavorField = (key: 'qty_osmanthus' | 'qty_red_date' | 'qty_rock_sugar', label: string, disabled = false) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1.5">{label}</label>
+      <input
+        type="number"
+        min="0"
+        disabled={disabled}
+        value={order[key]}
+        onChange={(e) => setOrder({ ...order, [key]: Number(e.target.value) || 0 })}
+        onBlur={() => patch({ [key]: order[key] })}
+        className={`${input} text-lg font-semibold ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+      />
+    </div>
+  );
+
+  return (
+    <AppLayout>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to schedule</button>
+        <div className="flex gap-3">
+          <Link href={`/kitchen-prep/${id}/print`} className="px-5 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 shadow-sm">
+            🖨 Print Prep Sheet 列印備料單
+          </Link>
+        </div>
+      </div>
+
+      {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
+
+      <div className="bg-white rounded-2xl border border-gray-200 p-8 mb-6">
+        <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Ingredient Calculator 備料詳情與計算</p>
+        <h1 className="text-2xl font-bold text-gray-900 font-mono mb-6">{order.order_code}</h1>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Stewing Date 燉製日期</label>
+            <input type="date" value={order.stewing_date} onChange={(e) => setOrder({ ...order, stewing_date: e.target.value })} onBlur={() => patch({ stewing_date: order.stewing_date })} className={input} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Order Type 訂單類型</label>
+            <select value={order.order_type} onChange={(e) => { const v = e.target.value as PrepOrder['order_type']; setOrder({ ...order, order_type: v }); patch({ order_type: v }); }} className={input}>
+              {PREP_ORDER_TYPES.map((t) => <option key={t} value={t}>{PREP_ORDER_TYPE_LABELS[t]}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Capacity 容量</label>
+            <select
+              value={order.capacity}
+              onChange={(e) => {
+                const v = e.target.value as PrepOrder['capacity'];
+                const upd: Partial<PrepOrder> = { capacity: v };
+                if (!isRedDateAllowed(v)) upd.qty_red_date = 0;
+                setOrder({ ...order, ...upd });
+                patch({ capacity: v, qty_red_date: upd.qty_red_date ?? order.qty_red_date });
+              }}
+              className={input}
+            >
+              {PREP_CAPACITIES.map((c) => <option key={c} value={c}>{PREP_CAPACITY_LABELS[c]}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
+            <select value={order.status} onChange={(e) => { const v = e.target.value as PrepOrder['status']; setOrder({ ...order, status: v }); patch({ status: v }); }} className={input}>
+              {PREP_STATUSES.map((s) => <option key={s} value={s}>{PREP_STATUS_LABELS[s]}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Order Quantities 訂購樽數</h3>
+        <div className="grid md:grid-cols-3 gap-5 mb-4">
+          {flavorField('qty_osmanthus', '桂花 Osmanthus (樽)')}
+          {flavorField('qty_red_date', '紅棗 Red Date (樽)', !isRedDateAllowed(order.capacity))}
+          {flavorField('qty_rock_sugar', '冰糖 Rock Sugar (樽)')}
+        </div>
+        {!isRedDateAllowed(order.capacity) && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
+            ⚠ Red Date (紅棗) is disabled for 25g capacity.
+          </p>
+        )}
+        {order.order_type === 'wedding' && (
+          <p className="text-xs text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2 mb-6">
+            Wedding buffer: each flavor adds +{WEDDING_BUFFER} bottles to actual production (回禮訂單 +3 樽).
+          </p>
+        )}
+        {!calc.formulaReady && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
+            Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet — only 45g is available. Please provide 25g / 75g formulas to complete calculations.
+          </p>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+          <h2 className="text-lg font-bold text-gray-900">Kitchen Summary 備料重量總表</h2>
+          <p className="text-sm text-gray-500">45g formula · per-bottle basis (燕餅 0.8g · 桂花 0.13g · 紅棗 1.8g · 冰糖 3.57g · 片糖 5.03g)</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[800px]">
+            <thead>
+              <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                <th className="px-6 py-4">Flavor 口味</th>
+                <th className="px-6 py-4 text-right">Order Qty</th>
+                <th className="px-6 py-4 text-right">Actual Qty 實際生產樽數</th>
+                <th className="px-6 py-4 text-right">燕餅 Bird&apos;s Nest</th>
+                <th className="px-6 py-4 text-right">Flavor Ingredient</th>
+                <th className="px-6 py-4 text-right">冰糖 Rock Sugar</th>
+                <th className="px-6 py-4 text-right">片糖 Slab Sugar</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {calc.rows.filter((r) => r.orderQty > 0).map((r) => (
+                <tr key={r.flavor} className="hover:bg-gray-50">
+                  <td className="px-6 py-5 text-xl font-bold text-gray-900">{r.label}</td>
+                  <td className="px-6 py-5 text-right text-2xl font-semibold text-gray-700">{r.orderQty}</td>
+                  <td className="px-6 py-5 text-right">
+                    <span className="text-3xl font-bold text-brand-700">{r.actualQty}</span>
+                    {r.weddingBuffer > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">{r.orderQty} + {r.weddingBuffer} buffer</p>
+                    )}
+                  </td>
+                  <td className="px-6 py-5 text-right text-2xl font-bold text-gray-900">{formatGrams(r.birdNestGrams)}</td>
+                  <td className="px-6 py-5 text-right text-2xl font-bold text-gray-900">{formatGrams(r.flavorGrams)}</td>
+                  <td className="px-6 py-5 text-right text-xl font-semibold text-gray-700">{formatGrams(r.rockSugarGrams)}</td>
+                  <td className="px-6 py-5 text-right text-xl font-semibold text-gray-700">{formatGrams(r.slabSugarGrams)}</td>
+                </tr>
+              ))}
+              {calc.rows.filter((r) => r.orderQty > 0).length === 0 && (
+                <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400">Enter order quantities above to see calculations.</td></tr>
+              )}
+            </tbody>
+            {calc.rows.some((r) => r.orderQty > 0) && calc.formulaReady && (
+              <tfoot className="bg-brand-50 border-t-2 border-brand-200">
+                <tr>
+                  <td className="px-6 py-4 text-lg font-bold text-brand-900">TOTAL 合計</td>
+                  <td className="px-6 py-4" />
+                  <td className="px-6 py-4 text-right text-2xl font-bold text-brand-800">{calc.totals.bottles} 樽</td>
+                  <td className="px-6 py-4 text-right text-2xl font-bold text-brand-800">{formatGrams(calc.totals.birdNestGrams)}</td>
+                  <td className="px-6 py-4" />
+                  <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.rockSugarGrams)}</td>
+                  <td className="px-6 py-4 text-right text-xl font-bold text-brand-800">{formatGrams(calc.totals.slabSugarGrams)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {saving && <p className="text-center text-sm text-gray-400 mt-4">Saving…</p>}
+    </AppLayout>
+  );
+}

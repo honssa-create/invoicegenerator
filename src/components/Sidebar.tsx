@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/orders', label: 'Orders', icon: '📦' },
   { href: '/inbound', label: 'Inbound', icon: '📥' },
   { href: '/kitchen', label: 'Kitchen', icon: '🍲' },
+  { href: '/kitchen-prep', label: 'Kitchen Prep', icon: '🥣' },
   { href: '/expenses', label: 'Expenses', icon: '🧾' },
   { href: '/accounting', label: 'Accounting', icon: '📒' },
   { href: '/cashflow', label: 'Cash Flow', icon: '💹' },

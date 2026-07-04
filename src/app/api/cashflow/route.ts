@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { listOrders } from '@/lib/order-server';
 import { orderTitle } from '@/lib/orders';
+import { listUnclaimedDeposits } from '@/lib/bank-statement-server';
 import type { LedgerEntry } from '@/lib/cashflow';
 
 export async function GET(request: Request) {
@@ -29,13 +30,14 @@ export async function GET(request: Request) {
       amount: amt,
       receiptUrl: o.fields.payment_receipt_path ? `/api/orders/${o.id}/payment-receipt` : null,
       verified: o.fields.payment_verified === true || o.fields.payment_verified === 'true',
+      bankCleared: o.fields.payment_bank_cleared === true || o.fields.payment_bank_cleared === 'true',
       orderId: o.id,
     });
   }
 
   // Other Income — manual entries.
   const rows = db.prepare('SELECT * FROM other_income WHERE user_id = ?').all(session.userId) as {
-    id: number; category: string | null; txn_date: string | null; amount: number; account: string | null; remarks: string | null; receipt_path: string | null; verified: number; created_at: string;
+    id: number; category: string | null; txn_date: string | null; amount: number; account: string | null; remarks: string | null; receipt_path: string | null; verified: number; bank_cleared: number; created_at: string;
   }[];
   for (const r of rows) {
     entries.push({
@@ -48,6 +50,7 @@ export async function GET(request: Request) {
       amount: r.amount,
       receiptUrl: r.receipt_path ? `/api/other-income/${r.id}/receipt` : null,
       verified: r.verified === 1,
+      bankCleared: r.bank_cleared === 1,
       incomeId: r.id,
     });
   }
@@ -62,5 +65,6 @@ export async function GET(request: Request) {
     month,
     totals: { productSales, otherIncome, gross: productSales + otherIncome },
     entries,
+    unclaimed: listUnclaimedDeposits(session.userId),
   });
 }

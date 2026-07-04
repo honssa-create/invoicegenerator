@@ -295,6 +295,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_other_income_user ON other_income(user_id);
 `);
 
+// Unclaimed bank deposits pool (月結單未認領入帳).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS unclaimed_bank_deposits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    txn_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_unclaimed_bank_user ON unclaimed_bank_deposits(user_id);
+`);
+
 // Integrated Kitchen Scheduling & Two-Tier Inventory System.
 db.exec(`
   CREATE TABLE IF NOT EXISTS kitchen_finished (
@@ -421,6 +435,11 @@ if (legacyReceipts.length) {
     for (const r of legacyReceipts) insert.run(r.id, r.user_id, r.receipt_path);
   });
   migrate();
+}
+
+// Migration: bank_cleared flag on other_income (matched against bank statement).
+if (!db.prepare('PRAGMA table_info(other_income)').all().some((c) => (c as { name: string }).name === 'bank_cleared')) {
+  db.exec('ALTER TABLE other_income ADD COLUMN bank_cleared INTEGER NOT NULL DEFAULT 0');
 }
 
 export default db;

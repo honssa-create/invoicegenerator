@@ -5,6 +5,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
 import { compressImage } from '@/lib/imageCompression';
+import type { BankImportResponse, ConfirmMatchPayload } from '@/lib/bank-statement';
 import {
   INCOME_CATEGORIES,
   RECEIVED_ACCOUNTS,
@@ -28,6 +29,11 @@ export default function CashflowPage() {
   const [error, setError] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bankFileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<BankImportResponse | null>(null);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
+  const [confirming, setConfirming] = useState(false);
 
   const load = () => fetch(`/api/cashflow?month=${month}`).then((r) => r.json()).then(setData);
   useEffect(() => { load(); }, [month]);
@@ -75,7 +81,62 @@ export default function CashflowPage() {
     }
   };
 
+  const handleBankImport = async (file: File) => {
+    setImporting(true);
+    setImportResult(null);
+    setSelectedSuggestions(new Set());
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/cashflow/bank-import', { method: 'POST', body: fd });
+    const d = await res.json();
+    setImporting(false);
+    if (!res.ok) { alert(d.error || 'Import failed'); return; }
+    setImportResult(d);
+    const suggestedIdx = d.results
+      .map((r: BankImportResponse['results'][0], i: number) => (r.status === 'suggested' ? i : -1))
+      .filter((i: number) => i >= 0);
+    setSelectedSuggestions(new Set(suggestedIdx));
+    load();
+  };
+
+  const confirmSuggestions = async () => {
+    if (!importResult) return;
+    const matches: ConfirmMatchPayload[] = [];
+    importResult.results.forEach((r, i) => {
+      if (r.status === 'suggested' && r.match && selectedSuggestions.has(i)) {
+        matches.push({
+          type: r.match.type,
+          id: r.match.id,
+          txn_date: r.row.txn_date,
+          amount: r.row.deposit_amount,
+          description: r.row.description,
+        });
+      }
+    });
+    if (matches.length === 0) { setImportResult(null); return; }
+    setConfirming(true);
+    const res = await fetch('/api/cashflow/bank-import/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matches }),
+    });
+    setConfirming(false);
+    if (!res.ok) { const d = await res.json(); alert(d.error || 'Confirmation failed'); return; }
+    setImportResult(null);
+    load();
+  };
+
+  const toggleSuggestion = (idx: number) => {
+    setSelectedSuggestions((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
   const input = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
+  const suggestedResults = importResult?.results.filter((r) => r.status === 'suggested') || [];
 
   return (
     <AppLayout>
@@ -84,8 +145,25 @@ export default function CashflowPage() {
           <h1 className="text-2xl font-bold text-gray-900">Cash Flow &amp; Reconciliation 營運收支中央看板</h1>
           <p className="text-gray-500 mt-1">All incoming revenue — product sales + other income — in one ledger</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+          <button
+            onClick={() => bankFileRef.current?.click()}
+            disabled={importing}
+            className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            {importing ? 'Importing…' : '🏦 Import Bank Statement (CSV/Excel)'}
+          </button>
+          <input
+            ref={bankFileRef}
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.[0]) handleBankImport(e.target.files[0]);
+              e.target.value = '';
+            }}
+          />
           <button onClick={openForm} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">➕ Add Income 新增其他收入</button>
         </div>
       </div>
@@ -95,6 +173,33 @@ export default function CashflowPage() {
         <StatCard title="Other Income 其他收入" value={formatMoney(data?.totals.otherIncome || 0)} icon="💵" color="bg-green-50 text-green-600" />
         <StatCard title="Gross Revenue 總入帳金額" value={formatMoney(data?.totals.gross || 0)} icon="📈" color="bg-brand-50 text-brand-600" />
       </div>
+
+      {data && data.unclaimed.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl mb-8 overflow-x-auto">
+          <div className="px-6 py-4 border-b border-amber-200">
+            <h2 className="font-semibold text-amber-900">Unclaimed Bank Deposits Pool 待認領入帳池</h2>
+            <p className="text-xs text-amber-700 mt-1">Bank deposits with no matching order payment or other income in the system</p>
+          </div>
+          <table className="w-full min-w-[600px] text-sm">
+            <thead>
+              <tr className="text-left text-xs text-amber-800 uppercase tracking-wider border-b border-amber-200">
+                <th className="px-4 py-3">Date 交易日期</th>
+                <th className="px-4 py-3">Description 摘要備註</th>
+                <th className="px-4 py-3 text-right">Deposit 入帳金額</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-amber-100">
+              {data.unclaimed.map((u) => (
+                <tr key={u.id} className="hover:bg-amber-100/50">
+                  <td className="px-4 py-3 whitespace-nowrap text-amber-900">{u.txn_date}</td>
+                  <td className="px-4 py-3 text-amber-800">{u.description || '—'}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-amber-900">{formatMoney(u.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <div className="px-6 py-4 border-b border-gray-200"><h2 className="font-semibold text-gray-900">Unified Financial Ledger 統一流水帳</h2></div>
@@ -112,6 +217,7 @@ export default function CashflowPage() {
                 <th className="px-4 py-3">Account</th>
                 <th className="px-4 py-3 text-right">Amount</th>
                 <th className="px-4 py-3">Receipt</th>
+                <th className="px-4 py-3">Bank</th>
                 <th className="px-4 py-3">Status</th>
               </tr>
             </thead>
@@ -138,6 +244,13 @@ export default function CashflowPage() {
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3">
+                    {e.bankCleared ? (
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">Bank Cleared</span>
+                    ) : (
+                      <span className="text-gray-300 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     {e.verified ? (
                       <button onClick={() => toggleVerify(e)} className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200">✓ Verified</button>
                     ) : (
@@ -150,6 +263,75 @@ export default function CashflowPage() {
           </table>
         )}
       </div>
+
+      {importResult && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-2xl p-6 shadow-xl my-8 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold mb-1">Bank Statement Import Results 月結單匯入結果</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {importResult.summary.total} rows processed · {importResult.summary.autoCleared} auto-cleared · {importResult.summary.suggested} suggested · {importResult.summary.unclaimed} unclaimed
+            </p>
+
+            {importResult.summary.autoCleared > 0 && (
+              <div className="mb-4 p-3 bg-indigo-50 text-indigo-800 text-sm rounded-lg">
+                ✓ {importResult.summary.autoCleared} deposit(s) matched by reference number and marked <strong>Bank Cleared</strong>.
+              </div>
+            )}
+
+            {importResult.summary.unclaimed > 0 && (
+              <div className="mb-4 p-3 bg-amber-50 text-amber-800 text-sm rounded-lg">
+                {importResult.summary.unclaimed} unmatched deposit(s) added to the <strong>Unclaimed Bank Deposits Pool</strong>.
+              </div>
+            )}
+
+            {suggestedResults.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 mb-2">Suggested Matches 建議比對（請確認）</h3>
+                <p className="text-xs text-gray-500 mb-3">Amount matches exactly and date is within ±3 days of the recorded payment.</p>
+                <div className="space-y-2">
+                  {importResult.results.map((r, i) => {
+                    if (r.status !== 'suggested' || !r.match) return null;
+                    return (
+                      <label key={i} className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedSuggestions.has(i)}
+                          onChange={() => toggleSuggestion(i)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 text-sm">
+                          <div className="font-medium text-gray-900">
+                            {formatMoney(r.row.deposit_amount)} on {r.row.txn_date}
+                          </div>
+                          <div className="text-gray-600 truncate">{r.row.description || '—'}</div>
+                          <div className="text-xs text-brand-700 mt-1">
+                            → {r.match.type === 'order' ? 'Order' : 'Other Income'}: {r.match.ref} ({formatMoney(r.match.amount)}, {r.match.date})
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              {suggestedResults.length > 0 ? (
+                <button
+                  onClick={confirmSuggestions}
+                  disabled={confirming || selectedSuggestions.size === 0}
+                  className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium"
+                >
+                  {confirming ? 'Confirming…' : `Confirm ${selectedSuggestions.size} Match(es) as Bank Cleared`}
+                </button>
+              ) : (
+                <button onClick={() => setImportResult(null)} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 font-medium">Done</button>
+              )}
+              <button onClick={() => setImportResult(null)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">

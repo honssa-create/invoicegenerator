@@ -1,0 +1,56 @@
+import type { Meal } from '@/types';
+
+export const MOCK_MEALS: Meal[] = [
+  {
+    id: '1',
+    name: 'Braised Pork Belly',
+    category: 'chinese',
+    imageUri: 'https://images.unsplash.com/photo-1525755662778-989d593090ca?w=400&q=80',
+    recipe: 'Slow-braised pork belly with soy, star anise, and rock sugar until tender.',
+    youtubeUrl: 'https://www.youtube.com/watch?v=example1',
+    tags: ['Comfort', 'Weekend'],
+  },
+  {
+    id: '2',
+    name: 'Tom Yum Soup',
+    category: 'se-asian',
+    imageUri: 'https://images.unsplash.com/photo-1548943487-a2e4e43b4853?w=400&q=80',
+    recipe: 'Fragrant lemongrass broth with shrimp, mushrooms, and lime leaves.',
+    youtubeUrl: 'https://www.youtube.com/watch?v=example2',
+    tags: ['Spicy', 'Light'],
+  },
+  {
+    id: '3',
+    name: 'Herb-Crusted Salmon',
+    category: 'western',
+    imageUri: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?w=400&q=80',
+    recipe: 'Oven-roasted salmon with dill, lemon zest, and a touch of butter.',
+    youtubeUrl: 'https://www.youtube.com/watch?v=example3',
+    tags: ['Healthy', 'Quick'],
+  },
+  {
+    id: '4',
+    name: 'Mapo Tofu',
+    category: 'chinese',
+    imageUri: 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=400&q=80',
+    recipe: 'Silken tofu in a silky Sichuan peppercorn and chili bean sauce.',
+    tags: ['Spicy', 'Vegetarian'],
+  },
+  {
+    id: '5',
+    name: 'Classic Shabu-Shabu',
+    category: 'hotpot',
+    imageUri: 'https://images.unsplash.com/photo-1590301157893-3e5ee1b9c6f8?w=400&q=80',
+    recipe: 'Thinly sliced beef and vegetables swirled in a light kombu broth.',
+    youtubeUrl: 'https://www.youtube.com/watch?v=example5',
+    tags: ['Gathering', 'Winter'],
+  },
+  {
+    id: '6',
+    name: 'Miso Hotpot',
+    category: 'hotpot',
+    imageUri: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?w=400&q=80',
+    recipe: 'White miso base with tofu, napa cabbage, and enoki mushrooms.',
+    tags: ['Cozy', 'Family'],
+  },
+];

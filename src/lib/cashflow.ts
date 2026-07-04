@@ -11,6 +11,7 @@ export interface LedgerEntry {
   amount: number;
   receiptUrl: string | null;
   verified: boolean;
+  bankCleared: boolean;
   orderId?: number;
   incomeId?: number;
 }
@@ -21,10 +22,13 @@ export interface CashflowTotals {
   gross: number;
 }
 
+import type { UnclaimedDeposit } from './bank-statement';
+
 export interface CashflowResponse {
   month: string; // YYYY-MM
   totals: CashflowTotals;
   entries: LedgerEntry[];
+  unclaimed: UnclaimedDeposit[];
 }
 
 export function currentMonth(): string {

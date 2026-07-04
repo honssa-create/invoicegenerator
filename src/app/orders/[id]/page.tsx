@@ -29,6 +29,9 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const paymentInputRef = useRef<HTMLInputElement>(null);
+  const [paymentPreview, setPaymentPreview] = useState<string | null>(null);
+  const [paymentScanMsg, setPaymentScanMsg] = useState('');
 
   useEffect(() => {
     fetch(`/api/orders/${id}`)
@@ -92,6 +95,46 @@ export default function OrderDetailPage() {
   const deleteFile = async (fileId: number) => {
     const res = await fetch(`/api/order-files/${fileId}`, { method: 'DELETE' });
     if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
+  };
+
+  const handlePaymentReceipt = async (rawFile: File) => {
+    setPaymentScanMsg('Compressing & scanning receipt…');
+    // Compress with the receipt rule: 1600px, quality 0.65, < 300KB. Heavy PDFs → first page image.
+    let file = rawFile;
+    try {
+      if (rawFile.type === 'application/pdf') {
+        const pages = await compressPdfToImages(rawFile, { quality: 0.65, maxWidthOrHeight: 1600 });
+        if (pages[0]) file = pages[0];
+      } else {
+        const c = await compressImage(rawFile, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg', quality: 0.65 });
+        file = c.file;
+      }
+    } catch {
+      /* fall back to original */
+    }
+    setPaymentPreview(URL.createObjectURL(file));
+
+    const fd = new FormData();
+    fd.append('receipt', file);
+    try {
+      const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { setPaymentScanMsg(data.error || 'Scan failed'); return; }
+      const r = data.result;
+      const upd: Record<string, string> = { payment_receipt_path: r.receipt_path || '' };
+      if (r.payment_date) upd.payment_date = r.payment_date;
+      if (r.amount != null) upd.payment_amount = String(r.amount);
+      if (r.bank) upd.payment_bank = r.bank;
+      if (r.method) upd.payment_method_detail = r.method;
+      if (r.reference) upd.payment_reference = r.reference;
+      setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
+      patch({ fields: upd });
+      const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
+      const found = [r.payment_date && 'date', r.amount != null && 'amount', r.bank && 'bank', r.method && 'method', r.reference && 'ref'].filter(Boolean);
+      setPaymentScanMsg(found.length ? `Extracted via ${via}: ${found.join(', ')}. Please verify.` : `No fields auto-extracted (${via}). Enter manually.`);
+    } catch {
+      setPaymentScanMsg('Scan failed');
+    }
   };
 
   const paymentBadge = () => {
@@ -341,7 +384,42 @@ export default function OrderDetailPage() {
           <section className="bg-white rounded-2xl border border-gray-200 p-8">
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 2</p>
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Payment Detail 付款詳情</h2>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+            {/* Payment receipt upload + AI scan */}
+            <div className="grid md:grid-cols-[200px_1fr] gap-5 mb-6">
+              <div>
+                <div
+                  onClick={() => paymentInputRef.current?.click()}
+                  onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0]); }}
+                  onDragOver={(e) => e.preventDefault()}
+                  className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px]"
+                >
+                  <input ref={paymentInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0]); e.target.value = ''; }} />
+                  {paymentPreview || order.fields.payment_receipt_path ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={paymentPreview || `/api/orders/${order.id}/payment-receipt`}
+                      alt="Payment receipt"
+                      onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview || `/api/orders/${order.id}/payment-receipt`); }}
+                      className="max-h-28 rounded-lg cursor-zoom-in"
+                    />
+                  ) : (
+                    <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Payment Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                  )}
+                </div>
+                {paymentScanMsg && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg}</p>}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
+                {labeled('支付日期 Payment Date', fInput('payment_date', 'date'))}
+                {labeled('銀碼 Amount', fInput('payment_amount', 'number', '0.00'))}
+                {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
+                {labeled('支付方式 Payment Method', fInput('payment_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5 border-t border-gray-100 pt-6">
               {labeled(
                 'Payment Status 付款狀態',
                 <select
@@ -353,11 +431,11 @@ export default function OrderDetailPage() {
                   {PAYMENT_STATUS_LABELS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               )}
-              <div />
-              <div />
+              <div className="hidden lg:block" />
+              <div className="hidden lg:block" />
               {labeled('第一次Payment 日期', fInput('payment1_date', 'date'))}
               {labeled('第一次Payment 金額', fInput('payment1_amount', 'number', '0.00'))}
-              <div />
+              <div className="hidden lg:block" />
               {labeled('第二次Payment 日期', fInput('payment2_date', 'date'))}
               {labeled('第二次Payment 金額', fInput('payment2_amount', 'number', '0.00'))}
             </div>

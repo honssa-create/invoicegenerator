@@ -5,6 +5,7 @@ export interface CompressOptions {
   maxDim?: number; // max width/height in px
   targetBytes?: number; // desired max output size
   mimeType?: 'image/jpeg' | 'image/webp';
+  quality?: number; // starting JPEG quality (0..1); auto-reduced further if over target
 }
 
 export interface CompressResult {
@@ -20,10 +21,11 @@ const DEFAULTS: Required<CompressOptions> = {
   maxDim: 1600,
   targetBytes: 300 * 1024,
   mimeType: 'image/jpeg',
+  quality: 0.85,
 };
 
 export async function compressImage(file: File, options: CompressOptions = {}): Promise<CompressResult> {
-  const { maxDim, targetBytes, mimeType } = { ...DEFAULTS, ...options };
+  const { maxDim, targetBytes, mimeType, quality: startQuality } = { ...DEFAULTS, ...options };
   const original = { file, compressed: false, originalBytes: file.size, outputBytes: file.size };
 
   // Only handle raster images; skip animated GIFs (re-encoding would flatten them).
@@ -62,7 +64,7 @@ export async function compressImage(file: File, options: CompressOptions = {}): 
     new Promise((resolve) => canvas.toBlob((b) => resolve(b), mimeType, q));
 
   render(w, h);
-  let quality = 0.85;
+  let quality = startQuality;
   let blob = await toBlob(quality);
   while (blob && blob.size > targetBytes && quality > 0.4) {
     quality = Math.round((quality - 0.1) * 100) / 100;

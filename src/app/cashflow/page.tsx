@@ -5,7 +5,9 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
 import { compressImage } from '@/lib/imageCompression';
+import { compressPdfToImages } from '@/lib/pdfCompression';
 import type { BankImportResponse, ConfirmMatchPayload } from '@/lib/bank-statement';
+import type { Order } from '@/lib/orders';
 import {
   INCOME_CATEGORIES,
   RECEIVED_ACCOUNTS,
@@ -34,6 +36,16 @@ export default function CashflowPage() {
   const [importResult, setImportResult] = useState<BankImportResponse | null>(null);
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [viewEntry, setViewEntry] = useState<LedgerEntry | null>(null);
+  const [viewNotes, setViewNotes] = useState('');
+  const [viewReceiptUrl, setViewReceiptUrl] = useState<string | null>(null);
+  const [viewReceiptPath, setViewReceiptPath] = useState('');
+  const [viewOrder, setViewOrder] = useState<Order | null>(null);
+  const [viewIncome, setViewIncome] = useState<Record<string, unknown> | null>(null);
+  const [viewUploadMsg, setViewUploadMsg] = useState('');
+  const [viewSaving, setViewSaving] = useState(false);
+  const [viewError, setViewError] = useState('');
+  const viewFileRef = useRef<HTMLInputElement>(null);
 
   const load = () => fetch(`/api/cashflow?month=${month}`).then((r) => r.json()).then(setData);
   useEffect(() => { load(); }, [month]);
@@ -135,6 +147,107 @@ export default function CashflowPage() {
     });
   };
 
+  const openView = async (e: LedgerEntry) => {
+    setViewEntry(e);
+    setViewError('');
+    setViewUploadMsg('');
+    setViewReceiptPath('');
+    setViewReceiptUrl(e.receiptUrl);
+    if (e.kind === 'product' && e.orderId) {
+      const res = await fetch(`/api/orders/${e.orderId}`);
+      const d = await res.json();
+      if (res.ok && d.order) {
+        setViewOrder(d.order);
+        setViewIncome(null);
+        setViewNotes(d.order.notes || '');
+        if (d.order.fields.payment_receipt_path) {
+          setViewReceiptUrl(`/api/orders/${e.orderId}/payment-receipt`);
+        }
+      }
+    } else if (e.incomeId) {
+      const res = await fetch(`/api/other-income/${e.incomeId}`);
+      const d = await res.json();
+      if (res.ok && d.income) {
+        setViewIncome(d.income);
+        setViewOrder(null);
+        setViewNotes(String(d.income.remarks || ''));
+        if (d.income.receipt_path) {
+          setViewReceiptUrl(`/api/other-income/${e.incomeId}/receipt`);
+        }
+      }
+    }
+  };
+
+  const handleViewReceiptUpload = async (rawFile: File) => {
+    if (!viewEntry) return;
+    setViewUploadMsg('Compressing…');
+    setViewError('');
+    let file = rawFile;
+    try {
+      if (rawFile.type === 'application/pdf') {
+        const pages = await compressPdfToImages(rawFile, { quality: 0.65, maxWidthOrHeight: 1600 });
+        if (pages[0]) file = pages[0];
+      } else {
+        const c = await compressImage(file, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg', quality: 0.65 });
+        file = c.file;
+      }
+    } catch { /* keep original */ }
+
+    if (viewEntry.kind === 'product' && viewEntry.orderId) {
+      const fd = new FormData();
+      fd.append('receipt', file);
+      const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
+      const d = await res.json();
+      if (!res.ok) { setViewError(d.error || 'Upload failed'); setViewUploadMsg(''); return; }
+      setViewReceiptUrl(URL.createObjectURL(file));
+      setViewReceiptPath(d.result?.receipt_path || '');
+      setViewUploadMsg('Payment receipt uploaded.');
+    } else if (viewEntry.incomeId) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/other-income/upload', { method: 'POST', body: fd });
+      const d = await res.json();
+      if (!res.ok) { setViewError(d.error || 'Upload failed'); setViewUploadMsg(''); return; }
+      setViewReceiptPath(d.path);
+      setViewReceiptUrl(URL.createObjectURL(file));
+      setViewUploadMsg('Voucher uploaded.');
+    }
+  };
+
+  const saveView = async () => {
+    if (!viewEntry) return;
+    setViewSaving(true);
+    setViewError('');
+    try {
+      if (viewEntry.kind === 'product' && viewEntry.orderId) {
+        const fields: Record<string, string> = {};
+        if (viewReceiptPath) fields.payment_receipt_path = viewReceiptPath;
+        const res = await fetch(`/api/orders/${viewEntry.orderId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ core: { notes: viewNotes }, fields }),
+        });
+        if (!res.ok) { const d = await res.json(); setViewError(d.error || 'Save failed'); return; }
+      } else if (viewEntry.incomeId) {
+        const res = await fetch(`/api/other-income/${viewEntry.incomeId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            remarks: viewNotes,
+            ...(viewReceiptPath ? { receipt_path: viewReceiptPath } : {}),
+          }),
+        });
+        if (!res.ok) { const d = await res.json(); setViewError(d.error || 'Save failed'); return; }
+      }
+      setViewEntry(null);
+      load();
+    } catch {
+      setViewError('Save failed');
+    } finally {
+      setViewSaving(false);
+    }
+  };
+
   const input = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
   const suggestedResults = importResult?.results.filter((r) => r.status === 'suggested') || [];
 
@@ -219,6 +332,7 @@ export default function CashflowPage() {
                 <th className="px-4 py-3">Receipt</th>
                 <th className="px-4 py-3">Bank</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -233,14 +347,16 @@ export default function CashflowPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-700">
-                    {e.orderId ? <Link href={`/orders/${e.orderId}`} className="text-brand-600 hover:text-brand-700 font-mono">{e.ref || `#${e.orderId}`}</Link> : (e.ref || '—')}
+                    <button onClick={() => openView(e)} className="text-left hover:text-brand-600">
+                      {e.orderId ? <span className="font-mono">{e.ref || `#${e.orderId}`}</span> : (e.ref || '—')}
+                    </button>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{e.account || '—'}</td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatMoney(e.amount)}</td>
                   <td className="px-4 py-3">
                     {e.receiptUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={e.receiptUrl} alt="receipt" onClick={() => setLightbox(e.receiptUrl)} className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      <img src={e.receiptUrl} alt="receipt" onClick={() => openView(e)} className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400" />
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3">
@@ -257,12 +373,89 @@ export default function CashflowPage() {
                       <button onClick={() => toggleVerify(e)} className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200">Pending</button>
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => openView(e)} className="text-sm text-brand-600 hover:text-brand-700 font-medium">View</button>
+                    {e.orderId && (
+                      <Link href={`/orders/${e.orderId}`} className="ml-3 text-sm text-gray-500 hover:text-gray-700">Order →</Link>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {viewEntry && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[55] p-4 overflow-y-auto" onClick={() => setViewEntry(null)}>
+          <div className="bg-white rounded-xl w-full max-w-2xl my-8 p-6 shadow-xl max-h-[92vh] overflow-y-auto" onClick={(ev) => ev.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-400">
+                  {viewEntry.kind === 'product' ? 'Product Sale 產品銷售' : `Other Income · ${viewEntry.category}`}
+                </p>
+                <h2 className="text-xl font-bold text-gray-900">{viewEntry.ref || '—'}</h2>
+                <p className="text-sm text-gray-500 mt-0.5">{viewEntry.date || '—'} · {formatMoney(viewEntry.amount)}</p>
+              </div>
+              <button onClick={() => setViewEntry(null)} className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200">Close</button>
+            </div>
+
+            {viewError && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{viewError}</div>}
+
+            <div className="grid grid-cols-2 gap-3 mb-5 text-sm">
+              <div><span className="text-gray-400 text-xs block">Account 收款賬戶</span>{viewEntry.account || '—'}</div>
+              <div><span className="text-gray-400 text-xs block">Verified</span>{viewEntry.verified ? '✓ Yes' : 'Pending'}</div>
+              <div><span className="text-gray-400 text-xs block">Bank Cleared</span>{viewEntry.bankCleared ? '✓ Yes' : '—'}</div>
+              {viewEntry.kind === 'product' && viewOrder && (
+                <>
+                  <div><span className="text-gray-400 text-xs block">Payment Date</span>{String(viewOrder.fields.payment_date || '—')}</div>
+                  <div><span className="text-gray-400 text-xs block">Reference</span>{String(viewOrder.fields.payment_reference || '—')}</div>
+                  <div><span className="text-gray-400 text-xs block">Bank / Platform</span>{String(viewOrder.fields.payment_bank || '—')}</div>
+                  <div><span className="text-gray-400 text-xs block">Method</span>{String(viewOrder.fields.payment_method_detail || '—')}</div>
+                </>
+              )}
+              {viewIncome && (
+                <>
+                  <div><span className="text-gray-400 text-xs block">Category</span>{String(viewIncome.category || '—')}</div>
+                  <div><span className="text-gray-400 text-xs block">Date</span>{String(viewIncome.txn_date || '—')}</div>
+                </>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-600 mb-2">Receipt / Voucher 收據</p>
+              {viewReceiptUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={viewReceiptUrl} alt="Receipt" onClick={() => setLightbox(viewReceiptUrl)} className="max-h-40 rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 mb-3" />
+              ) : (
+                <p className="text-sm text-gray-400 mb-3">No receipt uploaded.</p>
+              )}
+              <div
+                onClick={() => viewFileRef.current?.click()}
+                onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handleViewReceiptUpload(e.dataTransfer.files[0]); }}
+                onDragOver={(e) => e.preventDefault()}
+                className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
+              >
+                <input ref={viewFileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleViewReceiptUpload(e.target.files[0]); e.target.value = ''; }} />
+                <div className="text-xl mb-1">📎</div>
+                <p className="text-xs text-gray-600">Upload payment receipt / voucher</p>
+                {viewUploadMsg && <p className="text-[11px] text-brand-700 mt-1">{viewUploadMsg}</p>}
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                {viewEntry.kind === 'product' ? 'Order Notes 訂單備註' : 'Remarks 備註'}
+              </label>
+              <textarea value={viewNotes} onChange={(e) => setViewNotes(e.target.value)} rows={3} className={input} placeholder="Add or update notes…" />
+            </div>
+
+            <button onClick={saveView} disabled={viewSaving} className="w-full py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
+              {viewSaving ? 'Saving…' : 'Save Updates'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {importResult && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">

@@ -46,7 +46,12 @@ export default function ExpensesPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [gallery, setGallery] = useState<Expense | null>(null);
+  const [viewing, setViewing] = useState<Expense | null>(null);
+  const [viewNotes, setViewNotes] = useState('');
+  const [viewReceipts, setViewReceipts] = useState<FormReceipt[]>([]);
+  const [viewUploadMsg, setViewUploadMsg] = useState('');
+  const [viewSaving, setViewSaving] = useState(false);
+  const [viewError, setViewError] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [] });
 
@@ -58,6 +63,7 @@ export default function ExpensesPage() {
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const viewFileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const loadExpenses = () => {
@@ -178,6 +184,65 @@ export default function ExpensesPage() {
     setScanMessage('');
     setError('');
     setShowForm(true);
+  };
+
+  const openView = (e: Expense) => {
+    setViewing(e);
+    setViewNotes(e.notes || '');
+    setViewReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: `/api/receipts/${r.id}` })));
+    setViewUploadMsg('');
+    setViewError('');
+  };
+
+  const handleViewFiles = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    if (!files.length) return;
+    setViewUploadMsg(`Uploading ${files.length} file(s)…`);
+    setViewError('');
+    const localUrls = files.map((f) => URL.createObjectURL(f));
+    const fd = new FormData();
+    files.forEach((f) => fd.append('receipt', f));
+    try {
+      const res = await fetch('/api/expenses/scan', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { setViewError(data.error || 'Upload failed'); setViewUploadMsg(''); return; }
+      const newReceipts: FormReceipt[] = (data.receipts || []).map(
+        (r: { path: string }, i: number) => ({ path: r.path, url: localUrls[i] || '' })
+      );
+      setViewReceipts((prev) => [...prev, ...newReceipts]);
+      setViewUploadMsg(`${newReceipts.length} receipt(s) attached.`);
+    } catch {
+      setViewError('Upload failed');
+      setViewUploadMsg('');
+    }
+  };
+
+  const saveView = async () => {
+    if (!viewing) return;
+    setViewSaving(true);
+    setViewError('');
+    const res = await fetch(`/api/expenses/${viewing.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category: viewing.category,
+        merchant: viewing.merchant,
+        amount_hkd: viewing.amount_hkd,
+        amount_rmb: viewing.amount_rmb,
+        paid_date: viewing.paid_date,
+        order_no: viewing.order_no,
+        platform: viewing.platform,
+        payment_method: viewing.payment_method,
+        payment_status: viewing.payment_status,
+        notes: viewNotes,
+        receipt_paths: viewReceipts.map((r) => r.path),
+      }),
+    });
+    const data = await res.json();
+    setViewSaving(false);
+    if (!res.ok) { setViewError(data.error || 'Failed to save'); return; }
+    setViewing(null);
+    loadExpenses();
   };
 
   const openEdit = (e: Expense) => {
@@ -364,13 +429,13 @@ export default function ExpensesPage() {
             key={r.id}
             src={`/api/receipts/${r.id}`}
             alt="Receipt"
-            onClick={() => setGallery(e)}
+            onClick={() => openView(e)}
             className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400 transition"
           />
         ))}
         {extra > 0 && (
           <button
-            onClick={() => setGallery(e)}
+            onClick={() => openView(e)}
             className="h-10 w-10 rounded border border-gray-200 bg-gray-100 text-gray-600 text-xs font-semibold hover:bg-gray-200"
           >
             +{extra}
@@ -498,10 +563,14 @@ export default function ExpensesPage() {
                   <td className="px-4 py-3">
                     <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label={`Select ${e.receipt_no || e.id}`} />
                   </td>
-                  <td className="px-4 py-3 text-sm font-mono text-gray-700 whitespace-nowrap">{e.receipt_no || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-700 whitespace-nowrap">
+                    <button onClick={() => openView(e)} className="text-brand-600 hover:text-brand-700 font-mono font-medium">{e.receipt_no || '—'}</button>
+                  </td>
                   <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{e.merchant || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                    <button onClick={() => openView(e)} className="text-left hover:text-brand-600">{e.merchant || '—'}</button>
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.payment_method || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_hkd, 'HKD')}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_rmb, 'CNY')}</td>
@@ -513,6 +582,7 @@ export default function ExpensesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm space-x-3 whitespace-nowrap">
+                    <button onClick={() => openView(e)} className="text-gray-600 hover:text-gray-800 font-medium">View</button>
                     <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
                     <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
                   </td>
@@ -629,32 +699,70 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {gallery && (
-        <div onClick={() => setGallery(null)} className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 overflow-y-auto cursor-zoom-out">
-          <div className="bg-white rounded-xl w-full max-w-4xl my-8 p-6" onClick={(ev) => ev.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
+      {viewing && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 overflow-y-auto" onClick={() => setViewing(null)}>
+          <div className="bg-white rounded-xl w-full max-w-2xl my-8 p-6 shadow-xl max-h-[92vh] overflow-y-auto" onClick={(ev) => ev.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4 gap-3">
               <div>
-                <p className="text-xs uppercase tracking-wider text-gray-400">Receipt No.</p>
-                <p className="text-xl font-bold font-mono text-gray-900">{gallery.receipt_no || `EXP-${gallery.id}`}</p>
-                <p className="text-sm text-gray-500 mt-0.5">{gallery.merchant || 'Unnamed'} · {(gallery.receipts || []).length} image(s)</p>
+                <p className="text-xs uppercase tracking-wider text-gray-400">Expense Detail 支出詳情</p>
+                <h2 className="text-xl font-bold font-mono text-gray-900">{viewing.receipt_no || `EXP-${viewing.id}`}</h2>
+                <p className="text-sm text-gray-500 mt-0.5">{categoryLabel(viewing.category)} · {viewing.merchant || 'Unnamed'}</p>
               </div>
-              <button onClick={() => setGallery(null)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200">Close</button>
+              <button onClick={() => setViewing(null)} className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200">Close</button>
             </div>
-            {(gallery.receipts || []).length === 0 ? (
-              <p className="text-gray-400 text-sm py-12 text-center">No receipt images for this expense.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(gallery.receipts || []).map((r, i) => (
-                  <div key={r.id} className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border-b border-gray-200">
-                      {gallery.receipt_no || `EXP-${gallery.id}`} · #{i + 1}
-                    </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/receipts/${r.id}`} alt={`Receipt ${i + 1}`} onClick={() => setLightbox(`/api/receipts/${r.id}`)} className="w-full object-contain max-h-[60vh] bg-white cursor-zoom-in" />
-                  </div>
-                ))}
+
+            {viewError && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{viewError}</div>}
+
+            <div className="grid grid-cols-2 gap-3 mb-5 text-sm">
+              <div><span className="text-gray-400 text-xs block">Payment 支付方式</span>{viewing.payment_method || '—'}</div>
+              <div><span className="text-gray-400 text-xs block">Platform 消費平台</span>{viewing.platform || '—'}</div>
+              <div><span className="text-gray-400 text-xs block">Amount HKD</span>{formatMoney(viewing.amount_hkd, 'HKD')}</div>
+              <div><span className="text-gray-400 text-xs block">Amount RMB</span>{formatMoney(viewing.amount_rmb, 'CNY')}</div>
+              <div><span className="text-gray-400 text-xs block">Paid Date</span>{viewing.paid_date || '—'}</div>
+              <div><span className="text-gray-400 text-xs block">Order No.</span>{viewing.order_no || '—'}</div>
+              <div className="col-span-2">
+                <span className="text-gray-400 text-xs block">Status</span>
+                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[viewing.payment_status]}`}>{viewing.payment_status}</span>
               </div>
-            )}
+            </div>
+
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-600 mb-2">Receipts 付款收據</p>
+              {viewReceipts.length > 0 ? (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {viewReceipts.map((r, i) => (
+                    <div key={i} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r.url} alt="Receipt" onClick={() => setLightbox(r.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      <button type="button" onClick={() => setViewReceipts((prev) => prev.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">×</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 mb-3">No receipt images yet.</p>
+              )}
+              <div
+                onClick={() => viewFileInputRef.current?.click()}
+                onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) handleViewFiles(e.dataTransfer.files); }}
+                onDragOver={(e) => e.preventDefault()}
+                className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
+              >
+                <input ref={viewFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) handleViewFiles(e.target.files); e.target.value = ''; }} />
+                <div className="text-xl mb-1">📎</div>
+                <p className="text-xs text-gray-600">Upload / drop receipt images</p>
+                {viewUploadMsg && <p className="text-[11px] text-brand-700 mt-1">{viewUploadMsg}</p>}
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Notes 備註</label>
+              <textarea value={viewNotes} onChange={(e) => setViewNotes(e.target.value)} rows={3} className={inputCls} placeholder="Add or update notes…" />
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={saveView} disabled={viewSaving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{viewSaving ? 'Saving…' : 'Save Updates'}</button>
+              <button onClick={() => { const e = viewing; setViewing(null); openEdit(e); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-sm">Full Edit</button>
+            </div>
           </div>
         </div>
       )}

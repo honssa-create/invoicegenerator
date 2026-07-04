@@ -337,6 +337,17 @@ export default function OrderDetailPage() {
                     <p className="text-sm text-gray-400">Upload proofs in the “Design Proofs” section below.</p>
                   )}
                 </div>
+                <div className="border-t border-gray-100 pt-6">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Fields 襟章訂製詳情</h3>
+                  <div className="divide-y divide-gray-100">
+                    {ORDER_FIELDS.map((f) => (
+                      <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
+                        <div className="text-sm text-gray-500">{f.label}</div>
+                        <div>{renderField(f)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -513,21 +524,6 @@ export default function OrderDetailPage() {
               </div>
             )}
           </div>
-
-          {/* Badge-order fields — hidden for 燕窩回禮燉製 */}
-          {orderType === '訂製襟章' && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="font-semibold text-gray-900 mb-4">Fields 襟章訂製詳情</h2>
-              <div className="divide-y divide-gray-100">
-                {ORDER_FIELDS.map((f) => (
-                  <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
-                    <div className="text-sm text-gray-500">{f.label}</div>
-                    <div>{renderField(f)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}

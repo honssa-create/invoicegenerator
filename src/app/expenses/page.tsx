@@ -186,12 +186,22 @@ export default function ExpensesPage() {
     setShowForm(true);
   };
 
-  const openView = (e: Expense) => {
+  const openView = async (e: Expense) => {
     setViewing(e);
-    setViewNotes(e.notes || '');
-    setViewReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: `/api/receipts/${r.id}` })));
     setViewUploadMsg('');
     setViewError('');
+    setViewNotes(e.notes || '');
+    setViewReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: `/api/receipts/${r.id}` })));
+    try {
+      const res = await fetch(`/api/expenses/${e.id}`);
+      const data = await res.json();
+      if (res.ok && data.expense) {
+        const fresh = data.expense as Expense;
+        setViewing(fresh);
+        setViewNotes(fresh.notes || '');
+        setViewReceipts((fresh.receipts || []).map((r) => ({ id: r.id, path: r.path, url: `/api/receipts/${r.id}` })));
+      }
+    } catch { /* use list row data */ }
   };
 
   const handleViewFiles = async (fileList: FileList | File[]) => {

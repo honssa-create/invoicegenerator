@@ -45,6 +45,7 @@ export default function CashflowPage() {
   const [viewUploadMsg, setViewUploadMsg] = useState('');
   const [viewSaving, setViewSaving] = useState(false);
   const [viewError, setViewError] = useState('');
+  const [viewLoading, setViewLoading] = useState(false);
   const viewFileRef = useRef<HTMLInputElement>(null);
 
   const load = () => fetch(`/api/cashflow?month=${month}`).then((r) => r.json()).then(setData);
@@ -153,28 +154,38 @@ export default function CashflowPage() {
     setViewUploadMsg('');
     setViewReceiptPath('');
     setViewReceiptUrl(e.receiptUrl);
-    if (e.kind === 'product' && e.orderId) {
-      const res = await fetch(`/api/orders/${e.orderId}`);
-      const d = await res.json();
-      if (res.ok && d.order) {
-        setViewOrder(d.order);
-        setViewIncome(null);
-        setViewNotes(d.order.notes || '');
-        if (d.order.fields.payment_receipt_path) {
-          setViewReceiptUrl(`/api/orders/${e.orderId}/payment-receipt`);
+    setViewOrder(null);
+    setViewIncome(null);
+    setViewNotes('');
+    setViewLoading(true);
+    try {
+      if (e.kind === 'product' && e.orderId) {
+        const res = await fetch(`/api/orders/${e.orderId}`);
+        const d = await res.json();
+        if (!res.ok) { setViewError(d.error || 'Failed to load order'); return; }
+        if (d.order) {
+          setViewOrder(d.order);
+          setViewNotes(d.order.notes || '');
+          if (d.order.fields.payment_receipt_path) {
+            setViewReceiptUrl(`/api/orders/${e.orderId}/payment-receipt?t=${Date.now()}`);
+          }
+        }
+      } else if (e.incomeId) {
+        const res = await fetch(`/api/other-income/${e.incomeId}`);
+        const d = await res.json();
+        if (!res.ok) { setViewError(d.error || 'Failed to load income'); return; }
+        if (d.income) {
+          setViewIncome(d.income);
+          setViewNotes(String(d.income.remarks || ''));
+          if (d.income.receipt_path) {
+            setViewReceiptUrl(`/api/other-income/${e.incomeId}/receipt?t=${Date.now()}`);
+          }
         }
       }
-    } else if (e.incomeId) {
-      const res = await fetch(`/api/other-income/${e.incomeId}`);
-      const d = await res.json();
-      if (res.ok && d.income) {
-        setViewIncome(d.income);
-        setViewOrder(null);
-        setViewNotes(String(d.income.remarks || ''));
-        if (d.income.receipt_path) {
-          setViewReceiptUrl(`/api/other-income/${e.incomeId}/receipt`);
-        }
-      }
+    } catch {
+      setViewError('Failed to load details');
+    } finally {
+      setViewLoading(false);
     }
   };
 
@@ -199,18 +210,40 @@ export default function CashflowPage() {
       const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
       const d = await res.json();
       if (!res.ok) { setViewError(d.error || 'Upload failed'); setViewUploadMsg(''); return; }
-      setViewReceiptUrl(URL.createObjectURL(file));
-      setViewReceiptPath(d.result?.receipt_path || '');
-      setViewUploadMsg('Payment receipt uploaded.');
+      const r = d.result || {};
+      const fields: Record<string, string> = {};
+      if (r.receipt_path) fields.payment_receipt_path = r.receipt_path;
+      if (r.payment_date) fields.payment_date = r.payment_date;
+      if (r.amount != null) fields.payment_amount = String(r.amount);
+      if (r.bank) fields.payment_bank = r.bank;
+      if (r.method) fields.payment_method_detail = r.method;
+      if (r.reference) fields.payment_reference = r.reference;
+      const patchRes = await fetch(`/api/orders/${viewEntry.orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields }),
+      });
+      if (!patchRes.ok) { setViewError('Receipt uploaded but failed to attach to order'); setViewUploadMsg(''); return; }
+      setViewReceiptUrl(`/api/orders/${viewEntry.orderId}/payment-receipt?t=${Date.now()}`);
+      setViewReceiptPath(r.receipt_path || '');
+      setViewUploadMsg('Payment receipt saved to order.');
+      load();
     } else if (viewEntry.incomeId) {
       const fd = new FormData();
       fd.append('file', file);
       const res = await fetch('/api/other-income/upload', { method: 'POST', body: fd });
       const d = await res.json();
       if (!res.ok) { setViewError(d.error || 'Upload failed'); setViewUploadMsg(''); return; }
+      const patchRes = await fetch(`/api/other-income/${viewEntry.incomeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receipt_path: d.path }),
+      });
+      if (!patchRes.ok) { setViewError('Upload failed to save'); setViewUploadMsg(''); return; }
       setViewReceiptPath(d.path);
-      setViewReceiptUrl(URL.createObjectURL(file));
-      setViewUploadMsg('Voucher uploaded.');
+      setViewReceiptUrl(`/api/other-income/${viewEntry.incomeId}/receipt?t=${Date.now()}`);
+      setViewUploadMsg('Voucher saved.');
+      load();
     }
   };
 
@@ -401,7 +434,10 @@ export default function CashflowPage() {
             </div>
 
             {viewError && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{viewError}</div>}
-
+            {viewLoading ? (
+              <div className="py-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
+            ) : (
+            <>
             <div className="grid grid-cols-2 gap-3 mb-5 text-sm">
               <div><span className="text-gray-400 text-xs block">Account 收款賬戶</span>{viewEntry.account || '—'}</div>
               <div><span className="text-gray-400 text-xs block">Verified</span>{viewEntry.verified ? '✓ Yes' : 'Pending'}</div>
@@ -450,9 +486,11 @@ export default function CashflowPage() {
               <textarea value={viewNotes} onChange={(e) => setViewNotes(e.target.value)} rows={3} className={input} placeholder="Add or update notes…" />
             </div>
 
-            <button onClick={saveView} disabled={viewSaving} className="w-full py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
+            <button onClick={saveView} disabled={viewSaving || viewLoading} className="w-full py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
               {viewSaving ? 'Saving…' : 'Save Updates'}
             </button>
+            </>
+            )}
           </div>
         </div>
       )}

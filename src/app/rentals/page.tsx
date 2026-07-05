@@ -163,7 +163,7 @@ export default function RentalsPage() {
                         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[rec.status]}`}>
                           {RENTAL_STATUS_LABELS[rec.status]}
                         </span>
-                        {rec.waterFee > 0 || rec.electricityFee > 0 ? (
+                        {(rec.waterFee > 0 || rec.electricityFee > 0 || rec.actualAmount > u.currentYearRent) ? (
                           <p className="text-[10px] text-gray-400 mt-0.5">+Utilities</p>
                         ) : null}
                       </td>

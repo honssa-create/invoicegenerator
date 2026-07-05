@@ -190,7 +190,16 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
   const found = db.prepare(
     'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?'
   ).get(unit.user_id, unit.id, period) as RecordRow | undefined;
-  if (found) return hydrateRecord(found);
+  if (found) {
+    // Backfill base_rent for records created before the column existed.
+    if (!found.base_rent && unit.currentYearRent > 0) {
+      const total = computeTotal(unit.currentYearRent, found.water_fee || 0, found.electricity_fee || 0);
+      db.prepare('UPDATE rental_records SET base_rent = ?, actual_amount = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(unit.currentYearRent, total, found.id);
+      return hydrateRecord({ ...found, base_rent: unit.currentYearRent, actual_amount: total });
+    }
+    return hydrateRecord(found);
+  }
 
   const base = unit.currentYearRent;
   const res = db.prepare(

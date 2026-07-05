@@ -148,7 +148,10 @@ export default function OrderDetailPage() {
       const r = data.result;
       const upd: Record<string, string> = { payment_receipt_path: r.receipt_path || '' };
       if (r.payment_date) upd.payment_date = r.payment_date;
-      if (r.amount != null) upd.payment_amount = String(r.amount);
+      if (r.amount != null) {
+        upd.payment_amount = String(r.amount);
+        if (Number(r.amount) > 0) upd.payment_status_label = '部分付款 Partly Paid';
+      }
       if (r.bank) upd.payment_bank = r.bank;
       if (r.method) upd.payment_method_detail = r.method;
       if (r.reference) upd.payment_reference = r.reference;
@@ -204,21 +207,31 @@ export default function OrderDetailPage() {
       className={softInput}
     />
   );
-  const commitPayment1Amount = (value: string) => {
+  const partialPaymentFields = (key: 'payment_amount' | 'payment1_amount', value: string) => {
     const amount = Number(value);
-    const fields: Record<string, string> = { payment1_amount: value };
+    const fields: Record<string, string> = { [key]: value };
     if (Number.isFinite(amount) && amount > 0 && fVal('payment_status_label') !== 'Full Paid') {
       fields.payment_status_label = '部分付款 Partly Paid';
       setFieldLocal('payment_status_label', fields.payment_status_label);
     }
     patch({ fields });
   };
+  const paymentAmountInput = (
+    <input
+      type="number"
+      value={fVal('payment_amount')}
+      onChange={(e) => setFieldLocal('payment_amount', e.target.value)}
+      onBlur={(e) => partialPaymentFields('payment_amount', e.target.value)}
+      placeholder="0.00"
+      className={softInput}
+    />
+  );
   const payment1AmountInput = (
     <input
       type="number"
       value={fVal('payment1_amount')}
       onChange={(e) => setFieldLocal('payment1_amount', e.target.value)}
-      onBlur={(e) => commitPayment1Amount(e.target.value)}
+      onBlur={(e) => partialPaymentFields('payment1_amount', e.target.value)}
       placeholder="0.00"
       className={softInput}
     />
@@ -521,7 +534,7 @@ export default function OrderDetailPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
                 {labeled('支付日期 Payment Date', fInput('payment_date', 'date'))}
-                {labeled('銀碼 Amount', fInput('payment_amount', 'number', '0.00'))}
+                {labeled('銀碼 Amount', paymentAmountInput, 'auto-sets 部分付款 Partly Paid')}
                 {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
                 {labeled('支付方式 Payment Method', fInput('payment_method_detail', 'text', 'e.g. FPS 轉數快'))}
                 <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>

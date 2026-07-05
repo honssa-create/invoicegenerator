@@ -446,6 +446,52 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_expense_options_user ON expense_options(user_id, type);
 `);
 
+// Rental Income Management — unit leases + monthly rent records.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rental_units (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_name TEXT NOT NULL,
+    tenant_name TEXT NOT NULL,
+    tenant_email TEXT,
+    current_year_rent REAL NOT NULL DEFAULT 0,
+    previous_years_rent_json TEXT DEFAULT '[]',
+    lease_start_date TEXT,
+    lease_end_date TEXT,
+    due_date_day INTEGER NOT NULL DEFAULT 1,
+    auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
+    automation_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    billing_period TEXT NOT NULL,
+    actual_amount REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'overdue')),
+    invoice_ref TEXT,
+    receipt_ref TEXT,
+    invoice_sent_at TEXT,
+    receipt_sent_at TEXT,
+    paid_at TEXT,
+    custom_invoice_note TEXT,
+    custom_receipt_note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, unit_id, billing_period),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rental_units_user ON rental_units(user_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_records_user_period ON rental_records(user_id, billing_period);
+  CREATE INDEX IF NOT EXISTS idx_rental_records_unit ON rental_records(unit_id);
+`);
+
 // Backfill: move any single receipt_path into the expense_receipts table once.
 const legacyReceipts = db
   .prepare(

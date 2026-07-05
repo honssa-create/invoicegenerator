@@ -613,6 +613,54 @@ try {
   /* table may not exist on first boot before exec above — ignore */
 }
 
+// User roles + per-role section permissions.
+{
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+  if (!userCols.some((c) => c.name === 'role')) {
+    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
+    db.exec("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''");
+  }
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS role_permissions (
+    role TEXT NOT NULL,
+    section TEXT NOT NULL,
+    allowed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (role, section)
+  );
+`);
+
+// Seed default operator/accountant permissions once.
+{
+  const permCount = (db.prepare('SELECT COUNT(*) as c FROM role_permissions').get() as { c: number }).c;
+  if (permCount === 0) {
+    const defaults: Record<string, Record<string, boolean>> = {
+      operator: {
+        dashboard: true, quotations: false, invoices: false, orders: true, inbound: true,
+        kitchen: true, kitchen_prep: true, rentals: false, expenses: false, accounting: false,
+        cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
+      },
+      accountant: {
+        dashboard: true, quotations: true, invoices: true, orders: false, inbound: false,
+        kitchen: false, kitchen_prep: false, rentals: true, expenses: true, accounting: true,
+        cashflow: true, scan_table: true, customers: true, trash: true, admin: false,
+      },
+    };
+    const insert = db.prepare(
+      'INSERT INTO role_permissions (role, section, allowed) VALUES (?, ?, ?)'
+    );
+    const seed = db.transaction(() => {
+      for (const [role, sections] of Object.entries(defaults)) {
+        for (const [section, allowed] of Object.entries(sections)) {
+          insert.run(role, section, allowed ? 1 : 0);
+        }
+      }
+    });
+    seed();
+  }
+}
+
   dbInstance = db;
   return dbInstance;
 }

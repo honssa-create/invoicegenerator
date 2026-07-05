@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { hashPassword, createToken, setSessionCookie } from '@/lib/auth';
+import { hashPassword, createSessionForUserId, setSessionCookie } from '@/lib/auth';
 
 export async function POST(request: Request) {
   try {
@@ -14,6 +14,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
+    const userCount = (db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }).c;
+    if (userCount > 0) {
+      return NextResponse.json(
+        { error: 'Public registration is disabled. Ask an administrator to create your account.' },
+        { status: 403 }
+      );
+    }
+
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (existing) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
@@ -21,16 +29,17 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password);
     const result = db
-      .prepare('INSERT INTO users (email, password_hash, name, company_name) VALUES (?, ?, ?, ?)')
-      .run(email.toLowerCase().trim(), passwordHash, name.trim(), company_name?.trim() || null);
+      .prepare(
+        'INSERT INTO users (email, password_hash, name, company_name, role) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(email.toLowerCase().trim(), passwordHash, name.trim(), company_name?.trim() || null, 'admin');
 
     const userId = result.lastInsertRowid as number;
-    const token = await createToken({ userId, email: email.toLowerCase().trim(), name: name.trim() });
-    await setSessionCookie(token);
+    const session = await createSessionForUserId(userId);
+    if (!session) return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
+    await setSessionCookie(session.token);
 
-    return NextResponse.json({
-      user: { id: userId, email: email.toLowerCase().trim(), name: name.trim(), company_name },
-    });
+    return NextResponse.json({ user: session.user });
   } catch {
     return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
   }

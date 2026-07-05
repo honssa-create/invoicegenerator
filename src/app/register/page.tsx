@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
 
@@ -9,6 +9,14 @@ export default function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '', company_name: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/setup-status')
+      .then((r) => r.json())
+      .then((d) => setRegistrationOpen(d.registration_open === true))
+      .catch(() => setRegistrationOpen(false));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,10 +39,26 @@ export default function RegisterPage() {
             <span className="text-3xl">💰</span>
             <span className="font-bold text-xl">InvoiceFlow</span>
           </Link>
-          <h1 className="mt-6 text-2xl font-bold text-gray-900">Create your account</h1>
-          <p className="mt-2 text-gray-600">Start invoicing in minutes</p>
+          <h1 className="mt-6 text-2xl font-bold text-gray-900">
+            {registrationOpen === false ? 'Registration closed' : 'Create your account'}
+          </h1>
+          <p className="mt-2 text-gray-600">
+            {registrationOpen === false
+              ? 'Ask an administrator to create your account.'
+              : registrationOpen
+                ? 'First setup — this account becomes the system administrator.'
+                : 'Loading…'}
+          </p>
         </div>
 
+        {registrationOpen === false ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm text-center">
+            <p className="text-gray-600 text-sm mb-4">New users are created by an admin under Administration → Users.</p>
+            <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+              Back to sign in
+            </Link>
+          </div>
+        ) : registrationOpen ? (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
@@ -104,6 +128,11 @@ export default function RegisterPage() {
             </Link>
           </p>
         </form>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 shadow-sm text-center text-gray-500">
+            Loading…
+          </div>
+        )}
       </div>
     </div>
   );

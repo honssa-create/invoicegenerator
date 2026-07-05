@@ -3,23 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
-
-export const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: '📊' },
-  { href: '/quotations', label: 'Quotations', icon: '📝' },
-  { href: '/invoices', label: 'Invoices', icon: '📄' },
-  { href: '/orders', label: 'Orders', icon: '📦' },
-  { href: '/inbound', label: 'Inbound', icon: '📥' },
-  { href: '/kitchen', label: 'Kitchen', icon: '🍲' },
-  { href: '/kitchen-prep', label: 'Kitchen Prep', icon: '🥣' },
-  { href: '/rentals', label: 'Rentals', icon: '🏠' },
-  { href: '/expenses', label: 'Expenses', icon: '🧾' },
-  { href: '/accounting', label: 'Accounting', icon: '📒' },
-  { href: '/cashflow', label: 'Cash Flow', icon: '💹' },
-  { href: '/scan-table', label: 'Scan to Table', icon: '📊' },
-  { href: '/customers', label: 'Customers', icon: '👥' },
-  { href: '/trash', label: 'Deleted Records', icon: '🗑️' },
-];
+import { NAV_ITEMS } from './nav-items';
 
 interface SidebarProps {
   variant?: 'desktop' | 'mobile';
@@ -29,7 +13,7 @@ interface SidebarProps {
 
 export default function Sidebar({ variant = 'desktop', open = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, logout, canAccess } = useAuth();
 
   const isMobile = variant === 'mobile';
 
@@ -40,6 +24,8 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
     : 'hidden lg:flex w-64 min-h-screen flex-col border-r border-gray-200 bg-white';
 
   const handleNav = () => onNavigate?.();
+
+  const visibleItems = NAV_ITEMS.filter((item) => canAccess(item.section));
 
   return (
     <aside className={asideClass} aria-hidden={isMobile ? !open : undefined}>
@@ -54,7 +40,7 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto p-3 sm:p-4">
-        {NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const active = pathname.startsWith(item.href);
           return (
             <Link
@@ -78,6 +64,9 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
         <div className="mb-2 px-4 py-2">
           <p className="truncate text-sm font-medium text-gray-900">{user?.name}</p>
           <p className="truncate text-xs text-gray-500">{user?.email}</p>
+          {user?.role_label && (
+            <p className="truncate text-xs text-brand-600 mt-0.5">{user.role_label}</p>
+          )}
         </div>
         <button
           onClick={() => {

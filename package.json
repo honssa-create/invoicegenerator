@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:clean": "pkill -f 'next dev' 2>/dev/null; pkill -f 'next-server' 2>/dev/null; sleep 1; rm -rf .next && next dev",
+    "dev:clean": "bash -c 'pkill -f \"node.*\\.bin/next dev\" 2>/dev/null || true; pkill -f next-server 2>/dev/null || true; sleep 1; rm -rf .next; exec next dev'",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

@@ -93,7 +93,7 @@ export default function QuotationDetailPage() {
   };
 
   const del = async () => {
-    if (!confirm('Delete this quotation?')) return;
+    if (!confirm('Move this quotation to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/quotations/${id}`, { method: 'DELETE' });
     router.push('/quotations');
   };

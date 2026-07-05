@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { attachReceipts, normalizeNumber, receiptPathsFromBody } from '@/lib/expense-server';
+import { trashExpense } from '@/lib/trash';
 import type { Expense } from '@/lib/types';
 
 const STATUSES = ['unpaid', 'pending', 'paid'];
@@ -99,12 +100,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result = db
-    .prepare('DELETE FROM expenses WHERE id = ? AND user_id = ?')
-    .run(params.id, session.userId);
-
-  if (result.changes === 0) {
+  if (!trashExpense(session.userId, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

@@ -18,6 +18,7 @@ export const NAV_ITEMS = [
   { href: '/cashflow', label: 'Cash Flow', icon: '💹' },
   { href: '/scan-table', label: 'Scan to Table', icon: '📊' },
   { href: '/customers', label: 'Customers', icon: '👥' },
+  { href: '/trash', label: 'Deleted Records', icon: '🗑️' },
 ];
 
 interface SidebarProps {

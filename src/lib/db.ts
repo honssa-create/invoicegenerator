@@ -589,6 +589,30 @@ if (legacyReceipts.length) {
   migrate();
 }
 
+// Recycle bin — deleted records kept for 60 days before permanent purge.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS deleted_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    summary TEXT,
+    payload TEXT NOT NULL,
+    deleted_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_deleted_records_user ON deleted_records(user_id);
+  CREATE INDEX IF NOT EXISTS idx_deleted_records_expires ON deleted_records(expires_at);
+`);
+
+try {
+  db.prepare("DELETE FROM deleted_records WHERE expires_at < datetime('now')").run();
+} catch {
+  /* table may not exist on first boot before exec above — ignore */
+}
+
   dbInstance = db;
   return dbInstance;
 }

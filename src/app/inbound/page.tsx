@@ -88,7 +88,7 @@ export default function InboundPage() {
   };
 
   const del = async (id: number) => {
-    if (!confirm('Delete this shipment record?')) return;
+    if (!confirm('Move this shipment to Deleted Records? You can restore it within 60 days.')) return;
     const res = await fetch(`/api/inbound/${id}`, { method: 'DELETE' });
     if (res.ok) load();
   };

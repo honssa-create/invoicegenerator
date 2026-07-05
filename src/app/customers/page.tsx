@@ -66,7 +66,7 @@ export default function CustomersPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this customer?')) return;
+    if (!confirm('Move this customer to Deleted Records? You can restore it within 60 days.')) return;
     const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getInvoiceWithDetails } from '@/lib/invoices';
+import { trashInvoice } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
 
 function linkedOrder(orderId: number | null | undefined, userId: number) {
@@ -128,13 +129,9 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result = db
-    .prepare('DELETE FROM invoices WHERE id = ? AND user_id = ?')
-    .run(params.id, session.userId);
-
-  if (result.changes === 0) {
+  if (!trashInvoice(session.userId, Number(params.id))) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

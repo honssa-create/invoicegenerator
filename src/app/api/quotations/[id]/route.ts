@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
+import { trashQuotation } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -72,7 +73,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const result = db.prepare('DELETE FROM quotations WHERE id = ? AND user_id = ?').run(params.id, session.userId);
-  if (result.changes === 0) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
-  return NextResponse.json({ success: true });
+  if (!trashQuotation(session.userId, Number(params.id))) {
+    return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
+  }
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

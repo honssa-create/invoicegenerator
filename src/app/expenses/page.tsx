@@ -323,7 +323,7 @@ export default function ExpensesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this expense?')) return;
+    if (!confirm('Move this expense to Deleted Records? You can restore it within 60 days.')) return;
     const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
     if (res.ok) {
       setSelected((prev) => {

@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Each image must be under 10 MB' }, { status: 400 });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
-    const path = saveReceipt(buffer, file.type);
+    const path = await saveReceipt(buffer, file.type, file.name);
     insert.run(params.id, session.userId, path, file.name || null);
   }
 

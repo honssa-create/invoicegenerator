@@ -5,7 +5,7 @@
 InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLite** file via `better-sqlite3`. There are no other services to run.
 
 ### Running / building / testing
-- Dev server: `npm run dev` (serves http://localhost:3000). This is the command to use during development.
+- Dev server: `npm run dev` (serves http://localhost:3000). This is the command to use during development. If pages return 500 or JS/CSS 404, run `npm run dev:clean` (deletes `.next` then starts dev — `npm run build` while dev is running can corrupt the cache).
 - Build: `npm run build` — also runs TypeScript type-checking, so it doubles as the type check.
 - Production run: `npm start` (only after a build; not needed for development).
 - Lint: `npm run lint` is **not configured** in this repo — `next lint` will prompt interactively to create an ESLint config. There is no committed ESLint config, so treat lint as unavailable unless you intentionally add one.
@@ -48,6 +48,11 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLi
 ### Cash Flow dashboard (`/cashflow`)
 - `GET /api/cashflow?month=YYYY-MM` builds a unified ledger: **Product Sales** rows come from order `payment_amount` fields, **Other Income** rows from the `other_income` table. Top cards show monthly Product Sales / Other Income / Gross for the selected month. Manual income is created via `POST /api/other-income` (voucher first uploaded to `POST /api/other-income/upload`, compressed client-side at 1600px / quality 0.65 / <300KB), served at `/api/other-income/[id]/receipt`, verified via `PATCH /api/other-income/[id]`. Product rows verify through the order (`payment_verified`).
 
+### Rental Income Management (`/rentals`)
+- Tables: `rental_units` (unit/tenant lease master: current rent, previous rents JSON, lease dates, due day, auto receipt toggle, automation toggle) and `rental_records` (monthly billing period, actual override amount, pending/paid/overdue, invoice/receipt refs and email timestamps).
+- UI: `/rentals` combines the fixed **Lease Overview Master Panel 租約主控面板** and **Monthly Collection Grid 每月收租看板**. Cards support amount override before invoice sending, email preview notes, mark-as-paid receipt flow with auto-send toggle, and per-unit history.
+- APIs: `GET/POST /api/rentals`, `PATCH /api/rentals/units/[id]`, `POST /api/rentals/records/[id]/invoice`, `POST /api/rentals/records/[id]/paid`, `GET|POST /api/cron/rental-invoices`. Print views: `/rentals/records/[id]/invoice` and `/rentals/records/[id]/receipt`.
+
 ### Payment receipts + Accounting reconciliation
 - Order **Box 2 (Payment Detail)** has a payment-receipt upload zone: images/PDF are compressed client-side (`compressImage`/`compressPdfToImages`, 1600px, quality **0.65**, <300KB) then sent to `POST /api/payments/scan`, which extracts payment date / amount / bank·platform / method / reference via Gemini (OCR fallback) and pre-fills the fields. Fields + `payment_receipt_path` (+ later `payment_verified`) live in the order `fields_json`; the receipt image is served auth-scoped at `GET /api/orders/[id]/payment-receipt`.
 - **Accounting Reconciliation Dashboard** (`/accounting`, `GET /api/accounting`) aggregates every order that has any payment field into one table (receipt thumbnail, order #, customer, type, date, amount, bank, method, reference, verified). "Confirm Entry" toggles `fields.payment_verified` via `PATCH /api/orders/[id]` (Pending Verification ↔ Verified).
@@ -58,6 +63,13 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLi
   2. **Manual batch brewing** (`createBatch` → allocates raw materials; `completeBatch` → consumes raw + adds finished + FIFO-fulfils backlog for that SKU). Raw needs are computed from the manually entered batch bottle count only (`computeBatchMaterials`: 燕餅 = bottles × 0.8g, etc.).
   3. **Two-tier inventory**: `kitchen_finished` (ready-to-ship) and `kitchen_raw` (`total_stock`/`allocated_stock`, `available = total − allocated`). Seeded per user on first `/api/kitchen/state` call.
 - APIs: `GET /api/kitchen/state`, `POST /api/kitchen/orders`, `POST /api/kitchen/batches`, `POST /api/kitchen/batches/[id]/complete` — each mutating route returns the fresh full `state` so the dashboard stays in sync without a refetch.
+
+### Kitchen Prep — ingredient calculator (`/kitchen-prep`)
+- Independent **廚房備料系統** for stewed bird's-nest prep: `kitchen_prep_orders` table, logic in `src/lib/kitchen-prep.ts` + `src/lib/kitchen-prep-server.ts`.
+- **List** (`/kitchen-prep`): scheduled orders — stewing date, order ID, Daily/Wedding type, status; row click → detail.
+- **Detail** (`/kitchen-prep/[id]`): auto-calculates per-flavor weights from `CAPACITY_FLAVOR_FORMULAS` (capacity → flavor → per-bottle grams). **25g**: Osmanthus → 燕餅 0.4g · 桂花 0.072g · 片糖 2.79g; Rock Sugar → 燕餅 0.4g · 冰糖 1.98g; Red Date disabled. **45g**: 桂花 uses 片糖 only; 紅棗/冰糖 use 冰糖 only (business rules enforced). Wedding orders add +3 bottles per flavor (actual qty × formula). Kitchen Summary table includes 容量 column; shared typography with print via `PrepSummaryTable`.
+- **Create**: multi-capacity batch via `POST /api/kitchen-prep` `{ lines: [{ capacity, qty_* }] }` — one DB row per capacity.
+- **Print** (`/kitchen-prep/[id]/print`): printer-friendly prep sheet (`no-print` toolbar). **Completion reporting**: list row action opens tablet-friendly modal (expected vs actual yield, quantity splits into sub-orders, exception tags); `POST /api/kitchen-prep/[id]/complete` sets status `completed` and logs to the linked order's Activity feed. APIs: `GET/POST /api/kitchen-prep`, `GET/PATCH/DELETE /api/kitchen-prep/[id]`, `POST /api/kitchen-prep/import` (from bird's-nest order).
 
 ### Order Type + section boxes (dynamic entry)
 - The order detail left column has three "Quiet Luxury" section boxes above the legacy fields list: **Order Detail** (dynamic by `order_type` field: `訂製襟章` → badge style/qty/image preview; `燕窩回禮燉製` → bird's-nest dates/quantities/production), **Payment Detail**, and **Shipment Detail**. All values persist in `fields_json` via the same `PATCH /api/orders/[id]` autosave, except 送貨地址 (bound to the `shipping_address` core column). `客人送貨日期`/`tracking_no`/送貨地址 intentionally share keys with other UI so they stay in sync.

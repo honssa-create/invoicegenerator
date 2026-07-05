@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { receiptFilePath, receiptContentType } from '@/lib/receipt';
+import { imageResponseForStoredPath } from '@/lib/stored-image';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -19,16 +18,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     .get(params.id, session.userId) as { path: string } | undefined;
   if (!row) return NextResponse.json({ error: 'File not found' }, { status: 404 });
 
-  const filePath = receiptFilePath(row.path);
-  if (!filePath) return NextResponse.json({ error: 'File missing' }, { status: 404 });
-
-  const file = fs.readFileSync(filePath);
-  return new NextResponse(file, {
-    headers: {
-      'Content-Type': receiptContentType(row.path),
-      'Cache-Control': 'private, max-age=3600',
-    },
-  });
+  return imageResponseForStoredPath(row.path);
 }
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {

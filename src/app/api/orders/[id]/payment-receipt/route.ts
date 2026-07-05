@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { receiptFilePath, receiptContentType } from '@/lib/receipt';
+import { imageResponseForStoredPath } from '@/lib/stored-image';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -13,19 +12,13 @@ export async function GET(request: Request, { params }: { params: { id: string }
     .get(params.id, session.userId) as { fields_json: string | null } | undefined;
   if (!row) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-  let path: string | undefined;
+  let stored: string | undefined;
   try {
-    path = row.fields_json ? JSON.parse(row.fields_json).payment_receipt_path : undefined;
+    stored = row.fields_json ? JSON.parse(row.fields_json).payment_receipt_path : undefined;
   } catch {
-    path = undefined;
+    stored = undefined;
   }
-  if (!path) return NextResponse.json({ error: 'No payment receipt' }, { status: 404 });
+  if (!stored) return NextResponse.json({ error: 'No payment receipt' }, { status: 404 });
 
-  const filePath = receiptFilePath(path);
-  if (!filePath) return NextResponse.json({ error: 'File missing' }, { status: 404 });
-
-  const file = fs.readFileSync(filePath);
-  return new NextResponse(file, {
-    headers: { 'Content-Type': receiptContentType(path), 'Cache-Control': 'private, max-age=3600' },
-  });
+  return imageResponseForStoredPath(stored);
 }

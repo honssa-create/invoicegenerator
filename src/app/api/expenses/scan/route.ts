@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Each image must be under 10 MB' }, { status: 400 });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
-    savedPaths.push(saveReceipt(buffer, file.type));
+    savedPaths.push(await saveReceipt(buffer, file.type, file.name));
     if (!firstBuffer) {
       firstBuffer = buffer;
       firstType = file.type;

@@ -2,12 +2,13 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const dataDir = path.join(process.cwd(), 'data');
+const defaultDbPath = path.join(process.cwd(), 'data', 'invoices.db');
+const dbPath = process.env.DB_PATH || defaultDbPath;
+const dataDir = path.dirname(dbPath);
+
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
-
-const dbPath = path.join(dataDir, 'invoices.db');
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
@@ -193,11 +194,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_order_activities_order ON order_activities(order_id);
 `);
 
-// Carton count on orders (for delivery notes).
+// Carton count + quotation link on orders (for delivery notes / source quote tracking).
 {
   const orderCols = db.prepare('PRAGMA table_info(orders)').all() as { name: string }[];
   if (!orderCols.some((c) => c.name === 'carton_count')) {
     db.exec('ALTER TABLE orders ADD COLUMN carton_count TEXT');
+  }
+  if (!orderCols.some((c) => c.name === 'quotation_id')) {
+    db.exec('ALTER TABLE orders ADD COLUMN quotation_id INTEGER');
   }
 }
 
@@ -346,6 +350,46 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_kitchen_batches_user ON kitchen_batches(user_id);
 `);
 
+// Kitchen Prep (廚房備料系統) — stewing ingredient calculator.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    order_code TEXT NOT NULL,
+    linked_order_id INTEGER,
+    stewing_date TEXT NOT NULL,
+    order_type TEXT NOT NULL DEFAULT 'daily' CHECK(order_type IN ('daily', 'wedding')),
+    capacity TEXT NOT NULL DEFAULT '45g',
+    status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'in_prep', 'completed')),
+    qty_osmanthus INTEGER NOT NULL DEFAULT 0,
+    qty_red_date INTEGER NOT NULL DEFAULT 0,
+    qty_rock_sugar INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (linked_order_id) REFERENCES orders(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_kitchen_prep_user ON kitchen_prep_orders(user_id);
+  CREATE INDEX IF NOT EXISTS idx_kitchen_prep_date ON kitchen_prep_orders(user_id, stewing_date);
+`);
+
+const kitchenPrepCompletionCols = [
+  'expected_yield INTEGER',
+  'actual_yield INTEGER',
+  'completion_remarks TEXT',
+  'completed_at TEXT',
+  'completed_by TEXT',
+  'completion_splits_json TEXT',
+] as const;
+for (const col of kitchenPrepCompletionCols) {
+  try {
+    db.exec(`ALTER TABLE kitchen_prep_orders ADD COLUMN ${col}`);
+  } catch {
+    /* column exists */
+  }
+}
+
 // Inbound Shipment Tracker (到件紀錄) — arriving supplier shipments.
 db.exec(`
   CREATE TABLE IF NOT EXISTS inbound_shipments (
@@ -402,6 +446,115 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_expense_options_user ON expense_options(user_id, type);
 `);
+
+// Rental Income Management — unit leases + monthly rent records.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rental_units (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_name TEXT NOT NULL,
+    tenant_name TEXT NOT NULL,
+    tenant_phone TEXT,
+    tenant_email TEXT,
+    current_year_rent REAL NOT NULL DEFAULT 0,
+    previous_years_rent_json TEXT DEFAULT '[]',
+    lease_start_date TEXT,
+    lease_end_date TEXT,
+    due_date_day INTEGER NOT NULL DEFAULT 1,
+    auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
+    automation_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    billing_period TEXT NOT NULL,
+    base_rent REAL NOT NULL DEFAULT 0,
+    water_fee REAL NOT NULL DEFAULT 0,
+    electricity_fee REAL NOT NULL DEFAULT 0,
+    actual_amount REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'overdue')),
+    paid_date TEXT,
+    invoice_ref TEXT,
+    receipt_ref TEXT,
+    receipt_image_path TEXT,
+    invoice_sent_at TEXT,
+    receipt_sent_at TEXT,
+    paid_at TEXT,
+    custom_invoice_note TEXT,
+    custom_receipt_note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, unit_id, billing_period),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_payment_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    rent_record_id INTEGER NOT NULL,
+    image_path TEXT NOT NULL,
+    extracted_method TEXT,
+    extracted_transfer_date TEXT,
+    extracted_receiving_account TEXT,
+    extracted_amount REAL,
+    extraction_source TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (rent_record_id) REFERENCES rental_records(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    rent_record_id INTEGER,
+    action TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rental_units_user ON rental_units(user_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_records_user_period ON rental_records(user_id, billing_period);
+  CREATE INDEX IF NOT EXISTS idx_rental_records_unit ON rental_records(unit_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_receipts_record ON rental_payment_receipts(rent_record_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_activities_unit ON rental_activity_logs(unit_id);
+`);
+
+// Migrate existing rental_units / rental_records columns safely.
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('tenant_phone')) {
+    db.exec('ALTER TABLE rental_units ADD COLUMN tenant_phone TEXT');
+  }
+  const rrCols = (db.prepare('PRAGMA table_info(rental_records)').all() as { name: string }[]).map((c) => c.name);
+  for (const col of [
+    'base_rent REAL NOT NULL DEFAULT 0',
+    'water_fee REAL NOT NULL DEFAULT 0',
+    'electricity_fee REAL NOT NULL DEFAULT 0',
+    'paid_date TEXT',
+    'receipt_image_path TEXT',
+    'amount_paid REAL NOT NULL DEFAULT 0',
+    'water_period_from TEXT',
+    'water_period_to TEXT',
+    'electricity_period_from TEXT',
+    'electricity_period_to TEXT',
+    'base_rent_period_from TEXT',
+    'base_rent_period_to TEXT',
+  ]) {
+    const name = col.split(' ')[0];
+    if (!rrCols.includes(name)) {
+      try { db.exec(`ALTER TABLE rental_records ADD COLUMN ${col}`); } catch { /* exists */ }
+    }
+  }
+}
 
 // Backfill: move any single receipt_path into the expense_receipts table once.
 const legacyReceipts = db

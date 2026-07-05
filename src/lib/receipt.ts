@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import type { ReceiptScanResult } from './types';
+import { isR2Configured, uploadBufferToR2 } from './r2';
 
 const RECEIPTS_DIR = path.join(process.cwd(), 'data', 'receipts');
 
@@ -19,7 +20,16 @@ export function ensureReceiptsDir() {
   }
 }
 
-export function saveReceipt(buffer: Buffer, mimeType: string): string {
+/** Save an image to R2 (production) or local disk (dev fallback). Returns public URL or bare filename. */
+export async function saveReceipt(
+  buffer: Buffer,
+  mimeType: string,
+  originalName = 'receipt',
+): Promise<string> {
+  if (isR2Configured()) {
+    return uploadBufferToR2(buffer, mimeType, originalName);
+  }
+
   ensureReceiptsDir();
   const ext = ALLOWED_EXT[mimeType] || '.png';
   const filename = `${crypto.randomUUID()}${ext}`;

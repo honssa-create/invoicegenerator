@@ -54,8 +54,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const create = db.transaction(() => {
       const result = db
         .prepare(
-          `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json)
-           VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}')`
+          `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json, quotation_id)
+           VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}', ?)`
         )
         .run(
           session.userId,
@@ -65,7 +65,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
           q.customer_email || null,
           null,
           [q.customer_address, q.customer_city, q.customer_state, q.customer_zip].filter(Boolean).join(', ') || null,
-          itemsSummary || null
+          itemsSummary || null,
+          q.id
         );
       return result.lastInsertRowid as number;
     });

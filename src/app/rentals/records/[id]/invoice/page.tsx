@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { dueDateForPeriod, formatMoney, formatUtilityAmount, utilityLineLabel, type RentRecord, type RentalUnit } from '@/lib/rentals';
+import { dueDateForPeriod, formatMoney, formatUtilityAmount, baseRentLineLabel, utilityLineLabel, type RentRecord, type RentalUnit } from '@/lib/rentals';
 
 interface DocumentPayload { unit: RentalUnit; record: RentRecord; dueDate: string; }
 
@@ -57,7 +57,7 @@ export default function RentInvoicePage() {
           </thead>
           <tbody>
             <tr className="border-b">
-              <td className="px-4 py-4">基本租金 Monthly Rent — {record.billingPeriod}</td>
+              <td className="px-4 py-4">{baseRentLineLabel(record)}</td>
               <td className="px-4 py-4 text-right font-semibold">{formatMoney(record.baseRent)}</td>
             </tr>
             <tr className="border-b">

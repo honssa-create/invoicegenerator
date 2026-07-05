@@ -10,10 +10,13 @@ import {
   RENTAL_STATUS_LABELS,
   currentBillingPeriod,
   daysRemaining,
+  defaultRentPeriod,
   displayRentalStatus,
   formatDueDayLabel,
   formatMoney,
+  formatPeriodDate,
   formatUtilityAmount,
+  baseRentLineLabel,
   outstandingBalance,
   utilityLineLabel,
   type RentRecord,
@@ -58,6 +61,8 @@ function RentalDetailInner() {
   const [profileSaving, setProfileSaving] = useState(false);
 
   // utility inputs
+  const [baseRentPeriodFrom, setBaseRentPeriodFrom] = useState('');
+  const [baseRentPeriodTo, setBaseRentPeriodTo] = useState('');
   const [waterFee, setWaterFee] = useState('');
   const [waterPeriodFrom, setWaterPeriodFrom] = useState('');
   const [waterPeriodTo, setWaterPeriodTo] = useState('');
@@ -102,7 +107,10 @@ function RentalDetailInner() {
           setDueDateDay(String(d.unit.dueDateDay || 1));
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
           const rec = d.currentRecord;
+          const rentDefaults = defaultRentPeriod(period, d.unit.dueDateDay || 1);
           if (rec) {
+            setBaseRentPeriodFrom(rec.baseRentPeriodFrom || rentDefaults.from);
+            setBaseRentPeriodTo(rec.baseRentPeriodTo || rentDefaults.to);
             setWaterFee(String(rec.waterFee || 0));
             setWaterPeriodFrom(rec.waterPeriodFrom || '');
             setWaterPeriodTo(rec.waterPeriodTo || '');
@@ -148,6 +156,9 @@ function RentalDetailInner() {
   };
 
   const utilityPayload = () => ({
+    baseRent: Number(baseRent),
+    baseRentPeriodFrom: baseRentPeriodFrom || null,
+    baseRentPeriodTo: baseRentPeriodTo || null,
     waterFee: Number(waterFee),
     electricityFee: Number(electricityFee),
     waterPeriodFrom: waterPeriodFrom || null,
@@ -320,11 +331,27 @@ function RentalDetailInner() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Utilities & Billing — {period}</h2>
             {rec ? (
               <>
-                <div className="grid md:grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Base Rent 基本租金</label>
-                    <div className="px-3 py-2.5 rounded-lg bg-gray-100 text-sm font-semibold">{formatMoney(rec.baseRent)}</div>
+                {/* Base Rent */}
+                <div className="rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-4">
+                  <p className="text-sm font-semibold text-brand-800 mb-3">基本租金 Base Rent</p>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                      <div className="px-3 py-2.5 rounded-lg bg-white border border-gray-200 text-sm font-semibold">{formatMoney(Number(baseRent) || rec.baseRent)}</div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                      <input type="date" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                      <input type="date" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
+                    </div>
                   </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Default based on {formatDueDayLabel(Number(dueDateDay) || 1)}:{' '}
+                    {formatPeriodDate(defaultRentPeriod(period, Number(dueDateDay) || 1).from)} – {formatPeriodDate(defaultRentPeriod(period, Number(dueDateDay) || 1).to)}
+                  </p>
                 </div>
 
                 {/* Water */}
@@ -529,7 +556,10 @@ function RentalDetailInner() {
             <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 text-sm">
               <p className="font-semibold text-gray-700 mb-2">Bill Summary</p>
               <div className="space-y-1">
-                <div className="flex justify-between"><span>Base Rent</span><span className="font-medium">{formatMoney(rec.baseRent)}</span></div>
+                <div className="flex justify-between text-brand-700 gap-2">
+                  <span className="text-xs">{baseRentLineLabel({ ...rec, billingPeriod: period, baseRentPeriodFrom, baseRentPeriodTo })}</span>
+                  <span className="font-medium shrink-0">{formatMoney(Number(baseRent) || rec.baseRent)}</span>
+                </div>
                 <div className="flex justify-between text-blue-700">
                   <span>{utilityLineLabel('water', { waterPeriodFrom, waterPeriodTo, electricityPeriodFrom: '', electricityPeriodTo: '' })}</span>
                   <span>{formatUtilityAmount(Number(waterFee))}</span>

@@ -545,6 +545,8 @@ db.exec(`
     'water_period_to TEXT',
     'electricity_period_from TEXT',
     'electricity_period_to TEXT',
+    'base_rent_period_from TEXT',
+    'base_rent_period_to TEXT',
   ]) {
     const name = col.split(' ')[0];
     if (!rrCols.includes(name)) {

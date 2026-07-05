@@ -10,6 +10,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const result = await sendRentInvoice(params.id, session.userId, {
       waterFee: body.waterFee !== undefined ? Number(body.waterFee) : undefined,
       electricityFee: body.electricityFee !== undefined ? Number(body.electricityFee) : undefined,
+      baseRentPeriodFrom: body.baseRentPeriodFrom,
+      baseRentPeriodTo: body.baseRentPeriodTo,
       waterPeriodFrom: body.waterPeriodFrom,
       waterPeriodTo: body.waterPeriodTo,
       electricityPeriodFrom: body.electricityPeriodFrom,

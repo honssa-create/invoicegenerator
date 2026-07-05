@@ -47,6 +47,8 @@ export interface RentRecord {
   unitId: number;
   billingPeriod: string;
   baseRent: number;
+  baseRentPeriodFrom: string | null;
+  baseRentPeriodTo: string | null;
   waterFee: number;
   electricityFee: number;
   waterPeriodFrom: string | null;
@@ -120,10 +122,53 @@ export function formatDueDayLabel(day: number): string {
 }
 
 export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
-  if (from && to) return from === to ? from : `${from} – ${to}`;
-  if (from) return `from ${from}`;
-  if (to) return `to ${to}`;
+  if (from && to) {
+    const f = formatPeriodDate(from);
+    const t = formatPeriodDate(to);
+    return f === t ? f : `${f} – ${t}`;
+  }
+  if (from) return `from ${formatPeriodDate(from)}`;
+  if (to) return `to ${formatPeriodDate(to)}`;
   return '';
+}
+
+/** DD/MM/YYYY for invoice display */
+export function formatPeriodDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+/**
+ * Default rent period for a billing month based on 每月交租日.
+ * e.g. due day 6, period 2026-07 → 07/06/2026 – 06/07/2026
+ */
+export function defaultRentPeriod(billingPeriod: string, dueDateDay: number): { from: string; to: string } {
+  const [year, month] = billingPeriod.split('-').map(Number);
+  const dueDay = Math.min(Math.max(1, dueDateDay || 1), 28);
+
+  const to = `${year}-${String(month).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
+
+  let prevMonth = month - 1;
+  let prevYear = year;
+  if (prevMonth < 1) {
+    prevMonth = 12;
+    prevYear -= 1;
+  }
+  const fromDay = dueDay + 1;
+  const daysInPrev = new Date(prevYear, prevMonth, 0).getDate();
+  const actualFromDay = Math.min(fromDay, daysInPrev);
+  const from = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(actualFromDay).padStart(2, '0')}`;
+
+  return { from, to };
+}
+
+export function baseRentLineLabel(
+  record: Pick<RentRecord, 'baseRentPeriodFrom' | 'baseRentPeriodTo' | 'billingPeriod'>
+): string {
+  const period = formatUtilityPeriod(record.baseRentPeriodFrom, record.baseRentPeriodTo);
+  const base = `基本租金 Monthly Rent — ${record.billingPeriod}`;
+  return period ? `${base} (${period})` : base;
 }
 
 export function utilityLineLabel(

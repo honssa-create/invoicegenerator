@@ -12,6 +12,7 @@ import {
   formatDisplayDate,
   formatDueDayLabel,
   formatMoney,
+  toFormDate,
   type PreviousYearRent,
   type RentalUnit,
   type RentalUnitWithRecord,
@@ -54,7 +55,11 @@ export default function RentalsPage() {
 
   const openUnitModal = (unit: Partial<RentalUnit>) => {
     setPreviousYearsText((unit.previousYearsRent || []).map((r) => `${r.year}, ${r.rent}`).join('\n'));
-    setUnitModal(unit);
+    setUnitModal({
+      ...unit,
+      leaseStartDate: unit.leaseStartDate ? toFormDate(unit.leaseStartDate) : '',
+      leaseEndDate: unit.leaseEndDate ? toFormDate(unit.leaseEndDate) : '',
+    });
   };
 
   const saveUnit = async () => {
@@ -229,12 +234,12 @@ export default function RentalsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start</label>
-                <input type="date" className={inp} value={unitModal.leaseStartDate || ''}
+                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={unitModal.leaseStartDate || ''}
                   onChange={(e) => setUnitModal({ ...unitModal, leaseStartDate: e.target.value })} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End</label>
-                <input type="date" className={inp} value={unitModal.leaseEndDate || ''}
+                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={unitModal.leaseEndDate || ''}
                   onChange={(e) => setUnitModal({ ...unitModal, leaseEndDate: e.target.value })} />
               </div>
               <div className="md:col-span-2">

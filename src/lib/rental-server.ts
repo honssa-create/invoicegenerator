@@ -14,6 +14,7 @@ import {
   baseRentLineLabel,
   utilityLineLabel,
   outstandingBalance,
+  normalizeStoredDate,
   type PreviousYearRent,
   type RentRecord,
   type RentalActivityLog,
@@ -161,7 +162,8 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
     userId, input.unitName?.trim() || 'New Unit', input.tenantName?.trim() || 'Tenant',
     input.tenantPhone?.trim() || null, input.tenantEmail?.trim() || null,
     Number(input.currentYearRent) || 0, JSON.stringify(input.previousYearsRent || []),
-    input.leaseStartDate || null, input.leaseEndDate || null,
+    normalizeStoredDate(input.leaseStartDate) || null,
+    normalizeStoredDate(input.leaseEndDate) || null,
     Number(input.dueDateDay) || 1, input.autoSendReceiptEmail ? 1 : 0,
     input.automationEnabled === false ? 0 : 1
   );
@@ -206,8 +208,8 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     (input.tenantEmail ?? existing.tenantEmail) || null,
     Number(input.currentYearRent ?? existing.currentYearRent) || 0,
     JSON.stringify(input.previousYearsRent ?? existing.previousYearsRent),
-    (input.leaseStartDate ?? existing.leaseStartDate) || null,
-    (input.leaseEndDate ?? existing.leaseEndDate) || null,
+    normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null,
+    normalizeStoredDate(input.leaseEndDate ?? existing.leaseEndDate) || null,
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
     (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
@@ -290,12 +292,24 @@ export function updateRentRecordUtilities(
   const water = Number(input.waterFee ?? existing.waterFee) || 0;
   const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
   const total = computeTotal(base, water, elec);
-  const waterFrom = input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : existing.waterPeriodFrom;
-  const waterTo = input.waterPeriodTo !== undefined ? input.waterPeriodTo : existing.waterPeriodTo;
-  const elecFrom = input.electricityPeriodFrom !== undefined ? input.electricityPeriodFrom : existing.electricityPeriodFrom;
-  const elecTo = input.electricityPeriodTo !== undefined ? input.electricityPeriodTo : existing.electricityPeriodTo;
-  const rentFrom = input.baseRentPeriodFrom !== undefined ? input.baseRentPeriodFrom : existing.baseRentPeriodFrom;
-  const rentTo = input.baseRentPeriodTo !== undefined ? input.baseRentPeriodTo : existing.baseRentPeriodTo;
+  const waterFrom = normalizeStoredDate(
+    input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : existing.waterPeriodFrom,
+  );
+  const waterTo = normalizeStoredDate(
+    input.waterPeriodTo !== undefined ? input.waterPeriodTo : existing.waterPeriodTo,
+  );
+  const elecFrom = normalizeStoredDate(
+    input.electricityPeriodFrom !== undefined ? input.electricityPeriodFrom : existing.electricityPeriodFrom,
+  );
+  const elecTo = normalizeStoredDate(
+    input.electricityPeriodTo !== undefined ? input.electricityPeriodTo : existing.electricityPeriodTo,
+  );
+  const rentFrom = normalizeStoredDate(
+    input.baseRentPeriodFrom !== undefined ? input.baseRentPeriodFrom : existing.baseRentPeriodFrom,
+  );
+  const rentTo = normalizeStoredDate(
+    input.baseRentPeriodTo !== undefined ? input.baseRentPeriodTo : existing.baseRentPeriodTo,
+  );
   db.prepare(
     `UPDATE rental_records SET base_rent = ?, base_rent_period_from = ?, base_rent_period_to = ?,
       water_fee = ?, electricity_fee = ?,
@@ -433,12 +447,24 @@ export async function sendRentInvoice(
   const elec = Number(input.electricityFee ?? record.electricityFee) || 0;
   const total = computeTotal(record.baseRent, water, elec);
   const invoiceRef = `/rentals/records/${record.id}/invoice`;
-  const waterFrom = input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : record.waterPeriodFrom;
-  const waterTo = input.waterPeriodTo !== undefined ? input.waterPeriodTo : record.waterPeriodTo;
-  const elecFrom = input.electricityPeriodFrom !== undefined ? input.electricityPeriodFrom : record.electricityPeriodFrom;
-  const elecTo = input.electricityPeriodTo !== undefined ? input.electricityPeriodTo : record.electricityPeriodTo;
-  const rentFrom = input.baseRentPeriodFrom !== undefined ? input.baseRentPeriodFrom : record.baseRentPeriodFrom;
-  const rentTo = input.baseRentPeriodTo !== undefined ? input.baseRentPeriodTo : record.baseRentPeriodTo;
+  const waterFrom = normalizeStoredDate(
+    input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : record.waterPeriodFrom,
+  );
+  const waterTo = normalizeStoredDate(
+    input.waterPeriodTo !== undefined ? input.waterPeriodTo : record.waterPeriodTo,
+  );
+  const elecFrom = normalizeStoredDate(
+    input.electricityPeriodFrom !== undefined ? input.electricityPeriodFrom : record.electricityPeriodFrom,
+  );
+  const elecTo = normalizeStoredDate(
+    input.electricityPeriodTo !== undefined ? input.electricityPeriodTo : record.electricityPeriodTo,
+  );
+  const rentFrom = normalizeStoredDate(
+    input.baseRentPeriodFrom !== undefined ? input.baseRentPeriodFrom : record.baseRentPeriodFrom,
+  );
+  const rentTo = normalizeStoredDate(
+    input.baseRentPeriodTo !== undefined ? input.baseRentPeriodTo : record.baseRentPeriodTo,
+  );
 
   db.prepare(
     `UPDATE rental_records SET water_fee = ?, electricity_fee = ?,
@@ -588,7 +614,7 @@ export async function markRentPaid(
   const fullyPaid = newAmountPaid >= record.actualAmount - 0.01;
   const receiptRef = `/rentals/records/${record.id}/receipt`;
   const shouldSend = input.autoSendReceiptEmail ?? unit.autoSendReceiptEmail;
-  const paidDate = input.paidDate || new Date().toISOString().slice(0, 10);
+  const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
   db.prepare(
     `UPDATE rental_records SET

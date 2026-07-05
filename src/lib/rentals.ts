@@ -99,6 +99,153 @@ export interface RentalUnitWithRecord extends RentalUnit {
   history: RentRecord[];
 }
 
+export interface BasicRentPeriod {
+  periodFrom: string;
+  periodTo: string;
+  formattedRange: string;
+  isoFrom: string;
+  isoTo: string;
+}
+
+// ---------------------------------------------------------------------------
+// Date utilities — strict DD/MM/YYYY for UI / form state / display helpers
+// ---------------------------------------------------------------------------
+
+function daysInMonth(year: number, monthIndex0: number): number {
+  return new Date(year, monthIndex0 + 1, 0).getDate();
+}
+
+function toIsoDate(year: number, monthIndex0: number, day: number): string {
+  return `${year}-${String(monthIndex0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Convert Date or ISO / DD/MM/YYYY string → strict DD/MM/YYYY */
+export function formatDateToDDMMYYYY(input: Date | string | null | undefined): string {
+  if (!input) return '—';
+  if (input instanceof Date) {
+    if (Number.isNaN(input.getTime())) return '—';
+    return `${String(input.getDate()).padStart(2, '0')}/${String(input.getMonth() + 1).padStart(2, '0')}/${input.getFullYear()}`;
+  }
+  const s = String(input).trim();
+  const dm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dm) {
+    return `${dm[1].padStart(2, '0')}/${dm[2].padStart(2, '0')}/${dm[3]}`;
+  }
+  const datePart = s.slice(0, 10);
+  const [y, m, d] = datePart.split('-');
+  if (y && m && d && y.length === 4) {
+    return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+  }
+  return s;
+}
+
+/** Parse DD/MM/YYYY (or ISO) → YYYY-MM-DD for DB / comparisons. */
+export function isoFromDisplayDate(display: string | null | undefined): string | null {
+  if (!display) return null;
+  const s = display.trim();
+  const dm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dm) {
+    const d = Number(dm[1]);
+    const m = Number(dm[2]);
+    const y = Number(dm[3]);
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+    return toIsoDate(y, m - 1, d);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s.slice(0, 10))) return s.slice(0, 10);
+  return null;
+}
+
+/** @alias formatDateToDDMMYYYY */
+export function formatDisplayDate(iso: string | null | undefined): string {
+  return formatDateToDDMMYYYY(iso);
+}
+
+/** @alias formatDateToDDMMYYYY */
+export function formatPeriodDate(iso: string): string {
+  const f = formatDateToDDMMYYYY(iso);
+  return f === '—' ? iso : f;
+}
+
+export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
+  if (from && to) {
+    const f = formatDateToDDMMYYYY(from);
+    const t = formatDateToDDMMYYYY(to);
+    return f === t ? f : `${f} - ${t}`;
+  }
+  if (from) return `from ${formatDateToDDMMYYYY(from)}`;
+  if (to) return `to ${formatDateToDDMMYYYY(to)}`;
+  return '';
+}
+
+export function formatRentPeriodRange(from: string, to: string): string {
+  return `${formatDateToDDMMYYYY(from)} - ${formatDateToDDMMYYYY(to)}`;
+}
+
+/**
+ * Calculate basic rent billing period from 每月交租日.
+ * - periodFrom: rentPaymentDay of billing month (clamped)
+ * - periodTo: one month after periodFrom minus one day
+ */
+export function calculateBasicRentPeriod(
+  rentPaymentDay: number,
+  targetYear: number,
+  targetMonth: number,
+): BasicRentPeriod {
+  const day = Math.min(Math.max(1, rentPaymentDay || 1), 31);
+  const monthIndex = Math.min(Math.max(0, targetMonth), 11);
+
+  const fromDay = Math.min(day, daysInMonth(targetYear, monthIndex));
+  const isoFrom = toIsoDate(targetYear, monthIndex, fromDay);
+
+  let toYear = targetYear;
+  let toMonthIndex = monthIndex;
+  let toDay: number;
+
+  if (fromDay === 1) {
+    toDay = daysInMonth(targetYear, monthIndex);
+  } else {
+    toMonthIndex = monthIndex + 1;
+    if (toMonthIndex > 11) {
+      toMonthIndex = 0;
+      toYear += 1;
+    }
+    toDay = Math.min(fromDay - 1, daysInMonth(toYear, toMonthIndex));
+  }
+
+  const isoTo = toIsoDate(toYear, toMonthIndex, toDay);
+  const periodFrom = formatDateToDDMMYYYY(isoFrom);
+  const periodTo = formatDateToDDMMYYYY(isoTo);
+
+  return {
+    periodFrom,
+    periodTo,
+    formattedRange: `${periodFrom} - ${periodTo}`,
+    isoFrom,
+    isoTo,
+  };
+}
+
+/** Billing period YYYY-MM + rent payment day → period (ISO for DB + DD/MM/YYYY for UI) */
+export function defaultRentPeriod(billingPeriod: string, rentPaymentDay: number): { from: string; to: string } {
+  const [year, month] = billingPeriod.split('-').map(Number);
+  const { isoFrom, isoTo } = calculateBasicRentPeriod(rentPaymentDay, year, month - 1);
+  return { from: isoFrom, to: isoTo };
+}
+
+/** @deprecated Use calculateBasicRentPeriod */
+export function computeRentPeriod(
+  rentPaymentDay: number,
+  targetYear: number,
+  targetMonth: number,
+): { from: string; to: string } {
+  const { isoFrom, isoTo } = calculateBasicRentPeriod(rentPaymentDay, targetYear, targetMonth);
+  return { from: isoFrom, to: isoTo };
+}
+
+// ---------------------------------------------------------------------------
+// Rental helpers
+// ---------------------------------------------------------------------------
+
 export function currentBillingPeriod(date = new Date()): string {
   return date.toISOString().slice(0, 7);
 }
@@ -111,7 +258,6 @@ export function formatMoney(value: number): string {
   }).format(value || 0);
 }
 
-/** Show '/' for zero utility charges; otherwise formatted currency. */
 export function formatUtilityAmount(value: number): string {
   return value ? formatMoney(value) : '/';
 }
@@ -119,87 +265,6 @@ export function formatUtilityAmount(value: number): string {
 export function formatDueDayLabel(day: number): string {
   const d = Math.min(Math.max(1, day || 1), 31);
   return `每月${d}日`;
-}
-
-function daysInMonth(year: number, monthIndex0: number): number {
-  return new Date(year, monthIndex0 + 1, 0).getDate();
-}
-
-function toIsoDate(year: number, monthIndex0: number, day: number): string {
-  return `${year}-${String(monthIndex0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-/**
- * Compute base-rent billing period from 每月交租日.
- * - periodFrom: rentPaymentDay of the billing month (clamped to month length)
- * - periodTo: one month after periodFrom minus one day
- *   (= day rentPaymentDay−1 of the following month, or last day of billing month if day is 1)
- */
-export function computeRentPeriod(
-  rentPaymentDay: number,
-  targetYear: number,
-  targetMonth: number,
-): { from: string; to: string } {
-  const day = Math.min(Math.max(1, rentPaymentDay || 1), 31);
-  const monthIndex = Math.min(Math.max(0, targetMonth), 11);
-
-  const fromDay = Math.min(day, daysInMonth(targetYear, monthIndex));
-  const from = toIsoDate(targetYear, monthIndex, fromDay);
-
-  let toYear = targetYear;
-  let toMonthIndex = monthIndex;
-  let toDay: number;
-
-  if (day === 1) {
-    toDay = daysInMonth(targetYear, monthIndex);
-  } else {
-    toMonthIndex = monthIndex + 1;
-    if (toMonthIndex > 11) {
-      toMonthIndex = 0;
-      toYear += 1;
-    }
-    toDay = Math.min(day - 1, daysInMonth(toYear, toMonthIndex));
-  }
-
-  const to = toIsoDate(toYear, toMonthIndex, toDay);
-  return { from, to };
-}
-
-/** Format rent period as DD/MM/YYYY - DD/MM/YYYY */
-export function formatRentPeriodRange(from: string, to: string): string {
-  return `${formatPeriodDate(from)} - ${formatPeriodDate(to)}`;
-}
-
-/** Billing period YYYY-MM + rent payment day → ISO from/to */
-export function defaultRentPeriod(billingPeriod: string, rentPaymentDay: number): { from: string; to: string } {
-  const [year, month] = billingPeriod.split('-').map(Number);
-  return computeRentPeriod(rentPaymentDay, year, month - 1);
-}
-
-export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
-  if (from && to) {
-    const f = formatPeriodDate(from);
-    const t = formatPeriodDate(to);
-    return f === t ? f : `${f} - ${t}`;
-  }
-  if (from) return `from ${formatPeriodDate(from)}`;
-  if (to) return `to ${formatPeriodDate(to)}`;
-  return '';
-}
-
-/** DD/MM/YYYY display for any ISO date string (YYYY-MM-DD or datetime). */
-export function formatDisplayDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const datePart = iso.slice(0, 10);
-  const [y, m, d] = datePart.split('-');
-  if (!y || !m || !d || y.length !== 4) return iso;
-  return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
-}
-
-/** @alias formatDisplayDate */
-export function formatPeriodDate(iso: string): string {
-  const formatted = formatDisplayDate(iso);
-  return formatted === '—' ? iso : formatted;
 }
 
 export function baseRentLineLabel(
@@ -224,18 +289,20 @@ export function utilityLineLabel(
 }
 
 export function daysRemaining(leaseEndDate: string): number | null {
-  if (!leaseEndDate) return null;
-  const end = new Date(`${leaseEndDate}T23:59:59`);
+  const iso = isoFromDisplayDate(leaseEndDate) || leaseEndDate;
+  if (!iso) return null;
+  const end = new Date(`${iso}T23:59:59`);
   if (Number.isNaN(end.getTime())) return null;
   const diff = end.getTime() - Date.now();
   return Math.ceil(diff / 86400000);
 }
 
+/** Returns ISO YYYY-MM-DD (for server comparisons). Display via formatDateToDDMMYYYY. */
 export function dueDateForPeriod(period: string, dueDateDay: number): string {
   const [year, month] = period.split('-').map(Number);
   const day = Math.min(Math.max(1, dueDateDay || 1), 31);
   const clamped = Math.min(day, daysInMonth(year, month - 1));
-  return `${year}-${String(month).padStart(2, '0')}-${String(clamped).padStart(2, '0')}`;
+  return toIsoDate(year, month - 1, clamped);
 }
 
 export function computeTotal(baseRent: number, waterFee: number, electricityFee: number): number {
@@ -250,4 +317,27 @@ export function displayRentalStatus(record: Pick<RentRecord, 'status' | 'actualA
   if (record.status === 'paid' || outstandingBalance(record) <= 0) return 'paid';
   if ((record.amountPaid || 0) > 0) return 'partial';
   return record.status;
+}
+
+/** Normalize optional date field from API (ISO) → DD/MM/YYYY for form state */
+export function toFormDate(value: string | null | undefined): string {
+  if (!value) return '';
+  return formatDateToDDMMYYYY(value);
+}
+
+/** Normalize form DD/MM/YYYY → ISO for API / DB */
+export function fromFormDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return isoFromDisplayDate(value);
+}
+
+/** Today's date in strict DD/MM/YYYY for form defaults */
+export function todayFormDate(): string {
+  return formatDateToDDMMYYYY(new Date());
+}
+
+/** Normalize DD/MM/YYYY or ISO → ISO for DB storage */
+export function normalizeStoredDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return isoFromDisplayDate(value);
 }

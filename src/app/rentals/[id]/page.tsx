@@ -8,18 +8,19 @@ import { compressImage } from '@/lib/imageCompression';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
+  calculateBasicRentPeriod,
   currentBillingPeriod,
   daysRemaining,
-  defaultRentPeriod,
   displayRentalStatus,
-  dueDateForPeriod,
   formatDueDayLabel,
   formatDisplayDate,
   formatMoney,
-  formatRentPeriodRange,
   formatUtilityAmount,
   baseRentLineLabel,
+  fromFormDate,
   outstandingBalance,
+  toFormDate,
+  todayFormDate,
   utilityLineLabel,
   type RentRecord,
   type RentalActivityLog,
@@ -81,13 +82,24 @@ function RentalDetailInner() {
   // paid modal
   const [showPaidModal, setShowPaidModal] = useState(false);
   const [autoSendReceipt, setAutoSendReceipt] = useState(false);
-  const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paidDate, setPaidDate] = useState(todayFormDate());
   const [paidAmount, setPaidAmount] = useState('');
   const [paidNote, setPaidNote] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [ocrResult, setOcrResult] = useState<{ extracted: { amount: number | null; method: string | null; transfer_date: string | null; receiving_account: string | null }; matched: boolean } | null>(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
+  const skipPeriodRecalcRef = useRef(true);
+
+  const billingYearMonth = () => {
+    const [year, month] = period.split('-').map(Number);
+    return { year, monthIndex: month - 1 };
+  };
+
+  const calcBasicRentPeriod = (rentPaymentDay: number) => {
+    const { year, monthIndex } = billingYearMonth();
+    return calculateBasicRentPeriod(rentPaymentDay, year, monthIndex);
+  };
 
   // activity note modal
   const [showNoteModal, setShowNoteModal] = useState(false);
@@ -98,6 +110,7 @@ function RentalDetailInner() {
 
   const load = useCallback(() => {
     setLoading(true);
+    skipPeriodRecalcRef.current = true;
     fetch(`/api/rentals/units/${id}?period=${period}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -110,28 +123,35 @@ function RentalDetailInner() {
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
           const rec = d.currentRecord;
           if (rec) {
+            const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
+            setBaseRentPeriodFrom(rec.baseRentPeriodFrom ? toFormDate(rec.baseRentPeriodFrom) : calc.periodFrom);
+            setBaseRentPeriodTo(rec.baseRentPeriodTo ? toFormDate(rec.baseRentPeriodTo) : calc.periodTo);
             setWaterFee(String(rec.waterFee || 0));
-            setWaterPeriodFrom(rec.waterPeriodFrom || '');
-            setWaterPeriodTo(rec.waterPeriodTo || '');
+            setWaterPeriodFrom(toFormDate(rec.waterPeriodFrom));
+            setWaterPeriodTo(toFormDate(rec.waterPeriodTo));
             setElectricityFee(String(rec.electricityFee || 0));
-            setElectricityPeriodFrom(rec.electricityPeriodFrom || '');
-            setElectricityPeriodTo(rec.electricityPeriodTo || '');
+            setElectricityPeriodFrom(toFormDate(rec.electricityPeriodFrom));
+            setElectricityPeriodTo(toFormDate(rec.electricityPeriodTo));
             setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
             setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
           }
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        skipPeriodRecalcRef.current = false;
+        setLoading(false);
+      });
   }, [id, period]);
 
   useEffect(() => { load(); }, [load]);
 
   // Reactive base-rent period: recalc whenever 每月交租日 or billing month changes
   useEffect(() => {
-    const { from, to } = defaultRentPeriod(period, Number(dueDateDay) || 1);
-    setBaseRentPeriodFrom(from);
-    setBaseRentPeriodTo(to);
+    if (skipPeriodRecalcRef.current) return;
+    const calc = calcBasicRentPeriod(Number(dueDateDay) || 1);
+    setBaseRentPeriodFrom(calc.periodFrom);
+    setBaseRentPeriodTo(calc.periodTo);
   }, [dueDateDay, period]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
@@ -163,14 +183,14 @@ function RentalDetailInner() {
 
   const utilityPayload = () => ({
     baseRent: Number(baseRent),
-    baseRentPeriodFrom: baseRentPeriodFrom || null,
-    baseRentPeriodTo: baseRentPeriodTo || null,
+    baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
+    baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
     waterFee: Number(waterFee),
     electricityFee: Number(electricityFee),
-    waterPeriodFrom: waterPeriodFrom || null,
-    waterPeriodTo: waterPeriodTo || null,
-    electricityPeriodFrom: electricityPeriodFrom || null,
-    electricityPeriodTo: electricityPeriodTo || null,
+    waterPeriodFrom: fromFormDate(waterPeriodFrom),
+    waterPeriodTo: fromFormDate(waterPeriodTo),
+    electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
+    electricityPeriodTo: fromFormDate(electricityPeriodTo),
     customInvoiceNote: utilityNote || null,
   });
 
@@ -218,7 +238,7 @@ function RentalDetailInner() {
     setOcrLoading(false);
     if (res.ok) {
       setOcrResult({ extracted: d.extracted, matched: d.matched });
-      if (d.extracted?.transfer_date) setPaidDate(d.extracted.transfer_date);
+      if (d.extracted?.transfer_date) setPaidDate(toFormDate(d.extracted.transfer_date));
       if (d.extracted?.amount) setPaidAmount(String(d.extracted.amount));
     }
   };
@@ -232,7 +252,7 @@ function RentalDetailInner() {
       body: JSON.stringify({
         autoSendReceiptEmail: autoSendReceipt,
         note: paidNote || null,
-        paidDate,
+        paidDate: fromFormDate(paidDate),
         amount: Number(paidAmount) || undefined,
       }),
     });
@@ -267,6 +287,7 @@ function RentalDetailInner() {
   const remaining = daysRemaining(unit.leaseEndDate);
   const recStatus = rec ? displayRentalStatus(rec) : 'pending';
   const balance = rec ? outstandingBalance(rec) : 0;
+  const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
 
   return (
     <AppLayout>
@@ -347,20 +368,15 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="date" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
-                      <DateHint value={baseRentPeriodFrom} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="date" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
-                      <DateHint value={baseRentPeriodTo} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
-                    Auto ({formatDueDayLabel(Number(dueDateDay) || 1)}): {formatRentPeriodRange(
-                      defaultRentPeriod(period, Number(dueDateDay) || 1).from,
-                      defaultRentPeriod(period, Number(dueDateDay) || 1).to,
-                    )}
+                    Auto ({formatDueDayLabel(Number(dueDateDay) || 1)}): {autoRentPeriod.formattedRange}
                   </p>
                 </div>
 
@@ -374,13 +390,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="date" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
-                      <DateHint value={waterPeriodFrom} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="date" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
-                      <DateHint value={waterPeriodTo} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
                     </div>
                   </div>
                 </div>
@@ -395,13 +409,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="date" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
-                      <DateHint value={electricityPeriodFrom} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="date" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
-                      <DateHint value={electricityPeriodTo} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
                     </div>
                   </div>
                 </div>
@@ -451,7 +463,7 @@ function RentalDetailInner() {
                   setShowPaidModal(true);
                   setOcrResult(null);
                   setReceiptFile(null);
-                  setPaidDate(rec.paidDate || new Date().toISOString().slice(0, 10));
+                  setPaidDate(rec.paidDate ? toFormDate(rec.paidDate) : todayFormDate());
                   setPaidAmount(String(balance || rec.actualAmount));
                 }}
                   disabled={recStatus === 'paid'}
@@ -676,8 +688,7 @@ function RentalDetailInner() {
 
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Paid Date 交租日子</label>
-              <input type="date" className={inp} value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
-              <DateHint value={paidDate} />
+              <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
             </div>
 
             <label className="flex items-center gap-3 text-sm font-medium cursor-pointer">
@@ -714,14 +725,6 @@ function RentalDetailInner() {
         </Modal>
       )}
     </AppLayout>
-  );
-}
-
-function DateHint({ value }: { value: string }) {
-  return (
-    <p className={`text-[10px] mt-0.5 ${value ? 'text-brand-600 font-medium' : 'text-gray-400'}`}>
-      {value ? formatDisplayDate(value) : 'dd/mm/yyyy'}
-    </p>
   );
 }
 

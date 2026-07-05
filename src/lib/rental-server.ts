@@ -174,9 +174,24 @@ export function getRentalUnit(id: number | string, userId: number): RentalUnit |
   return row ? hydrateUnit(row) : null;
 }
 
+/** Recalculate base-rent period dates for every billing record when 每月交租日 changes. */
+function syncRentPeriodsForUnit(unit: RentalUnit) {
+  const rows = db.prepare(
+    'SELECT id, billing_period FROM rental_records WHERE unit_id = ? AND user_id = ?'
+  ).all(unit.id, unit.user_id) as { id: number; billing_period: string }[];
+  const stmt = db.prepare(
+    `UPDATE rental_records SET base_rent_period_from = ?, base_rent_period_to = ?, updated_at = datetime('now') WHERE id = ?`
+  );
+  for (const row of rows) {
+    const { from, to } = defaultRentPeriod(row.billing_period, unit.dueDateDay);
+    stmt.run(from, to, row.id);
+  }
+}
+
 export function updateRentalUnit(id: number | string, userId: number, input: Partial<RentalUnit>): RentalUnit | null {
   const existing = getRentalUnit(id, userId);
   if (!existing) return null;
+  const newDueDay = Number(input.dueDateDay ?? existing.dueDateDay) || 1;
   db.prepare(
     `UPDATE rental_units SET
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
@@ -197,7 +212,11 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
     id, userId
   );
-  return getRentalUnit(id, userId);
+  const updated = getRentalUnit(id, userId)!;
+  if (input.dueDateDay !== undefined && newDueDay !== existing.dueDateDay) {
+    syncRentPeriodsForUnit(updated);
+  }
+  return updated;
 }
 
 // ---------------------------------------------------------------------------

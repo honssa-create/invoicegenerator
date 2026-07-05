@@ -217,10 +217,10 @@ export default function RentalsPage() {
                   onChange={(e) => setUnitModal({ ...unitModal, currentYearRent: Number(e.target.value) })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–28)</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–31)</label>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500">每月</span>
-                  <input type="number" min={1} max={28} className={`${inp} w-20 text-center`} value={unitModal.dueDateDay || 1}
+                  <input type="number" min={1} max={31} className={`${inp} w-20 text-center`} value={unitModal.dueDateDay || 1}
                     onChange={(e) => setUnitModal({ ...unitModal, dueDateDay: Number(e.target.value) })} />
                   <span className="text-sm text-gray-500">日</span>
                   <span className="text-sm font-medium text-brand-700">{formatDueDayLabel(unitModal.dueDateDay || 1)}</span>

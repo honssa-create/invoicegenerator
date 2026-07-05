@@ -117,8 +117,63 @@ export function formatUtilityAmount(value: number): string {
 }
 
 export function formatDueDayLabel(day: number): string {
-  const d = Math.min(Math.max(1, day || 1), 28);
+  const d = Math.min(Math.max(1, day || 1), 31);
   return `每月${d}日`;
+}
+
+function daysInMonth(year: number, monthIndex0: number): number {
+  return new Date(year, monthIndex0 + 1, 0).getDate();
+}
+
+function toIsoDate(year: number, monthIndex0: number, day: number): string {
+  return `${year}-${String(monthIndex0 + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Compute base-rent billing period from 每月交租日.
+ * - periodFrom: rentPaymentDay of the billing month (clamped to month length)
+ * - periodTo: one month after periodFrom minus one day
+ *   (= day rentPaymentDay−1 of the following month, or last day of billing month if day is 1)
+ */
+export function computeRentPeriod(
+  rentPaymentDay: number,
+  targetYear: number,
+  targetMonth: number,
+): { from: string; to: string } {
+  const day = Math.min(Math.max(1, rentPaymentDay || 1), 31);
+  const monthIndex = Math.min(Math.max(0, targetMonth), 11);
+
+  const fromDay = Math.min(day, daysInMonth(targetYear, monthIndex));
+  const from = toIsoDate(targetYear, monthIndex, fromDay);
+
+  let toYear = targetYear;
+  let toMonthIndex = monthIndex;
+  let toDay: number;
+
+  if (day === 1) {
+    toDay = daysInMonth(targetYear, monthIndex);
+  } else {
+    toMonthIndex = monthIndex + 1;
+    if (toMonthIndex > 11) {
+      toMonthIndex = 0;
+      toYear += 1;
+    }
+    toDay = Math.min(day - 1, daysInMonth(toYear, toMonthIndex));
+  }
+
+  const to = toIsoDate(toYear, toMonthIndex, toDay);
+  return { from, to };
+}
+
+/** Format rent period as DD/MM/YYYY - DD/MM/YYYY */
+export function formatRentPeriodRange(from: string, to: string): string {
+  return `${formatPeriodDate(from)} - ${formatPeriodDate(to)}`;
+}
+
+/** Billing period YYYY-MM + rent payment day → ISO from/to */
+export function defaultRentPeriod(billingPeriod: string, rentPaymentDay: number): { from: string; to: string } {
+  const [year, month] = billingPeriod.split('-').map(Number);
+  return computeRentPeriod(rentPaymentDay, year, month - 1);
 }
 
 export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
@@ -137,30 +192,6 @@ export function formatPeriodDate(iso: string): string {
   const [y, m, d] = iso.split('-');
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
-}
-
-/**
- * Default rent period for a billing month based on 每月交租日.
- * e.g. due day 6, period 2026-07 → 07/06/2026 – 06/07/2026
- */
-export function defaultRentPeriod(billingPeriod: string, dueDateDay: number): { from: string; to: string } {
-  const [year, month] = billingPeriod.split('-').map(Number);
-  const dueDay = Math.min(Math.max(1, dueDateDay || 1), 28);
-
-  const to = `${year}-${String(month).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
-
-  let prevMonth = month - 1;
-  let prevYear = year;
-  if (prevMonth < 1) {
-    prevMonth = 12;
-    prevYear -= 1;
-  }
-  const fromDay = dueDay + 1;
-  const daysInPrev = new Date(prevYear, prevMonth, 0).getDate();
-  const actualFromDay = Math.min(fromDay, daysInPrev);
-  const from = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(actualFromDay).padStart(2, '0')}`;
-
-  return { from, to };
 }
 
 export function baseRentLineLabel(
@@ -194,8 +225,9 @@ export function daysRemaining(leaseEndDate: string): number | null {
 
 export function dueDateForPeriod(period: string, dueDateDay: number): string {
   const [year, month] = period.split('-').map(Number);
-  const day = Math.min(Math.max(1, dueDateDay || 1), 28);
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const day = Math.min(Math.max(1, dueDateDay || 1), 31);
+  const clamped = Math.min(day, daysInMonth(year, month - 1));
+  return `${year}-${String(month).padStart(2, '0')}-${String(clamped).padStart(2, '0')}`;
 }
 
 export function computeTotal(baseRent: number, waterFee: number, electricityFee: number): number {

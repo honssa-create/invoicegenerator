@@ -12,9 +12,11 @@ import {
   daysRemaining,
   defaultRentPeriod,
   displayRentalStatus,
+  dueDateForPeriod,
   formatDueDayLabel,
   formatMoney,
   formatPeriodDate,
+  formatRentPeriodRange,
   formatUtilityAmount,
   baseRentLineLabel,
   outstandingBalance,
@@ -107,10 +109,7 @@ function RentalDetailInner() {
           setDueDateDay(String(d.unit.dueDateDay || 1));
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
           const rec = d.currentRecord;
-          const rentDefaults = defaultRentPeriod(period, d.unit.dueDateDay || 1);
           if (rec) {
-            setBaseRentPeriodFrom(rec.baseRentPeriodFrom || rentDefaults.from);
-            setBaseRentPeriodTo(rec.baseRentPeriodTo || rentDefaults.to);
             setWaterFee(String(rec.waterFee || 0));
             setWaterPeriodFrom(rec.waterPeriodFrom || '');
             setWaterPeriodTo(rec.waterPeriodTo || '');
@@ -127,6 +126,13 @@ function RentalDetailInner() {
   }, [id, period]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reactive base-rent period: recalc whenever 每月交租日 or billing month changes
+  useEffect(() => {
+    const { from, to } = defaultRentPeriod(period, Number(dueDateDay) || 1);
+    setBaseRentPeriodFrom(from);
+    setBaseRentPeriodTo(to);
+  }, [dueDateDay, period]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
@@ -302,10 +308,10 @@ function RentalDetailInner() {
             <input type="email" className={inp} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–28)</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–31)</label>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500 whitespace-nowrap">每月</span>
-              <input type="number" min={1} max={28} className={`${inp} w-20 text-center`} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} />
+              <input type="number" min={1} max={31} className={`${inp} w-20 text-center`} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} />
               <span className="text-sm text-gray-500 whitespace-nowrap">日</span>
               <span className="text-sm font-medium text-brand-700 ml-1">{formatDueDayLabel(Number(dueDateDay) || 1)}</span>
             </div>
@@ -349,8 +355,10 @@ function RentalDetailInner() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
-                    Default based on {formatDueDayLabel(Number(dueDateDay) || 1)}:{' '}
-                    {formatPeriodDate(defaultRentPeriod(period, Number(dueDateDay) || 1).from)} – {formatPeriodDate(defaultRentPeriod(period, Number(dueDateDay) || 1).to)}
+                    Auto ({formatDueDayLabel(Number(dueDateDay) || 1)}): {formatRentPeriodRange(
+                      defaultRentPeriod(period, Number(dueDateDay) || 1).from,
+                      defaultRentPeriod(period, Number(dueDateDay) || 1).to,
+                    )}
                   </p>
                 </div>
 

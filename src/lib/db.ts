@@ -3,14 +3,27 @@ import path from 'path';
 import fs from 'fs';
 
 const defaultDbPath = path.join(process.cwd(), 'data', 'invoices.db');
-const dbPath = process.env.DB_PATH || defaultDbPath;
-const dataDir = path.dirname(dbPath);
 
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+let dbInstance: Database.Database | null = null;
+
+/** During `next build`, avoid Railway runtime volume paths like /data. */
+function resolveDbPath(): string {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return path.join(process.cwd(), 'data', '.next-build.sqlite');
+  }
+  return process.env.DB_PATH || defaultDbPath;
 }
 
-const db = new Database(dbPath);
+function initializeDatabase(): Database.Database {
+  if (dbInstance) return dbInstance;
+
+  const dbPath = resolveDbPath();
+  const dataDir = path.dirname(dbPath);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -575,5 +588,20 @@ if (legacyReceipts.length) {
   });
   migrate();
 }
+
+  dbInstance = db;
+  return dbInstance;
+}
+
+const db: Database.Database = new Proxy({} as Database.Database, {
+  get(_target, prop) {
+    const instance = initializeDatabase();
+    const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+    if (typeof value === 'function') {
+      return (value as (...args: unknown[]) => unknown).bind(instance);
+    }
+    return value;
+  },
+});
 
 export default db;

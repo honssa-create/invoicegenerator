@@ -1,16 +1,19 @@
 export type RentalStatus = 'pending' | 'paid' | 'overdue';
 
 export const RENTAL_STATUS_LABELS: Record<RentalStatus, string> = {
-  pending: '已發租單，待付款 Pending',
-  paid: '已交租 Paid',
-  overdue: '已過期未交 Overdue',
+  pending: '待付款 Pending',
+  paid: '已付款 Paid',
+  overdue: '遲交 Overdue',
 };
 
-export const RENTAL_STATUS_COLORS: Record<RentalStatus, string> = {
-  pending: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-  paid: 'bg-green-50 border-green-200 text-green-800',
-  overdue: 'bg-red-50 border-red-200 text-red-800',
+export const RENTAL_STATUS_BADGE: Record<RentalStatus, string> = {
+  pending: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
+  paid: 'bg-green-100 text-green-800 border border-green-200',
+  overdue: 'bg-red-100 text-red-800 border border-red-200',
 };
+
+// Legacy alias kept for backward-compat in existing card UI
+export const RENTAL_STATUS_COLORS = RENTAL_STATUS_BADGE;
 
 export interface PreviousYearRent {
   year: number;
@@ -22,6 +25,7 @@ export interface RentalUnit {
   user_id: number;
   unitName: string;
   tenantName: string;
+  tenantPhone: string;
   tenantEmail: string;
   currentYearRent: number;
   previousYearsRent: PreviousYearRent[];
@@ -39,10 +43,15 @@ export interface RentRecord {
   user_id: number;
   unitId: number;
   billingPeriod: string;
+  baseRent: number;
+  waterFee: number;
+  electricityFee: number;
   actualAmount: number;
   status: RentalStatus;
+  paidDate: string | null;
   invoiceRef: string | null;
   receiptRef: string | null;
+  receiptImagePath: string | null;
   invoiceSentAt: string | null;
   receiptSentAt: string | null;
   paidAt: string | null;
@@ -50,6 +59,29 @@ export interface RentRecord {
   customReceiptNote: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface RentalPaymentReceipt {
+  id: number;
+  user_id: number;
+  rentRecordId: number;
+  imagePath: string;
+  extractedMethod: string | null;
+  extractedTransferDate: string | null;
+  extractedReceivingAccount: string | null;
+  extractedAmount: number | null;
+  extractionSource: string | null;
+  created_at: string;
+}
+
+export interface RentalActivityLog {
+  id: number;
+  user_id: number;
+  unitId: number;
+  rentRecordId: number | null;
+  action: string;
+  note: string | null;
+  created_at: string;
 }
 
 export interface RentalUnitWithRecord extends RentalUnit {
@@ -81,4 +113,8 @@ export function dueDateForPeriod(period: string, dueDateDay: number): string {
   const [year, month] = period.split('-').map(Number);
   const day = Math.min(Math.max(1, dueDateDay || 1), 28);
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function computeTotal(baseRent: number, waterFee: number, electricityFee: number): number {
+  return (baseRent || 0) + (waterFee || 0) + (electricityFee || 0);
 }

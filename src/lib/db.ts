@@ -453,6 +453,7 @@ db.exec(`
     user_id INTEGER NOT NULL,
     unit_name TEXT NOT NULL,
     tenant_name TEXT NOT NULL,
+    tenant_phone TEXT,
     tenant_email TEXT,
     current_year_rent REAL NOT NULL DEFAULT 0,
     previous_years_rent_json TEXT DEFAULT '[]',
@@ -471,10 +472,15 @@ db.exec(`
     user_id INTEGER NOT NULL,
     unit_id INTEGER NOT NULL,
     billing_period TEXT NOT NULL,
+    base_rent REAL NOT NULL DEFAULT 0,
+    water_fee REAL NOT NULL DEFAULT 0,
+    electricity_fee REAL NOT NULL DEFAULT 0,
     actual_amount REAL NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'overdue')),
+    paid_date TEXT,
     invoice_ref TEXT,
     receipt_ref TEXT,
+    receipt_image_path TEXT,
     invoice_sent_at TEXT,
     receipt_sent_at TEXT,
     paid_at TEXT,
@@ -487,10 +493,54 @@ db.exec(`
     FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS rental_payment_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    rent_record_id INTEGER NOT NULL,
+    image_path TEXT NOT NULL,
+    extracted_method TEXT,
+    extracted_transfer_date TEXT,
+    extracted_receiving_account TEXT,
+    extracted_amount REAL,
+    extraction_source TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (rent_record_id) REFERENCES rental_records(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    rent_record_id INTEGER,
+    action TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_rental_units_user ON rental_units(user_id);
   CREATE INDEX IF NOT EXISTS idx_rental_records_user_period ON rental_records(user_id, billing_period);
   CREATE INDEX IF NOT EXISTS idx_rental_records_unit ON rental_records(unit_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_receipts_record ON rental_payment_receipts(rent_record_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_activities_unit ON rental_activity_logs(unit_id);
 `);
+
+// Migrate existing rental_units / rental_records columns safely.
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('tenant_phone')) {
+    db.exec('ALTER TABLE rental_units ADD COLUMN tenant_phone TEXT');
+  }
+  const rrCols = (db.prepare('PRAGMA table_info(rental_records)').all() as { name: string }[]).map((c) => c.name);
+  for (const col of ['base_rent REAL NOT NULL DEFAULT 0', 'water_fee REAL NOT NULL DEFAULT 0', 'electricity_fee REAL NOT NULL DEFAULT 0', 'paid_date TEXT', 'receipt_image_path TEXT']) {
+    const name = col.split(' ')[0];
+    if (!rrCols.includes(name)) {
+      try { db.exec(`ALTER TABLE rental_records ADD COLUMN ${col}`); } catch { /* exists */ }
+    }
+  }
+}
 
 // Backfill: move any single receipt_path into the expense_receipts table once.
 const legacyReceipts = db

@@ -8,8 +8,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   try {
     const body = await request.json();
     const result = await markRentPaid(params.id, session.userId, {
-      autoSendReceiptEmail: Boolean(body.autoSendReceiptEmail),
+      autoSendReceiptEmail: body.autoSendReceiptEmail !== undefined ? Boolean(body.autoSendReceiptEmail) : undefined,
       note: body.note || null,
+      paidDate: body.paidDate || null,
     });
     return NextResponse.json(result);
   } catch (e) {

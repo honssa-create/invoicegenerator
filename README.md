@@ -75,3 +75,22 @@ npm start
 ```
 
 Set `JWT_SECRET` to a strong random string in production.
+
+## Deploy on Railway
+
+1. **Connect the correct repo & branch**
+   - Repository: `honssa-create/invoicegenerator`
+   - Branch: **`main`** (must not be an empty feature branch)
+   - Root Directory: leave **empty** (repo root contains `package.json`)
+
+2. **Add a Volume** (for SQLite persistence)
+   - Mount path: `/data`
+   - Set env: `DB_PATH=/data/invoices.db`
+
+3. **Required environment variables**
+   - `JWT_SECRET` — session signing secret
+   - `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` — image storage
+
+4. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
+
+This repo includes `railpack.json` and `railway.json` so Railpack detects **Node.js / Next.js** and runs `npm run build` + `npm start` automatically.

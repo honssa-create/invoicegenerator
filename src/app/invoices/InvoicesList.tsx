@@ -92,7 +92,7 @@ export default function InvoicesList() {
   );
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this invoice?')) return;
+    if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     setInvoices((prev) => prev.filter((i) => i.id !== id));
   };

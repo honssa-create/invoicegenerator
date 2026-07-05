@@ -79,7 +79,7 @@ export default function InvoiceDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm('Delete this invoice?')) return;
+    if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     router.push('/invoices');
   };

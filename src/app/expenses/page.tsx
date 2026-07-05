@@ -14,6 +14,7 @@ import {
   type OptionType,
 } from '@/lib/expenses';
 import type { Expense } from '@/lib/types';
+import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
 
 const EMPTY_FORM = {
   category: '',
@@ -193,7 +194,7 @@ export default function ExpensesPage() {
       notes: e.notes || '',
       payment_status: e.payment_status,
     });
-    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: `/api/receipts/${r.id}` })));
+    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r) })));
     setEditingId(e.id);
     setScanMessage('');
     setError('');
@@ -220,7 +221,10 @@ export default function ExpensesPage() {
         return;
       }
       const newReceipts: FormReceipt[] = (data.receipts || []).map(
-        (r: { path: string }, i: number) => ({ path: r.path, url: localUrls[i] || '' })
+        (r: { path: string }, i: number) => ({
+          path: r.path,
+          url: isStoredImageUrl(r.path) ? r.path : (localUrls[i] || r.path),
+        })
       );
       setFormReceipts((prev) => [...prev, ...newReceipts]);
 
@@ -362,7 +366,7 @@ export default function ExpensesPage() {
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={r.id}
-            src={`/api/receipts/${r.id}`}
+            src={expenseReceiptUrl(r)}
             alt="Receipt"
             onClick={() => setGallery(e)}
             className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400 transition"
@@ -650,7 +654,7 @@ export default function ExpensesPage() {
                       {gallery.receipt_no || `EXP-${gallery.id}`} · #{i + 1}
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/receipts/${r.id}`} alt={`Receipt ${i + 1}`} onClick={() => setLightbox(`/api/receipts/${r.id}`)} className="w-full object-contain max-h-[60vh] bg-white cursor-zoom-in" />
+                    <img src={expenseReceiptUrl(r)} alt={`Receipt ${i + 1}`} onClick={() => setLightbox(expenseReceiptUrl(r))} className="w-full object-contain max-h-[60vh] bg-white cursor-zoom-in" />
                   </div>
                 ))}
               </div>

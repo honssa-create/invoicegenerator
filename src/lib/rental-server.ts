@@ -555,7 +555,7 @@ export async function extractRentalReceipt(
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
 
-  const imagePath = saveReceipt(buffer, mimeType);
+  const imagePath = await saveReceipt(buffer, mimeType, 'rental-receipt');
 
   const aiResult = await geminiExtractRental(buffer.toString('base64'), mimeType);
   let extracted: ReturnType<typeof ocrFallbackExtract>;

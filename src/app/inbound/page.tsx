@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { compressImage } from '@/lib/imageCompression';
+import { inboundPhotoUrl } from '@/lib/image-url';
 import type { InboundShipment } from '@/lib/inbound';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -170,7 +171,7 @@ export default function InboundPage() {
                   <td className="px-6 py-3">
                     {s.photo_path ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={`/api/inbound-files/${s.id}`} alt="label" onClick={() => setLightbox(`/api/inbound-files/${s.id}`)} className="h-12 w-12 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      <img src={inboundPhotoUrl(s.id, s.photo_path) || ''} alt="label" onClick={() => setLightbox(inboundPhotoUrl(s.id, s.photo_path) || '')} className="h-12 w-12 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-6 py-3 text-sm font-mono text-gray-800">{s.waybill_number || '—'}</td>

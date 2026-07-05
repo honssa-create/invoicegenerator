@@ -7,6 +7,7 @@ import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import { compressImage } from '@/lib/imageCompression';
 import { compressPdfToImages } from '@/lib/pdfCompression';
+import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
 import {
   ORDER_FIELDS,
   ORDER_STATUSES,
@@ -429,7 +430,7 @@ export default function OrderDetailPage() {
                     <div className="flex flex-wrap gap-2">
                       {order.files.map((f) => (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img key={f.id} src={`/api/order-files/${f.id}`} alt="preview" onClick={() => setLightbox(`/api/order-files/${f.id}`)} className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                        <img key={f.id} src={orderFileUrl(f)} alt="preview" onClick={() => setLightbox(orderFileUrl(f))} className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
                       ))}
                     </div>
                   ) : (
@@ -520,9 +521,9 @@ export default function OrderDetailPage() {
                   {paymentPreview || order.fields.payment_receipt_path ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={paymentPreview || `/api/orders/${order.id}/payment-receipt`}
+                      src={paymentPreview || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || '')) || ''}
                       alt="Payment receipt"
-                      onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview || `/api/orders/${order.id}/payment-receipt`); }}
+                      onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || '')) || ''); }}
                       className="max-h-28 rounded-lg cursor-zoom-in"
                     />
                   ) : (
@@ -629,7 +630,7 @@ export default function OrderDetailPage() {
                 {order.files.map((f) => (
                   <div key={f.id} className="relative group">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/order-files/${f.id}`} alt={f.original_name || 'proof'} onClick={() => setLightbox(`/api/order-files/${f.id}`)} className="h-20 w-full object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                    <img src={orderFileUrl(f)} alt={f.original_name || 'proof'} onClick={() => setLightbox(orderFileUrl(f))} className="h-20 w-full object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
                     <button onClick={() => deleteFile(f.id)} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100" aria-label="Delete image">×</button>
                   </div>
                 ))}

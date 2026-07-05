@@ -24,6 +24,7 @@ export async function GET(request: Request) {
       method: (o.fields.payment_method_detail as string) || '',
       reference: (o.fields.payment_reference as string) || '',
       has_receipt: Boolean(o.fields.payment_receipt_path),
+      payment_receipt_path: (o.fields.payment_receipt_path as string) || '',
       verified: o.fields.payment_verified === true || o.fields.payment_verified === 'true',
     }));
 

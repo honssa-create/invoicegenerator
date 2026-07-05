@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import { orderPaymentReceiptUrl } from '@/lib/image-url';
 
 interface Entry {
   order_id: number;
@@ -16,6 +17,7 @@ interface Entry {
   method: string;
   reference: string;
   has_receipt: boolean;
+  payment_receipt_path: string;
   verified: boolean;
 }
 
@@ -90,7 +92,7 @@ export default function AccountingPage() {
                   <td className="px-4 py-3">
                     {e.has_receipt ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={`/api/orders/${e.order_id}/payment-receipt`} alt="receipt" onClick={() => setLightbox(`/api/orders/${e.order_id}/payment-receipt`)} className="h-11 w-11 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      <img src={orderPaymentReceiptUrl(e.order_id, e.payment_receipt_path) || ''} alt="receipt" onClick={() => setLightbox(orderPaymentReceiptUrl(e.order_id, e.payment_receipt_path) || '')} className="h-11 w-11 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3">

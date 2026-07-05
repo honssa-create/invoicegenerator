@@ -80,7 +80,7 @@ export async function POST(request: Request) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'Image too large (max 10 MB)' }, { status: 400 });
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const photoPath = saveReceipt(buffer, file.type);
+  const photoPath = await saveReceipt(buffer, file.type, file.name);
 
   const ai = await geminiExtract(buffer.toString('base64'), file.type);
   if (ai) {

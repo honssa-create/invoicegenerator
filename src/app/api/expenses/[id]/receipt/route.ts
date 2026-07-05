@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { receiptFilePath, receiptContentType } from '@/lib/receipt';
+import { imageResponseForStoredPath } from '@/lib/stored-image';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -15,19 +14,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     .get(params.id, session.userId) as { receipt_path: string | null } | undefined;
 
   if (!expense?.receipt_path) {
-    return NextResponse.json({ error: 'No receipt for this expense' }, { status: 404 });
+    return NextResponse.json({ error: 'No receipt' }, { status: 404 });
   }
 
-  const filePath = receiptFilePath(expense.receipt_path);
-  if (!filePath) {
-    return NextResponse.json({ error: 'Receipt file missing' }, { status: 404 });
-  }
-
-  const file = fs.readFileSync(filePath);
-  return new NextResponse(file, {
-    headers: {
-      'Content-Type': receiptContentType(expense.receipt_path),
-      'Cache-Control': 'private, max-age=3600',
-    },
-  });
+  return imageResponseForStoredPath(expense.receipt_path);
 }

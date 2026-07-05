@@ -4,6 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { listOrders } from '@/lib/order-server';
 import { orderTitle } from '@/lib/orders';
 import type { LedgerEntry } from '@/lib/cashflow';
+import { orderPaymentReceiptUrl, otherIncomeReceiptUrl } from '@/lib/image-url';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
       ref: o.po_number || orderTitle(o),
       account: (o.fields.payment_bank as string) || '',
       amount: amt,
-      receiptUrl: o.fields.payment_receipt_path ? `/api/orders/${o.id}/payment-receipt` : null,
+      receiptUrl: orderPaymentReceiptUrl(o.id, o.fields.payment_receipt_path as string | undefined),
       verified: o.fields.payment_verified === true || o.fields.payment_verified === 'true',
       orderId: o.id,
     });
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
       ref: r.remarks || '',
       account: r.account || '',
       amount: r.amount,
-      receiptUrl: r.receipt_path ? `/api/other-income/${r.id}/receipt` : null,
+      receiptUrl: otherIncomeReceiptUrl(r.id, r.receipt_path),
       verified: r.verified === 1,
       incomeId: r.id,
     });

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { categoryLabel, formatMoney } from '@/lib/expenses';
 import type { Expense } from '@/lib/types';
+import { expenseReceiptUrl } from '@/lib/image-url';
 
 export default function PrintView() {
   const router = useRouter();
@@ -109,7 +110,7 @@ export default function PrintView() {
                       </div>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={`/api/receipts/${r.id}`}
+                        src={expenseReceiptUrl(r)}
                         alt={`Receipt ${e.receipt_no || e.id} #${ri + 1}`}
                         className="w-full object-contain max-h-[70vh] print:max-h-none"
                       />

@@ -21,6 +21,7 @@ export interface CoreColumns {
   shipping_address: string;
   notes: string;
   carton_count: string;
+  quotation_id: number | null;
 }
 
 export const ORDER_STATUSES = [
@@ -98,6 +99,12 @@ export interface LinkedInvoice {
   status: string;
 }
 
+export interface LinkedQuotation {
+  id: number;
+  quote_number: string;
+  status: string;
+}
+
 export interface Order extends CoreColumns {
   id: number;
   user_id: number;
@@ -105,6 +112,7 @@ export interface Order extends CoreColumns {
   files: OrderFile[];
   activities: OrderActivity[];
   linked_invoice: LinkedInvoice | null;
+  linked_quotation: LinkedQuotation | null;
   created_at: string;
   updated_at: string;
 }

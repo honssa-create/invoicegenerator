@@ -20,12 +20,26 @@ import {
   type OrderFieldDef,
 } from '@/lib/orders';
 
+interface InvoiceOption {
+  id: number;
+  invoice_number: string;
+  status: string;
+}
+
+interface QuotationOption {
+  id: number;
+  quote_number: string;
+  status: string;
+}
+
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
   const [order, setOrder] = useState<Order | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
+  const [quotations, setQuotations] = useState<QuotationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,7 +54,18 @@ export default function OrderDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const patch = async (payload: { core?: Record<string, unknown>; fields?: Record<string, unknown> }) => {
+  useEffect(() => {
+    fetch('/api/invoices')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setInvoices((d?.invoices || []).map((i: InvoiceOption) => ({ id: i.id, invoice_number: i.invoice_number, status: i.status }))))
+      .catch(() => {});
+    fetch('/api/quotations')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setQuotations((d?.quotations || []).map((q: QuotationOption) => ({ id: q.id, quote_number: q.quote_number, status: q.status }))))
+      .catch(() => {});
+  }, []);
+
+  const patch = async (payload: { core?: Record<string, unknown>; fields?: Record<string, unknown>; linked_invoice_id?: string | number | null; linked_quotation_id?: string | number | null }) => {
     const res = await fetch(`/api/orders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -139,8 +164,12 @@ export default function OrderDetailPage() {
 
   const paymentBadge = () => {
     const inv = order?.linked_invoice;
+    const fieldStatus = String(order?.fields.payment_status_label || '');
+    if (inv?.status === 'paid') return { text: '✓ Paid · 100% Payment (全數付清)', cls: 'bg-green-100 text-green-700' };
+    if (fieldStatus.includes('部分付款') || fieldStatus.toLowerCase().includes('part')) {
+      return { text: '部分付款 Partly Paid', cls: 'bg-amber-100 text-amber-700' };
+    }
     if (!inv) return { text: 'No invoice linked', cls: 'bg-gray-100 text-gray-600' };
-    if (inv.status === 'paid') return { text: '✓ Paid · 100% Payment (全數付清)', cls: 'bg-green-100 text-green-700' };
     if (inv.status === 'overdue') return { text: '⚠ Overdue / 逾期未付', cls: 'bg-red-100 text-red-700' };
     return { text: '未付款 / 待核對 Unpaid', cls: 'bg-red-100 text-red-700' };
   };
@@ -172,6 +201,25 @@ export default function OrderDetailPage() {
       onChange={(e) => setFieldLocal(key, e.target.value)}
       onBlur={(e) => patch({ fields: { [key]: e.target.value } })}
       placeholder={placeholder}
+      className={softInput}
+    />
+  );
+  const commitPayment1Amount = (value: string) => {
+    const amount = Number(value);
+    const fields: Record<string, string> = { payment1_amount: value };
+    if (Number.isFinite(amount) && amount > 0 && fVal('payment_status_label') !== 'Full Paid') {
+      fields.payment_status_label = '部分付款 Partly Paid';
+      setFieldLocal('payment_status_label', fields.payment_status_label);
+    }
+    patch({ fields });
+  };
+  const payment1AmountInput = (
+    <input
+      type="number"
+      value={fVal('payment1_amount')}
+      onChange={(e) => setFieldLocal('payment1_amount', e.target.value)}
+      onBlur={(e) => commitPayment1Amount(e.target.value)}
+      placeholder="0.00"
       className={softInput}
     />
   );
@@ -226,6 +274,20 @@ export default function OrderDetailPage() {
     );
   };
 
+  const fieldsBox = (
+    <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/40">
+      <h3 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h3>
+      <div className="divide-y divide-gray-100">
+        {ORDER_FIELDS.map((f) => (
+          <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
+            <div className="text-sm text-gray-500">{f.label}</div>
+            <div>{renderField(f)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <AppLayout>
       <div className="flex items-center justify-between mb-4 gap-3">
@@ -277,6 +339,52 @@ export default function OrderDetailPage() {
             </div>
           </div>
 
+          <section className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="font-semibold text-gray-900 mb-4">Linked Records 關聯文件</h2>
+            <div className="grid md:grid-cols-2 gap-5">
+              {labeled(
+                'Quotation 報價單',
+                <div className="space-y-2">
+                  {order.linked_quotation ? (
+                    <Link href={`/quotations/${order.linked_quotation.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
+                      🔗 {order.linked_quotation.quote_number} · {order.linked_quotation.status}
+                    </Link>
+                  ) : (
+                    <p className="text-sm text-gray-400">No quotation linked.</p>
+                  )}
+                  <select
+                    value={order.quotation_id || ''}
+                    onChange={(e) => patch({ linked_quotation_id: e.target.value || null })}
+                    className={softInput}
+                  >
+                    <option value="">— Not linked —</option>
+                    {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
+                  </select>
+                </div>
+              )}
+              {labeled(
+                'Invoice 發票',
+                <div className="space-y-2">
+                  {order.linked_invoice ? (
+                    <Link href={`/invoices/${order.linked_invoice.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
+                      🔗 {order.linked_invoice.invoice_number} · {order.linked_invoice.status}
+                    </Link>
+                  ) : (
+                    <p className="text-sm text-gray-400">No invoice linked.</p>
+                  )}
+                  <select
+                    value={order.linked_invoice?.id || ''}
+                    onChange={(e) => patch({ linked_invoice_id: e.target.value || null })}
+                    className={softInput}
+                  >
+                    <option value="">— Not linked —</option>
+                    {invoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoice_number} · {inv.status}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          </section>
+
           {/* BOX 1 — Order Detail (dynamic by Order Type) */}
           <section className="bg-white rounded-2xl border border-gray-200 p-8">
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 1</p>
@@ -315,6 +423,7 @@ export default function OrderDetailPage() {
                     <p className="text-sm text-gray-400">Upload proofs in the “Design Proofs” section below.</p>
                   )}
                 </div>
+                {fieldsBox}
               </div>
             )}
 
@@ -434,7 +543,7 @@ export default function OrderDetailPage() {
               <div className="hidden lg:block" />
               <div className="hidden lg:block" />
               {labeled('第一次Payment 日期', fInput('payment1_date', 'date'))}
-              {labeled('第一次Payment 金額', fInput('payment1_amount', 'number', '0.00'))}
+              {labeled('第一次Payment 金額', payment1AmountInput, 'auto-sets 部分付款 Partly Paid')}
               <div className="hidden lg:block" />
               {labeled('第二次Payment 日期', fInput('payment2_date', 'date'))}
               {labeled('第二次Payment 金額', fInput('payment2_amount', 'number', '0.00'))}
@@ -515,18 +624,20 @@ export default function OrderDetailPage() {
             )}
           </div>
 
-          {/* Structured custom fields */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h2>
-            <div className="divide-y divide-gray-100">
-              {ORDER_FIELDS.map((f) => (
-                <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
-                  <div className="text-sm text-gray-500">{f.label}</div>
-                  <div>{renderField(f)}</div>
-                </div>
-              ))}
+          {/* Structured custom fields — for 訂製襟章 this lives inside Box 1. */}
+          {orderType !== '訂製襟章' && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h2>
+              <div className="divide-y divide-gray-100">
+                {ORDER_FIELDS.map((f) => (
+                  <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
+                    <div className="text-sm text-gray-500">{f.label}</div>
+                    <div>{renderField(f)}</div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}

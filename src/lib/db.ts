@@ -193,11 +193,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_order_activities_order ON order_activities(order_id);
 `);
 
-// Carton count on orders (for delivery notes).
+// Carton count + quotation link on orders (for delivery notes / source quote tracking).
 {
   const orderCols = db.prepare('PRAGMA table_info(orders)').all() as { name: string }[];
   if (!orderCols.some((c) => c.name === 'carton_count')) {
     db.exec('ALTER TABLE orders ADD COLUMN carton_count TEXT');
+  }
+  if (!orderCols.some((c) => c.name === 'quotation_id')) {
+    db.exec('ALTER TABLE orders ADD COLUMN quotation_id INTEGER');
   }
 }
 

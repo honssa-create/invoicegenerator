@@ -150,14 +150,16 @@ export default function KitchenPrepListPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Kitchen Prep 廚房備料系統</h1>
-          <p className="text-gray-500 mt-1">Scheduled stewing orders — click a row to open the ingredient calculator</p>
+          <h1 className="page-title">Kitchen Prep 廚房備料系統</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Scheduled stewing orders — click a row to open the ingredient calculator</p>
         </div>
-        <button onClick={() => { setError(''); setShowForm(true); }} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
-          + New Prep Order 新增備料單
-        </button>
+        <div className="page-actions">
+          <button onClick={() => { setError(''); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
+            + New Prep Order 新增備料單
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
@@ -252,12 +254,12 @@ export default function KitchenPrepListPage() {
       )}
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-2xl p-6 shadow-xl my-8">
+        <div className="modal-overlay overflow-y-auto">
+          <div className="modal-panel sm:max-w-2xl my-0 sm:my-8">
             <h2 className="text-lg font-semibold mb-4">New Prep Order 新增備料單</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Stewing Date 燉製日期</label>
                   <input type="date" value={form.stewing_date} onChange={(e) => setForm({ ...form, stewing_date: e.target.value })} className={input} />
@@ -300,7 +302,7 @@ export default function KitchenPrepListPage() {
               {form.lines.map((line, index) => (
                 <div key={`${line.capacity}-${index}`} className="border border-gray-200 rounded-lg p-4 space-y-3 bg-gray-50/50">
                   <p className="text-sm font-bold text-brand-700">{PREP_CAPACITY_LABELS[line.capacity]} 容量</p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">桂花 Osmanthus</label>
                       <input type="number" min="0" value={line.qty_osmanthus} onChange={(e) => updateLine(index, { qty_osmanthus: e.target.value })} className={input} />

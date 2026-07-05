@@ -126,12 +126,12 @@ export default function InvoicesList() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-500 mt-1">Create and manage your invoices</p>
+          <h1 className="page-title">Invoices</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Create and manage your invoices</p>
         </div>
-        <div className="flex gap-3">
+        <div className="page-actions">
           <button onClick={runReminders} disabled={remindering} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
             {remindering ? 'Checking…' : '⏰ Run 30-day reminders'}
           </button>
@@ -181,7 +181,8 @@ export default function InvoicesList() {
             <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">Create an invoice</Link>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="table-scroll">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 {sortTh('number', 'Invoice #')}
@@ -213,6 +214,7 @@ export default function InvoicesList() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </AppLayout>

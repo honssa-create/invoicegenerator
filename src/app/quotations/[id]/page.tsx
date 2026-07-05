@@ -111,15 +111,15 @@ export default function QuotationDetailPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div className="page-header">
         <div>
           <Link href="/quotations" className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to quotations</Link>
-          <div className="flex items-center gap-3 mt-2">
-            <h1 className="text-2xl font-bold text-gray-900">{quote.quote_number}</h1>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <h1 className="page-title">{quote.quote_number}</h1>
             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[status]}`}>{status}</span>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="page-actions">
           <Link href={`/quotations/${id}/print`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">🧾 Generate PDF</Link>
           <a href={`/api/quotations/${id}/export`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">⬇ Export Excel</a>
           <button onClick={copyToInvoice} disabled={copying} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">{copying ? 'Copying…' : '📋 Copy to New Invoice'}</button>

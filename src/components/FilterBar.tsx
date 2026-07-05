@@ -25,19 +25,22 @@ export default function FilterBar({
   onClear,
   children,
 }: FilterBarProps) {
-  const field = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
+  const field =
+    'w-full px-3 py-2.5 sm:px-2.5 sm:py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-3 mb-6 flex flex-wrap items-end gap-3">
-      <div className="flex flex-col">
-        <label className="text-[11px] font-medium text-gray-500 mb-1">Start Date</label>
-        <input type="date" value={dateStart} onChange={(e) => onDateStart(e.target.value)} className={field} />
-      </div>
-      <div className="flex flex-col">
-        <label className="text-[11px] font-medium text-gray-500 mb-1">End Date</label>
-        <input type="date" value={dateEnd} onChange={(e) => onDateEnd(e.target.value)} className={field} />
+    <div className="bg-white border border-gray-200 rounded-xl p-3 mb-6 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:contents">
+        <div className="flex flex-col min-w-0">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Start Date</label>
+          <input type="date" value={dateStart} onChange={(e) => onDateStart(e.target.value)} className={field} />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">End Date</label>
+          <input type="date" value={dateEnd} onChange={(e) => onDateEnd(e.target.value)} className={field} />
+        </div>
       </div>
       {children}
-      <div className="flex flex-col flex-1 min-w-[180px]">
+      <div className="flex flex-col flex-1 min-w-0 sm:min-w-[180px]">
         <label className="text-[11px] font-medium text-gray-500 mb-1">Search</label>
         <input
           value={search}
@@ -48,7 +51,7 @@ export default function FilterBar({
       </div>
       <button
         onClick={onClear}
-        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+        className="w-full sm:w-auto min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
       >
         Clear Filters
       </button>

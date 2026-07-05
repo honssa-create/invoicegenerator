@@ -76,17 +76,17 @@ export default function ScanTablePage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Scan to Table 掃描成表格</h1>
-          <p className="text-gray-500 mt-1">Upload an image or PDF of a printed table, then edit &amp; export it</p>
+          <h1 className="page-title">Scan to Table 掃描成表格</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Upload an image or PDF of a printed table, then edit &amp; export it</p>
         </div>
         {grid.length > 0 && (
-          <div className="flex gap-3">
-            <button onClick={exportCsv} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50">
+          <div className="page-actions">
+            <button onClick={exportCsv} className="btn bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">
               ⬇ Export CSV
             </button>
-            <button onClick={exportXlsx} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+            <button onClick={exportXlsx} className="btn bg-brand-600 text-white hover:bg-brand-700">
               ⬇ Export Excel
             </button>
           </div>

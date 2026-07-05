@@ -386,12 +386,12 @@ export default function ExpensesPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Expenses 支出紀錄</h1>
-          <p className="text-gray-500 mt-1">Track costs, scan receipts, import sheets, and export your books</p>
+          <h1 className="page-title">Expenses 支出紀錄</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Track costs, scan receipts, import sheets, and export your books</p>
         </div>
-        <div className="flex gap-3 flex-wrap">
+        <div className="page-actions">
           <button
             onClick={printSelected}
             disabled={selected.size === 0}
@@ -528,8 +528,8 @@ export default function ExpensesPage() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-2xl p-6 shadow-xl my-8">
+        <div className="modal-overlay overflow-y-auto">
+          <div className="modal-panel sm:max-w-2xl my-0 sm:my-8">
             <h2 className="text-lg font-semibold mb-4">{editingId ? 'Edit Expense' : 'New Expense'}</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
 

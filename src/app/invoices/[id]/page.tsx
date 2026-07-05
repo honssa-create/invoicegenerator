@@ -102,17 +102,17 @@ export default function InvoiceDetailPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
           <Link href="/invoices" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
             ← Back to invoices
           </Link>
-          <div className="flex items-center gap-3 mt-2">
-            <h1 className="text-2xl font-bold text-gray-900">{invoice.invoice_number}</h1>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <h1 className="page-title">{invoice.invoice_number}</h1>
             <StatusBadge status={invoice.status} />
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="page-actions">
           <Link
             href={`/invoices/${id}/print`}
             className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"

@@ -39,6 +39,7 @@ export default function RentalsPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [unitModal, setUnitModal] = useState<Partial<RentalUnit> | null>(null);
+  const [previousYearsText, setPreviousYearsText] = useState('');
   const [invoiceModal, setInvoiceModal] = useState<RentalUnitWithRecord | null>(null);
   const [paidModal, setPaidModal] = useState<RentalUnitWithRecord | null>(null);
   const [historyUnit, setHistoryUnit] = useState<RentalUnitWithRecord | null>(null);
@@ -64,13 +65,19 @@ export default function RentalsPage() {
 
   const currentUnitForm = useMemo(() => unitModal || blankUnit, [unitModal]);
 
+  const openUnitModal = (unit: Partial<RentalUnit>) => {
+    setPreviousYearsText((unit.previousYearsRent || []).map((r) => `${r.year}, ${r.rent}`).join('\n'));
+    setUnitModal(unit);
+  };
+
   const saveUnit = async () => {
     setBusy(true);
     const isEdit = Boolean(currentUnitForm.id);
+    const payload = { ...currentUnitForm, previousYearsRent: parsePreviousYears(previousYearsText) };
     const res = await fetch(isEdit ? `/api/rentals/units/${currentUnitForm.id}` : '/api/rentals', {
       method: isEdit ? 'PATCH' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(currentUnitForm),
+      body: JSON.stringify(payload),
     });
     setBusy(false);
     if (!res.ok) { setToast('Failed to save lease'); return; }
@@ -127,7 +134,7 @@ export default function RentalsPage() {
         <div className="flex gap-3 items-center flex-wrap">
           <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={input} />
           <button onClick={runScheduler} disabled={busy} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
-          <button onClick={() => setUnitModal(blankUnit)} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">+ Add Unit</button>
+          <button onClick={() => openUnitModal(blankUnit)} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">+ Add Unit</button>
         </div>
       </div>
 
@@ -178,7 +185,7 @@ export default function RentalsPage() {
                     <td className="px-4 py-3">{u.leaseStartDate || '—'}</td>
                     <td className="px-4 py-3">{u.leaseEndDate || '—'}</td>
                     <td className={`px-4 py-3 text-right font-semibold ${remaining !== null && remaining < 30 ? 'text-red-600' : 'text-gray-700'}`}>{remaining ?? '—'}</td>
-                    <td className="px-4 py-3 text-right"><button onClick={() => setUnitModal(u)} className="text-brand-600 hover:text-brand-700 font-medium">Edit Lease</button></td>
+                    <td className="px-4 py-3 text-right"><button onClick={() => openUnitModal(u)} className="text-brand-600 hover:text-brand-700 font-medium">Edit Lease</button></td>
                   </tr>
                 );
               })}
@@ -220,8 +227,8 @@ export default function RentalsPage() {
               <textarea
                 className={input}
                 rows={4}
-                value={(currentUnitForm.previousYearsRent || []).map((r) => `${r.year}, ${r.rent}`).join('\n')}
-                onChange={(e) => setUnitModal({ ...currentUnitForm, previousYearsRent: parsePreviousYears(e.target.value) })}
+                value={previousYearsText}
+                onChange={(e) => setPreviousYearsText(e.target.value)}
               />
             </Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(currentUnitForm.autoSendReceiptEmail)} onChange={(e) => setUnitModal({ ...currentUnitForm, autoSendReceiptEmail: e.target.checked })} /> 付款後自動發送收據 Email</label>

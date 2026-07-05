@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
@@ -47,8 +47,8 @@ export default function ExpensesPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [gallery, setGallery] = useState<Expense | null>(null);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Expense | null>(null);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [] });
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -346,6 +346,23 @@ export default function ExpensesPage() {
   const allSelected = displayed.length > 0 && displayed.every((e) => selected.has(e.id));
   const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(displayed.map((e) => e.id)));
 
+  const openDetail = (e: Expense) => setDetail(e);
+
+  const openLightbox = (expense: Expense, index: number) => {
+    const receipts = expense.receipts || [];
+    if (!receipts[index]) return;
+    setLightbox({
+      urls: receipts.map((r) => expenseReceiptUrl(r)),
+      index,
+    });
+  };
+
+  const stepLightbox = (delta: number) => {
+    if (!lightbox) return;
+    const next = (lightbox.index + delta + lightbox.urls.length) % lightbox.urls.length;
+    setLightbox({ ...lightbox, index: next });
+  };
+
   const printSelected = () => {
     if (!selected.size) return;
     const ids = displayed.filter((e) => selected.has(e.id)).map((e) => e.id);
@@ -361,20 +378,22 @@ export default function ExpensesPage() {
     const shown = rs.length <= 3 ? rs : rs.slice(0, 2);
     const extra = rs.length <= 3 ? 0 : rs.length - 2;
     return (
-      <div className="flex items-center gap-1">
-        {shown.map((r) => (
+      <div className="flex items-center gap-1" onClick={(ev) => ev.stopPropagation()}>
+        {shown.map((r, i) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={r.id}
             src={expenseReceiptUrl(r)}
             alt="Receipt"
-            onClick={() => setGallery(e)}
-            className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:ring-2 hover:ring-brand-400 transition"
+            onClick={() => openLightbox(e, i)}
+            className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 transition"
+            title="Click to enlarge"
           />
         ))}
         {extra > 0 && (
           <button
-            onClick={() => setGallery(e)}
+            type="button"
+            onClick={() => openDetail(e)}
             className="h-10 w-10 rounded border border-gray-200 bg-gray-100 text-gray-600 text-xs font-semibold hover:bg-gray-200"
           >
             +{extra}
@@ -383,6 +402,13 @@ export default function ExpensesPage() {
       </div>
     );
   };
+
+  const detailField = (label: string, value: ReactNode) => (
+    <div>
+      <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{label}</p>
+      <p className="text-sm text-gray-900 mt-0.5">{value || '—'}</p>
+    </div>
+  );
 
   return (
     <AppLayout>
@@ -498,11 +524,15 @@ export default function ExpensesPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayed.map((e) => (
-                <tr key={e.id} className={`hover:bg-gray-50 ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}>
-                  <td className="px-4 py-3">
+                <tr
+                  key={e.id}
+                  onClick={() => openDetail(e)}
+                  className={`hover:bg-gray-50 cursor-pointer ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}
+                >
+                  <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label={`Select ${e.receipt_no || e.id}`} />
                   </td>
-                  <td className="px-4 py-3 text-sm font-mono text-gray-700 whitespace-nowrap">{e.receipt_no || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-mono text-brand-700 whitespace-nowrap font-medium">{e.receipt_no || '—'}</td>
                   <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{e.merchant || '—'}</td>
@@ -516,7 +546,8 @@ export default function ExpensesPage() {
                       {e.payment_status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm space-x-3 whitespace-nowrap">
+                  <td className="px-4 py-3 text-sm space-x-3 whitespace-nowrap" onClick={(ev) => ev.stopPropagation()}>
+                    <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">View</button>
                     <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
                     <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
                   </td>
@@ -556,7 +587,7 @@ export default function ExpensesPage() {
                     <img
                       src={r.url}
                       alt="Attached receipt"
-                      onClick={() => setLightbox(r.url)}
+                      onClick={() => setLightbox({ urls: formReceipts.map((x) => x.url), index: i })}
                       className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
                       title="Click to enlarge"
                     />
@@ -633,40 +664,137 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {gallery && (
-        <div onClick={() => setGallery(null)} className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4 overflow-y-auto cursor-zoom-out">
-          <div className="bg-white rounded-xl w-full max-w-4xl my-8 p-6" onClick={(ev) => ev.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
+      {detail && (
+        <div className="modal-overlay overflow-y-auto" onClick={() => setDetail(null)}>
+          <div
+            className="modal-panel sm:max-w-3xl my-0 sm:my-8"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 mb-5">
               <div>
-                <p className="text-xs uppercase tracking-wider text-gray-400">Receipt No.</p>
-                <p className="text-xl font-bold font-mono text-gray-900">{gallery.receipt_no || `EXP-${gallery.id}`}</p>
-                <p className="text-sm text-gray-500 mt-0.5">{gallery.merchant || 'Unnamed'} · {(gallery.receipts || []).length} image(s)</p>
+                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
+                <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
+                <p className="text-sm text-gray-500 mt-1">{detail.merchant || 'Unnamed supplier'}</p>
               </div>
-              <button onClick={() => setGallery(null)} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200">Close</button>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => { setDetail(null); openEdit(detail); }}
+                  className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetail(null)}
+                  className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-            {(gallery.receipts || []).length === 0 ? (
-              <p className="text-gray-400 text-sm py-12 text-center">No receipt images for this expense.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(gallery.receipts || []).map((r, i) => (
-                  <div key={r.id} className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border-b border-gray-200">
-                      {gallery.receipt_no || `EXP-${gallery.id}`} · #{i + 1}
-                    </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={expenseReceiptUrl(r)} alt={`Receipt ${i + 1}`} onClick={() => setLightbox(expenseReceiptUrl(r))} className="w-full object-contain max-h-[60vh] bg-white cursor-zoom-in" />
-                  </div>
-                ))}
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
+              {detailField('Reason 支出原因', categoryLabel(detail.category))}
+              {detailField('Supplier 供應商', detail.merchant)}
+              {detailField('Payment 支付方式', detail.payment_method)}
+              {detailField('Platform 消費平台', detail.platform)}
+              {detailField('Amount HKD 港幣', formatMoney(detail.amount_hkd, 'HKD'))}
+              {detailField('Amount RMB 人民幣', formatMoney(detail.amount_rmb, 'CNY'))}
+              {detailField('Paid Date 支出日期', detail.paid_date)}
+              {detailField('Order No. 訂單編號', detail.order_no)}
+              <div>
+                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Status 付款狀態</p>
+                <span className={`inline-flex mt-1 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[detail.payment_status]}`}>
+                  {detail.payment_status}
+                </span>
+              </div>
+            </div>
+
+            {detail.notes && (
+              <div className="mb-6">
+                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Notes 備註</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.notes}</p>
               </div>
             )}
+
+            <div>
+              <p className="text-sm font-semibold text-gray-900 mb-3">
+                Receipt Images 付款收據 ({(detail.receipts || []).length})
+              </p>
+              {(detail.receipts || []).length === 0 ? (
+                <p className="text-gray-400 text-sm py-8 text-center border border-dashed border-gray-200 rounded-xl">No receipt images attached.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {(detail.receipts || []).map((r, i) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => openLightbox(detail, i)}
+                      className="group text-left border border-gray-200 rounded-xl overflow-hidden hover:ring-2 hover:ring-brand-400 transition-shadow bg-white"
+                    >
+                      <div className="bg-brand-50 px-3 py-1.5 text-xs font-mono font-semibold text-brand-800 border-b border-brand-100 flex items-center justify-between">
+                        <span>{detail.receipt_no || `EXP-${detail.id}`} · #{i + 1}</span>
+                        <span className="text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">🔍 Enlarge</span>
+                      </div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={expenseReceiptUrl(r)}
+                        alt={`Receipt ${i + 1}`}
+                        className="w-full object-contain max-h-[45vh] bg-gray-50"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {lightbox && (
-        <div onClick={() => setLightbox(null)} className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 cursor-zoom-out">
+        <div
+          className="fixed inset-0 bg-black/90 flex items-center justify-center z-[80] p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white text-xl hover:bg-white/20"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          {lightbox.urls.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(ev) => { ev.stopPropagation(); stepLightbox(-1); }}
+                className="absolute left-2 sm:left-6 z-10 h-12 w-12 rounded-full bg-white/10 text-white text-2xl hover:bg-white/20"
+                aria-label="Previous image"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={(ev) => { ev.stopPropagation(); stepLightbox(1); }}
+                className="absolute right-2 sm:right-6 z-10 h-12 w-12 rounded-full bg-white/10 text-white text-2xl hover:bg-white/20"
+                aria-label="Next image"
+              >
+                ›
+              </button>
+              <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-sm">
+                {lightbox.index + 1} / {lightbox.urls.length}
+              </p>
+            </>
+          )}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="Enlarged receipt" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
+          <img
+            src={lightbox.urls[lightbox.index]}
+            alt="Receipt enlarged"
+            onClick={(ev) => ev.stopPropagation()}
+            className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white cursor-default"
+          />
         </div>
       )}
 

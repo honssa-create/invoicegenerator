@@ -9,6 +9,7 @@ import {
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
+  formatDueDayLabel,
   formatMoney,
   type PreviousYearRent,
   type RentalUnit,
@@ -160,7 +161,7 @@ export default function RentalsPage() {
                       <td className={`px-4 py-3.5 text-right font-semibold ${remaining !== null && remaining < 60 ? 'text-red-600' : 'text-gray-700'}`}>
                         {remaining ?? '—'}
                       </td>
-                      <td className="px-4 py-3.5 text-gray-600">{u.dueDateDay}日</td>
+                      <td className="px-4 py-3.5 text-gray-600">{formatDueDayLabel(u.dueDateDay)}</td>
                       <td className="px-4 py-3.5">
                         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[recStatus]}`}>
                           {RENTAL_STATUS_LABELS[recStatus]}
@@ -216,9 +217,14 @@ export default function RentalsPage() {
                   onChange={(e) => setUnitModal({ ...unitModal, currentYearRent: Number(e.target.value) })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Due Day 交租日 (1–28)</label>
-                <input type="number" min={1} max={28} className={inp} value={unitModal.dueDateDay || 1}
-                  onChange={(e) => setUnitModal({ ...unitModal, dueDateDay: Number(e.target.value) })} />
+                <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–28)</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">每月</span>
+                  <input type="number" min={1} max={28} className={`${inp} w-20 text-center`} value={unitModal.dueDateDay || 1}
+                    onChange={(e) => setUnitModal({ ...unitModal, dueDateDay: Number(e.target.value) })} />
+                  <span className="text-sm text-gray-500">日</span>
+                  <span className="text-sm font-medium text-brand-700">{formatDueDayLabel(unitModal.dueDateDay || 1)}</span>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start</label>

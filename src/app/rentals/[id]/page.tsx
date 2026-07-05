@@ -11,8 +11,11 @@ import {
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
+  formatDueDayLabel,
   formatMoney,
+  formatUtilityAmount,
   outstandingBalance,
+  utilityLineLabel,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -48,13 +51,19 @@ function RentalDetailInner() {
 
   // profile inputs
   const [tenantName, setTenantName] = useState('');
+  const [tenantPhone, setTenantPhone] = useState('');
+  const [tenantEmail, setTenantEmail] = useState('');
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
 
   // utility inputs
   const [waterFee, setWaterFee] = useState('');
+  const [waterPeriodFrom, setWaterPeriodFrom] = useState('');
+  const [waterPeriodTo, setWaterPeriodTo] = useState('');
   const [electricityFee, setElectricityFee] = useState('');
+  const [electricityPeriodFrom, setElectricityPeriodFrom] = useState('');
+  const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
   const [utilityNote, setUtilityNote] = useState('');
   const [utilitySaving, setUtilitySaving] = useState(false);
 
@@ -88,12 +97,18 @@ function RentalDetailInner() {
         if (d) {
           setData(d);
           setTenantName(d.unit.tenantName || '');
+          setTenantPhone(d.unit.tenantPhone || '');
+          setTenantEmail(d.unit.tenantEmail || '');
           setDueDateDay(String(d.unit.dueDateDay || 1));
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
           const rec = d.currentRecord;
           if (rec) {
             setWaterFee(String(rec.waterFee || 0));
+            setWaterPeriodFrom(rec.waterPeriodFrom || '');
+            setWaterPeriodTo(rec.waterPeriodTo || '');
             setElectricityFee(String(rec.electricityFee || 0));
+            setElectricityPeriodFrom(rec.electricityPeriodFrom || '');
+            setElectricityPeriodTo(rec.electricityPeriodTo || '');
             setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
             setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
@@ -114,6 +129,8 @@ function RentalDetailInner() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tenantName: tenantName.trim(),
+        tenantPhone: tenantPhone.trim(),
+        tenantEmail: tenantEmail.trim(),
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
       }),
@@ -130,13 +147,23 @@ function RentalDetailInner() {
     load();
   };
 
+  const utilityPayload = () => ({
+    waterFee: Number(waterFee),
+    electricityFee: Number(electricityFee),
+    waterPeriodFrom: waterPeriodFrom || null,
+    waterPeriodTo: waterPeriodTo || null,
+    electricityPeriodFrom: electricityPeriodFrom || null,
+    electricityPeriodTo: electricityPeriodTo || null,
+    customInvoiceNote: utilityNote || null,
+  });
+
   const saveUtilities = async () => {
     if (!data?.currentRecord) return;
     setUtilitySaving(true);
     await fetch(`/api/rentals/records/${data.currentRecord.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waterFee: Number(waterFee), electricityFee: Number(electricityFee), customInvoiceNote: utilityNote || null }),
+      body: JSON.stringify(utilityPayload()),
     });
     setUtilitySaving(false);
     load();
@@ -148,7 +175,7 @@ function RentalDetailInner() {
     const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waterFee: Number(waterFee), electricityFee: Number(electricityFee), note: invoiceNote || null }),
+      body: JSON.stringify({ ...utilityPayload(), note: invoiceNote || null }),
     });
     setBusy(false);
     setToast(res.ok ? 'Invoice sent!' : 'Failed to send invoice');
@@ -241,8 +268,6 @@ function RentalDetailInner() {
           <div>
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
-            {unit.tenantPhone && <p className="text-sm text-gray-500 mt-1">📞 {unit.tenantPhone}</p>}
-            {unit.tenantEmail && <p className="text-sm text-gray-500 mt-0.5">✉ {unit.tenantEmail}</p>}
             <p className="text-xs text-gray-400 mt-2">Lease {unit.leaseStartDate || '—'} → {unit.leaseEndDate || '—'}
               {remaining !== null && (
                 <span className={`ml-2 font-semibold ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
@@ -252,14 +277,27 @@ function RentalDetailInner() {
             </p>
           </div>
         </div>
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Tenant Name 租單位人士</label>
             <input className={inp} value={tenantName} onChange={(e) => setTenantName(e.target.value)} />
           </div>
           <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Phone 電話</label>
+            <input type="tel" className={inp} value={tenantPhone} onChange={(e) => setTenantPhone(e.target.value)} placeholder="+852…" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+            <input type="email" className={inp} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" />
+          </div>
+          <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–28)</label>
-            <input type="number" min={1} max={28} className={inp} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} />
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 whitespace-nowrap">每月</span>
+              <input type="number" min={1} max={28} className={`${inp} w-20 text-center`} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} />
+              <span className="text-sm text-gray-500 whitespace-nowrap">日</span>
+              <span className="text-sm font-medium text-brand-700 ml-1">{formatDueDayLabel(Number(dueDateDay) || 1)}</span>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
@@ -287,13 +325,43 @@ function RentalDetailInner() {
                     <label className="block text-xs font-medium text-gray-500 mb-1">Base Rent 基本租金</label>
                     <div className="px-3 py-2.5 rounded-lg bg-gray-100 text-sm font-semibold">{formatMoney(rec.baseRent)}</div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Water 水費</label>
-                    <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0" />
+                </div>
+
+                {/* Water */}
+                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
+                  <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                      <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                      <input type="date" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                      <input type="date" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Electricity 電費</label>
-                    <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0" />
+                </div>
+
+                {/* Electricity */}
+                <div className="rounded-xl border border-yellow-100 bg-yellow-50/40 p-4 mb-4">
+                  <p className="text-sm font-semibold text-yellow-800 mb-3">電費 Electricity Fee</p>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                      <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                      <input type="date" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                      <input type="date" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-end gap-4">
@@ -310,7 +378,7 @@ function RentalDetailInner() {
                     <p className="text-xs text-gray-500">Total this month</p>
                     <p className="text-3xl font-bold text-brand-700">{formatMoney(rec.actualAmount)}</p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Rent {formatMoney(rec.baseRent)} + Water {formatMoney(rec.waterFee)} + Elec {formatMoney(rec.electricityFee)}
+                      Rent {formatMoney(rec.baseRent)} + Water {formatUtilityAmount(rec.waterFee)} + Elec {formatUtilityAmount(rec.electricityFee)}
                     </p>
                     {rec.amountPaid > 0 && (
                       <p className="text-sm text-green-700 mt-2 font-medium">
@@ -395,8 +463,8 @@ function RentalDetailInner() {
                     <tr key={r.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-900">{r.billingPeriod}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.baseRent)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.waterFee)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.electricityFee)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{formatUtilityAmount(r.waterFee)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{formatUtilityAmount(r.electricityFee)}</td>
                       <td className="px-4 py-3 text-right font-semibold">
                         {formatMoney(r.actualAmount)}
                         {r.amountPaid > 0 && r.amountPaid < r.actualAmount && (
@@ -462,8 +530,14 @@ function RentalDetailInner() {
               <p className="font-semibold text-gray-700 mb-2">Bill Summary</p>
               <div className="space-y-1">
                 <div className="flex justify-between"><span>Base Rent</span><span className="font-medium">{formatMoney(rec.baseRent)}</span></div>
-                <div className="flex justify-between text-blue-700"><span>Water 水費</span><span>{formatMoney(Number(waterFee))}</span></div>
-                <div className="flex justify-between text-yellow-700"><span>Electricity 電費</span><span>{formatMoney(Number(electricityFee))}</span></div>
+                <div className="flex justify-between text-blue-700">
+                  <span>{utilityLineLabel('water', { waterPeriodFrom, waterPeriodTo, electricityPeriodFrom: '', electricityPeriodTo: '' })}</span>
+                  <span>{formatUtilityAmount(Number(waterFee))}</span>
+                </div>
+                <div className="flex justify-between text-yellow-700">
+                  <span>{utilityLineLabel('electricity', { waterPeriodFrom: '', waterPeriodTo: '', electricityPeriodFrom, electricityPeriodTo })}</span>
+                  <span>{formatUtilityAmount(Number(electricityFee))}</span>
+                </div>
                 <div className="flex justify-between font-bold border-t pt-1 mt-1">
                   <span>Total</span>
                   <span className="text-lg">{formatMoney(rec.baseRent + Number(waterFee) + Number(electricityFee))}</span>
@@ -493,7 +567,7 @@ function RentalDetailInner() {
               <p className="text-sm text-green-700">Total Due 應付總額</p>
               <p className="text-3xl font-bold text-green-800">{formatMoney(rec.actualAmount)}</p>
               <p className="text-xs text-green-600 mt-1">
-                Rent {formatMoney(rec.baseRent)} + Water {formatMoney(rec.waterFee)} + Elec {formatMoney(rec.electricityFee)}
+                Rent {formatMoney(rec.baseRent)} + Water {formatUtilityAmount(rec.waterFee)} + Elec {formatUtilityAmount(rec.electricityFee)}
               </p>
               {rec.amountPaid > 0 && (
                 <p className="text-sm text-orange-700 mt-2 font-semibold">

@@ -14,6 +14,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       baseRent: body.baseRent !== undefined ? Number(body.baseRent) : undefined,
       waterFee: body.waterFee !== undefined ? Number(body.waterFee) : undefined,
       electricityFee: body.electricityFee !== undefined ? Number(body.electricityFee) : undefined,
+      waterPeriodFrom: body.waterPeriodFrom,
+      waterPeriodTo: body.waterPeriodTo,
+      electricityPeriodFrom: body.electricityPeriodFrom,
+      electricityPeriodTo: body.electricityPeriodTo,
       customInvoiceNote: body.customInvoiceNote,
     });
     return NextResponse.json({ record });

@@ -49,6 +49,10 @@ export interface RentRecord {
   baseRent: number;
   waterFee: number;
   electricityFee: number;
+  waterPeriodFrom: string | null;
+  waterPeriodTo: string | null;
+  electricityPeriodFrom: string | null;
+  electricityPeriodTo: string | null;
   actualAmount: number;
   amountPaid: number;
   status: RentalStatus;
@@ -103,6 +107,36 @@ export function formatMoney(value: number): string {
     currency: 'HKD',
     maximumFractionDigits: 0,
   }).format(value || 0);
+}
+
+/** Show '/' for zero utility charges; otherwise formatted currency. */
+export function formatUtilityAmount(value: number): string {
+  return value ? formatMoney(value) : '/';
+}
+
+export function formatDueDayLabel(day: number): string {
+  const d = Math.min(Math.max(1, day || 1), 28);
+  return `每月${d}日`;
+}
+
+export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
+  if (from && to) return from === to ? from : `${from} – ${to}`;
+  if (from) return `from ${from}`;
+  if (to) return `to ${to}`;
+  return '';
+}
+
+export function utilityLineLabel(
+  kind: 'water' | 'electricity',
+  record: Pick<RentRecord, 'waterPeriodFrom' | 'waterPeriodTo' | 'electricityPeriodFrom' | 'electricityPeriodTo'>
+): string {
+  const isWater = kind === 'water';
+  const period = formatUtilityPeriod(
+    isWater ? record.waterPeriodFrom : record.electricityPeriodFrom,
+    isWater ? record.waterPeriodTo : record.electricityPeriodTo,
+  );
+  const base = isWater ? '水費 Water Fee' : '電費 Electricity Fee';
+  return period ? `${base} (${period})` : base;
 }
 
 export function daysRemaining(leaseEndDate: string): number | null {

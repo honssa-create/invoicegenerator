@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { formatMoney, outstandingBalance, type RentRecord, type RentalUnit } from '@/lib/rentals';
+import { formatMoney, formatUtilityAmount, outstandingBalance, type RentRecord, type RentalUnit } from '@/lib/rentals';
 
 interface DocumentPayload { unit: RentalUnit; record: RentRecord; dueDate: string; }
 
@@ -52,7 +52,7 @@ export default function RentReceiptPage() {
           <p className="text-sm text-green-700">Payment Received 已收款</p>
           <p className="text-4xl font-bold text-green-800 mt-1">{formatMoney(record.amountPaid || record.actualAmount)}</p>
           <p className="text-sm text-green-600 mt-2">
-            Rent {formatMoney(record.baseRent)} + Water {formatMoney(record.waterFee)} + Elec {formatMoney(record.electricityFee)}
+            Rent {formatMoney(record.baseRent)} + Water {formatUtilityAmount(record.waterFee)} + Elec {formatUtilityAmount(record.electricityFee)}
           </p>
           {outstandingBalance(record) > 0 && (
             <p className="text-sm text-orange-700 mt-2 font-semibold">

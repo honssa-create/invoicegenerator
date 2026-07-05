@@ -8,6 +8,8 @@ import {
   displayRentalStatus,
   dueDateForPeriod,
   formatMoney,
+  formatUtilityAmount,
+  utilityLineLabel,
   outstandingBalance,
   type PreviousYearRent,
   type RentRecord,
@@ -34,6 +36,8 @@ interface UnitRow {
 interface RecordRow {
   id: number; user_id: number; unit_id: number; billing_period: string;
   base_rent: number; water_fee: number; electricity_fee: number;
+  water_period_from: string | null; water_period_to: string | null;
+  electricity_period_from: string | null; electricity_period_to: string | null;
   actual_amount: number; amount_paid: number; status: RentalStatus;
   paid_date: string | null; invoice_ref: string | null; receipt_ref: string | null;
   receipt_image_path: string | null;
@@ -80,6 +84,10 @@ function hydrateRecord(row: RecordRow): RentRecord {
     id: row.id, user_id: row.user_id, unitId: row.unit_id,
     billingPeriod: row.billing_period,
     baseRent: base, waterFee: water, electricityFee: elec,
+    waterPeriodFrom: row.water_period_from || null,
+    waterPeriodTo: row.water_period_to || null,
+    electricityPeriodFrom: row.electricity_period_from || null,
+    electricityPeriodTo: row.electricity_period_to || null,
     actualAmount: row.actual_amount || computeTotal(base, water, elec),
     amountPaid: row.amount_paid || 0,
     status: row.status, paidDate: row.paid_date || null,
@@ -219,7 +227,16 @@ export function getRentRecord(id: number | string, userId: number): RentRecord |
 
 export function updateRentRecordUtilities(
   id: number | string, userId: number,
-  input: { baseRent?: number; waterFee?: number; electricityFee?: number; customInvoiceNote?: string | null }
+  input: {
+    baseRent?: number;
+    waterFee?: number;
+    electricityFee?: number;
+    waterPeriodFrom?: string | null;
+    waterPeriodTo?: string | null;
+    electricityPeriodFrom?: string | null;
+    electricityPeriodTo?: string | null;
+    customInvoiceNote?: string | null;
+  }
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
   if (!existing) return null;
@@ -227,11 +244,17 @@ export function updateRentRecordUtilities(
   const water = Number(input.waterFee ?? existing.waterFee) || 0;
   const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
   const total = computeTotal(base, water, elec);
+  const waterFrom = input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : existing.waterPeriodFrom;
+  const waterTo = input.waterPeriodTo !== undefined ? input.waterPeriodTo : existing.waterPeriodTo;
+  const elecFrom = input.electricityPeriodFrom !== undefined ? input.electricityPeriodFrom : existing.electricityPeriodFrom;
+  const elecTo = input.electricityPeriodTo !== undefined ? input.electricityPeriodTo : existing.electricityPeriodTo;
   db.prepare(
-    `UPDATE rental_records SET base_rent = ?, water_fee = ?, electricity_fee = ?, actual_amount = ?,
-      custom_invoice_note = ?, updated_at = datetime('now')
+    `UPDATE rental_records SET base_rent = ?, water_fee = ?, electricity_fee = ?,
+      water_period_from = ?, water_period_to = ?,
+      electricity_period_from = ?, electricity_period_to = ?,
+      actual_amount = ?, custom_invoice_note = ?, updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(base, water, elec, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
+  ).run(base, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
   return getRentRecord(id, userId);
 }
 
@@ -311,8 +334,8 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
 function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null): string {
   const lineItems = [
     `<tr><td>基本租金 Base Rent</td><td align="right"><strong>${formatMoney(record.baseRent)}</strong></td></tr>`,
-    `<tr><td>水費 Water</td><td align="right">${formatMoney(record.waterFee)}</td></tr>`,
-    `<tr><td>電費 Electricity</td><td align="right">${formatMoney(record.electricityFee)}</td></tr>`,
+    `<tr><td>${utilityLineLabel('water', record)}</td><td align="right">${formatUtilityAmount(record.waterFee)}</td></tr>`,
+    `<tr><td>${utilityLineLabel('electricity', record)}</td><td align="right">${formatUtilityAmount(record.electricityFee)}</td></tr>`,
     `<tr style="border-top:2px solid #000"><td><strong>Total</strong></td><td align="right"><strong>${formatMoney(record.actualAmount)}</strong></td></tr>`,
   ].join('');
   return `<p>Dear ${unit.tenantName},</p>
@@ -340,7 +363,15 @@ function receiptHtml(unit: RentalUnit, record: RentRecord, note?: string | null,
 
 export async function sendRentInvoice(
   recordId: number | string, userId: number,
-  input: { waterFee?: number; electricityFee?: number; note?: string | null }
+  input: {
+    waterFee?: number;
+    electricityFee?: number;
+    waterPeriodFrom?: string | null;
+    waterPeriodTo?: string | null;
+    electricityPeriodFrom?: string | null;
+    electricityPeriodTo?: string | null;
+    note?: string | null;
+  }
 ) {
   const record = getRentRecord(recordId, userId);
   if (!record) throw new Error('Rent record not found');
@@ -351,12 +382,19 @@ export async function sendRentInvoice(
   const elec = Number(input.electricityFee ?? record.electricityFee) || 0;
   const total = computeTotal(record.baseRent, water, elec);
   const invoiceRef = `/rentals/records/${record.id}/invoice`;
+  const waterFrom = input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : record.waterPeriodFrom;
+  const waterTo = input.waterPeriodTo !== undefined ? input.waterPeriodTo : record.waterPeriodTo;
+  const elecFrom = input.electricityPeriodFrom !== undefined ? input.electricityPeriodFrom : record.electricityPeriodFrom;
+  const elecTo = input.electricityPeriodTo !== undefined ? input.electricityPeriodTo : record.electricityPeriodTo;
 
   db.prepare(
-    `UPDATE rental_records SET water_fee = ?, electricity_fee = ?, actual_amount = ?,
-      invoice_ref = ?, custom_invoice_note = ?, invoice_sent_at = datetime('now'), updated_at = datetime('now')
+    `UPDATE rental_records SET water_fee = ?, electricity_fee = ?,
+      water_period_from = ?, water_period_to = ?,
+      electricity_period_from = ?, electricity_period_to = ?,
+      actual_amount = ?, invoice_ref = ?, custom_invoice_note = ?,
+      invoice_sent_at = datetime('now'), updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(water, elec, total, invoiceRef, input.note?.trim() || null, record.id, userId);
+  ).run(water, elec, waterFrom, waterTo, elecFrom, elecTo, total, invoiceRef, input.note?.trim() || null, record.id, userId);
 
   const fresh = getRentRecord(record.id, userId)!;
   let email: SendResult = { sent: false, provider: 'log' };

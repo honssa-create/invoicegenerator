@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -27,6 +27,14 @@ interface DetailPayload {
 }
 
 export default function RentalDetailPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>}>
+      <RentalDetailInner />
+    </Suspense>
+  );
+}
+
+function RentalDetailInner() {
   const params = useParams();
   const router = useRouter();
   const sp = useSearchParams();

@@ -5,8 +5,10 @@ import { saveReceipt } from './receipt';
 import {
   computeTotal,
   currentBillingPeriod,
+  displayRentalStatus,
   dueDateForPeriod,
   formatMoney,
+  outstandingBalance,
   type PreviousYearRent,
   type RentRecord,
   type RentalActivityLog,
@@ -32,7 +34,7 @@ interface UnitRow {
 interface RecordRow {
   id: number; user_id: number; unit_id: number; billing_period: string;
   base_rent: number; water_fee: number; electricity_fee: number;
-  actual_amount: number; status: RentalStatus;
+  actual_amount: number; amount_paid: number; status: RentalStatus;
   paid_date: string | null; invoice_ref: string | null; receipt_ref: string | null;
   receipt_image_path: string | null;
   invoice_sent_at: string | null; receipt_sent_at: string | null;
@@ -79,6 +81,7 @@ function hydrateRecord(row: RecordRow): RentRecord {
     billingPeriod: row.billing_period,
     baseRent: base, waterFee: water, electricityFee: elec,
     actualAmount: row.actual_amount || computeTotal(base, water, elec),
+    amountPaid: row.amount_paid || 0,
     status: row.status, paidDate: row.paid_date || null,
     invoiceRef: row.invoice_ref, receiptRef: row.receipt_ref,
     receiptImagePath: row.receipt_image_path || null,
@@ -216,18 +219,19 @@ export function getRentRecord(id: number | string, userId: number): RentRecord |
 
 export function updateRentRecordUtilities(
   id: number | string, userId: number,
-  input: { waterFee?: number; electricityFee?: number; customInvoiceNote?: string | null }
+  input: { baseRent?: number; waterFee?: number; electricityFee?: number; customInvoiceNote?: string | null }
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
   if (!existing) return null;
+  const base = Number(input.baseRent ?? existing.baseRent) || 0;
   const water = Number(input.waterFee ?? existing.waterFee) || 0;
   const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
-  const total = computeTotal(existing.baseRent, water, elec);
+  const total = computeTotal(base, water, elec);
   db.prepare(
-    `UPDATE rental_records SET water_fee = ?, electricity_fee = ?, actual_amount = ?,
+    `UPDATE rental_records SET base_rent = ?, water_fee = ?, electricity_fee = ?, actual_amount = ?,
       custom_invoice_note = ?, updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(water, elec, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
+  ).run(base, water, elec, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
   return getRentRecord(id, userId);
 }
 
@@ -240,6 +244,8 @@ function applyOverdueStatuses(userId: number, period: string) {
   const today = new Date().toISOString().slice(0, 10);
   const mark = db.prepare("UPDATE rental_records SET status = 'overdue', updated_at = datetime('now') WHERE id = ?");
   for (const row of rows) {
+    const rec = getRentRecord(row.id, userId);
+    if (rec && outstandingBalance(rec) <= 0) continue;
     if (today > dueDateForPeriod(period, row.due_date_day)) mark.run(row.id);
   }
 }
@@ -268,9 +274,9 @@ export function listRentalDashboard(userId: number, period = currentBillingPerio
   });
 
   const records = withRecords.map((u) => u.currentRecord);
-  const totalRevenue = records.filter((r) => r.status === 'paid').reduce((s, r) => s + r.actualAmount, 0);
-  const outstanding = records.filter((r) => r.status !== 'paid').reduce((s, r) => s + r.actualAmount, 0);
-  const paidCount = records.filter((r) => r.status === 'paid').length;
+  const totalRevenue = records.reduce((s, r) => s + (r.amountPaid || 0), 0);
+  const outstanding = records.reduce((s, r) => s + outstandingBalance(r), 0);
+  const paidCount = records.filter((r) => displayRentalStatus(r) === 'paid').length;
   return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period };
 }
 
@@ -305,8 +311,8 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
 function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null): string {
   const lineItems = [
     `<tr><td>基本租金 Base Rent</td><td align="right"><strong>${formatMoney(record.baseRent)}</strong></td></tr>`,
-    record.waterFee > 0 ? `<tr><td>水費 Water</td><td align="right">${formatMoney(record.waterFee)}</td></tr>` : '',
-    record.electricityFee > 0 ? `<tr><td>電費 Electricity</td><td align="right">${formatMoney(record.electricityFee)}</td></tr>` : '',
+    `<tr><td>水費 Water</td><td align="right">${formatMoney(record.waterFee)}</td></tr>`,
+    `<tr><td>電費 Electricity</td><td align="right">${formatMoney(record.electricityFee)}</td></tr>`,
     `<tr style="border-top:2px solid #000"><td><strong>Total</strong></td><td align="right"><strong>${formatMoney(record.actualAmount)}</strong></td></tr>`,
   ].join('');
   return `<p>Dear ${unit.tenantName},</p>
@@ -317,10 +323,13 @@ function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null)
     <p>Thank you.</p>`;
 }
 
-function receiptHtml(unit: RentalUnit, record: RentRecord, note?: string | null): string {
+function receiptHtml(unit: RentalUnit, record: RentRecord, note?: string | null, paymentAmount?: number): string {
+  const paid = paymentAmount ?? (record.amountPaid || record.actualAmount);
+  const balance = outstandingBalance(record);
   return `<p>Dear ${unit.tenantName},</p>
     <p>Payment received for <strong>${unit.unitName}</strong> — ${record.billingPeriod}.</p>
-    <p><strong>Amount: ${formatMoney(record.actualAmount)}</strong> · Paid: ${record.paidDate || record.paidAt?.slice(0, 10) || 'today'}</p>
+    <p><strong>Amount: ${formatMoney(paid)}</strong> · Paid: ${record.paidDate || record.paidAt?.slice(0, 10) || 'today'}</p>
+    ${balance > 0 ? `<p>Outstanding balance: ${formatMoney(balance)}</p>` : ''}
     ${note ? `<p>${note}</p>` : ''}
     <p>Thank you.</p>`;
 }
@@ -453,7 +462,7 @@ export async function extractRentalReceipt(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(userId, record.id, imagePath, extracted.method, extracted.transfer_date, extracted.receiving_account, extracted.amount, source);
 
-  const matched = extracted.amount !== null && Math.abs(extracted.amount - record.actualAmount) < 0.01;
+  const matched = extracted.amount !== null && Math.abs(extracted.amount - outstandingBalance(record)) < 0.01;
   logRentalActivity(userId, unit.id, 'Payment Receipt Uploaded', `Source: ${source}, Amount: ${extracted.amount ?? '?'}, Matched: ${matched}`, record.id);
 
   return {
@@ -471,22 +480,42 @@ export async function extractRentalReceipt(
 
 export async function markRentPaid(
   recordId: number | string, userId: number,
-  input: { autoSendReceiptEmail?: boolean; note?: string | null; paidDate?: string | null }
+  input: { autoSendReceiptEmail?: boolean; note?: string | null; paidDate?: string | null; amount?: number | null }
 ) {
   const record = getRentRecord(recordId, userId);
   if (!record) throw new Error('Rent record not found');
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
+
+  const paymentAmount = input.amount !== undefined && input.amount !== null
+    ? Number(input.amount)
+    : outstandingBalance(record);
+  if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
+
+  const newAmountPaid = (record.amountPaid || 0) + paymentAmount;
+  const fullyPaid = newAmountPaid >= record.actualAmount - 0.01;
   const receiptRef = `/rentals/records/${record.id}/receipt`;
   const shouldSend = input.autoSendReceiptEmail ?? unit.autoSendReceiptEmail;
   const paidDate = input.paidDate || new Date().toISOString().slice(0, 10);
 
   db.prepare(
-    `UPDATE rental_records SET status = 'paid', receipt_ref = ?, paid_date = ?, paid_at = datetime('now'),
+    `UPDATE rental_records SET
+      amount_paid = ?, status = ?, receipt_ref = ?, paid_date = ?,
+      paid_at = CASE WHEN ? THEN datetime('now') ELSE paid_at END,
       custom_receipt_note = ?, receipt_sent_at = CASE WHEN ? THEN datetime('now') ELSE receipt_sent_at END,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(receiptRef, paidDate, input.note?.trim() || null, shouldSend ? 1 : 0, record.id, userId);
+  ).run(
+    newAmountPaid,
+    fullyPaid ? 'paid' : record.status === 'overdue' ? 'overdue' : 'pending',
+    receiptRef,
+    paidDate,
+    fullyPaid ? 1 : 0,
+    input.note?.trim() || null,
+    shouldSend ? 1 : 0,
+    record.id,
+    userId
+  );
 
   if (input.autoSendReceiptEmail !== undefined) {
     updateRentalUnit(unit.id, userId, { autoSendReceiptEmail: input.autoSendReceiptEmail });
@@ -498,11 +527,15 @@ export async function markRentPaid(
     email = await sendEmail(
       unit.tenantEmail,
       `租金收據 ${unit.unitName} ${record.billingPeriod}`,
-      receiptHtml(unit, fresh, input.note)
+      receiptHtml(unit, fresh, input.note, paymentAmount)
     );
   }
-  logRentalActivity(userId, unit.id, 'Payment Marked Paid', `Period ${record.billingPeriod} · Paid ${paidDate} · Email: ${shouldSend}`, record.id);
-  return { record: fresh, email };
+  const action = fullyPaid ? 'Payment Marked Paid' : 'Partial Payment Recorded';
+  const detail = fullyPaid
+    ? `Period ${record.billingPeriod} · Paid ${paidDate} · Total ${formatMoney(newAmountPaid)}`
+    : `Period ${record.billingPeriod} · +${formatMoney(paymentAmount)} · Paid ${formatMoney(newAmountPaid)} / ${formatMoney(record.actualAmount)}`;
+  logRentalActivity(userId, unit.id, action, `${detail} · Email: ${shouldSend}`, record.id);
+  return { record: fresh, email, paymentAmount, fullyPaid };
 }
 
 // ---------------------------------------------------------------------------

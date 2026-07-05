@@ -11,6 +11,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       autoSendReceiptEmail: body.autoSendReceiptEmail !== undefined ? Boolean(body.autoSendReceiptEmail) : undefined,
       note: body.note || null,
       paidDate: body.paidDate || null,
+      amount: body.amount !== undefined && body.amount !== null ? Number(body.amount) : undefined,
     });
     return NextResponse.json(result);
   } catch (e) {

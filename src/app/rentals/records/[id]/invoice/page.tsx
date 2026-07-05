@@ -60,18 +60,14 @@ export default function RentInvoicePage() {
               <td className="px-4 py-4">基本租金 Monthly Rent — {record.billingPeriod}</td>
               <td className="px-4 py-4 text-right font-semibold">{formatMoney(record.baseRent)}</td>
             </tr>
-            {record.waterFee > 0 && (
-              <tr className="border-b">
-                <td className="px-4 py-4">水費 Water Fee</td>
-                <td className="px-4 py-4 text-right">{formatMoney(record.waterFee)}</td>
-              </tr>
-            )}
-            {record.electricityFee > 0 && (
-              <tr className="border-b">
-                <td className="px-4 py-4">電費 Electricity Fee</td>
-                <td className="px-4 py-4 text-right">{formatMoney(record.electricityFee)}</td>
-              </tr>
-            )}
+            <tr className="border-b">
+              <td className="px-4 py-4">水費 Water Fee</td>
+              <td className="px-4 py-4 text-right">{formatMoney(record.waterFee)}</td>
+            </tr>
+            <tr className="border-b">
+              <td className="px-4 py-4">電費 Electricity Fee</td>
+              <td className="px-4 py-4 text-right">{formatMoney(record.electricityFee)}</td>
+            </tr>
           </tbody>
           <tfoot>
             <tr className="bg-brand-50">

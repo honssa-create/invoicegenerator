@@ -11,6 +11,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
     const body = await request.json();
     const record = updateRentRecordUtilities(params.id, session.userId, {
+      baseRent: body.baseRent !== undefined ? Number(body.baseRent) : undefined,
       waterFee: body.waterFee !== undefined ? Number(body.waterFee) : undefined,
       electricityFee: body.electricityFee !== undefined ? Number(body.electricityFee) : undefined,
       customInvoiceNote: body.customInvoiceNote,

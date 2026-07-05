@@ -1,15 +1,18 @@
 export type RentalStatus = 'pending' | 'paid' | 'overdue';
+export type RentalDisplayStatus = RentalStatus | 'partial';
 
-export const RENTAL_STATUS_LABELS: Record<RentalStatus, string> = {
+export const RENTAL_STATUS_LABELS: Record<RentalDisplayStatus, string> = {
   pending: '待付款 Pending',
   paid: '已付款 Paid',
   overdue: '遲交 Overdue',
+  partial: '部分付款 Partial',
 };
 
-export const RENTAL_STATUS_BADGE: Record<RentalStatus, string> = {
+export const RENTAL_STATUS_BADGE: Record<RentalDisplayStatus, string> = {
   pending: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
   paid: 'bg-green-100 text-green-800 border border-green-200',
   overdue: 'bg-red-100 text-red-800 border border-red-200',
+  partial: 'bg-orange-100 text-orange-800 border border-orange-200',
 };
 
 // Legacy alias kept for backward-compat in existing card UI
@@ -47,6 +50,7 @@ export interface RentRecord {
   waterFee: number;
   electricityFee: number;
   actualAmount: number;
+  amountPaid: number;
   status: RentalStatus;
   paidDate: string | null;
   invoiceRef: string | null;
@@ -117,4 +121,14 @@ export function dueDateForPeriod(period: string, dueDateDay: number): string {
 
 export function computeTotal(baseRent: number, waterFee: number, electricityFee: number): number {
   return (baseRent || 0) + (waterFee || 0) + (electricityFee || 0);
+}
+
+export function outstandingBalance(record: Pick<RentRecord, 'actualAmount' | 'amountPaid'>): number {
+  return Math.max(0, (record.actualAmount || 0) - (record.amountPaid || 0));
+}
+
+export function displayRentalStatus(record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'>): RentalDisplayStatus {
+  if (record.status === 'paid' || outstandingBalance(record) <= 0) return 'paid';
+  if ((record.amountPaid || 0) > 0) return 'partial';
+  return record.status;
 }

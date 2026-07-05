@@ -10,7 +10,9 @@ import {
   RENTAL_STATUS_LABELS,
   currentBillingPeriod,
   daysRemaining,
+  displayRentalStatus,
   formatMoney,
+  outstandingBalance,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -44,6 +46,12 @@ function RentalDetailInner() {
   const [data, setData] = useState<DetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // profile inputs
+  const [tenantName, setTenantName] = useState('');
+  const [dueDateDay, setDueDateDay] = useState('1');
+  const [baseRent, setBaseRent] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+
   // utility inputs
   const [waterFee, setWaterFee] = useState('');
   const [electricityFee, setElectricityFee] = useState('');
@@ -58,6 +66,7 @@ function RentalDetailInner() {
   const [showPaidModal, setShowPaidModal] = useState(false);
   const [autoSendReceipt, setAutoSendReceipt] = useState(false);
   const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paidAmount, setPaidAmount] = useState('');
   const [paidNote, setPaidNote] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [ocrResult, setOcrResult] = useState<{ extracted: { amount: number | null; method: string | null; transfer_date: string | null; receiving_account: string | null }; matched: boolean } | null>(null);
@@ -78,11 +87,16 @@ function RentalDetailInner() {
       .then((d) => {
         if (d) {
           setData(d);
+          setTenantName(d.unit.tenantName || '');
+          setDueDateDay(String(d.unit.dueDateDay || 1));
+          setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
           const rec = d.currentRecord;
           if (rec) {
             setWaterFee(String(rec.waterFee || 0));
             setElectricityFee(String(rec.electricityFee || 0));
+            setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
+            setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
           }
         }
       })
@@ -92,6 +106,29 @@ function RentalDetailInner() {
   useEffect(() => { load(); }, [load]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
+
+  const saveProfile = async () => {
+    setProfileSaving(true);
+    await fetch(`/api/rentals/units/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantName: tenantName.trim(),
+        dueDateDay: Number(dueDateDay) || 1,
+        currentYearRent: Number(baseRent) || 0,
+      }),
+    });
+    if (data?.currentRecord) {
+      await fetch(`/api/rentals/records/${data.currentRecord.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseRent: Number(baseRent) || 0 }),
+      });
+    }
+    setProfileSaving(false);
+    setToast('Profile saved');
+    load();
+  };
 
   const saveUtilities = async () => {
     if (!data?.currentRecord) return;
@@ -138,6 +175,7 @@ function RentalDetailInner() {
     if (res.ok) {
       setOcrResult({ extracted: d.extracted, matched: d.matched });
       if (d.extracted?.transfer_date) setPaidDate(d.extracted.transfer_date);
+      if (d.extracted?.amount) setPaidAmount(String(d.extracted.amount));
     }
   };
 
@@ -147,10 +185,16 @@ function RentalDetailInner() {
     const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/paid`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ autoSendReceiptEmail: autoSendReceipt, note: paidNote || null, paidDate }),
+      body: JSON.stringify({
+        autoSendReceiptEmail: autoSendReceipt,
+        note: paidNote || null,
+        paidDate,
+        amount: Number(paidAmount) || undefined,
+      }),
     });
     setBusy(false);
-    setToast(res.ok ? 'Marked paid!' : 'Failed to mark paid');
+    const d = await res.json().catch(() => ({}));
+    setToast(res.ok ? (d.fullyPaid ? 'Marked paid!' : 'Partial payment recorded') : 'Failed to record payment');
     setShowPaidModal(false);
     setOcrResult(null);
     setReceiptFile(null);
@@ -177,6 +221,8 @@ function RentalDetailInner() {
   const { unit, currentRecord, history, activities } = data;
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
+  const recStatus = rec ? displayRentalStatus(rec) : 'pending';
+  const balance = rec ? outstandingBalance(rec) : 0;
 
   return (
     <AppLayout>
@@ -189,26 +235,41 @@ function RentalDetailInner() {
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 bg-brand-50 text-brand-700 text-sm rounded-lg cursor-pointer">{toast} ✕</div>}
 
-      {/* Header */}
+      {/* Header — editable profile */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
-        <div className="flex items-start justify-between flex-wrap gap-4">
+        <div className="flex items-start justify-between flex-wrap gap-4 mb-5">
           <div>
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile</p>
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
-            <p className="text-lg text-gray-700 mt-1">{unit.tenantName}</p>
-            {unit.tenantPhone && <p className="text-sm text-gray-500 mt-0.5">📞 {unit.tenantPhone}</p>}
+            {unit.tenantPhone && <p className="text-sm text-gray-500 mt-1">📞 {unit.tenantPhone}</p>}
             {unit.tenantEmail && <p className="text-sm text-gray-500 mt-0.5">✉ {unit.tenantEmail}</p>}
+            <p className="text-xs text-gray-400 mt-2">Lease {unit.leaseStartDate || '—'} → {unit.leaseEndDate || '—'}
+              {remaining !== null && (
+                <span className={`ml-2 font-semibold ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
+                  · {remaining} days remaining
+                </span>
+              )}
+            </p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-gray-400">Base Rent / month</p>
-            <p className="text-3xl font-bold text-gray-900">{formatMoney(unit.currentYearRent)}</p>
-            <p className="text-xs text-gray-400 mt-2">Lease {unit.leaseStartDate || '—'} → {unit.leaseEndDate || '—'}</p>
-            {remaining !== null && (
-              <p className={`text-sm font-semibold mt-1 ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
-                {remaining} days remaining
-              </p>
-            )}
+        </div>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Tenant Name 租單位人士</label>
+            <input className={inp} value={tenantName} onChange={(e) => setTenantName(e.target.value)} />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–28)</label>
+            <input type="number" min={1} max={28} className={inp} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
+            <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button onClick={saveProfile} disabled={profileSaving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
+            {profileSaving ? 'Saving…' : 'Save Profile 儲存資料'}
+          </button>
         </div>
       </div>
 
@@ -244,18 +305,22 @@ function RentalDetailInner() {
                     {utilitySaving ? 'Saving…' : 'Save Utilities'}
                   </button>
                 </div>
-                <div className="mt-4 rounded-xl border-2 border-brand-100 bg-brand-50 p-4 flex items-center justify-between">
+                <div className="mt-4 rounded-xl border-2 border-brand-100 bg-brand-50 p-4 flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <p className="text-xs text-gray-500">Total this month</p>
                     <p className="text-3xl font-bold text-brand-700">{formatMoney(rec.actualAmount)}</p>
-                    {(rec.waterFee > 0 || rec.electricityFee > 0) && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Rent {formatMoney(rec.baseRent)} + Water {formatMoney(rec.waterFee)} + Elec {formatMoney(rec.electricityFee)}
+                    <p className="text-xs text-gray-500 mt-1">
+                      Rent {formatMoney(rec.baseRent)} + Water {formatMoney(rec.waterFee)} + Elec {formatMoney(rec.electricityFee)}
+                    </p>
+                    {rec.amountPaid > 0 && (
+                      <p className="text-sm text-green-700 mt-2 font-medium">
+                        Paid {formatMoney(rec.amountPaid)}
+                        {balance > 0 && <span className="text-orange-700"> · Outstanding {formatMoney(balance)}</span>}
                       </p>
                     )}
                   </div>
-                  <span className={`px-3 py-1.5 rounded-full text-sm font-semibold ${RENTAL_STATUS_BADGE[rec.status]}`}>
-                    {RENTAL_STATUS_LABELS[rec.status]}
+                  <span className={`px-3 py-1.5 rounded-full text-sm font-semibold ${RENTAL_STATUS_BADGE[recStatus]}`}>
+                    {RENTAL_STATUS_LABELS[recStatus]}
                   </span>
                 </div>
               </>
@@ -273,10 +338,16 @@ function RentalDetailInner() {
                   className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700">
                   📄 Send Invoice
                 </button>
-                <button onClick={() => { setShowPaidModal(true); setOcrResult(null); setReceiptFile(null); setPaidDate(rec.paidDate || new Date().toISOString().slice(0, 10)); }}
-                  disabled={rec.status === 'paid'}
+                <button onClick={() => {
+                  setShowPaidModal(true);
+                  setOcrResult(null);
+                  setReceiptFile(null);
+                  setPaidDate(rec.paidDate || new Date().toISOString().slice(0, 10));
+                  setPaidAmount(String(balance || rec.actualAmount));
+                }}
+                  disabled={recStatus === 'paid'}
                   className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-40">
-                  ✓ Mark as Paid
+                  {recStatus === 'partial' ? '💰 Record Payment' : '✓ Record Payment 記錄收款'}
                 </button>
                 {rec.receiptRef && (
                   <Link href={`/rentals/records/${rec.id}/receipt`}
@@ -318,17 +389,24 @@ function RentalDetailInner() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {history.map((r) => (
+                  {history.map((r) => {
+                    const hStatus = displayRentalStatus(r);
+                    return (
                     <tr key={r.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-900">{r.billingPeriod}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.baseRent)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{r.waterFee > 0 ? formatMoney(r.waterFee) : '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{r.electricityFee > 0 ? formatMoney(r.electricityFee) : '—'}</td>
-                      <td className="px-4 py-3 text-right font-semibold">{formatMoney(r.actualAmount)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.waterFee)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.electricityFee)}</td>
+                      <td className="px-4 py-3 text-right font-semibold">
+                        {formatMoney(r.actualAmount)}
+                        {r.amountPaid > 0 && r.amountPaid < r.actualAmount && (
+                          <p className="text-[10px] text-orange-600 font-normal">Paid {formatMoney(r.amountPaid)}</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-600">{r.paidDate || r.paidAt?.slice(0, 10) || '—'}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[r.status]}`}>
-                          {RENTAL_STATUS_LABELS[r.status]}
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[hStatus]}`}>
+                          {RENTAL_STATUS_LABELS[hStatus]}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -338,7 +416,8 @@ function RentalDetailInner() {
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {history.length === 0 && (
                     <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No history yet.</td></tr>
                   )}
@@ -383,8 +462,8 @@ function RentalDetailInner() {
               <p className="font-semibold text-gray-700 mb-2">Bill Summary</p>
               <div className="space-y-1">
                 <div className="flex justify-between"><span>Base Rent</span><span className="font-medium">{formatMoney(rec.baseRent)}</span></div>
-                {Number(waterFee) > 0 && <div className="flex justify-between text-blue-700"><span>Water 水費</span><span>{formatMoney(Number(waterFee))}</span></div>}
-                {Number(electricityFee) > 0 && <div className="flex justify-between text-yellow-700"><span>Electricity 電費</span><span>{formatMoney(Number(electricityFee))}</span></div>}
+                <div className="flex justify-between text-blue-700"><span>Water 水費</span><span>{formatMoney(Number(waterFee))}</span></div>
+                <div className="flex justify-between text-yellow-700"><span>Electricity 電費</span><span>{formatMoney(Number(electricityFee))}</span></div>
                 <div className="flex justify-between font-bold border-t pt-1 mt-1">
                   <span>Total</span>
                   <span className="text-lg">{formatMoney(rec.baseRent + Number(waterFee) + Number(electricityFee))}</span>
@@ -406,18 +485,36 @@ function RentalDetailInner() {
         </Modal>
       )}
 
-      {/* Mark Paid Modal */}
+      {/* Record Payment Modal */}
       {showPaidModal && rec && (
-        <Modal title="Mark as Paid 確認收款" onClose={() => setShowPaidModal(false)}>
+        <Modal title="Record Payment 記錄收款" onClose={() => setShowPaidModal(false)}>
           <div className="space-y-5">
             <div className="rounded-xl bg-green-50 border border-green-200 p-4">
-              <p className="text-sm text-green-700">Total to confirm</p>
+              <p className="text-sm text-green-700">Total Due 應付總額</p>
               <p className="text-3xl font-bold text-green-800">{formatMoney(rec.actualAmount)}</p>
-              {(rec.waterFee > 0 || rec.electricityFee > 0) && (
-                <p className="text-xs text-green-600 mt-1">
-                  Rent {formatMoney(rec.baseRent)} + Water {formatMoney(rec.waterFee)} + Elec {formatMoney(rec.electricityFee)}
+              <p className="text-xs text-green-600 mt-1">
+                Rent {formatMoney(rec.baseRent)} + Water {formatMoney(rec.waterFee)} + Elec {formatMoney(rec.electricityFee)}
+              </p>
+              {rec.amountPaid > 0 && (
+                <p className="text-sm text-orange-700 mt-2 font-semibold">
+                  Already paid {formatMoney(rec.amountPaid)} · Outstanding {formatMoney(balance)}
                 </p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Amount 本次收款金額</label>
+              <input type="number" min={0} step="0.01" className={inp} value={paidAmount}
+                onChange={(e) => setPaidAmount(e.target.value)} />
+              <div className="flex gap-2 mt-2 flex-wrap">
+                <button type="button" onClick={() => setPaidAmount(String(balance))}
+                  className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Full balance 全數</button>
+                {rec.actualAmount > 0 && (
+                  <button type="button" onClick={() => setPaidAmount(String(Math.round(rec.actualAmount / 2)))}
+                    className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Half 一半</button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Leave as outstanding balance for full payment, or enter a smaller amount for partial payment.</p>
             </div>
 
             {/* AI Receipt Upload */}
@@ -477,8 +574,8 @@ function RentalDetailInner() {
 
             <div className="flex justify-end gap-3">
               <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button onClick={confirmPaid} disabled={busy} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
-                {busy ? 'Confirming…' : 'Confirm Paid 確認收款'}
+              <button onClick={confirmPaid} disabled={busy || !paidAmount || Number(paidAmount) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                {busy ? 'Saving…' : Number(paidAmount) >= balance ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
               </button>
             </div>
           </div>

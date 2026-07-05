@@ -534,7 +534,7 @@ db.exec(`
     db.exec('ALTER TABLE rental_units ADD COLUMN tenant_phone TEXT');
   }
   const rrCols = (db.prepare('PRAGMA table_info(rental_records)').all() as { name: string }[]).map((c) => c.name);
-  for (const col of ['base_rent REAL NOT NULL DEFAULT 0', 'water_fee REAL NOT NULL DEFAULT 0', 'electricity_fee REAL NOT NULL DEFAULT 0', 'paid_date TEXT', 'receipt_image_path TEXT']) {
+  for (const col of ['base_rent REAL NOT NULL DEFAULT 0', 'water_fee REAL NOT NULL DEFAULT 0', 'electricity_fee REAL NOT NULL DEFAULT 0', 'paid_date TEXT', 'receipt_image_path TEXT', 'amount_paid REAL NOT NULL DEFAULT 0']) {
     const name = col.split(' ')[0];
     if (!rrCols.includes(name)) {
       try { db.exec(`ALTER TABLE rental_records ADD COLUMN ${col}`); } catch { /* exists */ }

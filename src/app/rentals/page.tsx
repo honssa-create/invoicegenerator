@@ -8,6 +8,7 @@ import {
   RENTAL_STATUS_LABELS,
   currentBillingPeriod,
   daysRemaining,
+  displayRentalStatus,
   formatMoney,
   type PreviousYearRent,
   type RentalUnit,
@@ -141,6 +142,7 @@ export default function RentalsPage() {
                 {units.map((u) => {
                   const remaining = daysRemaining(u.leaseEndDate);
                   const rec = u.currentRecord;
+                  const recStatus = displayRentalStatus(rec);
                   return (
                     <tr
                       key={u.id}
@@ -160,9 +162,12 @@ export default function RentalsPage() {
                       </td>
                       <td className="px-4 py-3.5 text-gray-600">{u.dueDateDay}日</td>
                       <td className="px-4 py-3.5">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[rec.status]}`}>
-                          {RENTAL_STATUS_LABELS[rec.status]}
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[recStatus]}`}>
+                          {RENTAL_STATUS_LABELS[recStatus]}
                         </span>
+                        {rec.amountPaid > 0 && rec.amountPaid < rec.actualAmount && (
+                          <p className="text-[10px] text-orange-600 mt-0.5">{formatMoney(rec.amountPaid)} paid</p>
+                        )}
                         {(rec.waterFee > 0 || rec.electricityFee > 0 || rec.actualAmount > u.currentYearRent) ? (
                           <p className="text-[10px] text-gray-400 mt-0.5">+Utilities</p>
                         ) : null}

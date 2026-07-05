@@ -10,6 +10,7 @@ import {
   dueDateForPeriod,
   formatMoney,
   formatUtilityAmount,
+  formatDisplayDate,
   baseRentLineLabel,
   utilityLineLabel,
   outstandingBalance,
@@ -389,7 +390,7 @@ function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null)
   return `<p>Dear ${unit.tenantName},</p>
     <p>Rent invoice for <strong>${unit.unitName}</strong> — ${record.billingPeriod}.</p>
     <table style="width:100%;border-collapse:collapse">${lineItems}</table>
-    <p>Due: ${dueDateForPeriod(record.billingPeriod, unit.dueDateDay)}</p>
+    <p>Due: ${formatDisplayDate(dueDateForPeriod(record.billingPeriod, unit.dueDateDay))}</p>
     ${note ? `<p>${note}</p>` : ''}
     <p>Thank you.</p>`;
 }
@@ -399,7 +400,7 @@ function receiptHtml(unit: RentalUnit, record: RentRecord, note?: string | null,
   const balance = outstandingBalance(record);
   return `<p>Dear ${unit.tenantName},</p>
     <p>Payment received for <strong>${unit.unitName}</strong> — ${record.billingPeriod}.</p>
-    <p><strong>Amount: ${formatMoney(paid)}</strong> · Paid: ${record.paidDate || record.paidAt?.slice(0, 10) || 'today'}</p>
+    <p><strong>Amount: ${formatMoney(paid)}</strong> · Paid: ${formatDisplayDate(record.paidDate || record.paidAt?.slice(0, 10) || null) || 'today'}</p>
     ${balance > 0 ? `<p>Outstanding balance: ${formatMoney(balance)}</p>` : ''}
     ${note ? `<p>${note}</p>` : ''}
     <p>Thank you.</p>`;

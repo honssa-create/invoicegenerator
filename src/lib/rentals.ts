@@ -180,18 +180,26 @@ export function formatUtilityPeriod(from: string | null | undefined, to: string 
   if (from && to) {
     const f = formatPeriodDate(from);
     const t = formatPeriodDate(to);
-    return f === t ? f : `${f} – ${t}`;
+    return f === t ? f : `${f} - ${t}`;
   }
   if (from) return `from ${formatPeriodDate(from)}`;
   if (to) return `to ${formatPeriodDate(to)}`;
   return '';
 }
 
-/** DD/MM/YYYY for invoice display */
+/** DD/MM/YYYY display for any ISO date string (YYYY-MM-DD or datetime). */
+export function formatDisplayDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const datePart = iso.slice(0, 10);
+  const [y, m, d] = datePart.split('-');
+  if (!y || !m || !d || y.length !== 4) return iso;
+  return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+}
+
+/** @alias formatDisplayDate */
 export function formatPeriodDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
+  const formatted = formatDisplayDate(iso);
+  return formatted === '—' ? iso : formatted;
 }
 
 export function baseRentLineLabel(

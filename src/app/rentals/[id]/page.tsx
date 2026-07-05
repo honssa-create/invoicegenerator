@@ -14,8 +14,8 @@ import {
   displayRentalStatus,
   dueDateForPeriod,
   formatDueDayLabel,
+  formatDisplayDate,
   formatMoney,
-  formatPeriodDate,
   formatRentPeriodRange,
   formatUtilityAmount,
   baseRentLineLabel,
@@ -285,7 +285,7 @@ function RentalDetailInner() {
           <div>
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
             <h1 className="text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
-            <p className="text-xs text-gray-400 mt-2">Lease {unit.leaseStartDate || '—'} → {unit.leaseEndDate || '—'}
+            <p className="text-xs text-gray-400 mt-2">Lease {formatDisplayDate(unit.leaseStartDate)} → {formatDisplayDate(unit.leaseEndDate)}
               {remaining !== null && (
                 <span className={`ml-2 font-semibold ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
                   · {remaining} days remaining
@@ -348,10 +348,12 @@ function RentalDetailInner() {
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
                       <input type="date" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
+                      <DateHint value={baseRentPeriodFrom} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
                       <input type="date" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
+                      <DateHint value={baseRentPeriodTo} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
@@ -373,10 +375,12 @@ function RentalDetailInner() {
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
                       <input type="date" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                      <DateHint value={waterPeriodFrom} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
                       <input type="date" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                      <DateHint value={waterPeriodTo} />
                     </div>
                   </div>
                 </div>
@@ -392,10 +396,12 @@ function RentalDetailInner() {
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
                       <input type="date" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                      <DateHint value={electricityPeriodFrom} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
                       <input type="date" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                      <DateHint value={electricityPeriodTo} />
                     </div>
                   </div>
                 </div>
@@ -506,7 +512,7 @@ function RentalDetailInner() {
                           <p className="text-[10px] text-orange-600 font-normal">Paid {formatMoney(r.amountPaid)}</p>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{r.paidDate || r.paidAt?.slice(0, 10) || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{formatDisplayDate(r.paidDate || r.paidAt?.slice(0, 10))}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[hStatus]}`}>
                           {RENTAL_STATUS_LABELS[hStatus]}
@@ -661,7 +667,7 @@ function RentalDetailInner() {
                       {ocrResult.matched ? ' ✓' : ' (differs)'}
                     </span>
                     <span className="text-gray-500">Method:</span><span>{ocrResult.extracted.method || '—'}</span>
-                    <span className="text-gray-500">Date:</span><span>{ocrResult.extracted.transfer_date || '—'}</span>
+                    <span className="text-gray-500">Date:</span><span>{formatDisplayDate(ocrResult.extracted.transfer_date)}</span>
                     <span className="text-gray-500">Account:</span><span>{ocrResult.extracted.receiving_account || '—'}</span>
                   </div>
                 </div>
@@ -671,6 +677,7 @@ function RentalDetailInner() {
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Paid Date 交租日子</label>
               <input type="date" className={inp} value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
+              <DateHint value={paidDate} />
             </div>
 
             <label className="flex items-center gap-3 text-sm font-medium cursor-pointer">
@@ -707,6 +714,14 @@ function RentalDetailInner() {
         </Modal>
       )}
     </AppLayout>
+  );
+}
+
+function DateHint({ value }: { value: string }) {
+  return (
+    <p className={`text-[10px] mt-0.5 ${value ? 'text-brand-600 font-medium' : 'text-gray-400'}`}>
+      {value ? formatDisplayDate(value) : 'dd/mm/yyyy'}
+    </p>
   );
 }
 

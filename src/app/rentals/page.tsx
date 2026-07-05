@@ -9,6 +9,7 @@ import {
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
+  formatDisplayDate,
   formatDueDayLabel,
   formatMoney,
   type PreviousYearRent,
@@ -156,8 +157,8 @@ export default function RentalsPage() {
                         {u.tenantPhone && <p className="text-xs text-gray-400">{u.tenantPhone}</p>}
                       </td>
                       <td className="px-4 py-3.5 text-right font-semibold">{formatMoney(u.currentYearRent)}</td>
-                      <td className="px-4 py-3.5 text-gray-600">{u.leaseStartDate || '—'}</td>
-                      <td className="px-4 py-3.5 text-gray-600">{u.leaseEndDate || '—'}</td>
+                      <td className="px-4 py-3.5 text-gray-600">{formatDisplayDate(u.leaseStartDate)}</td>
+                      <td className="px-4 py-3.5 text-gray-600">{formatDisplayDate(u.leaseEndDate)}</td>
                       <td className={`px-4 py-3.5 text-right font-semibold ${remaining !== null && remaining < 60 ? 'text-red-600' : 'text-gray-700'}`}>
                         {remaining ?? '—'}
                       </td>

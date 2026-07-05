@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { formatMoney, formatUtilityAmount, outstandingBalance, type RentRecord, type RentalUnit } from '@/lib/rentals';
+import { formatDisplayDate, formatMoney, formatUtilityAmount, outstandingBalance, type RentRecord, type RentalUnit } from '@/lib/rentals';
 
 interface DocumentPayload { unit: RentalUnit; record: RentRecord; dueDate: string; }
 
@@ -44,7 +44,7 @@ export default function RentReceiptPage() {
           <div>
             <p className="text-gray-400 uppercase text-xs">Unit 單位</p>
             <p className="font-semibold text-lg mt-1">{unit.unitName}</p>
-            <p className="text-gray-600">Paid: {record.paidDate || record.paidAt?.slice(0, 10) || '—'}</p>
+            <p className="text-gray-600">Paid: {formatDisplayDate(record.paidDate || record.paidAt?.slice(0, 10))}</p>
           </div>
         </div>
 

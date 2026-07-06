@@ -28,6 +28,7 @@ export interface RentalUnit {
   user_id: number;
   unitName: string;
   tenantName: string;
+  tenantId: number | null;
   tenantPhone: string;
   tenantEmail: string;
   currentYearRent: number;
@@ -340,4 +341,101 @@ export function todayFormDate(): string {
 export function normalizeStoredDate(value: string | null | undefined): string | null {
   if (!value) return null;
   return isoFromDisplayDate(value);
+}
+
+// ---------------------------------------------------------------------------
+// Rental ledger — tenants, charge items, payments, rent payment notice
+// ---------------------------------------------------------------------------
+
+export type RentalChargeType = 'rent' | 'water' | 'electricity';
+
+export const CHARGE_TYPE_LABELS: Record<RentalChargeType, string> = {
+  rent: '租金 Rent',
+  water: '水費 Water',
+  electricity: '電費 Electricity',
+};
+
+export interface RentalTenant {
+  id: number;
+  user_id: number;
+  name: string;
+  phone: string;
+  email: string;
+  notes: string;
+  unitCount?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalChargeItem {
+  id: number;
+  user_id: number;
+  unitId: number;
+  billingPeriod: string;
+  chargeType: RentalChargeType;
+  amountDue: number;
+  amountAllocated: number;
+  legacyRecordId: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalPayment {
+  id: number;
+  user_id: number;
+  tenantId: number;
+  paymentDate: string;
+  amount: number;
+  receiptImagePath: string | null;
+  method: string | null;
+  reference: string | null;
+  notes: string | null;
+  amountAllocated: number;
+  amountUnallocated: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalPaymentAllocation {
+  id: number;
+  user_id: number;
+  paymentId: number;
+  chargeItemId: number;
+  amount: number;
+  created_at: string;
+}
+
+export interface RentPaymentNoticeColumn {
+  unitId: number;
+  unitName: string;
+  chargeType: RentalChargeType;
+  label: string;
+}
+
+export interface RentPaymentNoticeCell {
+  chargeItemId: number | null;
+  amountDue: number;
+  amountAllocated: number;
+  outstanding: number;
+}
+
+export interface RentPaymentNoticeRow {
+  period: string;
+  cells: RentPaymentNoticeCell[];
+  rowTotal: number;
+}
+
+export interface RentPaymentNoticeMatrix {
+  tenant: RentalTenant;
+  units: Pick<RentalUnit, 'id' | 'unitName'>[];
+  period: string;
+  fromPeriod: string;
+  columns: RentPaymentNoticeColumn[];
+  rows: RentPaymentNoticeRow[];
+  grandTotal: number;
+  totalAllocated: number;
+}
+
+export function chargeOutstanding(item: Pick<RentalChargeItem, 'amountDue' | 'amountAllocated'>): number {
+  return Math.max(0, (item.amountDue || 0) - (item.amountAllocated || 0));
 }

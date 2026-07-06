@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
 import { markRentPaid } from '@/lib/rental-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const session = await getSessionFromRequest(request);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = await requireApiAccess(request, 'rentals');
+  if (session instanceof NextResponse) return session;
+  const denied = denyReadOnlyWrite(session, 'rentals', request.method);
+  if (denied) return denied;
   try {
     const body = await request.json();
     const result = await markRentPaid(params.id, session.userId, {

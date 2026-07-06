@@ -2,6 +2,7 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
+import { ensureUnitTenantLink, syncChargeItemsFromRecord } from './rental-ledger-server';
 import {
   computeTotal,
   currentBillingPeriod,
@@ -30,6 +31,7 @@ import {
 
 interface UnitRow {
   id: number; user_id: number; unit_name: string; tenant_name: string;
+  tenant_id: number | null;
   tenant_phone: string | null; tenant_email: string | null;
   current_year_rent: number; previous_years_rent_json: string | null;
   lease_start_date: string | null; lease_end_date: string | null;
@@ -72,6 +74,7 @@ function parsePrevious(raw: string | null): PreviousYearRent[] {
 function hydrateUnit(row: UnitRow): RentalUnit {
   return {
     id: row.id, user_id: row.user_id, unitName: row.unit_name, tenantName: row.tenant_name,
+    tenantId: row.tenant_id ?? null,
     tenantPhone: row.tenant_phone || '', tenantEmail: row.tenant_email || '',
     currentYearRent: row.current_year_rent || 0,
     previousYearsRent: parsePrevious(row.previous_years_rent_json),
@@ -169,6 +172,7 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
   );
   const unit = getRentalUnit(Number(res.lastInsertRowid), userId)!;
   logRentalActivity(userId, unit.id, 'Unit created');
+  ensureUnitTenantLink(unit);
   return unit;
 }
 
@@ -219,6 +223,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
   if (input.dueDateDay !== undefined && newDueDay !== existing.dueDateDay) {
     syncRentPeriodsForUnit(updated);
   }
+  ensureUnitTenantLink(updated);
   return updated;
 }
 
@@ -251,9 +256,13 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
       updates.push('actual_amount = ?', "updated_at = datetime('now')");
       vals.push(total, found.id);
       db.prepare(`UPDATE rental_records SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
-      return getRentRecord(found.id, unit.user_id)!;
+      const synced = getRentRecord(found.id, unit.user_id)!;
+      syncChargeItemsFromRecord(synced);
+      return synced;
     }
-    return hydrateRecord(found);
+    const hydrated = hydrateRecord(found);
+    syncChargeItemsFromRecord(hydrated);
+    return hydrated;
   }
 
   const base = unit.currentYearRent;
@@ -263,7 +272,9 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
        water_fee, electricity_fee, actual_amount, status)
      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 'pending')`
   ).run(unit.user_id, unit.id, period, base, defaults.from, defaults.to, base);
-  return getRentRecord(Number(res.lastInsertRowid), unit.user_id)!;
+  const created = getRentRecord(Number(res.lastInsertRowid), unit.user_id)!;
+  syncChargeItemsFromRecord(created);
+  return created;
 }
 
 export function getRentRecord(id: number | string, userId: number): RentRecord | null {
@@ -318,7 +329,9 @@ export function updateRentRecordUtilities(
       actual_amount = ?, custom_invoice_note = ?, updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
-  return getRentRecord(id, userId);
+  const updated = getRentRecord(id, userId)!;
+  syncChargeItemsFromRecord(updated);
+  return updated;
 }
 
 function applyOverdueStatuses(userId: number, period: string) {
@@ -477,6 +490,7 @@ export async function sendRentInvoice(
   ).run(water, elec, rentFrom, rentTo, waterFrom, waterTo, elecFrom, elecTo, total, invoiceRef, input.note?.trim() || null, record.id, userId);
 
   const fresh = getRentRecord(record.id, userId)!;
+  syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (unit.tenantEmail) {
     email = await sendEmail(
@@ -640,6 +654,7 @@ export async function markRentPaid(
   }
 
   const fresh = getRentRecord(record.id, userId)!;
+  syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (shouldSend && unit.tenantEmail) {
     email = await sendEmail(

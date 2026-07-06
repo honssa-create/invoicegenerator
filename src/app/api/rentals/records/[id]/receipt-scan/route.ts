@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
 import { extractRentalReceipt } from '@/lib/rental-server';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const session = await getSessionFromRequest(request);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = await requireApiAccess(request, 'rentals');
+  if (session instanceof NextResponse) return session;
+  const denied = denyReadOnlyWrite(session, 'rentals', request.method);
+  if (denied) return denied;
 
   let formData: FormData;
   try { formData = await request.formData(); } catch {

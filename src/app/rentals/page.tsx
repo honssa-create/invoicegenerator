@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
+import { isSectionReadOnly } from '@/lib/permissions';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
@@ -14,6 +17,7 @@ import {
   formatMoney,
   toFormDate,
   type PreviousYearRent,
+  type RentalTenant,
   type RentalUnit,
   type RentalUnitWithRecord,
 } from '@/lib/rentals';
@@ -32,8 +36,11 @@ const blankUnit: Partial<RentalUnit> = {
 
 export default function RentalsPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [data, setData] = useState<DashboardData | null>(null);
+  const [tenants, setTenants] = useState<RentalTenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [unitModal, setUnitModal] = useState<Partial<RentalUnit> | null>(null);
   const [previousYearsText, setPreviousYearsText] = useState('');
@@ -42,9 +49,14 @@ export default function RentalsPage() {
 
   const load = () => {
     setLoading(true);
-    fetch(`/api/rentals?period=${period}`)
-      .then((r) => r.json())
-      .then((d) => setData(d))
+    Promise.all([
+      fetch(`/api/rentals?period=${period}`).then((r) => r.json()),
+      fetch('/api/rentals/tenants').then((r) => r.json()),
+    ])
+      .then(([d, t]) => {
+        setData(d);
+        setTenants(t.tenants || []);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -94,16 +106,57 @@ export default function RentalsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Rental Income 租金管理</h1>
-          <p className="text-gray-500 mt-0.5 text-sm">Row overview · click a unit to manage</p>
+          <p className="text-gray-500 mt-0.5 text-sm">
+            Row overview · click a unit to manage
+            {readOnly && <span className="text-amber-600 ml-2">(Read-only)</span>}
+          </p>
         </div>
         <div className="page-actions">
           <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
-          <button onClick={runScheduler} disabled={busy} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
-          <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ Add Unit</button>
+          <button onClick={runScheduler} disabled={busy || readOnly} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
+          {!readOnly && (
+            <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ Add Unit</button>
+          )}
         </div>
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 rounded-lg bg-brand-50 text-brand-700 text-sm cursor-pointer">{toast} ✕</div>}
+
+      {/* Tenants — multi-unit rent payment notice */}
+      {tenants.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Tenants 租客</p>
+            <p className="text-sm text-gray-500 mt-0.5">Multi-unit tenants · 繳付租金通知單 Rent Payment Notice</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left">Tenant 租客</th>
+                  <th className="px-4 py-3 text-left">Contact</th>
+                  <th className="px-4 py-3 text-right">Units</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {tenants.map((t) => (
+                  <tr key={t.id} className="hover:bg-brand-50/40 cursor-pointer" onClick={() => router.push(`/rentals/tenants/${t.id}`)}>
+                    <td className="px-4 py-3 font-semibold">{t.name}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{t.phone || t.email || '—'}</td>
+                    <td className="px-4 py-3 text-right">{t.unitCount ?? 0}</td>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <Link href={`/rentals/tenants/${t.id}/rent-payment-notice?period=${period}`} className="text-brand-600 text-xs font-medium hover:underline">
+                        通知單 Notice
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Metrics strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -180,12 +233,14 @@ export default function RentalsPage() {
                         ) : null}
                       </td>
                       <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => openUnitModal(u)}
-                          className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
-                        >
-                          Edit Lease
-                        </button>
+                        {!readOnly && (
+                          <button
+                            onClick={() => openUnitModal(u)}
+                            className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
+                          >
+                            Edit Lease
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

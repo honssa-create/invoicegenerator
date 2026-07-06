@@ -291,11 +291,9 @@ function RentalDetailInner() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <button onClick={() => router.push('/rentals')} className="text-sm text-brand-600 font-medium">← Back to Rentals</button>
-        <div className="flex gap-2 flex-wrap">
-          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} />
-        </div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
+        <button onClick={() => router.push('/rentals')} className="text-sm text-brand-600 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to Rentals</button>
+        <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 bg-brand-50 text-brand-700 text-sm rounded-lg cursor-pointer">{toast} ✕</div>}
@@ -305,7 +303,7 @@ function RentalDetailInner() {
         <div className="flex items-start justify-between flex-wrap gap-4 mb-5">
           <div>
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
-            <h1 className="text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
             <p className="text-xs text-gray-400 mt-2">Lease {formatDisplayDate(unit.leaseStartDate)} → {formatDisplayDate(unit.leaseEndDate)}
               {remaining !== null && (
                 <span className={`ml-2 font-semibold ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
@@ -730,11 +728,11 @@ function RentalDetailInner() {
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-6">
+    <div className="modal-overlay">
+      <div className="modal-panel max-h-[92vh]">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-xl font-bold">{title}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+          <button onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-700 text-xl">✕</button>
         </div>
         {children}
       </div>

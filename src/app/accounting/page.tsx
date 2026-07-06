@@ -48,18 +48,18 @@ export default function AccountingPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Accounting Reconciliation 會計入帳一覽表</h1>
-          <p className="text-gray-500 mt-1">One unified view of every order payment — tick each against your bank statement</p>
+          <h1 className="page-title">Accounting Reconciliation 會計入帳一覽表</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">One unified view of every order payment — tick each against your bank statement</p>
         </div>
-        <label className="flex items-center gap-2 text-sm text-gray-600">
+        <label className="flex items-center gap-2 text-sm text-gray-600 min-h-[44px] sm:min-h-0">
           <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
           Show pending only
         </label>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-6 max-w-md">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 max-w-none sm:max-w-md">
         <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Entries</p><p className="text-2xl font-bold">{entries.length}</p></div>
         <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Verified</p><p className="text-2xl font-bold text-green-600">{verifiedCount}</p></div>
         <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Pending</p><p className="text-2xl font-bold text-amber-600">{entries.length - verifiedCount}</p></div>

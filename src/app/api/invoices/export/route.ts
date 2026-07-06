@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getInvoiceWithDetails } from '@/lib/invoices';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -12,12 +13,13 @@ export async function GET(request: Request) {
     });
   }
 
+  const ownerId = getDataOwnerId(session.userId);
   const rows = db
     .prepare('SELECT id FROM invoices WHERE user_id = ? ORDER BY created_at DESC')
-    .all(session.userId) as { id: number }[];
+    .all(ownerId) as { id: number }[];
 
   const invoices = rows
-    .map((r) => getInvoiceWithDetails(r.id, session.userId))
+    .map((r) => getInvoiceWithDetails(r.id, ownerId))
     .filter((i): i is NonNullable<typeof i> => Boolean(i));
 
   const data = invoices.map((inv) => ({

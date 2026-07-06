@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { trashCustomer } from '@/lib/trash';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -81,13 +82,9 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     );
   }
 
-  const result = db
-    .prepare('DELETE FROM customers WHERE id = ? AND user_id = ?')
-    .run(params.id, session.userId);
-
-  if (result.changes === 0) {
+  if (!trashCustomer(session.userId, Number(params.id))) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

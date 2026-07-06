@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { generateInvoiceNumber, getInvoiceWithDetails } from '@/lib/invoices';
+import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
 export async function GET(request: Request) {
@@ -10,11 +12,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = getDataOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
 
   let query = 'SELECT id FROM invoices WHERE user_id = ?';
-  const queryParams: (string | number)[] = [session.userId];
+  const queryParams: (string | number)[] = [ownerId];
 
   if (status) {
     query += ' AND status = ?';
@@ -24,7 +27,7 @@ export async function GET(request: Request) {
   query += ' ORDER BY created_at DESC';
 
   const rows = db.prepare(query).all(...queryParams) as { id: number }[];
-  const invoices = rows.map((r) => getInvoiceWithDetails(r.id, session.userId)).filter(Boolean);
+  const invoices = rows.map((r) => getInvoiceWithDetails(r.id, ownerId)).filter(Boolean);
 
   return NextResponse.json({ invoices });
 }
@@ -34,6 +37,11 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const denied = denyReadOnlyWrite(session, 'invoices', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
@@ -57,7 +65,7 @@ export async function POST(request: Request) {
 
     const customer = db
       .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
-      .get(customer_id, session.userId);
+      .get(customer_id, ownerId);
 
     if (!customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -67,7 +75,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'At least one line item is required' }, { status: 400 });
     }
 
-    const invoiceNumber = generateInvoiceNumber(session.userId);
+    const invoiceNumber = generateInvoiceNumber(ownerId);
 
     const createInvoice = db.transaction(() => {
       const result = db
@@ -76,7 +84,7 @@ export async function POST(request: Request) {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
-          session.userId,
+          ownerId,
           customer_id,
           invoiceNumber,
           status,
@@ -104,7 +112,7 @@ export async function POST(request: Request) {
 
     const invoiceId = createInvoice();
     logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
-    const invoice = getInvoiceWithDetails(invoiceId, session.userId);
+    const invoice = getInvoiceWithDetails(invoiceId, ownerId);
 
     return NextResponse.json({ invoice }, { status: 201 });
   } catch {

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "buildAptPackages": ["python3", "build-essential"],
+  "packages": {
+    "node": "20"
+  },
+  "deploy": {
+    "startCommand": "npm start"
+  }
+}

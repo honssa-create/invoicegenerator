@@ -1,17 +1,21 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
+import { getDataOwnerId } from '@/lib/org-server';
+import { trashQuotation } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const quotation = getQuotationWithDetails(params.id, session.userId);
+  const ownerId = getDataOwnerId(session.userId);
+  const quotation = getQuotationWithDetails(params.id, ownerId);
   if (!quotation) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
-  const business = db.prepare('SELECT name, company_name, email FROM users WHERE id = ?').get(session.userId);
+  const business = db.prepare('SELECT name, company_name, email FROM users WHERE id = ?').get(ownerId);
   return NextResponse.json({ quotation, business });
 }
 
@@ -19,9 +23,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const denied = denyReadOnlyWrite(session, 'quotations', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+
   const existing = db
     .prepare('SELECT id, status FROM quotations WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId) as { id: number; status: string } | undefined;
+    .get(params.id, ownerId) as { id: number; status: string } | undefined;
   if (!existing) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
   try {
@@ -39,7 +48,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       if (terms !== undefined) { fields.push('terms = ?'); values.push(terms?.trim() || null); }
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
       fields.push("updated_at = datetime('now')");
-      values.push(params.id, session.userId);
+      values.push(params.id, ownerId);
       if (fields.length > 1) {
         db.prepare(`UPDATE quotations SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
       }
@@ -62,7 +71,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       logActivity('quotation', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
     }
 
-    return NextResponse.json({ quotation: getQuotationWithDetails(params.id, session.userId) });
+    return NextResponse.json({ quotation: getQuotationWithDetails(params.id, ownerId) });
   } catch {
     return NextResponse.json({ error: 'Failed to update quotation' }, { status: 500 });
   }
@@ -72,7 +81,12 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const result = db.prepare('DELETE FROM quotations WHERE id = ? AND user_id = ?').run(params.id, session.userId);
-  if (result.changes === 0) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
-  return NextResponse.json({ success: true });
+  const denied = denyReadOnlyWrite(session, 'quotations', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+  if (!trashQuotation(ownerId, Number(params.id))) {
+    return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
+  }
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

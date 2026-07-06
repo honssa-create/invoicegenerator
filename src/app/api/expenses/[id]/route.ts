@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { attachReceipts, normalizeNumber, receiptPathsFromBody } from '@/lib/expense-server';
+import { canAccessExpense, expenseWhereClause, getDataOwnerId } from '@/lib/org-server';
+import { trashExpense } from '@/lib/trash';
 import type { Expense } from '@/lib/types';
 
 const STATUSES = ['unpaid', 'pending', 'paid'];
@@ -12,9 +14,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const { sql, params: whereParams } = expenseWhereClause(session);
   const expense = db
-    .prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId) as Expense | undefined;
+    .prepare(`SELECT * FROM expenses WHERE id = ? AND ${sql}`)
+    .get(params.id, ...whereParams) as Expense | undefined;
 
   if (!expense) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
@@ -29,18 +32,16 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const existing = db
-    .prepare('SELECT id FROM expenses WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
-
-  if (!existing) {
+  if (!canAccessExpense(session, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
+
+  const ownerId = getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
     const category = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : 'other';
-    const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'unpaid';
+    const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'paid';
     const amount_hkd = normalizeNumber(body.amount_hkd);
     const amount_rmb = normalizeNumber(body.amount_rmb);
     const receiptPaths = receiptPathsFromBody(body);
@@ -52,13 +53,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     const update = db.transaction(() => {
       db.prepare(
         `UPDATE expenses SET
-           category = ?, merchant = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
-           order_no = ?, platform = ?, payment_method = ?, notes = ?, payment_status = ?, receipt_path = ?,
+           category = ?, merchant = ?, supplier_input = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
+           order_no = ?, platform = ?, payment_method = ?, notes = ?, special_notes = ?, payment_status = ?, receipt_path = ?,
            updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`
       ).run(
         category,
         body.merchant?.trim() || null,
+        body.supplier_input?.trim() || null,
         amount_hkd,
         amount_rmb,
         body.paid_date?.trim() || null,
@@ -66,21 +68,21 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         body.platform?.trim() || null,
         body.payment_method?.trim() || null,
         body.notes?.trim() || null,
+        body.special_notes?.trim() || null,
         payment_status,
         receiptPaths[0] || null,
         params.id,
-        session.userId
+        ownerId
       );
 
-      // Replace receipt attachments with the provided set.
       db.prepare('DELETE FROM expense_receipts WHERE expense_id = ? AND user_id = ?').run(
         params.id,
-        session.userId
+        ownerId
       );
       const insertReceipt = db.prepare(
         'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
       );
-      for (const p of receiptPaths) insertReceipt.run(params.id, session.userId, p);
+      for (const p of receiptPaths) insertReceipt.run(params.id, ownerId, p);
     });
 
     update();
@@ -99,12 +101,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result = db
-    .prepare('DELETE FROM expenses WHERE id = ? AND user_id = ?')
-    .run(params.id, session.userId);
-
-  if (result.changes === 0) {
+  if (!trashExpense(session, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

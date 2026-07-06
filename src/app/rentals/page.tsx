@@ -91,22 +91,22 @@ export default function RentalsPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Rental Income 租金管理</h1>
+          <h1 className="page-title">Rental Income 租金管理</h1>
           <p className="text-gray-500 mt-0.5 text-sm">Row overview · click a unit to manage</p>
         </div>
-        <div className="flex gap-2 items-center flex-wrap">
-          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} />
-          <button onClick={runScheduler} disabled={busy} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
-          <button onClick={() => openUnitModal(blankUnit)} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">+ Add Unit</button>
+        <div className="page-actions">
+          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+          <button onClick={runScheduler} disabled={busy} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
+          <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ Add Unit</button>
         </div>
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 rounded-lg bg-brand-50 text-brand-700 text-sm cursor-pointer">{toast} ✕</div>}
 
       {/* Metrics strip */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {[
           { label: 'Total Revenue', value: formatMoney(metrics.totalRevenue), cls: 'text-green-700 bg-green-50' },
           { label: 'Outstanding', value: formatMoney(metrics.outstanding), cls: 'text-red-700 bg-red-50' },
@@ -197,8 +197,8 @@ export default function RentalsPage() {
       </div>
 
       {unitModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+        <div className="modal-overlay">
+          <div className="modal-panel sm:max-w-2xl max-h-[92vh]">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-xl font-bold">{unitModal.id ? 'Edit Lease 編輯租約' : 'New Rental Unit 新增單位'}</h2>
               <button onClick={() => setUnitModal(null)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>

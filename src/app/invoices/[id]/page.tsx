@@ -5,7 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
+import { isSectionReadOnly } from '@/lib/permissions';
 import { formatDate, calculateInvoiceTotals } from '@/lib/utils';
 import type { InvoiceWithDetails, LinkedOrderSummary } from '@/lib/types';
 import { orderTitle, type Order } from '@/lib/orders';
@@ -19,6 +21,8 @@ interface LineItem {
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
   const [editing, setEditing] = useState(false);
   const [items, setItems] = useState<LineItem[]>([]);
@@ -79,7 +83,7 @@ export default function InvoiceDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm('Delete this invoice?')) return;
+    if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     router.push('/invoices');
   };
@@ -102,23 +106,25 @@ export default function InvoiceDetailPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
           <Link href="/invoices" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
             ← Back to invoices
           </Link>
-          <div className="flex items-center gap-3 mt-2">
-            <h1 className="text-2xl font-bold text-gray-900">{invoice.invoice_number}</h1>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <h1 className="page-title">{invoice.invoice_number}</h1>
             <StatusBadge status={invoice.status} />
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="page-actions">
           <Link
             href={`/invoices/${id}/print`}
             className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
           >
             Print / PDF
           </Link>
+          {!readOnly && (
+          <>
           {!editing ? (
             <button onClick={() => setEditing(true)} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
               Edit
@@ -136,6 +142,8 @@ export default function InvoiceDetailPage() {
           <button onClick={handleDelete} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">
             Delete
           </button>
+          </>
+          )}
         </div>
       </div>
 
@@ -253,6 +261,7 @@ export default function InvoiceDetailPage() {
             ) : (
               <p className="text-sm text-gray-500 mb-2">No order linked.</p>
             )}
+            {!readOnly && (
             <select
               value={linkedOrder?.id || ''}
               onChange={(e) => linkOrder(e.target.value)}
@@ -261,6 +270,7 @@ export default function InvoiceDetailPage() {
               <option value="">— Not linked —</option>
               {orders.map((o) => <option key={o.id} value={o.id}>{orderTitle(o)}</option>)}
             </select>
+            )}
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h3 className="font-semibold text-gray-900 mb-3">Notes</h3>

@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
+import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -10,7 +11,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const q = getQuotationWithDetails(params.id, session.userId);
+  const ownerId = getDataOwnerId(session.userId);
+  const q = getQuotationWithDetails(params.id, ownerId);
   if (!q) {
     return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }

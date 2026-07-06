@@ -31,6 +31,7 @@ yarn-error.log*
 /data/*.db-journal
 /data/*.db-shm
 /data/*.db-wal
+/data/.next-build.sqlite
 
 # uploaded receipts
 /data/receipts/
@@ -39,3 +40,4 @@ yarn-error.log*
 next-env.d.ts
 *.tsbuildinfo
 dev-server.log
+data/.next-build.sqlite*

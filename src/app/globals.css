@@ -84,15 +84,12 @@
     margin: 0 !important;
   }
 
-  /* Exactly one printed page per sheet — image scales into remaining space */
+  /* One printed page per sheet — natural height, no viewport hacks */
   .expense-print-root .expense-print-sheet {
-    display: flex !important;
-    flex-direction: column !important;
+    display: block !important;
     box-sizing: border-box !important;
     width: 100% !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
@@ -100,6 +97,8 @@
     border-radius: 0 !important;
     page-break-after: always !important;
     break-after: page !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 
   .expense-print-root .expense-print-sheet:last-child {
@@ -108,34 +107,29 @@
   }
 
   .expense-print-root .expense-print-body {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    padding: 4mm 0 0 !important;
+    overflow: visible !important;
+    padding: 2mm 0 0 !important;
   }
 
   .expense-print-root .expense-print-figure {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
+    display: block !important;
+    overflow: visible !important;
+    margin: 0 !important;
   }
 
   .expense-print-root .expense-print-receipt-img {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
+    display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    max-height: 100% !important;
+    max-height: 22cm !important;
     height: auto !important;
     object-fit: contain !important;
     object-position: top center !important;
     border-left: none !important;
     border-right: none !important;
     border-bottom: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .expense-print-root .expense-print-details {
@@ -152,6 +146,26 @@
   .expense-print-root .expense-print-mini-header {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  /* Rent payment notice print */
+  .rent-notice-print-root {
+    background: white !important;
+    padding: 0 !important;
+  }
+
+  .rent-notice-print-root table {
+    font-size: 8pt !important;
+    width: 100% !important;
+  }
+
+  .rent-notice-print-root th,
+  .rent-notice-print-root td {
+    padding: 2px 4px !important;
+  }
+
+  .rent-notice-print-root .sticky {
+    position: static !important;
   }
 
   * {

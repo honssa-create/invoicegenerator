@@ -1,33 +1,59 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import RentPaymentNoticeMatrixView from '@/components/RentPaymentNoticeMatrix';
 import { currentBillingPeriod, formatDisplayDate, formatMoney, type RentPaymentNoticeMatrix } from '@/lib/rentals';
 
-export default function RentPaymentNoticePage() {
+function RentPaymentNoticeContent() {
   const { id } = useParams();
   const searchParams = useSearchParams();
   const period = searchParams.get('period') || currentBillingPeriod();
   const from = searchParams.get('from') || period;
   const [matrix, setMatrix] = useState<RentPaymentNoticeMatrix | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
+    setError('');
     fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${from}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d && setMatrix(d));
+      .then(async (r) => {
+        if (r.status === 401) {
+          window.location.href = '/login';
+          return null;
+        }
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Failed to load notice');
+        return data;
+      })
+      .then((d) => {
+        if (d?.tenant) setMatrix(d);
+        else setError('Tenant not found');
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load notice'))
+      .finally(() => setLoading(false));
   }, [id, period, from]);
 
-  if (!matrix) {
+  if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
+  }
+
+  if (error || !matrix) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-gray-500">
+        <p>{error || 'Notice not available'}</p>
+        <Link href={`/rentals/tenants/${id}`} className="text-brand-600 text-sm font-medium">← Back to Tenant</Link>
+      </div>
+    );
   }
 
   const { tenant } = matrix;
   const issued = formatDisplayDate(new Date().toISOString().slice(0, 10));
 
   return (
-    <div className="min-h-screen bg-gray-100 print:bg-white">
+    <div className="rent-notice-print-root min-h-screen bg-gray-100 print:bg-white">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center">
         <Link href={`/rentals/tenants/${id}`} className="text-sm text-brand-600 font-medium">← Back to Tenant</Link>
         <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg">
@@ -64,5 +90,13 @@ export default function RentPaymentNoticePage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function RentPaymentNoticePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>}>
+      <RentPaymentNoticeContent />
+    </Suspense>
   );
 }

@@ -40,6 +40,7 @@ export default function TenantDetailPage() {
   const [detail, setDetail] = useState<TenantDetail | null>(null);
   const [matrix, setMatrix] = useState<MatrixType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
   const [paymentModal, setPaymentModal] = useState(false);
@@ -49,14 +50,24 @@ export default function TenantDetailPage() {
 
   const load = () => {
     setLoading(true);
+    setLoadError('');
     Promise.all([
-      fetch(`/api/rentals/tenants/${id}`).then((r) => r.json()),
-      fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${fromPeriod}`).then((r) => r.json()),
+      fetch(`/api/rentals/tenants/${id}`).then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Tenant not found');
+        return data;
+      }),
+      fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${fromPeriod}`).then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) return null;
+        return data;
+      }),
     ])
       .then(([d, m]) => {
         if (d.tenant) setDetail(d);
-        if (m.tenant) setMatrix(m);
+        if (m?.tenant) setMatrix(m);
       })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : 'Failed to load tenant'))
       .finally(() => setLoading(false));
   };
 
@@ -126,8 +137,15 @@ export default function TenantDetailPage() {
   if (loading && !detail) {
     return <AppLayout><div className="p-12 text-center text-gray-400">Loading…</div></AppLayout>;
   }
-  if (!detail) {
-    return <AppLayout><div className="p-12 text-center text-gray-400">Tenant not found</div></AppLayout>;
+  if (loadError || !detail) {
+    return (
+      <AppLayout>
+        <div className="p-12 text-center">
+          <p className="text-gray-500">{loadError || 'Tenant not found'}</p>
+          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← Back to Rentals</Link>
+        </div>
+      </AppLayout>
+    );
   }
 
   const { tenant, units, outstandingCharges, payments } = detail;

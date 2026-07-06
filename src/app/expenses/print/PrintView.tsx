@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { categoryLabel, expenseSupplierName, formatMoney } from '@/lib/expenses';
+import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
 import type { Expense } from '@/lib/types';
-import { expenseReceiptUrl } from '@/lib/image-url';
 
 type PrintPage = {
   key: string;
@@ -13,18 +13,31 @@ type PrintPage = {
   receiptIndex: number;
   receiptCount: number;
   showFullSummary: boolean;
+  imageKey: string;
 };
 
-function receiptSrc(receipt: { id: number; path: string }): string {
-  const url = expenseReceiptUrl(receipt);
-  if (url.startsWith('http')) return url;
-  if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
-  return url;
+function receiptSrc(expense: Expense, receipt: { id: number; path: string }): string {
+  if (receipt.id > 0) {
+    const url = expenseReceiptUrl(receipt);
+    if (url.startsWith('http')) return url;
+    if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
+    return url;
+  }
+  if (isStoredImageUrl(receipt.path)) return receipt.path;
+  const legacy = `/api/expenses/${expense.id}/receipt`;
+  if (typeof window !== 'undefined') return `${window.location.origin}${legacy}`;
+  return legacy;
+}
+
+function receiptsForExpense(e: Expense): { id: number; path: string }[] {
+  if (Array.isArray(e.receipts) && e.receipts.length) return e.receipts;
+  if (e.receipt_path?.trim()) return [{ id: 0, path: e.receipt_path.trim() }];
+  return [];
 }
 
 function ExpenseSummary({ e }: { e: Expense }) {
   return (
-    <div className="expense-print-summary shrink-0">
+    <div className="expense-print-summary">
       <div className="expense-print-banner bg-brand-600 text-white px-4 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider opacity-80">Receipt No.</p>
@@ -66,7 +79,7 @@ function ExpenseSummary({ e }: { e: Expense }) {
 
 function ExpenseMiniHeader({ e, receiptIndex, receiptCount }: { e: Expense; receiptIndex: number; receiptCount: number }) {
   return (
-    <div className="expense-print-mini-header shrink-0 bg-brand-600 text-white px-4 py-2 flex items-center justify-between text-sm">
+    <div className="expense-print-mini-header bg-brand-600 text-white px-4 py-2 flex items-center justify-between text-sm">
       <span className="font-mono font-semibold">{e.receipt_no || `EXP-${e.id}`}</span>
       <span className="opacity-90">
         Receipt {receiptIndex + 1} of {receiptCount} · {expenseSupplierName(e)}
@@ -79,28 +92,31 @@ function ReceiptImage({
   e,
   receipt,
   index,
+  imageKey,
   onReady,
 }: {
   e: Expense;
   receipt: { id: number; path: string };
   index: number;
-  onReady: (id: number) => void;
+  imageKey: string;
+  onReady: (key: string) => void;
 }) {
+  const src = receiptSrc(e, receipt);
   return (
-    <figure className="expense-print-figure m-0 flex min-h-0 flex-1 flex-col">
-      <figcaption className="expense-print-caption shrink-0 bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border border-gray-200 border-b-0">
+    <figure className="expense-print-figure m-0">
+      <figcaption className="expense-print-caption bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border border-gray-200 border-b-0">
         {e.receipt_no || `EXP-${e.id}`} · #{index + 1} — {expenseSupplierName(e)}
       </figcaption>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={receiptSrc(receipt)}
+        src={src}
         alt={`Receipt ${e.receipt_no || e.id} #${index + 1}`}
-        data-receipt-id={receipt.id}
+        data-image-key={imageKey}
         loading="eager"
         decoding="sync"
-        className="expense-print-receipt-img block w-full min-h-0 flex-1 border border-gray-200 object-contain object-top max-h-[70vh]"
-        onLoad={() => onReady(receipt.id)}
-        onError={() => onReady(receipt.id)}
+        className="expense-print-receipt-img block w-full border border-gray-200 object-contain object-top bg-white"
+        onLoad={() => onReady(imageKey)}
+        onError={() => onReady(imageKey)}
       />
     </figure>
   );
@@ -109,7 +125,7 @@ function ReceiptImage({
 function buildPrintPages(expenses: Expense[]): PrintPage[] {
   const pages: PrintPage[] = [];
   for (const e of expenses) {
-    const receipts = e.receipts || [];
+    const receipts = receiptsForExpense(e);
     if (!receipts.length) {
       pages.push({
         key: `${e.id}-empty`,
@@ -117,17 +133,20 @@ function buildPrintPages(expenses: Expense[]): PrintPage[] {
         receiptIndex: 0,
         receiptCount: 0,
         showFullSummary: true,
+        imageKey: `${e.id}-empty`,
       });
       continue;
     }
     receipts.forEach((receipt, i) => {
+      const imageKey = receipt.id > 0 ? `r-${receipt.id}` : `e-${e.id}-legacy`;
       pages.push({
-        key: `${e.id}-${receipt.id}`,
+        key: `${e.id}-${imageKey}`,
         expense: e,
         receipt,
         receiptIndex: i,
         receiptCount: receipts.length,
         showFullSummary: i === 0,
+        imageKey,
       });
     });
   }
@@ -139,7 +158,8 @@ export default function PrintView() {
   const searchParams = useSearchParams();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
-  const [imagesReady, setImagesReady] = useState<Set<number>>(new Set());
+  const [loadError, setLoadError] = useState('');
+  const [imagesReady, setImagesReady] = useState<Set<string>>(new Set());
 
   const idsParam = searchParams.get('ids') || '';
   const ids = idsParam
@@ -149,60 +169,68 @@ export default function PrintView() {
 
   const printPages = useMemo(() => buildPrintPages(expenses), [expenses]);
 
-  const expectedImageIds = useMemo(
-    () => printPages.filter((p) => p.receipt).map((p) => p.receipt!.id),
+  const expectedImageKeys = useMemo(
+    () => printPages.filter((p) => p.receipt).map((p) => p.imageKey),
     [printPages]
   );
 
   const allImagesReady =
-    expectedImageIds.length === 0 || expectedImageIds.every((id) => imagesReady.has(id));
+    expectedImageKeys.length === 0 || expectedImageKeys.every((key) => imagesReady.has(key));
 
-  const markImageReady = useCallback((id: number) => {
+  const markImageReady = useCallback((key: string) => {
     setImagesReady((prev) => {
-      if (prev.has(id)) return prev;
+      if (prev.has(key)) return prev;
       const next = new Set(prev);
-      next.add(id);
+      next.add(key);
       return next;
     });
   }, []);
 
   useEffect(() => {
-    if (!expectedImageIds.length) return;
+    if (!expectedImageKeys.length) return;
     const markCached = () => {
-      document.querySelectorAll<HTMLImageElement>('img[data-receipt-id]').forEach((img) => {
-        if (img.complete) {
-          const id = Number(img.dataset.receiptId);
-          if (Number.isFinite(id)) markImageReady(id);
-        }
+      document.querySelectorAll<HTMLImageElement>('img[data-image-key]').forEach((img) => {
+        if (img.complete && img.dataset.imageKey) markImageReady(img.dataset.imageKey);
       });
     };
     markCached();
     const t = window.setTimeout(markCached, 300);
     const fallback = window.setTimeout(() => {
-      expectedImageIds.forEach((id) => markImageReady(id));
+      expectedImageKeys.forEach((key) => markImageReady(key));
     }, 8000);
     return () => {
       window.clearTimeout(t);
       window.clearTimeout(fallback);
     };
-  }, [expectedImageIds, markImageReady]);
+  }, [expectedImageKeys, markImageReady]);
 
   useEffect(() => {
-    fetch('/api/expenses')
+    if (!ids.length) {
+      setExpenses([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError('');
+    fetch(`/api/expenses?ids=${ids.join(',')}`)
       .then((res) => {
         if (res.status === 401) {
           router.push('/login');
           return null;
         }
+        if (!res.ok) throw new Error('Failed to load expenses');
         return res.json();
       })
       .then((data) => {
         if (!data) return;
         const all: Expense[] = data.expenses || [];
         const byId = new Map(all.map((e) => [e.id, e]));
-        setExpenses(ids.map((id) => byId.get(id)).filter((e): e is Expense => Boolean(e)));
+        const ordered = ids.map((id) => byId.get(id)).filter((e): e is Expense => Boolean(e));
+        if (!ordered.length) setLoadError('No matching expenses found for the selected IDs.');
+        setExpenses(ordered);
         setImagesReady(new Set());
       })
+      .catch(() => setLoadError('Could not load expenses for printing.'))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsParam]);
@@ -232,19 +260,23 @@ export default function PrintView() {
           <p className="text-xs text-gray-500 mt-0.5">
             {expenses.length} expense{expenses.length === 1 ? '' : 's'} · {printPages.length} print page
             {printPages.length === 1 ? '' : 's'}
-            {!allImagesReady && expectedImageIds.length > 0 ? ' · loading images…' : ''}
+            {!allImagesReady && expectedImageKeys.length > 0 ? ' · loading images…' : ''}
           </p>
         </div>
         <button
           onClick={handlePrint}
-          disabled={!allImagesReady}
+          disabled={!allImagesReady || printPages.length === 0}
           className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           🖨 Print
         </button>
       </div>
 
-      {printPages.length === 0 ? (
+      {loadError && (
+        <div className="p-6 text-center text-red-600 text-sm">{loadError}</div>
+      )}
+
+      {!loadError && printPages.length === 0 ? (
         <div className="p-12 text-center text-gray-500">No receipts selected.</div>
       ) : (
         <div className="expense-print-stack max-w-3xl mx-auto p-4 sm:p-6 print:p-0 print:max-w-none">
@@ -269,6 +301,7 @@ export default function PrintView() {
                     e={page.expense}
                     receipt={page.receipt}
                     index={page.receiptIndex}
+                    imageKey={page.imageKey}
                     onReady={markImageReady}
                   />
                 ) : (

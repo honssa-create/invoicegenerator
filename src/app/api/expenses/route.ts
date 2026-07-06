@@ -21,6 +21,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category');
   const status = searchParams.get('status');
+  const idsParam = searchParams.get('ids');
 
   const ownerId = getDataOwnerId(session.userId);
   let query = 'SELECT * FROM expenses WHERE user_id = ?';
@@ -29,6 +30,17 @@ export async function GET(request: Request) {
   if (session.role === 'operator') {
     query += ' AND created_by_user_id = ?';
     params.push(session.userId);
+  }
+
+  if (idsParam) {
+    const ids = idsParam
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (ids.length) {
+      query += ` AND id IN (${ids.map(() => '?').join(',')})`;
+      params.push(...ids);
+    }
   }
 
   if (category) {

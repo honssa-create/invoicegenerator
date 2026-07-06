@@ -91,14 +91,17 @@ export default function PrintView() {
               </div>
 
               <div className="px-6 py-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div><span className="text-gray-500">Reason (支出原因):</span> {categoryLabel(e.category)}</div>
-                <div><span className="text-gray-500">Status:</span> <span className="capitalize">{e.payment_status}</span></div>
-                <div><span className="text-gray-500">Amount (HKD):</span> {formatMoney(e.amount_hkd, 'HKD')}</div>
-                <div><span className="text-gray-500">Amount (RMB):</span> {formatMoney(e.amount_rmb, 'CNY')}</div>
-                <div><span className="text-gray-500">Payment (支付方式):</span> {e.payment_method || '—'}</div>
+                <div><span className="text-gray-500">Paid Date (支出日期):</span> {e.paid_date || '—'}</div>
                 <div><span className="text-gray-500">Platform (消費平台):</span> {e.platform || '—'}</div>
+                <div><span className="text-gray-500">Supplier (供應商):</span> {e.merchant || '—'}</div>
+                <div><span className="text-gray-500">Reason (支出原因):</span> {categoryLabel(e.category)}</div>
+                <div><span className="text-gray-500">Amount (RMB):</span> {formatMoney(e.amount_rmb, 'CNY')}</div>
+                <div><span className="text-gray-500">Amount (HKD):</span> {formatMoney(e.amount_hkd, 'HKD')}</div>
+                <div><span className="text-gray-500">Payment (支付方式):</span> {e.payment_method || '—'}</div>
+                <div><span className="text-gray-500">Status:</span> <span className="capitalize">{e.payment_status}</span></div>
                 <div><span className="text-gray-500">Order No.:</span> {e.order_no || '—'}</div>
-                {e.notes && <div className="col-span-2"><span className="text-gray-500">Notes:</span> {e.notes}</div>}
+                {e.notes && <div className="col-span-2"><span className="text-gray-500">Notes (注意事項):</span> {e.notes}</div>}
+                {e.special_notes && <div className="col-span-2"><span className="text-gray-500">Special Notes (特別事項):</span> {e.special_notes}</div>}
               </div>
 
               <div className="px-6 pb-6 space-y-4">

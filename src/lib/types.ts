@@ -87,6 +87,7 @@ export interface Expense {
   platform: string | null;
   payment_method: string | null;
   notes: string | null;
+  special_notes: string | null;
   payment_status: PaymentStatus;
   receipt_path: string | null;
   receipts: ExpenseReceipt[];

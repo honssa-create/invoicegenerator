@@ -14,6 +14,8 @@ const ALIASES: Record<string, string[]> = {
   platform: ['shopping platform', '消費平台', 'platform', '消费平台'],
   amount: ['amount', '金額', '金额', 'amount (hkd)', 'hkd', 'total', '總額', '总额', '金额(hkd)'],
   supplier: ['supplier', '供應商', '供应商', 'merchant', '商戶', '商户', 'vendor'],
+  notes: ['notes', '注意事項', '注意事项', 'note', '備註', '备注'],
+  special_notes: ['special notes', '特別事項', '特别事项', '特別注意', '特别注意', 'special note'],
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -112,8 +114,8 @@ export async function POST(request: Request) {
 
   const insert = db.prepare(
     `INSERT INTO expenses
-       (user_id, created_by_user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, payment_status, receipt_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, created_by_user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   const run = db.transaction(() => {
@@ -124,6 +126,8 @@ export async function POST(request: Request) {
       const paymentMethod = String(pickField(row, 'payment_method') ?? '').trim() || null;
       const reason = String(pickField(row, 'category') ?? '').trim() || null;
       const platform = String(pickField(row, 'platform') ?? '').trim() || null;
+      const notes = String(pickField(row, 'notes') ?? '').trim() || null;
+      const specialNotes = String(pickField(row, 'special_notes') ?? '').trim() || null;
 
       // Ignore completely blank rows silently.
       if (!date && amount === null && !supplier && !paymentMethod && !reason && !platform) {
@@ -172,7 +176,8 @@ export async function POST(request: Request) {
         null,
         platform,
         paymentMethod,
-        null,
+        notes,
+        specialNotes,
         'unpaid',
         null
       );

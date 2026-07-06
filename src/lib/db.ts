@@ -633,6 +633,9 @@ try {
     db.exec('ALTER TABLE expenses ADD COLUMN created_by_user_id INTEGER REFERENCES users(id)');
     db.exec('UPDATE expenses SET created_by_user_id = user_id WHERE created_by_user_id IS NULL');
   }
+  if (!expenseCols.some((c) => c.name === 'special_notes')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN special_notes TEXT');
+  }
 }
 
 db.exec(`

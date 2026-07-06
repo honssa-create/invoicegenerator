@@ -26,6 +26,7 @@ const EMPTY_FORM = {
   platform: '',
   payment_method: '',
   notes: '',
+  special_notes: '',
   payment_status: 'unpaid',
 };
 
@@ -110,7 +111,7 @@ export default function ExpensesPage() {
       if (filters.reason && e.category !== filters.reason) return false;
       if (filters.platform && e.platform !== filters.platform) return false;
       if (q) {
-        const hay = [e.receipt_no, e.merchant, e.platform, e.payment_method, e.category]
+        const hay = [e.receipt_no, e.merchant, e.platform, e.payment_method, e.category, e.notes, e.special_notes]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -162,10 +163,10 @@ export default function ExpensesPage() {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   };
   const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
-  const sortTh = (key: SortKey, label: string) => (
+  const sortTh = (key: SortKey, label: string, className = '') => (
     <th
       onClick={() => toggleSort(key)}
-      className={`px-4 py-3 cursor-pointer select-none whitespace-nowrap hover:text-gray-700 ${sort.key === key ? 'text-brand-700' : ''}`}
+      className={`px-4 py-3 cursor-pointer select-none whitespace-nowrap hover:text-gray-700 ${sort.key === key ? 'text-brand-700' : ''} ${className}`}
     >
       {label}
       <span className="text-gray-400">{arrow(key)}</span>
@@ -192,6 +193,7 @@ export default function ExpensesPage() {
       platform: e.platform || '',
       payment_method: e.payment_method || '',
       notes: e.notes || '',
+      special_notes: e.special_notes || '',
       payment_status: e.payment_status,
     });
     setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r) })));
@@ -503,23 +505,25 @@ export default function ExpensesPage() {
             <p>No expenses match. Add one, import a sheet, or clear filters.</p>
           </div>
         ) : (
-          <table className="w-full min-w-[1100px]">
+          <table className="w-full min-w-[1400px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-4 py-3">
+                <th className="px-4 py-3 sticky left-0 z-10 bg-white">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('number', 'Receipt No.')}
-                <th className="px-4 py-3">Receipts 付款收據</th>
-                {sortTh('reason', 'Reason 支出原因')}
-                {sortTh('supplier', 'Supplier 供應商')}
-                {sortTh('payment', 'Payment 支付方式')}
-                {sortTh('hkd', 'Amount HKD')}
-                {sortTh('rmb', 'RMB')}
+                {sortTh('number', 'Receipt No.', 'sticky left-10 z-10 bg-white')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
+                {sortTh('supplier', 'Supplier 供應商')}
+                <th className="px-4 py-3 whitespace-nowrap">Notes 注意事項</th>
+                {sortTh('rmb', 'RMB')}
+                {sortTh('hkd', 'Amount HKD')}
+                {sortTh('payment', 'Payment 支付方式')}
+                {sortTh('reason', 'Reason 支出原因')}
+                <th className="px-4 py-3 whitespace-nowrap">Receipts 付款收據</th>
+                <th className="px-4 py-3 whitespace-nowrap min-w-[120px]">Special Notes 特別事項</th>
                 {sortTh('status', 'Status')}
-                <th className="px-4 py-3">Actions</th>
+                <th className="px-4 py-3 sticky right-0 z-10 bg-white whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -529,24 +533,26 @@ export default function ExpensesPage() {
                   onClick={() => openDetail(e)}
                   className={`hover:bg-gray-50 cursor-pointer ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}
                 >
-                  <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
+                  <td className="px-4 py-3 sticky left-0 z-[1] bg-inherit" onClick={(ev) => ev.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label={`Select ${e.receipt_no || e.id}`} />
                   </td>
-                  <td className="px-4 py-3 text-sm font-mono text-brand-700 whitespace-nowrap font-medium">{e.receipt_no || '—'}</td>
-                  <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{e.merchant || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.payment_method || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_hkd, 'HKD')}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatMoney(e.amount_rmb, 'CNY')}</td>
+                  <td className="px-4 py-3 sticky left-10 z-[1] bg-inherit text-sm font-mono text-brand-700 whitespace-nowrap font-medium">{e.receipt_no || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.paid_date || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.platform || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[160px] truncate" title={e.merchant || ''}>{e.merchant || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.notes || ''}>{e.notes || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_rmb, 'CNY')}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_hkd, 'HKD')}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.payment_method || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
+                  <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.special_notes || ''}>{e.special_notes || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[e.payment_status]}`}>
                       {e.payment_status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm space-x-3 whitespace-nowrap" onClick={(ev) => ev.stopPropagation()}>
+                  <td className="px-4 py-3 sticky right-0 z-[1] bg-inherit text-sm space-x-3 whitespace-nowrap" onClick={(ev) => ev.stopPropagation()}>
                     <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">View</button>
                     <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
                     <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
@@ -607,33 +613,33 @@ export default function ExpensesPage() {
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>
-                  <TagSelect value={form.category} options={options.category} onChange={(v) => setForm((f) => ({ ...f, category: v }))} onAdd={(v) => addOption('category', v)} placeholder="Select or add a reason" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Supplier 供應商</label>
-                  <input value={form.merchant} onChange={(ev) => setForm({ ...form, merchant: ev.target.value })} className={inputCls} placeholder="Supplier / merchant name" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method 支付方式</label>
-                  <TagSelect value={form.payment_method} options={options.payment_method} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
+                  <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
+                  <p className="text-[11px] text-gray-400 mt-1">Receipt No. uses this month (EXP-YYYYMM-XXX)</p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Shopping Platform 消費平台</label>
                   <TagSelect value={form.platform} options={options.platform} onChange={(v) => setForm((f) => ({ ...f, platform: v }))} onAdd={(v) => addOption('platform', v)} placeholder="Select or add a platform" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount (HKD) 港幣</label>
-                  <input type="number" step="0.01" min="0" value={form.amount_hkd} onChange={(ev) => setForm({ ...form, amount_hkd: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Supplier 供應商</label>
+                  <input value={form.merchant} onChange={(ev) => setForm({ ...form, merchant: ev.target.value })} className={inputCls} placeholder="Supplier / merchant name" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>
+                  <TagSelect value={form.category} options={options.category} onChange={(v) => setForm((f) => ({ ...f, category: v }))} onAdd={(v) => addOption('category', v)} placeholder="Select or add a reason" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method 支付方式</label>
+                  <TagSelect value={form.payment_method} options={options.payment_method} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Amount (RMB) 人民幣</label>
                   <input type="number" step="0.01" min="0" value={form.amount_rmb} onChange={(ev) => setForm({ ...form, amount_rmb: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
-                  <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
-                  <p className="text-[11px] text-gray-400 mt-1">Receipt No. uses this month (EXP-YYYYMM-XXX)</p>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount (HKD) 港幣</label>
+                  <input type="number" step="0.01" min="0" value={form.amount_hkd} onChange={(ev) => setForm({ ...form, amount_hkd: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Order No. 訂單編號</label>
@@ -647,8 +653,12 @@ export default function ExpensesPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Notes 備註</label>
-                <textarea value={form.notes} onChange={(ev) => setForm({ ...form, notes: ev.target.value })} rows={2} className={inputCls} placeholder="Optional notes" />
+                <label className="block text-xs font-medium text-gray-600 mb-1">Notes 注意事項</label>
+                <textarea value={form.notes} onChange={(ev) => setForm({ ...form, notes: ev.target.value })} rows={2} className={inputCls} placeholder="General notes for this expense" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Special Notes 特別事項</label>
+                <textarea value={form.special_notes} onChange={(ev) => setForm({ ...form, special_notes: ev.target.value })} rows={2} className={inputCls} placeholder="Special remarks or follow-up notes" />
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -695,13 +705,13 @@ export default function ExpensesPage() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
-              {detailField('Reason 支出原因', categoryLabel(detail.category))}
-              {detailField('Supplier 供應商', detail.merchant)}
-              {detailField('Payment 支付方式', detail.payment_method)}
-              {detailField('Platform 消費平台', detail.platform)}
-              {detailField('Amount HKD 港幣', formatMoney(detail.amount_hkd, 'HKD'))}
-              {detailField('Amount RMB 人民幣', formatMoney(detail.amount_rmb, 'CNY'))}
               {detailField('Paid Date 支出日期', detail.paid_date)}
+              {detailField('Platform 消費平台', detail.platform)}
+              {detailField('Supplier 供應商', detail.merchant)}
+              {detailField('Amount RMB 人民幣', formatMoney(detail.amount_rmb, 'CNY'))}
+              {detailField('Amount HKD 港幣', formatMoney(detail.amount_hkd, 'HKD'))}
+              {detailField('Payment 支付方式', detail.payment_method)}
+              {detailField('Reason 支出原因', categoryLabel(detail.category))}
               {detailField('Order No. 訂單編號', detail.order_no)}
               <div>
                 <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Status 付款狀態</p>
@@ -712,11 +722,20 @@ export default function ExpensesPage() {
             </div>
 
             {detail.notes && (
-              <div className="mb-6">
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Notes 備註</p>
+              <div className="mb-4">
+                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Notes 注意事項</p>
                 <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.notes}</p>
               </div>
             )}
+
+            {detail.special_notes && (
+              <div className="mb-6">
+                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Special Notes 特別事項</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.special_notes}</p>
+              </div>
+            )}
+
+            {!detail.notes && !detail.special_notes && <div className="mb-6" />}
 
             <div>
               <p className="text-sm font-semibold text-gray-900 mb-3">

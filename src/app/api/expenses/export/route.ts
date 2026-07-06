@@ -25,24 +25,25 @@ export async function GET(request: Request) {
     .all(...params) as (Expense & { receipt_count: number })[];
 
   const data = expenses.map((e) => ({
-    'Receipt No.': e.receipt_no || '',
-    'Expense Reason (支出原因)': categoryLabel(e.category),
-    'Merchant / Supplier (供應商)': e.merchant || '',
-    'Payment Method (支付方式)': e.payment_method || '',
-    'Amount (HKD)': e.amount_hkd ?? null,
-    'Amount (RMB)': e.amount_rmb ?? null,
     'Paid Date (支出日期)': e.paid_date || '',
-    'Order No.': e.order_no || '',
     'Platform (消費平台)': e.platform || '',
-    'Payment Status': e.payment_status,
+    'Supplier (供應商)': e.merchant || '',
+    'Notes (注意事項)': e.notes || '',
+    'Amount (RMB)': e.amount_rmb ?? null,
+    'Amount (HKD)': e.amount_hkd ?? null,
+    'Payment Method (支付方式)': e.payment_method || '',
+    'Expense Reason (支出原因)': categoryLabel(e.category),
     Receipts: e.receipt_count,
-    Notes: e.notes || '',
+    'Special Notes (特別事項)': e.special_notes || '',
+    'Receipt No.': e.receipt_no || '',
+    'Order No.': e.order_no || '',
+    'Payment Status': e.payment_status,
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);
   ws['!cols'] = [
-    { wch: 16 }, { wch: 22 }, { wch: 24 }, { wch: 22 }, { wch: 14 }, { wch: 14 },
-    { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 15 }, { wch: 10 }, { wch: 30 },
+    { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 28 }, { wch: 14 }, { wch: 14 },
+    { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 15 },
   ];
 
   const wb = XLSX.utils.book_new();

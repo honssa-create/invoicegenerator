@@ -4,12 +4,16 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
+import { isSectionReadOnly } from '@/lib/permissions';
 import { QUOTATION_STATUS_COLORS, type QuotationWithDetails } from '@/lib/quotations';
 
 export default function QuotationsPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'quotations') : false;
   const [quotations, setQuotations] = useState<QuotationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -40,12 +44,14 @@ export default function QuotationsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Quotations 報價單</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Create quotations, export, and convert to orders or invoices</p>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? 'View quotations (read-only)' : 'Create quotations, export, and convert to orders or invoices'}</p>
         </div>
         <div className="page-actions">
+          {!readOnly && (
           <button onClick={create} disabled={creating} className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             {creating ? 'Creating…' : '+ New Quotation'}
           </button>
+          )}
         </div>
       </div>
 

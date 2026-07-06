@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { generateReceiptNumber, syncOption } from '@/lib/expense-server';
+import { getDataOwnerId } from '@/lib/org-server';
 
 const MAX_BYTES = 15 * 1024 * 1024;
 
@@ -107,10 +108,12 @@ export async function POST(request: Request) {
   const errors: string[] = [];
   const seenInBatch = new Set<string>();
 
+  const ownerId = getDataOwnerId(session.userId);
+
   const insert = db.prepare(
     `INSERT INTO expenses
-       (user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, payment_status, receipt_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, created_by_user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, payment_status, receipt_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   const run = db.transaction(() => {
@@ -134,9 +137,9 @@ export async function POST(request: Request) {
       }
 
       // Tag sync — add any new payment method / reason / platform to custom options.
-      if (syncOption(session.userId, 'payment_method', paymentMethod)) tagsAdded.push(paymentMethod!);
-      if (syncOption(session.userId, 'category', reason)) tagsAdded.push(reason!);
-      if (syncOption(session.userId, 'platform', platform)) tagsAdded.push(platform!);
+      if (syncOption(ownerId, 'payment_method', paymentMethod)) tagsAdded.push(paymentMethod!);
+      if (syncOption(ownerId, 'category', reason)) tagsAdded.push(reason!);
+      if (syncOption(ownerId, 'platform', platform)) tagsAdded.push(platform!);
 
       // Duplicate guard (Date + Amount + Supplier), both against DB and within this batch.
       const dupKey = `${date || ''}|${amount}|${supplier || ''}`;
@@ -149,15 +152,16 @@ export async function POST(request: Request) {
           `SELECT 1 FROM expenses
            WHERE user_id = ? AND IFNULL(paid_date, '') = ? AND IFNULL(amount_hkd, -1) = ? AND IFNULL(merchant, '') = ?`
         )
-        .get(session.userId, date || '', amount, supplier || '');
+        .get(ownerId, date || '', amount, supplier || '');
       if (existing) {
         skipped++;
         return;
       }
       seenInBatch.add(dupKey);
 
-      const receiptNo = generateReceiptNumber(session.userId, date);
+      const receiptNo = generateReceiptNumber(ownerId, date);
       insert.run(
+        ownerId,
         session.userId,
         receiptNo,
         reason || 'other',

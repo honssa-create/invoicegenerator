@@ -76,6 +76,7 @@ export interface ExpenseReceipt {
 export interface Expense {
   id: number;
   user_id: number;
+  created_by_user_id?: number | null;
   receipt_no: string | null;
   category: string;
   merchant: string | null;

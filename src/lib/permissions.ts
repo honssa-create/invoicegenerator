@@ -35,14 +35,14 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Record<PermissionSection
   admin: Object.fromEntries(ALL_SECTIONS.map((k) => [k, true])) as Record<PermissionSection, boolean>,
   operator: {
     dashboard: true,
-    quotations: false,
-    invoices: false,
+    quotations: true,
+    invoices: true,
     orders: true,
     inbound: true,
     kitchen: true,
     kitchen_prep: true,
     rentals: false,
-    expenses: false,
+    expenses: true,
     accounting: false,
     cashflow: false,
     scan_table: true,
@@ -124,4 +124,11 @@ export function canAccessSection(
 
 export function navHrefToSection(href: string): PermissionSection | undefined {
   return NAV_HREF_SECTION[href];
+}
+
+/** Operators may view invoices & quotations but cannot create or edit them. */
+export const OPERATOR_READ_ONLY_SECTIONS: PermissionSection[] = ['invoices', 'quotations'];
+
+export function isSectionReadOnly(role: UserRole, section: PermissionSection): boolean {
+  return role === 'operator' && OPERATOR_READ_ONLY_SECTIONS.includes(section);
 }

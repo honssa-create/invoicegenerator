@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { SessionPayload } from './auth';
 import { getSessionFromRequest } from './auth';
-import { canAccessSection, sectionForApiPath, type PermissionSection } from './permissions';
+import {
+  canAccessSection,
+  isSectionReadOnly,
+  sectionForApiPath,
+  type PermissionSection,
+} from './permissions';
 import { requireAdmin } from './permissions-server';
 
 export async function requireApiSession(
@@ -35,4 +40,17 @@ export async function requireApiAccess(
     return NextResponse.json({ error: 'Forbidden — insufficient permissions' }, { status: 403 });
   }
   return session;
+}
+
+/** Block mutating requests when the role has read-only access to a section. */
+export function denyReadOnlyWrite(
+  session: SessionPayload,
+  section: PermissionSection,
+  method: string
+): NextResponse | null {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
+  if (isSectionReadOnly(session.role, section)) {
+    return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
+  }
+  return null;
 }

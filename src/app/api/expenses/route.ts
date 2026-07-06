@@ -7,6 +7,7 @@ import {
   normalizeNumber,
   receiptPathsFromBody,
 } from '@/lib/expense-server';
+import { getDataOwnerId } from '@/lib/org-server';
 import type { Expense } from '@/lib/types';
 
 const STATUSES = ['unpaid', 'pending', 'paid'];
@@ -21,8 +22,14 @@ export async function GET(request: Request) {
   const category = searchParams.get('category');
   const status = searchParams.get('status');
 
+  const ownerId = getDataOwnerId(session.userId);
   let query = 'SELECT * FROM expenses WHERE user_id = ?';
-  const params: (string | number)[] = [session.userId];
+  const params: (string | number)[] = [ownerId];
+
+  if (session.role === 'operator') {
+    query += ' AND created_by_user_id = ?';
+    params.push(session.userId);
+  }
 
   if (category) {
     query += ' AND category = ?';
@@ -53,21 +60,23 @@ export async function POST(request: Request) {
     const amount_hkd = normalizeNumber(body.amount_hkd);
     const amount_rmb = normalizeNumber(body.amount_rmb);
     const receiptPaths = receiptPathsFromBody(body);
+    const ownerId = getDataOwnerId(session.userId);
 
     if (amount_hkd === null && amount_rmb === null) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
     }
 
-    const receiptNo = generateReceiptNumber(session.userId, body.paid_date?.trim() || null);
+    const receiptNo = generateReceiptNumber(ownerId, body.paid_date?.trim() || null);
 
     const create = db.transaction(() => {
       const result = db
         .prepare(
           `INSERT INTO expenses
-            (user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, payment_status, receipt_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (user_id, created_by_user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, payment_status, receipt_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
+          ownerId,
           session.userId,
           receiptNo,
           category,
@@ -86,7 +95,7 @@ export async function POST(request: Request) {
       const insertReceipt = db.prepare(
         'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
       );
-      for (const p of receiptPaths) insertReceipt.run(expenseId, session.userId, p);
+      for (const p of receiptPaths) insertReceipt.run(expenseId, ownerId, p);
       return expenseId;
     });
 

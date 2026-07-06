@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { attachReceipts, normalizeNumber, receiptPathsFromBody } from '@/lib/expense-server';
+import { canAccessExpense, expenseWhereClause, getDataOwnerId } from '@/lib/org-server';
 import { trashExpense } from '@/lib/trash';
 import type { Expense } from '@/lib/types';
 
@@ -13,9 +14,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const { sql, params: whereParams } = expenseWhereClause(session);
   const expense = db
-    .prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId) as Expense | undefined;
+    .prepare(`SELECT * FROM expenses WHERE id = ? AND ${sql}`)
+    .get(params.id, ...whereParams) as Expense | undefined;
 
   if (!expense) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
@@ -30,13 +32,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const existing = db
-    .prepare('SELECT id FROM expenses WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
-
-  if (!existing) {
+  if (!canAccessExpense(session, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
+
+  const ownerId = getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
@@ -70,18 +70,17 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         payment_status,
         receiptPaths[0] || null,
         params.id,
-        session.userId
+        ownerId
       );
 
-      // Replace receipt attachments with the provided set.
       db.prepare('DELETE FROM expense_receipts WHERE expense_id = ? AND user_id = ?').run(
         params.id,
-        session.userId
+        ownerId
       );
       const insertReceipt = db.prepare(
         'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
       );
-      for (const p of receiptPaths) insertReceipt.run(params.id, session.userId, p);
+      for (const p of receiptPaths) insertReceipt.run(params.id, ownerId, p);
     });
 
     update();
@@ -100,7 +99,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!trashExpense(session.userId, Number(params.id))) {
+  if (!trashExpense(session, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
   return NextResponse.json({ success: true, trashed: true, retention_days: 60 });

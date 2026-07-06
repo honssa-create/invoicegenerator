@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { categoryLabel } from '@/lib/expenses';
+import { expenseWhereClause } from '@/lib/org-server';
 import type { Expense } from '@/lib/types';
 
 export async function GET(request: Request) {
@@ -13,14 +14,15 @@ export async function GET(request: Request) {
     });
   }
 
+  const { sql, params } = expenseWhereClause(session);
   const expenses = db
     .prepare(
       `SELECT e.*, (SELECT COUNT(*) FROM expense_receipts r WHERE r.expense_id = e.id) as receipt_count
        FROM expenses e
-       WHERE e.user_id = ?
+       WHERE e.${sql}
        ORDER BY COALESCE(e.paid_date, e.created_at) DESC, e.id DESC`
     )
-    .all(session.userId) as (Expense & { receipt_count: number })[];
+    .all(...params) as (Expense & { receipt_count: number })[];
 
   const data = expenses.map((e) => ({
     'Receipt No.': e.receipt_no || '',

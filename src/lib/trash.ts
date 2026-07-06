@@ -1,4 +1,6 @@
 import db from './db';
+import type { SessionPayload } from './auth';
+import { getDataOwnerId } from './org-server';
 import {
   TRASH_RETENTION_DAYS,
   TRASH_ENTITY_LABELS,
@@ -225,16 +227,23 @@ export function restoreFromTrash(
   return { entity_type: record.entity_type, entity_id: entityId };
 }
 
-export function trashExpense(userId: number, expenseId: number): boolean {
-  const expense = db.prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?').get(expenseId, userId) as Row | undefined;
+export function trashExpense(session: SessionPayload, expenseId: number): boolean {
+  const ownerId = getDataOwnerId(session.userId);
+  let sql = 'SELECT * FROM expenses WHERE id = ? AND user_id = ?';
+  const params: number[] = [expenseId, ownerId];
+  if (session.role === 'operator') {
+    sql += ' AND created_by_user_id = ?';
+    params.push(session.userId);
+  }
+  const expense = db.prepare(sql).get(...params) as Row | undefined;
   if (!expense) return false;
   const receipts = db.prepare('SELECT * FROM expense_receipts WHERE expense_id = ?').all(expenseId) as Row[];
   const label = String(expense.receipt_no || expense.merchant || `Expense #${expenseId}`);
   const summary = [expense.merchant, expense.paid_date].filter(Boolean).join(' · ') || null;
 
   db.transaction(() => {
-    insertTrash(userId, 'expense', expenseId, label, summary, { expense, receipts });
-    db.prepare('DELETE FROM expenses WHERE id = ? AND user_id = ?').run(expenseId, userId);
+    insertTrash(ownerId, 'expense', expenseId, label, summary, { expense, receipts });
+    db.prepare('DELETE FROM expenses WHERE id = ? AND user_id = ?').run(expenseId, ownerId);
   })();
   return true;
 }

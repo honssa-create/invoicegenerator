@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getInvoiceWithDetails } from '@/lib/invoices';
+import { getDataOwnerId } from '@/lib/org-server';
 import { trashInvoice } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
 
-function linkedOrder(orderId: number | null | undefined, userId: number) {
+function linkedOrder(orderId: number | null | undefined, ownerId: number) {
   if (!orderId) return null;
   return (
     db
       .prepare('SELECT id, po_number, name, description FROM orders WHERE id = ? AND user_id = ?')
-      .get(orderId, userId) || null
+      .get(orderId, ownerId) || null
   );
 }
 
@@ -20,14 +22,15 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const invoice = getInvoiceWithDetails(Number(params.id), session.userId);
+  const ownerId = getDataOwnerId(session.userId);
+  const invoice = getInvoiceWithDetails(Number(params.id), ownerId);
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }
 
   const user = db
     .prepare('SELECT name, company_name, email FROM users WHERE id = ?')
-    .get(session.userId);
+    .get(ownerId);
 
   const orderRow = db
     .prepare('SELECT order_id FROM invoices WHERE id = ?')
@@ -36,7 +39,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   return NextResponse.json({
     invoice: { ...invoice, order_id: orderRow?.order_id ?? null },
     business: user,
-    linkedOrder: linkedOrder(orderRow?.order_id, session.userId),
+    linkedOrder: linkedOrder(orderRow?.order_id, ownerId),
   });
 }
 
@@ -46,9 +49,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const denied = denyReadOnlyWrite(session, 'invoices', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+
   const existing = db
     .prepare('SELECT id, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId) as { id: number; status: string; order_id: number | null } | undefined;
+    .get(params.id, ownerId) as { id: number; status: string; order_id: number | null } | undefined;
 
   if (!existing) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
@@ -61,7 +69,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     if (customer_id) {
       const customer = db
         .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
-        .get(customer_id, session.userId);
+        .get(customer_id, ownerId);
       if (!customer) {
         return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
       }
@@ -81,7 +89,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       if (order_id !== undefined) { fields.push('order_id = ?'); values.push(order_id || null); }
 
       fields.push("updated_at = datetime('now')");
-      values.push(params.id, session.userId);
+      values.push(params.id, ownerId);
 
       if (fields.length > 1) {
         db.prepare(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
@@ -103,7 +111,6 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
     updateInvoice();
 
-    // Activity logging on the invoice, plus mirror to the linked order.
     if (status !== undefined && status !== existing.status) {
       logActivity('invoice', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
     }
@@ -116,7 +123,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
     }
 
-    const invoice = getInvoiceWithDetails(Number(params.id), session.userId);
+    const invoice = getInvoiceWithDetails(Number(params.id), ownerId);
     return NextResponse.json({ invoice });
   } catch {
     return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
@@ -129,7 +136,11 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!trashInvoice(session.userId, Number(params.id))) {
+  const denied = denyReadOnlyWrite(session, 'invoices', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+  if (!trashInvoice(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }
 

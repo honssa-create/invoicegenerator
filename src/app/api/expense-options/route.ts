@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { DEFAULT_OPTIONS, OPTION_TYPES, type OptionType } from '@/lib/expenses';
+import { getDataOwnerId } from '@/lib/org-server';
 
 function mergedOptions(userId: number, type: OptionType): string[] {
   const custom = db
@@ -25,8 +26,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = getDataOwnerId(session.userId);
+
   const options = Object.fromEntries(
-    OPTION_TYPES.map((type) => [type, mergedOptions(session.userId, type)])
+    OPTION_TYPES.map((type) => [type, mergedOptions(ownerId, type)])
   );
   return NextResponse.json({ options });
 }
@@ -47,15 +50,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Option value is required' }, { status: 400 });
     }
 
+    const ownerId = getDataOwnerId(session.userId);
+
     // Only persist if it is not already a default or an existing custom option.
-    const existing = mergedOptions(session.userId, type as OptionType);
+    const existing = mergedOptions(ownerId, type as OptionType);
     if (!existing.includes(trimmed)) {
       db.prepare(
         'INSERT OR IGNORE INTO expense_options (user_id, type, value) VALUES (?, ?, ?)'
-      ).run(session.userId, type, trimmed);
+      ).run(ownerId, type, trimmed);
     }
 
-    return NextResponse.json({ value: trimmed, options: mergedOptions(session.userId, type as OptionType) });
+    return NextResponse.json({ value: trimmed, options: mergedOptions(ownerId, type as OptionType) });
   } catch {
     return NextResponse.json({ error: 'Failed to add option' }, { status: 500 });
   }

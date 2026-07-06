@@ -4,6 +4,7 @@ import { hashPassword } from '@/lib/auth';
 import { requireApiAdmin } from '@/lib/api-guard';
 import { USER_ROLES, ROLE_LABELS, type UserRole } from '@/lib/permissions';
 import { listUsers } from '@/lib/permissions-server';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await requireApiAdmin(request);
@@ -32,16 +33,18 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hashPassword(password);
+    const ownerId = getDataOwnerId(session.userId);
     const result = db
       .prepare(
-        'INSERT INTO users (email, password_hash, name, company_name, role) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO users (email, password_hash, name, company_name, role, owner_user_id) VALUES (?, ?, ?, ?, ?, ?)'
       )
       .run(
         email.toLowerCase().trim(),
         passwordHash,
         name.trim(),
         company_name?.trim() || null,
-        userRole
+        userRole,
+        ownerId
       );
 
     const userId = result.lastInsertRowid as number;

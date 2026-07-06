@@ -620,6 +620,19 @@ try {
     db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
     db.exec("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''");
   }
+  if (!userCols.some((c) => c.name === 'owner_user_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN owner_user_id INTEGER REFERENCES users(id)');
+    db.exec('UPDATE users SET owner_user_id = id WHERE owner_user_id IS NULL');
+  }
+}
+
+// Track who uploaded each expense (for operator-scoped visibility).
+{
+  const expenseCols = db.prepare('PRAGMA table_info(expenses)').all() as { name: string }[];
+  if (!expenseCols.some((c) => c.name === 'created_by_user_id')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN created_by_user_id INTEGER REFERENCES users(id)');
+    db.exec('UPDATE expenses SET created_by_user_id = user_id WHERE created_by_user_id IS NULL');
+  }
 }
 
 db.exec(`
@@ -637,8 +650,8 @@ db.exec(`
   if (permCount === 0) {
     const defaults: Record<string, Record<string, boolean>> = {
       operator: {
-        dashboard: true, quotations: false, invoices: false, orders: true, inbound: true,
-        kitchen: true, kitchen_prep: true, rentals: false, expenses: false, accounting: false,
+        dashboard: true, quotations: true, invoices: true, orders: true, inbound: true,
+        kitchen: true, kitchen_prep: true, rentals: false, expenses: true, accounting: false,
         cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
       },
       accountant: {
@@ -658,6 +671,17 @@ db.exec(`
       }
     });
     seed();
+  }
+}
+
+// Grant operators view access to invoices, quotations, and expenses.
+{
+  const upsert = db.prepare(
+    `INSERT INTO role_permissions (role, section, allowed) VALUES ('operator', ?, 1)
+     ON CONFLICT(role, section) DO UPDATE SET allowed = 1`
+  );
+  for (const section of ['invoices', 'quotations', 'expenses']) {
+    upsert.run(section);
   }
 }
 

@@ -79,4 +79,32 @@
   .prep-summary-table td {
     padding: 0.65rem 0.85rem !important;
   }
+
+  /* Expense receipt print: keep summary + image together per page */
+  .expense-print-sheet {
+    page-break-after: always;
+    break-after: page;
+  }
+  .expense-print-sheet:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  .expense-print-summary {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .expense-print-receipt {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .expense-print-receipt img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    /* Fit below metadata on one sheet — avoids blank pages from full-size mobile screenshots */
+    max-height: 7.5in;
+    object-fit: contain;
+    object-position: top center;
+  }
 }

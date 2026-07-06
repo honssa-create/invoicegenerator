@@ -537,6 +537,61 @@ export function formatPeriodRangeShort(periods: string[]): string {
   return sorted.map(formatBillingPeriodLabel).join('、');
 }
 
+/** Arrear range for footer e.g. 02/2026-03/2026 (min–max unpaid past periods). */
+export function formatArrearPeriodRangeLabel(periods: string[]): string {
+  if (!periods.length) return '';
+  const sorted = [...periods].sort();
+  if (sorted.length === 1) return formatBillingPeriodLabel(sorted[0]);
+  const first = sorted[0].split('-');
+  const last = sorted[sorted.length - 1].split('-');
+  if (first[0] === last[0]) {
+    return `${formatBillingPeriodLabel(sorted[0])}-${formatBillingPeriodLabel(sorted[sorted.length - 1])}`;
+  }
+  return sorted.map(formatBillingPeriodLabel).join('、');
+}
+
+/** DD/MM/YYYY → 2026年6月28日 */
+export function formatDueDateChinese(dueDateDisplay: string, fallbackYear?: string): string {
+  const [day, month, year] = dueDateDisplay.split('/');
+  if (!day || !month) return dueDateDisplay;
+  const yr = year || fallbackYear || '';
+  return `${yr}年${Number(month)}月${Number(day)}日`;
+}
+
+function formatFooterAmount(grandTotal: number): string {
+  return new Intl.NumberFormat('en-HK', {
+    style: 'currency',
+    currency: 'HKD',
+    maximumFractionDigits: 2,
+  }).format(grandTotal);
+}
+
+/**
+ * Debit note footer remark — conditional on historical arrears.
+ * A: has arrears → includes 延期 [min-max] 租金/費用及 [current] 應繳款項
+ * B: no arrears → clean [current] 應繳款項 only (no 延期)
+ */
+export function buildDebitNoteFooterRemark(
+  targetPeriod: string,
+  dueDateDisplay: string,
+  priorArrearsPeriods: string[],
+  grandTotal: number,
+): string {
+  if (grandTotal <= 0) return '所有款項已付清 All amounts settled.';
+
+  const dueLabel = formatDueDateChinese(dueDateDisplay, targetPeriod.split('-')[0]);
+  const currentLabel = formatBillingPeriodLabel(targetPeriod);
+  const amount = formatFooterAmount(grandTotal);
+  const arrears = priorArrearsPeriods.filter(Boolean).sort();
+
+  if (arrears.length > 0) {
+    const arrearRange = formatArrearPeriodRangeLabel(arrears);
+    return `請於 ${dueLabel}前繳交 延期 ${arrearRange} 租金/費用及 ${currentLabel} 應繳款項，總計 ${amount}`;
+  }
+
+  return `請於 ${dueLabel}前繳交 ${currentLabel} 應繳款項，總計 ${amount}`;
+}
+
 export function chargeOutstanding(item: Pick<RentalChargeItem, 'amountDue' | 'amountAllocated'>): number {
   return Math.max(0, (item.amountDue || 0) - (item.amountAllocated || 0));
 }

@@ -8,6 +8,7 @@ import {
   formatBillingPeriodLabel,
   formatDisplayDate,
   formatPeriodRangeShort,
+  buildDebitNoteFooterRemark,
   type RentalChargeItem,
   type RentalChargeItemStatus,
   type RentalChargeType,
@@ -295,24 +296,6 @@ function columnLabel(unitName: string, chargeType: RentalChargeType): string {
   return `${unitName} ${short}`;
 }
 
-function buildReminderText(
-  period: string,
-  dueDateDisplay: string,
-  priorArrearsPeriods: string[],
-  grandTotal: number,
-): string {
-  if (grandTotal <= 0) return '所有款項已付清 All amounts settled.';
-  const parts: string[] = [];
-  if (priorArrearsPeriods.length) {
-    parts.push(`延期 ${formatPeriodRangeShort(priorArrearsPeriods)} 租金`);
-  }
-  parts.push(formatBillingPeriodLabel(period));
-  const amount = new Intl.NumberFormat('en-HK', { style: 'currency', currency: 'HKD', maximumFractionDigits: 2 }).format(grandTotal);
-  const [day, month, year] = dueDateDisplay.split('/');
-  const yr = year || period.split('-')[0];
-  return `請於 ${yr}年${month}月${day}日前 繳交 ${parts.join('、')} 總計 ${amount}`;
-}
-
 function normalizeNoticeQuery(
   options?: string | RentPaymentNoticeQuery,
 ): RentPaymentNoticeQuery {
@@ -529,7 +512,7 @@ export function buildRentPaymentNoticeMatrix(
     currentPeriodOutstanding,
     dueDate,
     dueDateDisplay,
-    reminderText: buildReminderText(targetPeriod, dueDateDisplay, priorArrearsPeriods, grandTotal),
+    reminderText: buildDebitNoteFooterRemark(targetPeriod, dueDateDisplay, priorArrearsPeriods, grandTotal),
   };
 
   return {

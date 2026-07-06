@@ -21,6 +21,7 @@ import {
   CHARGE_STATUS_LABELS,
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
+  addBillingMonths,
   chargeOutstanding,
   computeLeaseDisplayStatus,
   currentBillingPeriod,
@@ -44,7 +45,7 @@ import { isSectionReadOnly } from '@/lib/permissions';
 
 interface TenantDetail {
   tenant: RentalTenant;
-  units: { id: number; unitName: string; tenantName: string }[];
+  units: { id: number; unitName: string; tenantName: string; currentYearRent?: number }[];
   outstandingCharges: RentalChargeItem[];
   payments: RentalPayment[];
   paymentsWithAllocations: RentalPaymentWithAllocations[];
@@ -78,6 +79,8 @@ export default function TenantDetailPage() {
   const [utilitySaving, setUtilitySaving] = useState(false);
   const [contactSaving, setContactSaving] = useState(false);
   const [contactEditing, setContactEditing] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<'byPeriod' | 'byType'>('byPeriod');
+  const [periodRows, setPeriodRows] = useState<{ unitId: number; billingPeriod: string; amount: string }[]>([]);
 
   const load = () => {
     setLoading(true);
@@ -160,6 +163,8 @@ export default function TenantDetailPage() {
     const rows = chargeRowsByType(detail.outstandingCharges);
     const filled = fillOutstandingValues(rows);
     setChargeAllocValues(filled);
+    setPaymentMode('byPeriod');
+    setPeriodRows([]);
     setPaymentForm((f) => ({
       ...f,
       amount: String(sumAllocationValues(filled) || ''),
@@ -167,35 +172,118 @@ export default function TenantDetailPage() {
     setPaymentModal(true);
   };
 
+  const startPeriodForUnit = (unitId: number) => {
+    if (!detail) return currentBillingPeriod();
+    const periods = detail.outstandingCharges
+      .filter((c) => c.unitId === unitId && chargeOutstanding(c) > 0)
+      .map((c) => c.billingPeriod)
+      .sort();
+    return periods[0] || currentBillingPeriod();
+  };
+
+  const monthlyRentForUnit = (unitId: number) => {
+    const u = detail?.units.find((x) => x.id === unitId);
+    if (u?.currentYearRent) return u.currentYearRent;
+    const hist = detail?.billingHistory?.find((h) => h.unitId === unitId);
+    return hist?.baseRent || 0;
+  };
+
+  const fillOutstandingPeriodRows = () => {
+    if (!detail) return;
+    const seen = new Set<string>();
+    const rows: { unitId: number; billingPeriod: string; amount: string }[] = [];
+    const charges = [...detail.outstandingCharges]
+      .filter((c) => chargeOutstanding(c) > 0)
+      .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod) || a.unitId - b.unitId);
+    for (const c of charges) {
+      const key = `${c.unitId}:${c.billingPeriod}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const periodTotal = charges
+        .filter((x) => x.unitId === c.unitId && x.billingPeriod === c.billingPeriod)
+        .reduce((s, x) => s + chargeOutstanding(x), 0);
+      rows.push({ unitId: c.unitId, billingPeriod: c.billingPeriod, amount: String(periodTotal) });
+    }
+    setPeriodRows(rows);
+    setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+  };
+
+  const fillAdvanceMonths = (months: number) => {
+    if (!detail) return;
+    const targetUnits = detail.units.filter((u) => selectedUnitIds.includes(u.id));
+    const unitsToFill = targetUnits.length ? targetUnits : detail.units;
+    const rows: { unitId: number; billingPeriod: string; amount: string }[] = [];
+    for (const u of unitsToFill) {
+      let p = startPeriodForUnit(u.id);
+      const rent = monthlyRentForUnit(u.id);
+      for (let i = 0; i < months; i += 1) {
+        rows.push({ unitId: u.id, billingPeriod: p, amount: rent ? String(rent) : '' });
+        p = addBillingMonths(p, 1);
+      }
+    }
+    setPeriodRows(rows);
+    setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+  };
+
+  const addPeriodRow = () => {
+    const unitId = selectedUnitIds[0] || detail?.units[0]?.id;
+    if (!unitId) return;
+    setPeriodRows((prev) => [...prev, { unitId, billingPeriod: startPeriodForUnit(unitId), amount: '' }]);
+  };
+
   const chargeTypeRows = detail ? chargeRowsByType(detail.outstandingCharges) : [];
 
   const savePayment = async () => {
     if (!detail) return;
-    const allocSum = sumAllocationValues(chargeAllocValues);
     const amount = Number(paymentForm.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setToast('Enter a valid payment amount');
       return;
     }
-    if (allocSum > amount + 0.01) {
-      setToast('Allocated total exceeds payment amount');
-      return;
+
+    let body: Record<string, unknown> = {
+      tenantId: detail.tenant.id,
+      paymentDate: paymentForm.paymentDate,
+      amount,
+      method: paymentForm.method || null,
+      reference: paymentForm.reference || null,
+      notes: paymentForm.notes || null,
+      unitIds: selectedUnitIds.length ? selectedUnitIds : undefined,
+    };
+
+    if (paymentMode === 'byPeriod') {
+      const periodAllocations = periodRows
+        .filter((r) => r.billingPeriod && Number(r.amount) > 0)
+        .map((r) => ({ unitId: r.unitId, billingPeriod: r.billingPeriod, amount: Number(r.amount) }));
+      if (periodAllocations.length) {
+        body.periodAllocations = periodAllocations;
+      } else {
+        body.autoAllocate = true;
+      }
+    } else {
+      const allocSum = sumAllocationValues(chargeAllocValues);
+      if (allocSum > amount + 0.01) {
+        setToast('Allocated total exceeds payment amount');
+        return;
+      }
+      const allocations = distributeByChargeType(detail.outstandingCharges, chargeAllocValues);
+      if (allocations.length && Math.abs(allocSum - amount) < 0.02) {
+        body.allocations = allocations;
+      } else if (allocations.length && allocSum < amount) {
+        body.periodAllocations = undefined;
+        body.autoAllocate = true;
+      } else if (allocations.length) {
+        body.allocations = allocations;
+      } else {
+        body.autoAllocate = true;
+      }
     }
-    const allocations = distributeByChargeType(detail.outstandingCharges, chargeAllocValues);
 
     setBusy(true);
     const res = await fetch('/api/rentals/payments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: detail.tenant.id,
-        paymentDate: paymentForm.paymentDate,
-        amount,
-        method: paymentForm.method || null,
-        reference: paymentForm.reference || null,
-        notes: paymentForm.notes || null,
-        allocations: allocations.length ? allocations : undefined,
-      }),
+      body: JSON.stringify(body),
     });
     setBusy(false);
     if (!res.ok) {
@@ -205,8 +293,9 @@ export default function TenantDetailPage() {
     }
     setPaymentModal(false);
     setChargeAllocValues({});
+    setPeriodRows([]);
     setPaymentForm({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
-    setToast(allocations.length ? 'Payment recorded and allocated' : 'Payment recorded — allocate remaining balance when ready');
+    setToast('Payment recorded — outstanding balance updated');
     load();
   };
 
@@ -659,7 +748,25 @@ export default function TenantDetailPage() {
         <div className="modal-overlay">
           <div className="modal-panel sm:max-w-2xl max-h-[92vh] overflow-y-auto">
             <h2 className="text-lg font-bold mb-1">Record Payment 記錄收款</h2>
-            <p className="text-sm text-gray-500 mb-4">Enter rent, water and electricity amounts separately 租金 / 水費 / 電費分開輸入</p>
+            <p className="text-sm text-gray-500 mb-4">Enter paid date, amount and period breakdown — advance rent (半年／一年) auto-deducts outstanding</p>
+
+            <div className="flex gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => setPaymentMode('byPeriod')}
+                className={`text-xs px-3 py-1.5 rounded-lg border ${paymentMode === 'byPeriod' ? 'bg-brand-600 text-white border-brand-600' : 'hover:bg-gray-50'}`}
+              >
+                按期數 By Period
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentMode('byType')}
+                className={`text-xs px-3 py-1.5 rounded-lg border ${paymentMode === 'byType' ? 'bg-brand-600 text-white border-brand-600' : 'hover:bg-gray-50'}`}
+              >
+                按類型 By Type
+              </button>
+            </div>
+
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
@@ -685,6 +792,108 @@ export default function TenantDetailPage() {
                 </div>
               </div>
 
+              {paymentMode === 'byPeriod' ? (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <label className="text-xs font-semibold text-gray-600 uppercase">Period breakdown 帳期明細</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={fillOutstandingPeriodRows}>
+                        填未付 Fill arrears
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
+                        預付6個月
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(12)}>
+                        預付12個月
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={addPeriodRow}>
+                        + Row
+                      </button>
+                    </div>
+                  </div>
+                  {periodRows.length === 0 ? (
+                    <p className="text-sm text-gray-400 border border-dashed rounded-lg p-4 text-center">
+                      Add period rows, or enter total only — system will auto-allocate FIFO (including future months for advance rent)
+                    </p>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-xs text-gray-500">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Unit</th>
+                            <th className="px-3 py-2 text-left">Period 帳期</th>
+                            <th className="px-3 py-2 text-right">Amount 金額</th>
+                            <th className="w-8" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {periodRows.map((row, idx) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-2">
+                                {units.length > 1 ? (
+                                  <select
+                                    className="w-full text-xs border rounded px-1 py-1"
+                                    value={row.unitId}
+                                    onChange={(e) => {
+                                      const unitId = Number(e.target.value);
+                                      setPeriodRows((prev) => prev.map((r, i) => i === idx ? { ...r, unitId } : r));
+                                    }}
+                                  >
+                                    {units.map((u) => (
+                                      <option key={u.id} value={u.id}>{u.unitName}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <span className="text-xs">{units[0]?.unitName}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="month"
+                                  className="w-full text-xs border rounded px-2 py-1"
+                                  value={row.billingPeriod}
+                                  onChange={(e) => {
+                                    const billingPeriod = e.target.value;
+                                    setPeriodRows((prev) => prev.map((r, i) => i === idx ? { ...r, billingPeriod } : r));
+                                  }}
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="number"
+                                  className="w-full text-xs border rounded px-2 py-1 text-right"
+                                  value={row.amount}
+                                  onChange={(e) => {
+                                    const amount = e.target.value;
+                                    setPeriodRows((prev) => {
+                                      const next = prev.map((r, i) => i === idx ? { ...r, amount } : r);
+                                      setPaymentForm((f) => ({ ...f, amount: String(next.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              </td>
+                              <td className="px-1 py-2">
+                                <button
+                                  type="button"
+                                  className="text-gray-400 hover:text-red-600 text-xs"
+                                  onClick={() => setPeriodRows((prev) => prev.filter((_, i) => i !== idx))}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-2">
+                    Period total: {formatMoney(periodRows.reduce((s, r) => s + Number(r.amount || 0), 0))}
+                    {paymentForm.amount && ` · Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
+                  </p>
+                </div>
+              ) : (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-semibold text-gray-600 uppercase">Payment split 分拆收款</label>
@@ -727,6 +936,7 @@ export default function TenantDetailPage() {
                   {paymentForm.amount && ` / Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
                 </p>
               </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setPaymentModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>

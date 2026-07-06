@@ -32,9 +32,10 @@ import {
   type TenantProfileSummary,
   type RentPaymentNoticeSummary,
   type RentRecord,
+  type PeriodPaymentAllocation,
   type TenantBillingHistoryRow,
-  utilityChargeTypesForMode,
   type UtilityBillingMode,
+  utilityChargeTypesForMode,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
 
@@ -224,11 +225,11 @@ export function linkUnitToTenant(unitId: number, userId: number, tenantId: numbe
     .run(tenantId, unitId, userId);
 }
 
-export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUnit, 'id' | 'unitName' | 'tenantName'>[] {
+export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUnit, 'id' | 'unitName' | 'tenantName' | 'currentYearRent'>[] {
   return (db.prepare(
-    'SELECT id, unit_name, tenant_name FROM rental_units WHERE tenant_id = ? AND user_id = ? ORDER BY unit_name COLLATE NOCASE'
-  ).all(tenantId, userId) as { id: number; unit_name: string; tenant_name: string }[]).map((r) => ({
-    id: r.id, unitName: r.unit_name, tenantName: r.tenant_name,
+    'SELECT id, unit_name, tenant_name, current_year_rent FROM rental_units WHERE tenant_id = ? AND user_id = ? ORDER BY unit_name COLLATE NOCASE'
+  ).all(tenantId, userId) as { id: number; unit_name: string; tenant_name: string; current_year_rent: number }[]).map((r) => ({
+    id: r.id, unitName: r.unit_name, tenantName: r.tenant_name, currentYearRent: r.current_year_rent || 0,
   }));
 }
 
@@ -971,6 +972,30 @@ export function getChargeItemsForTenant(tenantId: number, userId: number): Renta
   ).all(userId, ...units.map((u) => u.id)) as ChargeRow[]).map(hydrateCharge);
 }
 
+/** Outstanding charge items for units, FIFO-sorted (period → unit → rent/water/elec). */
+export function getOutstandingChargeItemsForUnits(
+  userId: number,
+  unitIds: number[],
+  chargeTypes?: RentalChargeType[],
+): RentalChargeItem[] {
+  if (!unitIds.length) return [];
+  const placeholders = unitIds.map(() => '?').join(',');
+  let items = (db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE user_id = ? AND unit_id IN (${placeholders})
+       AND amount_due > amount_allocated
+     ORDER BY billing_period ASC, unit_id ASC`
+  ).all(userId, ...unitIds) as ChargeRow[]).map(hydrateCharge);
+  if (chargeTypes?.length) {
+    items = items.filter((c) => chargeTypes.includes(c.chargeType));
+  }
+  return items.sort(
+    (a, b) => a.billingPeriod.localeCompare(b.billingPeriod)
+      || a.unitId - b.unitId
+      || CHARGE_ORDER.indexOf(a.chargeType) - CHARGE_ORDER.indexOf(b.chargeType),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Payments + manual allocation
 // ---------------------------------------------------------------------------
@@ -1076,7 +1101,7 @@ function applyPaymentAllocations(
   });
   run();
 
-  syncLegacyRecordFromCharges(allocations.map((a) => a.chargeItemId), userId);
+  syncLegacyRecordFromCharges(allocations.map((a) => a.chargeItemId), userId, paymentRow.payment_date);
 
   const freshPayment = hydratePayment(
     db.prepare('SELECT * FROM rental_payments WHERE id = ?').get(payment.id) as PaymentRow
@@ -1141,7 +1166,7 @@ export function recordTenantPaymentWithAllocations(
   return applyPaymentAllocations(payment.id, userId, allocations);
 }
 
-function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number) {
+function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number, paymentDate?: string) {
   const legacyIds = new Set<number>();
   for (const id of chargeItemIds) {
     const row = db.prepare('SELECT legacy_record_id FROM rental_charge_items WHERE id = ? AND user_id = ?')
@@ -1156,9 +1181,19 @@ function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number) {
     const totalDue = items.reduce((s, i) => s + (i.amount_due || 0), 0);
     const fullyPaid = totalPaid >= totalDue - 0.01;
     for (const item of items) refreshChargeItemStatus(item.id);
-    db.prepare(
-      `UPDATE rental_records SET amount_paid = ?, status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
-    ).run(totalPaid, fullyPaid ? 'paid' : 'pending', recordId, userId);
+    if (paymentDate) {
+      db.prepare(
+        `UPDATE rental_records SET amount_paid = ?, status = ?,
+          paid_date = CASE WHEN ? THEN COALESCE(paid_date, ?) ELSE paid_date END,
+          paid_at = CASE WHEN ? THEN COALESCE(paid_at, datetime('now')) ELSE paid_at END,
+          updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`
+      ).run(totalPaid, fullyPaid ? 'paid' : 'pending', fullyPaid ? 1 : 0, paymentDate, fullyPaid ? 1 : 0, recordId, userId);
+    } else {
+      db.prepare(
+        `UPDATE rental_records SET amount_paid = ?, status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+      ).run(totalPaid, fullyPaid ? 'paid' : 'pending', recordId, userId);
+    }
   }
 }
 

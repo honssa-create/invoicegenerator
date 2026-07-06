@@ -331,6 +331,20 @@ export function currentBillingPeriod(date = new Date()): string {
   return date.toISOString().slice(0, 7);
 }
 
+/** Add months to a YYYY-MM billing period. */
+export function addBillingMonths(period: string, months: number): string {
+  const [y, m] = period.split('-').map(Number);
+  if (!y || !m) return period;
+  let total = y * 12 + (m - 1) + months;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}`;
+}
+
+export function nextBillingPeriod(period: string): string {
+  return addBillingMonths(period, 1);
+}
+
 export function formatMoney(value: number): string {
   return new Intl.NumberFormat('en-HK', {
     style: 'currency',
@@ -724,6 +738,17 @@ export interface TenantProfileSummary {
   totalPaid: number;
   totalOutstanding: number;
   lastPaymentDate: string | null;
+}
+
+/** Per-unit billing row for tenant payment history. */
+export interface PeriodPaymentAllocation {
+  unitId: number;
+  billingPeriod: string;
+  /** Total for period — applied rent-first (then water/elec if company proxy). */
+  amount?: number;
+  rent?: number;
+  water?: number;
+  electricity?: number;
 }
 
 /** Per-unit billing row for tenant payment history. */

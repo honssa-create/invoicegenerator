@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
 import { rentalOwnerId } from '@/lib/org-server';
 import { createRentalPayment, recordTenantPaymentWithAllocations } from '@/lib/rental-ledger-server';
-import { normalizeStoredDate } from '@/lib/rentals';
+import { prepareAdvancePaymentAllocations } from '@/lib/rental-server';
+import { normalizeStoredDate, type PeriodPaymentAllocation } from '@/lib/rentals';
 
 export async function POST(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
@@ -17,7 +18,9 @@ export async function POST(request: Request) {
     if (!tenantId || !Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ error: 'tenantId and positive amount required' }, { status: 400 });
     }
-    const allocations = Array.isArray(body.allocations)
+
+    const ownerId = rentalOwnerId(session.userId);
+    let allocations = Array.isArray(body.allocations)
       ? (body.allocations as { chargeItemId: number; amount: number }[])
           .map((a) => ({
             chargeItemId: Number(a.chargeItemId),
@@ -26,8 +29,30 @@ export async function POST(request: Request) {
           .filter((a) => a.chargeItemId && a.amount > 0)
       : [];
 
+    const periodAllocations = Array.isArray(body.periodAllocations)
+      ? (body.periodAllocations as PeriodPaymentAllocation[])
+          .map((r) => ({
+            unitId: Number(r.unitId),
+            billingPeriod: String(r.billingPeriod),
+            amount: r.amount !== undefined ? Number(r.amount) : undefined,
+            rent: r.rent !== undefined ? Number(r.rent) : undefined,
+            water: r.water !== undefined ? Number(r.water) : undefined,
+            electricity: r.electricity !== undefined ? Number(r.electricity) : undefined,
+          }))
+          .filter((r) => r.unitId && r.billingPeriod)
+      : [];
+
+    if (!allocations.length && (periodAllocations.length || body.autoAllocate)) {
+      allocations = prepareAdvancePaymentAllocations(ownerId, tenantId, {
+        amount,
+        unitIds: Array.isArray(body.unitIds) ? body.unitIds.map(Number).filter(Boolean) : undefined,
+        periodAllocations: periodAllocations.length ? periodAllocations : undefined,
+        autoAllocate: Boolean(body.autoAllocate) || periodAllocations.length > 0,
+      });
+    }
+
     if (allocations.length) {
-      const result = recordTenantPaymentWithAllocations(rentalOwnerId(session.userId), {
+      const result = recordTenantPaymentWithAllocations(ownerId, {
         tenantId,
         paymentDate,
         amount,
@@ -39,7 +64,7 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 201 });
     }
 
-    const payment = createRentalPayment(rentalOwnerId(session.userId), {
+    const payment = createRentalPayment(ownerId, {
       tenantId,
       paymentDate,
       amount,

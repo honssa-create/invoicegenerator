@@ -6,6 +6,9 @@ import {
   allocateChargeItemsDirect,
   ensureUnitTenantLink,
   getChargeItemsForRecord,
+  getOutstandingChargeItemsForUnits,
+  getRentalTenant,
+  getTenantUnits,
   getUnitPaymentHistory,
   recordTenantPaymentWithAllocations,
   syncChargeItemsFromRecord,
@@ -36,6 +39,9 @@ import {
   outstandingBalance,
   normalizeStoredDate,
   billingPeriodAfterLeaseEnd,
+  nextBillingPeriod,
+  utilityChargeTypesForMode,
+  type PeriodPaymentAllocation,
   type PreviousYearRent,
   type RentalChargeItem,
   type RentalChargeType,
@@ -808,4 +814,180 @@ export function getRentDocument(id: number | string, userId: number) {
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) return null;
   return { unit, record, dueDate: dueDateForPeriod(record.billingPeriod, unit.dueDateDay) };
+}
+
+// ---------------------------------------------------------------------------
+// Advance / period-based payment allocation
+// ---------------------------------------------------------------------------
+
+function getNextAllocatablePeriod(userId: number, unitId: number): string {
+  const outstanding = db.prepare(
+    `SELECT billing_period FROM rental_charge_items
+     WHERE user_id = ? AND unit_id = ? AND amount_due > amount_allocated
+     ORDER BY billing_period ASC LIMIT 1`
+  ).get(userId, unitId) as { billing_period: string } | undefined;
+  if (outstanding) return outstanding.billing_period;
+
+  const maxRow = db.prepare(
+    `SELECT billing_period FROM rental_records
+     WHERE user_id = ? AND unit_id = ?
+     ORDER BY billing_period DESC LIMIT 1`
+  ).get(userId, unitId) as { billing_period: string } | undefined;
+  if (maxRow) return nextBillingPeriod(maxRow.billing_period);
+
+  return currentBillingPeriod();
+}
+
+function allocateToPeriodItems(
+  items: RentalChargeItem[],
+  billableTypes: RentalChargeType[],
+  remaining: number,
+  explicit?: { rent?: number; water?: number; electricity?: number },
+): { allocations: { chargeItemId: number; amount: number }[]; remaining: number } {
+  const allocations: { chargeItemId: number; amount: number }[] = [];
+  let left = remaining;
+
+  if (explicit && (explicit.rent !== undefined || explicit.water !== undefined || explicit.electricity !== undefined)) {
+    for (const type of billableTypes) {
+      const val = explicit[type];
+      if (!val || val <= 0) continue;
+      const item = items.find((c) => c.chargeType === type);
+      if (!item) continue;
+      const out = chargeOutstanding(item);
+      const cap = out > 0 ? out : item.amountDue || 0;
+      const alloc = Math.min(val, cap);
+      if (alloc > 0.009) {
+        allocations.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+        left -= alloc;
+      }
+    }
+    return { allocations, remaining: left };
+  }
+
+  for (const type of billableTypes) {
+    if (left <= 0.009) break;
+    const item = items.find((c) => c.chargeType === type);
+    if (!item) continue;
+    const out = chargeOutstanding(item);
+    const cap = out > 0 ? out : item.amountDue || 0;
+    if (cap <= 0) continue;
+    const alloc = Math.min(left, cap);
+    if (alloc > 0.009) {
+      allocations.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+      left -= alloc;
+    }
+  }
+  return { allocations, remaining: left };
+}
+
+/** Build charge-item allocations from period rows and/or auto FIFO (creates future months for advance rent). */
+export function prepareAdvancePaymentAllocations(
+  userId: number,
+  tenantId: number,
+  options: {
+    amount: number;
+    unitIds?: number[];
+    periodAllocations?: PeriodPaymentAllocation[];
+    autoAllocate?: boolean;
+  },
+): { chargeItemId: number; amount: number }[] {
+  const tenant = getRentalTenant(tenantId, userId);
+  if (!tenant) throw new Error('Tenant not found');
+
+  const billableTypes = utilityChargeTypesForMode(tenant.utilityBillingMode);
+  let units = getTenantUnits(tenantId, userId);
+  if (options.unitIds?.length) {
+    const idSet = new Set(options.unitIds);
+    units = units.filter((u) => idSet.has(u.id));
+  }
+  if (!units.length) throw new Error('No units linked to tenant');
+
+  const unitIds = units.map((u) => u.id);
+  const result: { chargeItemId: number; amount: number }[] = [];
+
+  if (options.periodAllocations?.length) {
+    for (const row of options.periodAllocations) {
+      if (!unitIds.includes(row.unitId)) {
+        throw new Error(`Unit ${row.unitId} is not linked to this tenant`);
+      }
+      const unit = getRentalUnit(row.unitId, userId);
+      if (!unit) throw new Error(`Unit ${row.unitId} not found`);
+      const record = ensureRentRecord(unit, row.billingPeriod);
+      const items = getChargeItemsForRecord(record.id, userId);
+      const hasExplicit = row.rent !== undefined || row.water !== undefined || row.electricity !== undefined;
+      if (hasExplicit) {
+        const { allocations } = allocateToPeriodItems(
+          items, billableTypes, 0,
+          { rent: row.rent, water: row.water, electricity: row.electricity },
+        );
+        result.push(...allocations);
+      } else if (row.amount !== undefined && row.amount > 0) {
+        const { allocations } = allocateToPeriodItems(items, billableTypes, row.amount);
+        result.push(...allocations);
+      }
+    }
+    return mergeAllocationAmounts(result);
+  }
+
+  if (!options.autoAllocate) {
+    throw new Error('Provide periodAllocations or enable autoAllocate');
+  }
+
+  let remaining = options.amount;
+  const existing = getOutstandingChargeItemsForUnits(userId, unitIds, billableTypes);
+  for (const item of existing) {
+    if (remaining <= 0.009) break;
+    const out = chargeOutstanding(item);
+    const alloc = Math.min(remaining, out);
+    if (alloc > 0.009) {
+      result.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+      remaining -= alloc;
+    }
+  }
+
+  const nextPeriodByUnit = new Map<number, string>();
+  for (const uid of unitIds) {
+    nextPeriodByUnit.set(uid, getNextAllocatablePeriod(userId, uid));
+  }
+
+  let safety = 0;
+  while (remaining > 0.009 && safety < 120) {
+    safety += 1;
+    let roundProgress = false;
+    for (const uid of unitIds) {
+      if (remaining <= 0.009) break;
+      const unit = getRentalUnit(uid, userId);
+      if (!unit) continue;
+      const period = nextPeriodByUnit.get(uid)!;
+      const record = ensureRentRecord(unit, period);
+      const items = getChargeItemsForRecord(record.id, userId);
+      const { allocations, remaining: left } = allocateToPeriodItems(items, billableTypes, remaining);
+      if (allocations.length) {
+        result.push(...allocations);
+        remaining = left;
+        roundProgress = true;
+      }
+      nextPeriodByUnit.set(uid, nextBillingPeriod(period));
+    }
+    if (!roundProgress) break;
+  }
+
+  if (remaining > 0.5) {
+    throw new Error(`Could not allocate ${formatMoney(remaining)} — check amount or add period rows manually`);
+  }
+
+  return mergeAllocationAmounts(result);
+}
+
+function mergeAllocationAmounts(
+  items: { chargeItemId: number; amount: number }[],
+): { chargeItemId: number; amount: number }[] {
+  const map = new Map<number, number>();
+  for (const a of items) {
+    map.set(a.chargeItemId, (map.get(a.chargeItemId) || 0) + a.amount);
+  }
+  return Array.from(map.entries()).map(([chargeItemId, amount]) => ({
+    chargeItemId,
+    amount: Math.round(amount * 100) / 100,
+  }));
 }

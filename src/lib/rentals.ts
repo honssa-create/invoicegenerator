@@ -695,6 +695,20 @@ export interface FormalDebitNote {
   units: Pick<RentalUnit, 'id' | 'unitName'>[];
 }
 
+/** Lease row on tenant profile — all units this tenant has occupied. */
+export interface TenantLeaseHistoryRow extends RentalLease {
+  unitName: string;
+}
+
+/** Summary stats for tenant profile header cards. */
+export interface TenantProfileSummary {
+  activeUnits: number;
+  contractCount: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  lastPaymentDate: string | null;
+}
+
 /** Per-unit billing row for tenant payment history. */
 export interface TenantBillingHistoryRow {
   recordId: number;

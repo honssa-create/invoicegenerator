@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import RentPaymentNoticeMatrix from '@/components/RentPaymentNoticeMatrix';
 import ChargeAllocationGrid, {
   chargeRowsByType,
@@ -21,6 +22,7 @@ import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
   chargeOutstanding,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   formatDisplayDate,
   formatMoney,
@@ -33,6 +35,8 @@ import {
   type RentalTenant,
   type RentPaymentNoticeMatrix as MatrixType,
   type TenantBillingHistoryRow,
+  type TenantLeaseHistoryRow,
+  type TenantProfileSummary,
 } from '@/lib/rentals';
 import { isSectionReadOnly } from '@/lib/permissions';
 
@@ -44,6 +48,8 @@ interface TenantDetail {
   paymentsWithAllocations: RentalPaymentWithAllocations[];
   allocationLedger: RentalPaymentAllocationDetail[];
   billingHistory: TenantBillingHistoryRow[];
+  leaseHistory: TenantLeaseHistoryRow[];
+  summary: TenantProfileSummary;
 }
 
 export default function TenantDetailPage() {
@@ -65,6 +71,9 @@ export default function TenantDetailPage() {
   const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
+  const [contactForm, setContactForm] = useState({ name: '', phone: '', email: '', notes: '' });
+  const [contactSaving, setContactSaving] = useState(false);
+  const [contactEditing, setContactEditing] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -84,6 +93,12 @@ export default function TenantDetailPage() {
       .then(([d, m]) => {
         if (d.tenant) {
           setDetail(d);
+          setContactForm({
+            name: d.tenant.name || '',
+            phone: d.tenant.phone || '',
+            email: d.tenant.email || '',
+            notes: d.tenant.notes || '',
+          });
           setSelectedUnitIds((prev) => {
             if (prev.length && d.units?.every((u: { id: number }) => prev.includes(u.id))) return prev;
             return (d.units || []).map((u: { id: number }) => u.id);
@@ -96,6 +111,25 @@ export default function TenantDetailPage() {
   };
 
   useEffect(() => { load(); }, [id, period, fromPeriod, paidLookback]);
+
+  const saveContact = async () => {
+    if (!detail) return;
+    setContactSaving(true);
+    const res = await fetch(`/api/rentals/tenants/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(contactForm),
+    });
+    setContactSaving(false);
+    if (!res.ok) {
+      const d = await res.json();
+      setToast(d.error || 'Failed to save contact details');
+      return;
+    }
+    setContactEditing(false);
+    setToast('Contact details saved');
+    load();
+  };
 
   const openPaymentModal = () => {
     if (!detail) return;
@@ -201,7 +235,7 @@ export default function TenantDetailPage() {
     );
   }
 
-  const { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory } = detail;
+  const { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory, leaseHistory, summary } = detail;
 
   const toggleUnit = (unitId: number) => {
     setSelectedUnitIds((prev) =>
@@ -228,10 +262,11 @@ export default function TenantDetailPage() {
       <div className="page-header">
         <div>
           <Link href="/rentals" className="text-sm text-brand-600 hover:text-brand-700">← Rentals</Link>
-          <h1 className="page-title mt-1">{tenant.name}</h1>
+          <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mt-2">租客檔案 Tenant Profile</p>
+          <h1 className="page-title mt-0.5">{tenant.name}</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {tenant.phone && <span>{tenant.phone} · </span>}
-            {tenant.email || 'No email'}
+            {summary.activeUnits} active unit{summary.activeUnits !== 1 ? 's' : ''}
+            {summary.contractCount > 0 && ` · ${summary.contractCount} contract${summary.contractCount !== 1 ? 's' : ''}`}
             {readOnly && <span className="ml-2 text-amber-600">(Read-only)</span>}
           </p>
         </div>
@@ -259,32 +294,172 @@ export default function TenantDetailPage() {
         <div onClick={() => setToast('')} className="mb-4 p-3 rounded-lg bg-brand-50 text-brand-700 text-sm cursor-pointer">{toast} ✕</div>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-6 mb-6">
+      {/* Contact details */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-gray-900">聯絡資料 Contact Details</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Phone, email and notes for this tenant</p>
+          </div>
+          {!readOnly && !contactEditing && (
+            <button
+              type="button"
+              onClick={() => setContactEditing(true)}
+              className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50"
+            >
+              Edit 編輯
+            </button>
+          )}
+        </div>
+        <div className="p-6">
+          {contactEditing ? (
+            <div className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Name 姓名</label>
+                  <input className={inp} value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Phone 電話</label>
+                  <input type="tel" className={inp} value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} placeholder="+852…" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Email 電郵</label>
+                  <input type="email" className={inp} value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
+                <textarea className={`${inp} min-h-[80px]`} value={contactForm.notes} onChange={(e) => setContactForm({ ...contactForm, notes: e.target.value })} placeholder="Emergency contact, ID reference, etc." />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContactEditing(false);
+                    setContactForm({
+                      name: tenant.name || '',
+                      phone: tenant.phone || '',
+                      email: tenant.email || '',
+                      notes: tenant.notes || '',
+                    });
+                  }}
+                  className="px-4 py-2 border rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveContact}
+                  disabled={contactSaving}
+                  className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50"
+                >
+                  {contactSaving ? 'Saving…' : 'Save 儲存'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <dl className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">Phone 電話</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.phone || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">Email 電郵</dt>
+                <dd className="mt-1 font-medium text-gray-900 break-all">{tenant.email || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">Last Payment 最近交租</dt>
+                <dd className="mt-1 font-medium text-gray-900">{formatDisplayDate(summary.lastPaymentDate) || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">Total Paid 累計收款</dt>
+                <dd className="mt-1 font-medium text-green-700">{formatMoney(summary.totalPaid)}</dd>
+              </div>
+              {tenant.notes && (
+                <div className="sm:col-span-2 lg:col-span-4">
+                  <dt className="text-xs text-gray-500 uppercase">Notes 備註</dt>
+                  <dd className="mt-1 text-gray-700 whitespace-pre-wrap">{tenant.notes}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 uppercase">Units 單位</p>
-          <p className="text-2xl font-bold mt-1">{units.length}</p>
-          <p className="text-xs text-gray-500 mt-2 mb-1">Select units for grouped debit note 合併繳費通知單</p>
-          <ul className="mt-1 text-sm text-gray-600 space-y-1.5">
+          <p className="text-2xl font-bold mt-1">{summary.activeUnits}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs text-gray-500 uppercase">Contracts 租約</p>
+          <p className="text-2xl font-bold mt-1">{summary.contractCount}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs text-gray-500 uppercase">Outstanding 未付</p>
+          <p className="text-2xl font-bold mt-1 text-red-700">{formatMoney(summary.totalOutstanding)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs text-gray-500 uppercase">Payments 收款</p>
+          <p className="text-2xl font-bold mt-1">{payments.length}</p>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6 mb-6">
+        {/* Units selection */}
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="font-semibold text-gray-900">Current Units 現租單位</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Select units for grouped debit note 合併繳費通知單</p>
+          </div>
+          <ul className="p-4 space-y-2">
             {units.map((u) => (
-              <li key={u.id} className="flex items-center gap-2">
+              <li key={u.id} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   checked={selectedUnitIds.includes(u.id)}
                   onChange={() => toggleUnit(u.id)}
                   className="h-4 w-4 rounded border-gray-300"
                 />
-                <Link href={`/rentals/${u.id}`} className="text-brand-600 hover:underline">{u.unitName}</Link>
+                <Link href={`/rentals/${u.id}`} className="text-brand-600 hover:underline font-medium">{u.unitName}</Link>
               </li>
             ))}
+            {units.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">No active units linked</p>
+            )}
           </ul>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 uppercase">Outstanding 未付</p>
-          <p className="text-2xl font-bold mt-1 text-red-700">{matrix ? formatMoney(matrix.grandTotal) : '—'}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 uppercase">Payments 收款</p>
-          <p className="text-2xl font-bold mt-1">{payments.length}</p>
+
+        {/* Contract history */}
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="font-semibold text-gray-900">Contract History 租約紀錄</h2>
+            <p className="text-xs text-gray-500 mt-0.5">All past and current leases across units</p>
+          </div>
+          <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
+            {(leaseHistory || []).length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">No contract history yet</p>
+            ) : (
+              (leaseHistory || []).map((l) => (
+                <div key={l.id} className={`rounded-xl border p-3 text-sm ${l.isCurrent ? 'border-brand-200 bg-brand-50/40' : 'border-gray-100'}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Link href={`/rentals/${l.unitId}`} className="font-semibold text-brand-700 hover:underline">{l.unitName}</Link>
+                    <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
+                    {l.isCurrent && <span className="ml-1 text-brand-600 font-medium">(Current)</span>}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Rent {formatMoney(l.baseRent)} · Deposit {formatMoney(l.depositAmount)}
+                    {l.endReason && <span className="ml-1">· {l.endReason}</span>}
+                  </p>
+                  {l.endNotes && <p className="text-xs text-gray-400 mt-1">{l.endNotes}</p>}
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 

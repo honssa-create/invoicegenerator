@@ -385,3 +385,24 @@ export function unitOutstandingTotal(unitId: number, userId: number): number {
       ? s + bal : s;
   }, 0);
 }
+
+/** All leases (current + past) for a tenant across every unit they occupied. */
+export function getTenantLeaseHistory(tenantId: number | string, userId: number) {
+  const rows = db.prepare(
+    `SELECT l.*, u.unit_name
+     FROM rental_leases l
+     JOIN rental_units u ON u.id = l.unit_id AND u.user_id = l.user_id
+     WHERE l.tenant_id = ? AND l.user_id = ?
+     ORDER BY l.lease_start_date DESC, l.id DESC`
+  ).all(tenantId, userId) as (LeaseRow & { unit_name: string })[];
+
+  return rows.map((row) => {
+    const lease = hydrateLease(row);
+    const status = row.is_current ? persistLeaseStatus(lease) : lease.status;
+    return {
+      ...lease,
+      status,
+      unitName: row.unit_name || `Unit ${row.unit_id}`,
+    };
+  });
+}

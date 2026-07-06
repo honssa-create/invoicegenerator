@@ -28,10 +28,13 @@ import {
   type RentalUnit,
   type RentPaymentNoticeMatrix,
   type RentPaymentNoticeQuery,
+  type TenantLeaseHistoryRow,
+  type TenantProfileSummary,
   type RentPaymentNoticeSummary,
   type RentRecord,
   type TenantBillingHistoryRow,
 } from './rentals';
+import { getTenantLeaseHistory } from './rental-lease-server';
 
 function logRentalActivity(
   userId: number, unitId: number, action: string,
@@ -155,6 +158,39 @@ export function getRentalTenant(id: number | string, userId: number): RentalTena
   if (!row) return null;
   const count = (db.prepare('SELECT COUNT(*) AS c FROM rental_units WHERE tenant_id = ? AND user_id = ?').get(id, userId) as { c: number }).c;
   return hydrateTenant(row, count);
+}
+
+export function updateRentalTenant(
+  tenantId: number | string,
+  userId: number,
+  input: { name?: string; phone?: string | null; email?: string | null; notes?: string | null },
+): RentalTenant | null {
+  const existing = getRentalTenant(tenantId, userId);
+  if (!existing) return null;
+
+  const name = input.name !== undefined ? input.name.trim() : existing.name;
+  const phone = input.phone !== undefined ? (input.phone?.trim() || null) : (existing.phone || null);
+  const email = input.email !== undefined ? (input.email?.trim() || null) : (existing.email || null);
+  const notes = input.notes !== undefined ? (input.notes?.trim() || null) : (existing.notes || null);
+
+  if (!name) throw new Error('Tenant name is required');
+
+  db.prepare(
+    `UPDATE rental_tenants SET name = ?, phone = ?, email = ?, notes = ?, updated_at = datetime('now')
+     WHERE id = ? AND user_id = ?`
+  ).run(name, phone, email, notes, tenantId, userId);
+
+  db.prepare(
+    `UPDATE rental_units SET tenant_name = ?, tenant_phone = ?, tenant_email = ?, updated_at = datetime('now')
+     WHERE tenant_id = ? AND user_id = ?`
+  ).run(name, phone, email, tenantId, userId);
+
+  db.prepare(
+    `UPDATE rental_leases SET tenant_name = ?, tenant_phone = ?, tenant_email = ?, updated_at = datetime('now')
+     WHERE tenant_id = ? AND user_id = ?`
+  ).run(name, phone, email, tenantId, userId);
+
+  return getRentalTenant(tenantId, userId);
 }
 
 export function listRentalTenants(userId: number): RentalTenant[] {
@@ -761,8 +797,23 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
   const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
   const paymentsWithAllocations = payments.map((p) => hydratePaymentWithAllocations(p, userId, unitNameMap));
   const billingHistory = getTenantBillingHistory(tenant.id, userId);
+  const leaseHistory = getTenantLeaseHistory(tenant.id, userId);
 
-  return { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory };
+  const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  const totalOutstanding = outstandingCharges.reduce((s, c) => s + chargeOutstanding(c), 0);
+  const lastPaymentDate = payments.length ? payments[0].paymentDate : null;
+  const activeUnits = units.length;
+  const contractCount = leaseHistory.length;
+
+  const summary: TenantProfileSummary = {
+    activeUnits,
+    contractCount,
+    totalPaid,
+    totalOutstanding,
+    lastPaymentDate,
+  };
+
+  return { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory, leaseHistory, summary };
 }
 
 function hydratePaymentWithAllocations(

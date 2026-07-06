@@ -416,6 +416,24 @@ export interface RentalPaymentAllocation {
   created_at: string;
 }
 
+/** N-to-N payment ↔ billing-item link (maps to rental_payment_allocations). */
+export interface RentalPaymentAllocationDetail {
+  id: number;
+  paymentId: number;
+  chargeItemId: number;
+  allocatedAmount: number;
+  created_at: string;
+  paymentDate: string;
+  paymentAmount: number;
+  paymentMethod: string | null;
+  paymentReference: string | null;
+  unitId: number;
+  unitName: string;
+  billingPeriod: string;
+  chargeType: RentalChargeType;
+  chargeAmountDue: number;
+}
+
 export interface RentPaymentNoticeColumn {
   unitId: number;
   unitName: string;

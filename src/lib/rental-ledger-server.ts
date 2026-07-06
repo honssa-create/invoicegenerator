@@ -13,6 +13,7 @@ import {
   type RentalChargeType,
   type RentalPayment,
   type RentalPaymentAllocation,
+  type RentalPaymentAllocationDetail,
   type RentalTenant,
   type RentalUnit,
   type RentPaymentNoticeMatrix,
@@ -460,7 +461,68 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
     'SELECT * FROM rental_payments WHERE tenant_id = ? AND user_id = ? ORDER BY payment_date DESC, id DESC'
   ).all(tenantId, userId) as PaymentRow[]).map(hydratePayment);
 
-  return { tenant, units, outstandingCharges, payments };
+  const allocationLedger = getTenantAllocationLedger(tenant.id, userId);
+
+  return { tenant, units, outstandingCharges, payments, allocationLedger };
+}
+
+export function getRentalPaymentDetail(paymentId: number | string, userId: number) {
+  const row = db.prepare(
+    'SELECT * FROM rental_payments WHERE id = ? AND user_id = ?'
+  ).get(paymentId, userId) as PaymentRow | undefined;
+  if (!row) return null;
+  const payment = hydratePayment(row);
+  const allocations = getPaymentAllocations(payment.id, userId);
+  const unitNames = Object.fromEntries(
+    getTenantUnits(payment.tenantId, userId).map((u) => [u.id, u.unitName])
+  );
+  return {
+    payment,
+    allocations: allocations.map((a) => ({
+      ...a,
+      unitName: unitNames[a.charge.unitId] || `Unit ${a.charge.unitId}`,
+    })),
+  };
+}
+
+export function getTenantAllocationLedger(
+  tenantId: number,
+  userId: number,
+): RentalPaymentAllocationDetail[] {
+  const rows = db.prepare(
+    `SELECT a.id, a.payment_id, a.charge_item_id, a.amount, a.created_at,
+            p.payment_date, p.amount AS payment_amount, p.method, p.reference,
+            c.unit_id, c.billing_period, c.charge_type, c.amount_due,
+            u.unit_name
+     FROM rental_payment_allocations a
+     JOIN rental_payments p ON p.id = a.payment_id
+     JOIN rental_charge_items c ON c.id = a.charge_item_id
+     JOIN rental_units u ON u.id = c.unit_id
+     WHERE p.tenant_id = ? AND a.user_id = ?
+     ORDER BY p.payment_date DESC, a.id DESC`
+  ).all(tenantId, userId) as {
+    id: number; payment_id: number; charge_item_id: number; amount: number; created_at: string;
+    payment_date: string; payment_amount: number; method: string | null; reference: string | null;
+    unit_id: number; billing_period: string; charge_type: RentalChargeType; amount_due: number;
+    unit_name: string;
+  }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    paymentId: r.payment_id,
+    chargeItemId: r.charge_item_id,
+    allocatedAmount: r.amount,
+    created_at: r.created_at,
+    paymentDate: r.payment_date,
+    paymentAmount: r.payment_amount,
+    paymentMethod: r.method,
+    paymentReference: r.reference,
+    unitId: r.unit_id,
+    unitName: r.unit_name,
+    billingPeriod: r.billing_period,
+    chargeType: r.charge_type,
+    chargeAmountDue: r.amount_due,
+  }));
 }
 
 export function getChargeItemsForRecord(recordId: number, userId: number): RentalChargeItem[] {

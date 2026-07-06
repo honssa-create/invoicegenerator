@@ -11,6 +11,7 @@ import ChargeAllocationGrid, {
   fillRentOnlyValues,
   sumAllocationValues,
 } from '@/components/ChargeAllocationGrid';
+import PaymentAllocationLedger from '@/components/PaymentAllocationLedger';
 import { useAuth } from '@/components/AuthProvider';
 import {
   CHARGE_TYPE_LABELS,
@@ -22,6 +23,7 @@ import {
   todayFormDate,
   type RentalChargeItem,
   type RentalPayment,
+  type RentalPaymentAllocationDetail,
   type RentalTenant,
   type RentPaymentNoticeMatrix as MatrixType,
 } from '@/lib/rentals';
@@ -32,6 +34,7 @@ interface TenantDetail {
   units: { id: number; unitName: string; tenantName: string }[];
   outstandingCharges: RentalChargeItem[];
   payments: RentalPayment[];
+  allocationLedger: RentalPaymentAllocationDetail[];
 }
 
 export default function TenantDetailPage() {
@@ -52,6 +55,7 @@ export default function TenantDetailPage() {
   const [busy, setBusy] = useState(false);
   const [paymentModal, setPaymentModal] = useState(false);
   const [allocateModal, setAllocateModal] = useState<RentalPayment | null>(null);
+  const [viewPaymentId, setViewPaymentId] = useState<number | null>(null);
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
   const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [allocations, setAllocations] = useState<Record<number, string>>({});
@@ -185,7 +189,7 @@ export default function TenantDetailPage() {
     );
   }
 
-  const { tenant, units, outstandingCharges, payments } = detail;
+  const { tenant, units, outstandingCharges, payments, allocationLedger } = detail;
 
   return (
     <AppLayout>
@@ -321,17 +325,34 @@ export default function TenantDetailPage() {
                   <td className="px-4 py-3 text-right text-orange-600">{formatMoney(p.amountUnallocated)}</td>
                   <td className="px-4 py-3 text-gray-500">{p.reference || p.method || '—'}</td>
                   <td className="px-4 py-3 text-right">
-                    {!readOnly && p.amountUnallocated > 0 && (
-                      <button onClick={() => openAllocate(p)} className="text-brand-600 text-xs font-medium hover:underline">
-                        Allocate 分配
-                      </button>
-                    )}
+                    <span className="space-x-2">
+                      {p.amountAllocated > 0 && (
+                        <button onClick={() => setViewPaymentId(p.id)} className="text-gray-600 text-xs font-medium hover:underline">
+                          View 明細
+                        </button>
+                      )}
+                      {!readOnly && p.amountUnallocated > 0 && (
+                        <button onClick={() => openAllocate(p)} className="text-brand-600 text-xs font-medium hover:underline">
+                          Allocate 分配
+                        </button>
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold">Payment Allocations 核銷對照表</h2>
+          <p className="text-xs text-gray-500 mt-0.5">N-to-N: payments ↔ billing items (rent / water / electricity per unit & month)</p>
+        </div>
+        <div className="p-4">
+          <PaymentAllocationLedger rows={allocationLedger || []} />
+        </div>
       </div>
 
       {paymentModal && detail && (
@@ -444,6 +465,22 @@ export default function TenantDetailPage() {
               <button onClick={saveAllocation} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
                 {busy ? 'Saving…' : 'Allocate'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewPaymentId && (
+        <div className="modal-overlay">
+          <div className="modal-panel sm:max-w-3xl max-h-[85vh] overflow-y-auto">
+            <h2 className="text-lg font-bold mb-1">Payment #{viewPaymentId} Allocations</h2>
+            <p className="text-sm text-gray-500 mb-4">Billing items covered by this receipt</p>
+            <PaymentAllocationLedger
+              rows={(allocationLedger || []).filter((r) => r.paymentId === viewPaymentId)}
+              compact
+            />
+            <div className="flex justify-end mt-6">
+              <button onClick={() => setViewPaymentId(null)} className="px-4 py-2 border rounded-lg text-sm">Close</button>
             </div>
           </div>
         </div>

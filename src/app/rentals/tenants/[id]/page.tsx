@@ -6,7 +6,8 @@ import { useParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import RentPaymentNoticeMatrix from '@/components/RentPaymentNoticeMatrix';
 import ChargeAllocationGrid, {
-  chargeRowsFromItems,
+  chargeRowsByType,
+  distributeByChargeType,
   fillOutstandingValues,
   fillRentOnlyValues,
   sumAllocationValues,
@@ -98,8 +99,7 @@ export default function TenantDetailPage() {
 
   const openPaymentModal = () => {
     if (!detail) return;
-    const unitNames = Object.fromEntries(detail.units.map((u) => [u.id, u.unitName]));
-    const rows = chargeRowsFromItems(detail.outstandingCharges, unitNames);
+    const rows = chargeRowsByType(detail.outstandingCharges);
     const filled = fillOutstandingValues(rows);
     setChargeAllocValues(filled);
     setPaymentForm((f) => ({
@@ -108,6 +108,8 @@ export default function TenantDetailPage() {
     }));
     setPaymentModal(true);
   };
+
+  const chargeTypeRows = detail ? chargeRowsByType(detail.outstandingCharges) : [];
 
   const savePayment = async () => {
     if (!detail) return;
@@ -121,9 +123,7 @@ export default function TenantDetailPage() {
       setToast('Allocated total exceeds payment amount');
       return;
     }
-    const allocations = Object.entries(chargeAllocValues)
-      .filter(([, v]) => v && Number(v) > 0)
-      .map(([chargeItemId, v]) => ({ chargeItemId: Number(chargeItemId), amount: Number(v) }));
+    const allocations = distributeByChargeType(detail.outstandingCharges, chargeAllocValues);
 
     setBusy(true);
     const res = await fetch('/api/rentals/payments', {
@@ -417,7 +417,7 @@ export default function TenantDetailPage() {
         <div className="modal-overlay">
           <div className="modal-panel sm:max-w-2xl max-h-[92vh] overflow-y-auto">
             <h2 className="text-lg font-bold mb-1">Record Payment 記錄收款</h2>
-            <p className="text-sm text-gray-500 mb-4">Split payment across rent / water / electricity per unit and month</p>
+            <p className="text-sm text-gray-500 mb-4">Enter rent, water and electricity amounts separately 租金 / 水費 / 電費分開輸入</p>
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
@@ -426,7 +426,12 @@ export default function TenantDetailPage() {
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Total Amount 收款總額</label>
-                  <input type="number" className={inp} value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} />
+                  <input
+                    type="number"
+                    className={inp}
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Method 方式</label>
@@ -440,14 +445,13 @@ export default function TenantDetailPage() {
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-gray-600 uppercase">Allocate to billing items 分配至收費細項</label>
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Payment split 分拆收款</label>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
                       onClick={() => {
-                        const rows = chargeRowsFromItems(detail.outstandingCharges, Object.fromEntries(detail.units.map((u) => [u.id, u.unitName])));
-                        const filled = fillRentOnlyValues(rows);
+                        const filled = fillRentOnlyValues(chargeTypeRows);
                         setChargeAllocValues(filled);
                         setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
                       }}
@@ -458,8 +462,7 @@ export default function TenantDetailPage() {
                       type="button"
                       className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
                       onClick={() => {
-                        const rows = chargeRowsFromItems(detail.outstandingCharges, Object.fromEntries(detail.units.map((u) => [u.id, u.unitName])));
-                        const filled = fillOutstandingValues(rows);
+                        const filled = fillOutstandingValues(chargeTypeRows);
                         setChargeAllocValues(filled);
                         setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
                       }}
@@ -469,9 +472,13 @@ export default function TenantDetailPage() {
                   </div>
                 </div>
                 <ChargeAllocationGrid
-                  rows={chargeRowsFromItems(detail.outstandingCharges, Object.fromEntries(detail.units.map((u) => [u.id, u.unitName])))}
+                  rows={chargeTypeRows}
                   values={chargeAllocValues}
-                  onChange={setChargeAllocValues}
+                  onChange={(v) => {
+                    setChargeAllocValues(v);
+                    setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(v) || '') }));
+                  }}
+                  threeRow
                 />
                 <p className="text-xs text-gray-500 mt-2">
                   Allocated: {formatMoney(sumAllocationValues(chargeAllocValues))}

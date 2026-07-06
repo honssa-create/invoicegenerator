@@ -743,6 +743,7 @@ function RentalDetailInner() {
                   setChargeAllocValues(v);
                   setPaidAmount(String(sumAllocationValues(v)));
                 }}
+                threeRow
               />
             </div>
 

@@ -26,6 +26,8 @@ interface Props {
   values: Record<string, string>;
   onChange: (values: Record<string, string>) => void;
   compact?: boolean;
+  /** Simpler 3-row layout for rent / water / electricity only */
+  threeRow?: boolean;
 }
 
 export function chargeRowsFromItems(
@@ -55,6 +57,54 @@ export function chargeRowsFromRecord(
     amountAllocated: c.amountAllocated,
     status: c.status,
   }));
+}
+
+const CHARGE_TYPE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+
+/** Aggregate outstanding charges into exactly 3 rows (rent / water / electricity). */
+export function chargeRowsByType(items: RentalChargeItem[]): ChargeAllocationRow[] {
+  const totals: Record<RentalChargeType, { due: number; allocated: number }> = {
+    rent: { due: 0, allocated: 0 },
+    water: { due: 0, allocated: 0 },
+    electricity: { due: 0, allocated: 0 },
+  };
+  for (const item of items) {
+    const bucket = totals[item.chargeType];
+    bucket.due += item.amountDue || 0;
+    bucket.allocated += item.amountAllocated || 0;
+  }
+  return CHARGE_TYPE_ORDER.map((chargeType) => ({
+    key: chargeType,
+    label: CHARGE_TYPE_LABELS[chargeType],
+    chargeType,
+    amountDue: totals[chargeType].due,
+    amountAllocated: totals[chargeType].allocated,
+  })).filter((r) => r.amountDue > 0 || chargeOutstanding(r) > 0);
+}
+
+/** Spread rent/water/electricity amounts across billing items (FIFO by period, then unit). */
+export function distributeByChargeType(
+  items: RentalChargeItem[],
+  values: Record<string, string>,
+): { chargeItemId: number; amount: number }[] {
+  const result: { chargeItemId: number; amount: number }[] = [];
+  for (const chargeType of CHARGE_TYPE_ORDER) {
+    let remaining = Number(values[chargeType] || 0);
+    if (remaining <= 0) continue;
+    const sorted = items
+      .filter((c) => c.chargeType === chargeType && chargeOutstanding(c) > 0)
+      .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod) || a.unitId - b.unitId);
+    for (const item of sorted) {
+      if (remaining <= 0.009) break;
+      const out = chargeOutstanding(item);
+      const alloc = Math.min(remaining, out);
+      if (alloc > 0.009) {
+        result.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+        remaining -= alloc;
+      }
+    }
+  }
+  return result;
 }
 
 export function sumAllocationValues(values: Record<string, string>): number {
@@ -87,9 +137,50 @@ const STATUS_BADGE: Record<RentalChargeItemStatus, string> = {
   paid: 'text-green-700 bg-green-50',
 };
 
-export default function ChargeAllocationGrid({ rows, values, onChange, compact }: Props) {
+export default function ChargeAllocationGrid({ rows, values, onChange, compact, threeRow }: Props) {
   if (!rows.length) {
     return <p className="text-sm text-gray-400 py-2">No outstanding billing items.</p>;
+  }
+
+  if (threeRow) {
+    return (
+      <div className={`space-y-3 ${compact ? 'text-xs' : 'text-sm'}`}>
+        {rows.map((row) => {
+          const outstanding = chargeOutstanding(row);
+          const status = row.status || (outstanding <= 0 ? 'paid' : row.amountAllocated > 0 ? 'partially_paid' : 'unpaid');
+          return (
+            <div
+              key={row.key}
+              className="grid grid-cols-[1fr_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3"
+            >
+              <div>
+                <p className="font-semibold text-gray-900">{row.label}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  應繳 Due {row.amountDue > 0 ? formatMoney(row.amountDue) : '—'}
+                  {' · '}
+                  未付 Outstanding <span className="font-semibold text-red-700">{outstanding > 0 ? formatMoney(outstanding) : '—'}</span>
+                </p>
+                <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_BADGE[status]}`}>
+                  {CHARGE_STATUS_LABELS[status]}
+                </span>
+              </div>
+              <label className="text-xs text-gray-500 sm:hidden">本次收款</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                max={outstanding}
+                disabled={outstanding <= 0}
+                className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-lg text-right font-semibold disabled:bg-gray-100 disabled:text-gray-400"
+                placeholder="0"
+                value={values[row.key] || ''}
+                onChange={(e) => onChange({ ...values, [row.key]: e.target.value })}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   return (

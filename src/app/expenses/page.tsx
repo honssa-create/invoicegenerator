@@ -717,7 +717,7 @@ export default function ExpensesPage() {
                     onAdd={(v) => addOption('supplier', v)}
                     ocrMatch={supplierOcrMatch}
                     onDismissOcrMatch={() => setSupplierOcrMatch(null)}
-                    placeholder="Search, select, or type supplier…"
+                    placeholder="Select supplier 供應商…"
                   />
                 </div>
                 <div>

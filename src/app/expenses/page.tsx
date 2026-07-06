@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
 import TagSelect from '@/components/TagSelect';
+import SupplierSelect from '@/components/SupplierSelect';
 import FilterBar from '@/components/FilterBar';
 import {
   PAYMENT_STATUSES,
@@ -13,6 +14,12 @@ import {
   formatMoney,
   type OptionType,
 } from '@/lib/expenses';
+import {
+  matchSupplierFromOcr,
+  mergeSupplierLists,
+  SUPPLIER_OCR_AUTO_FILL_THRESHOLD,
+  type SupplierMatch,
+} from '@/lib/expense-suppliers';
 import type { Expense } from '@/lib/types';
 import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
 
@@ -50,7 +57,8 @@ export default function ExpensesPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [detail, setDetail] = useState<Expense | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
-  const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [] });
+  const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [], supplier: [] });
+  const [supplierOcrMatch, setSupplierOcrMatch] = useState<SupplierMatch | null>(null);
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
@@ -101,6 +109,10 @@ export default function ExpensesPage() {
   const reasonOptions = Array.from(new Set([...(options.category || []), ...expenses.map((e) => e.category).filter(Boolean)]));
   const paymentOptions = Array.from(new Set([...(options.payment_method || []), ...expenses.map((e) => e.payment_method).filter(Boolean) as string[]]));
   const platformOptions = Array.from(new Set([...(options.platform || []), ...expenses.map((e) => e.platform).filter(Boolean) as string[]]));
+  const supplierOptions = useMemo(
+    () => mergeSupplierLists(options.supplier, expenses.map((e) => e.merchant)),
+    [options.supplier, expenses]
+  );
 
   const displayed = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
@@ -178,6 +190,7 @@ export default function ExpensesPage() {
     setFormReceipts([]);
     setEditingId(null);
     setScanMessage('');
+    setSupplierOcrMatch(null);
     setError('');
     setShowForm(true);
   };
@@ -199,6 +212,7 @@ export default function ExpensesPage() {
     setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r) })));
     setEditingId(e.id);
     setScanMessage('');
+    setSupplierOcrMatch(null);
     setError('');
     setShowForm(true);
   };
@@ -232,22 +246,42 @@ export default function ExpensesPage() {
 
       const r = data.result;
       if (r) {
-        setForm((prev) => ({
-          ...prev,
-          merchant: prev.merchant || r.merchant || '',
-          paid_date: prev.paid_date || r.date || '',
-          amount_hkd: prev.amount_hkd || (r.amount_hkd != null ? String(r.amount_hkd) : ''),
-          amount_rmb: prev.amount_rmb || (r.amount_rmb != null ? String(r.amount_rmb) : ''),
-        }));
+        const supplierList = mergeSupplierLists(options.supplier, expenses.map((ex) => ex.merchant));
+        const ocrBlob = [r.merchant, r.raw_text].filter(Boolean).join('\n');
+        const supplierMatch = ocrBlob ? matchSupplierFromOcr(ocrBlob, supplierList) : null;
+        const autoSupplier =
+          supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD
+            ? supplierMatch.supplier
+            : r.merchant?.trim() || '';
+
+        let showOcrMatch = false;
+        setForm((prev) => {
+          if (!prev.merchant && supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD) {
+            showOcrMatch = true;
+          }
+          return {
+            ...prev,
+            merchant: prev.merchant || autoSupplier,
+            paid_date: prev.paid_date || r.date || '',
+            amount_hkd: prev.amount_hkd || (r.amount_hkd != null ? String(r.amount_hkd) : ''),
+            amount_rmb: prev.amount_rmb || (r.amount_rmb != null ? String(r.amount_rmb) : ''),
+          };
+        });
+        setSupplierOcrMatch(showOcrMatch ? supplierMatch : null);
+
         const found: string[] = [];
-        if (r.merchant) found.push('merchant');
+        if (autoSupplier) found.push('supplier');
         if (r.date) found.push('date');
         if (r.amount_hkd != null) found.push('HKD');
         if (r.amount_rmb != null) found.push('RMB');
         const via = r.source === 'ai' ? 'AI vision' : 'OCR';
+        const supplierNote =
+          supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD
+            ? ` · supplier matched (${Math.round(supplierMatch.score * 100)}%)`
+            : '';
         setScanMessage(
           found.length
-            ? `${newReceipts.length} attached. Extracted from 1st file via ${via}: ${found.join(', ')}. Review & fill any blanks.`
+            ? `${newReceipts.length} attached. Extracted from 1st file via ${via}: ${found.join(', ')}${supplierNote}. Review & fill any blanks.`
             : `${newReceipts.length} attached. No fields auto-extracted (${via}). Enter values manually.`
         );
       } else {
@@ -307,6 +341,10 @@ export default function ExpensesPage() {
       return;
     }
     setSaving(true);
+    const merchant = form.merchant.trim();
+    if (merchant && !supplierOptions.includes(merchant)) {
+      await addOption('supplier', merchant);
+    }
     const url = editingId ? `/api/expenses/${editingId}` : '/api/expenses';
     const method = editingId ? 'PUT' : 'POST';
     const res = await fetch(url, {
@@ -321,6 +359,7 @@ export default function ExpensesPage() {
       return;
     }
     setShowForm(false);
+    setSupplierOcrMatch(null);
     loadExpenses();
   };
 
@@ -623,7 +662,15 @@ export default function ExpensesPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Supplier 供應商</label>
-                  <input value={form.merchant} onChange={(ev) => setForm({ ...form, merchant: ev.target.value })} className={inputCls} placeholder="Supplier / merchant name" />
+                  <SupplierSelect
+                    value={form.merchant}
+                    options={supplierOptions}
+                    onChange={(v) => setForm((f) => ({ ...f, merchant: v }))}
+                    onAdd={(v) => addOption('supplier', v)}
+                    ocrMatch={supplierOcrMatch}
+                    onDismissOcrMatch={() => setSupplierOcrMatch(null)}
+                    placeholder="Search, select, or type supplier…"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>

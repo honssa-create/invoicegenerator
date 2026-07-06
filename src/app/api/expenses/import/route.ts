@@ -144,6 +144,7 @@ export async function POST(request: Request) {
       if (syncOption(ownerId, 'payment_method', paymentMethod)) tagsAdded.push(paymentMethod!);
       if (syncOption(ownerId, 'category', reason)) tagsAdded.push(reason!);
       if (syncOption(ownerId, 'platform', platform)) tagsAdded.push(platform!);
+      if (supplier && syncOption(ownerId, 'supplier', supplier)) tagsAdded.push(supplier);
 
       // Duplicate guard (Date + Amount + Supplier), both against DB and within this batch.
       const dupKey = `${date || ''}|${amount}|${supplier || ''}`;

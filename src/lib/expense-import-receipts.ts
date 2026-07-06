@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { saveReceipt } from './receipt';
 
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_TIMEOUT_MS = 30_000;
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif']);
 
@@ -15,9 +15,20 @@ export const RECEIPT_COLUMN_ALIASES = [
   '收据',
   'receipt image',
   'payment receipt',
+  '收據連結',
+  '收据链接',
+  '收據链接',
+  '圖片連結',
+  '图片链接',
+  'image link',
+  'image url',
+  'receipt url',
+  'receipt link',
+  '付款收據連結',
+  '付款收据链接',
 ];
 
-/** Pull HTTP(S) URLs from a legacy spreadsheet cell (plain text, HYPERLINK formula, or multiple). */
+/** Pull HTTP(S) URLs from a legacy spreadsheet cell (plain text, formulas, or multiple). */
 export function extractReceiptUrls(raw: unknown): string[] {
   if (raw === null || raw === undefined || raw === '') return [];
   const text = String(raw).trim();
@@ -25,8 +36,17 @@ export function extractReceiptUrls(raw: unknown): string[] {
 
   const urls = new Set<string>();
 
-  const hyperlinkFormula = /=HYPERLINK\s*\(\s*["']([^"']+)["']/i.exec(text);
-  if (hyperlinkFormula?.[1]) urls.add(hyperlinkFormula[1].trim());
+  const formulaPatterns = [
+    /=HYPERLINK\s*\(\s*["']([^"']+)["']/gi,
+    /=IMAGE\s*\(\s*["']([^"']+)["']/gi,
+  ];
+  for (const re of formulaPatterns) {
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) {
+      if (m[1]?.trim()) urls.add(m[1].trim());
+    }
+  }
 
   const urlRe = /https?:\/\/[^\s<>"')\]},;|]+/gi;
   for (const m of text.match(urlRe) || []) {
@@ -35,6 +55,29 @@ export function extractReceiptUrls(raw: unknown): string[] {
   }
 
   return Array.from(urls);
+}
+
+/** Convert share links (Google Drive, Dropbox) to direct-download URLs when possible. */
+export function normalizeReceiptDownloadUrl(url: string): string {
+  const trimmed = url.trim();
+  const driveFile = trimmed.match(/drive\.google\.com\/file\/d\/([^/]+)/i);
+  if (driveFile?.[1]) {
+    return `https://drive.google.com/uc?export=download&id=${driveFile[1]}`;
+  }
+  const driveOpen = trimmed.match(/drive\.google\.com\/open\?id=([^&]+)/i);
+  if (driveOpen?.[1]) {
+    return `https://drive.google.com/uc?export=download&id=${driveOpen[1]}`;
+  }
+  if (/dropbox\.com/i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      u.searchParams.set('dl', '1');
+      return u.toString();
+    } catch {
+      return trimmed.replace('dl=0', 'dl=1');
+    }
+  }
+  return trimmed;
 }
 
 function sniffImageMime(buf: Buffer): string | null {
@@ -82,6 +125,10 @@ function mimeFromUrl(url: string): string | null {
 function normalizeImageMime(contentType: string | null, url: string, buf: Buffer): string | null {
   const ct = (contentType || '').split(';')[0].trim().toLowerCase();
   if (IMAGE_MIMES.has(ct)) return ct === 'image/jpg' ? 'image/jpeg' : ct;
+  if (ct === 'application/octet-stream' || ct === 'binary/octet-stream') {
+    const sniffed = sniffImageMime(buf);
+    if (sniffed) return sniffed;
+  }
   const sniffed = sniffImageMime(buf);
   if (sniffed) return sniffed;
   const fromUrl = mimeFromUrl(url);
@@ -95,15 +142,11 @@ export interface ReceiptFetchWarning {
   message: string;
 }
 
-/** Download a remote receipt image and store it via saveReceipt (local disk or R2). */
-export async function fetchAndStoreReceiptFromUrl(
-  url: string,
-  rowLabel: string
-): Promise<{ path: string } | { warning: ReceiptFetchWarning }> {
+async function downloadImageBuffer(url: string): Promise<{ buf: Buffer; contentType: string | null } | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await fetch(normalizeReceiptDownloadUrl(url), {
       signal: controller.signal,
       redirect: 'follow',
       headers: {
@@ -111,30 +154,42 @@ export async function fetchAndStoreReceiptFromUrl(
         Accept: 'image/*,*/*;q=0.8',
       },
     });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) return null;
+    return { buf, contentType: res.headers.get('content-type') };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
-    if (!res.ok) {
+/** Download a remote receipt image and store it via saveReceipt (local disk or R2). */
+export async function fetchAndStoreReceiptFromUrl(
+  url: string,
+  rowLabel: string
+): Promise<{ path: string } | { warning: ReceiptFetchWarning }> {
+  try {
+    const downloaded = await downloadImageBuffer(url);
+    if (!downloaded) {
       return {
         warning: {
           row: 0,
           url,
-          message: `Row ${rowLabel}: receipt link expired or unreachable (HTTP ${res.status})`,
+          message: `Row ${rowLabel}: receipt link expired or unreachable`,
         },
       };
     }
 
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (!buf.length) {
-      return {
-        warning: { row: 0, url, message: `Row ${rowLabel}: receipt download returned empty data` },
-      };
-    }
+    const { buf, contentType } = downloaded;
     if (buf.length > MAX_RECEIPT_BYTES) {
       return {
         warning: { row: 0, url, message: `Row ${rowLabel}: receipt image too large (max 10 MB)` },
       };
     }
 
-    const mimeType = normalizeImageMime(res.headers.get('content-type'), url, buf);
+    const mimeType = normalizeImageMime(contentType, url, buf);
     if (!mimeType) {
       return {
         warning: { row: 0, url, message: `Row ${rowLabel}: URL did not return a supported image` },
@@ -151,13 +206,10 @@ export async function fetchAndStoreReceiptFromUrl(
 
     const path = await saveReceipt(buf, mimeType, filename);
     return { path };
-  } catch (e) {
-    const msg = e instanceof Error && e.name === 'AbortError' ? 'download timed out' : 'download failed';
+  } catch {
     return {
-      warning: { row: 0, url, message: `Row ${rowLabel}: receipt ${msg} — link may be expired` },
+      warning: { row: 0, url, message: `Row ${rowLabel}: receipt download failed — link may be expired` },
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -173,6 +225,24 @@ export function pickReceiptCell(row: Record<string, unknown>): unknown {
   return undefined;
 }
 
+/** Collect receipt URLs from the receipt column, or any cell in the row that contains image links. */
+export function collectReceiptUrlsFromRow(
+  row: Record<string, unknown>,
+  extraUrls: string[] = []
+): string[] {
+  const urls = new Set<string>(extraUrls.map((u) => u.trim()).filter(Boolean));
+  const receiptCell = pickReceiptCell(row);
+  for (const u of extractReceiptUrls(receiptCell)) urls.add(u);
+
+  if (!urls.size) {
+    for (const val of Object.values(row)) {
+      for (const u of extractReceiptUrls(val)) urls.add(u);
+    }
+  }
+
+  return Array.from(urls);
+}
+
 /** Find receipt column index in the first header row (for Excel hyperlink targets). */
 export function findReceiptColumnIndex(headerRow: string[]): number {
   for (let i = 0; i < headerRow.length; i++) {
@@ -184,7 +254,20 @@ export function findReceiptColumnIndex(headerRow: string[]): number {
   return -1;
 }
 
-/** Hyperlink targets from an .xlsx sheet keyed by data-row index (0 = first data row). */
+type SheetCell = { l?: { Target?: string }; v?: unknown; w?: string };
+
+function cellUrls(cell: SheetCell | undefined): string[] {
+  if (!cell) return [];
+  const urls = new Set<string>();
+  if (cell.l?.Target) {
+    for (const u of extractReceiptUrls(cell.l.Target)) urls.add(u);
+  }
+  for (const u of extractReceiptUrls(cell.v)) urls.add(u);
+  for (const u of extractReceiptUrls(cell.w)) urls.add(u);
+  return Array.from(urls);
+}
+
+/** Hyperlink targets from the receipt column keyed by data-row index (0 = first data row). */
 export function hyperlinkUrlsByDataRow(
   ws: XLSX.WorkSheet,
   receiptColIndex: number
@@ -195,21 +278,35 @@ export function hyperlinkUrlsByDataRow(
   const range = XLSX.utils.decode_range(ws['!ref']);
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const ref = XLSX.utils.encode_cell({ r, c: receiptColIndex });
-    const cell = ws[ref] as { l?: { Target?: string } } | undefined;
-    const target = cell?.l?.Target;
-    if (!target) continue;
-    const urls = extractReceiptUrls(target);
+    const urls = cellUrls(ws[ref] as SheetCell | undefined);
     if (urls.length) map.set(r - range.s.r - 1, urls);
+  }
+  return map;
+}
+
+/** Scan every column for Excel hyperlinks / embedded URLs (fallback when header does not match). */
+export function hyperlinkUrlsFromAllColumns(ws: XLSX.WorkSheet): Map<number, string[]> {
+  const map = new Map<number, string[]>();
+  if (!ws['!ref']) return map;
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = range.s.r + 1; r <= range.e.r; r++) {
+    const urls = new Set<string>();
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      for (const u of cellUrls(ws[ref] as SheetCell | undefined)) urls.add(u);
+    }
+    if (urls.size) map.set(r - range.s.r - 1, Array.from(urls));
   }
   return map;
 }
 
 export async function resolveImportReceiptPaths(
   rowNumber: number,
-  cellValue: unknown,
+  row: Record<string, unknown>,
   extraUrls: string[] = []
 ): Promise<{ paths: string[]; warnings: ReceiptFetchWarning[] }> {
-  const urls = Array.from(new Set([...extractReceiptUrls(cellValue), ...extraUrls]));
+  const urls = collectReceiptUrlsFromRow(row, extraUrls);
   const paths: string[] = [];
   const warnings: ReceiptFetchWarning[] = [];
   const rowLabel = String(rowNumber);

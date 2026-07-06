@@ -6,7 +6,7 @@ import { generateReceiptNumber, syncOption } from '@/lib/expense-server';
 import {
   findReceiptColumnIndex,
   hyperlinkUrlsByDataRow,
-  pickReceiptCell,
+  hyperlinkUrlsFromAllColumns,
   resolveImportReceiptPaths,
   type ReceiptFetchWarning,
 } from '@/lib/expense-import-receipts';
@@ -22,6 +22,7 @@ const ALIASES: Record<string, string[]> = {
   amount: ['amount', '金額', '金额', 'amount (hkd)', 'hkd', 'total', '總額', '总额', '金额(hkd)', '支出金額(hkd)', '支出金额(hkd)'],
   amount_rmb: ['amount (rmb)', 'rmb', '支出金額(rmb)', '支出金额(rmb)', '人民币', '人民幣'],
   supplier: ['supplier', '供應商', '供应商', 'merchant', '商戶', '商户', 'vendor'],
+  supplier_input: ['supplier input', '供應商(input)', '供应商(input)', '供應商 input', 'one-time supplier', '臨時供應商'],
   notes: ['notes', '注意事項', '注意事项', 'note', '備註', '备注'],
   special_notes: ['special notes', '特別事項', '特别事项', '特別注意', '特别注意', 'special note'],
 };
@@ -72,12 +73,23 @@ function pickField(row: Record<string, unknown>, field: string): unknown {
   return undefined;
 }
 
+function mergeUrlMaps(primary: Map<number, string[]>, fallback: Map<number, string[]>): Map<number, string[]> {
+  const merged = new Map(primary);
+  fallback.forEach((urls, idx) => {
+    if (!merged.has(idx) || !merged.get(idx)?.length) {
+      merged.set(idx, urls);
+    }
+  });
+  return merged;
+}
+
 interface PreparedRow {
   sheetRow: number;
   date: string | null;
   amountHkd: number | null;
   amountRmb: number | null;
-  supplier: string | null;
+  merchant: string | null;
+  supplierInput: string | null;
   paymentMethod: string | null;
   reason: string | null;
   platform: string | null;
@@ -125,7 +137,9 @@ export async function POST(request: Request) {
       const headerAoA = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
       const headerRow = (headerAoA[0] || []).map((c) => String(c ?? ''));
       const receiptCol = findReceiptColumnIndex(headerRow);
-      hyperlinkByRow = hyperlinkUrlsByDataRow(ws, receiptCol);
+      const byReceiptCol = hyperlinkUrlsByDataRow(ws, receiptCol);
+      const byAllCols = hyperlinkUrlsFromAllColumns(ws);
+      hyperlinkByRow = mergeUrlMaps(byReceiptCol, byAllCols);
     }
   } catch {
     return NextResponse.json({ error: 'Could not parse the file' }, { status: 400 });
@@ -147,15 +161,16 @@ export async function POST(request: Request) {
     const date = toISODate(pickField(row, 'date'));
     const amountHkd = toAmount(pickField(row, 'amount'));
     const amountRmb = toAmount(pickField(row, 'amount_rmb'));
-    const supplier = String(pickField(row, 'supplier') ?? '').trim() || null;
+    const merchant = String(pickField(row, 'supplier') ?? '').trim() || null;
+    const supplierInput = String(pickField(row, 'supplier_input') ?? '').trim() || null;
     const paymentMethod = String(pickField(row, 'payment_method') ?? '').trim() || null;
     const reason = String(pickField(row, 'category') ?? '').trim() || null;
     const platform = String(pickField(row, 'platform') ?? '').trim() || null;
     const notes = String(pickField(row, 'notes') ?? '').trim() || null;
     const specialNotes = String(pickField(row, 'special_notes') ?? '').trim() || null;
-    const receiptCell = pickReceiptCell(row);
+    const supplierLabel = merchant || supplierInput;
 
-    if (!date && amountHkd === null && amountRmb === null && !supplier && !paymentMethod && !reason && !platform) {
+    if (!date && amountHkd === null && amountRmb === null && !supplierLabel && !paymentMethod && !reason && !platform) {
       continue;
     }
 
@@ -165,7 +180,7 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const dupKey = `${date || ''}|${amountHkd ?? ''}|${amountRmb ?? ''}|${supplier || ''}`;
+    const dupKey = `${date || ''}|${amountHkd ?? ''}|${amountRmb ?? ''}|${supplierLabel || ''}`;
     if (seenInBatch.has(dupKey)) {
       skipped++;
       continue;
@@ -176,9 +191,10 @@ export async function POST(request: Request) {
          WHERE user_id = ? AND IFNULL(paid_date, '') = ?
            AND IFNULL(amount_hkd, -1) = IFNULL(?, -1)
            AND IFNULL(amount_rmb, -1) = IFNULL(?, -1)
-           AND IFNULL(merchant, '') = ?`
+           AND IFNULL(merchant, '') = ?
+           AND IFNULL(supplier_input, '') = ?`
       )
-      .get(ownerId, date || '', amountHkd, amountRmb, supplier || '');
+      .get(ownerId, date || '', amountHkd, amountRmb, merchant || '', supplierInput || '');
     if (existing) {
       skipped++;
       continue;
@@ -187,7 +203,7 @@ export async function POST(request: Request) {
 
     const { paths, warnings } = await resolveImportReceiptPaths(
       sheetRow,
-      receiptCell,
+      row,
       hyperlinkByRow.get(idx) || []
     );
     receiptWarnings.push(...warnings);
@@ -199,7 +215,8 @@ export async function POST(request: Request) {
       date,
       amountHkd,
       amountRmb,
-      supplier,
+      merchant,
+      supplierInput,
       paymentMethod,
       reason,
       platform,
@@ -214,8 +231,8 @@ export async function POST(request: Request) {
 
   const insertExpense = db.prepare(
     `INSERT INTO expenses
-       (user_id, created_by_user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, created_by_user_id, receipt_no, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertReceipt = db.prepare(
     'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
@@ -226,7 +243,7 @@ export async function POST(request: Request) {
       if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
       if (syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
       if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
-      if (row.supplier && syncOption(ownerId, 'supplier', row.supplier)) tagsAdded.push(row.supplier);
+      if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
       const receiptNo = generateReceiptNumber(ownerId, row.date);
       const primaryPath = row.receiptPaths[0] || null;
@@ -235,7 +252,8 @@ export async function POST(request: Request) {
         session.userId,
         receiptNo,
         row.reason || 'other',
-        row.supplier,
+        row.merchant,
+        row.supplierInput,
         row.amountHkd,
         row.amountRmb,
         row.date,
@@ -244,7 +262,7 @@ export async function POST(request: Request) {
         row.paymentMethod,
         row.notes,
         row.specialNotes,
-        'unpaid',
+        'paid',
         primaryPath
       );
       const expenseId = result.lastInsertRowid as number;

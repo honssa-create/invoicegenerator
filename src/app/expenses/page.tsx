@@ -373,8 +373,16 @@ export default function ExpensesPage() {
       if (data.tagsAdded?.length) msg += ` · added ${data.tagsAdded.length} new tag(s)`;
       if (data.receipt_warnings?.length) {
         console.warn('Expense import receipt warnings:', data.receipt_warnings);
+        const preview = data.receipt_warnings.slice(0, 2).join(' · ');
+        msg += ` · ${preview}`;
       }
-      setToast({ msg, kind: data.receipt_failed && !data.imported ? 'error' : 'success' });
+      const kind =
+        data.receipt_failed && !data.imported
+          ? 'error'
+          : data.receipt_failed && data.imported
+            ? 'success'
+            : 'success';
+      setToast({ msg, kind });
       loadOptions();
       loadExpenses();
     } catch {

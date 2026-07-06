@@ -2,6 +2,11 @@ import db from './db';
 import {
   CHARGE_TYPE_LABELS,
   chargeOutstanding,
+  cellPaymentStatus,
+  dueDateForPeriod,
+  formatBillingPeriodLabel,
+  formatDisplayDate,
+  formatPeriodRangeShort,
   type RentalChargeItem,
   type RentalChargeType,
   type RentalPayment,
@@ -9,6 +14,7 @@ import {
   type RentalTenant,
   type RentalUnit,
   type RentPaymentNoticeMatrix,
+  type RentPaymentNoticeSummary,
   type RentRecord,
 } from './rentals';
 
@@ -251,6 +257,30 @@ function periodRange(from: string, to: string): string[] {
   return periods;
 }
 
+function columnLabel(unitName: string, chargeType: RentalChargeType): string {
+  if (chargeType === 'rent') return unitName;
+  const short = chargeType === 'water' ? '水費' : '電費';
+  return `${unitName} ${short}`;
+}
+
+function buildReminderText(
+  period: string,
+  dueDateDisplay: string,
+  priorArrearsPeriods: string[],
+  grandTotal: number,
+): string {
+  if (grandTotal <= 0) return '所有款項已付清 All amounts settled.';
+  const [y, m] = period.split('-').map(Number);
+  const yy = String(y).slice(-2);
+  const parts: string[] = [];
+  if (priorArrearsPeriods.length) {
+    parts.push(`延期${formatPeriodRangeShort(priorArrearsPeriods)}租金`);
+  }
+  parts.push(formatBillingPeriodLabel(period));
+  const amount = new Intl.NumberFormat('en-HK', { style: 'currency', currency: 'HKD', maximumFractionDigits: 2 }).format(grandTotal);
+  return `${yy}年${m}月${dueDateDisplay.split('/')[0]}日前必須應繳交 ${parts.join('、')} ${amount}`;
+}
+
 export function buildRentPaymentNoticeMatrix(
   tenantId: number | string,
   userId: number,
@@ -261,10 +291,17 @@ export function buildRentPaymentNoticeMatrix(
   if (!tenant) return null;
 
   const units = getTenantUnits(tenant.id, userId);
+  const emptySummary: RentPaymentNoticeSummary = {
+    priorArrearsTotal: 0, priorArrearsPeriods: [], priorPaidTotal: 0, priorPaidPeriods: [],
+    currentPeriodDue: 0, currentPeriodOutstanding: 0,
+    dueDate: dueDateForPeriod(period, 1), dueDateDisplay: formatDisplayDate(dueDateForPeriod(period, 1)),
+    reminderText: '',
+  };
+
   if (!units.length) {
     return {
       tenant, units, period, fromPeriod: fromPeriod || period,
-      columns: [], rows: [], grandTotal: 0, totalAllocated: 0,
+      columns: [], rows: [], summary: emptySummary, grandTotal: 0, totalAllocated: 0,
     };
   }
 
@@ -275,23 +312,29 @@ export function buildRentPaymentNoticeMatrix(
      WHERE user_id = ? AND unit_id IN (${placeholders})`
   ).all(userId, ...unitIds) as ChargeRow[]).map(hydrateCharge);
 
+  const unitMeta = db.prepare(
+    `SELECT due_date_day FROM rental_units WHERE tenant_id = ? AND user_id = ? LIMIT 1`
+  ).get(tenantId, userId) as { due_date_day: number } | undefined;
+  const dueDateDay = unitMeta?.due_date_day || 1;
+  const dueDate = dueDateForPeriod(period, dueDateDay);
+  const dueDateDisplay = formatDisplayDate(dueDate);
+
   const from = fromPeriod || period;
-  const basePeriods = new Set(periodRange(from, period));
+  const basePeriods = new Set<string>();
 
   for (const c of charges) {
+    if (c.amountDue > 0 || c.amountAllocated > 0) basePeriods.add(c.billingPeriod);
     if (chargeOutstanding(c) > 0) basePeriods.add(c.billingPeriod);
-    if (basePeriods.has(c.billingPeriod) || c.billingPeriod <= period) {
-      if (c.billingPeriod >= from && c.billingPeriod <= period) basePeriods.add(c.billingPeriod);
-    }
   }
+  for (const p of periodRange(from, period)) basePeriods.add(p);
 
-  const periods = Array.from(basePeriods).sort();
+  const periods = Array.from(basePeriods).filter((p) => p <= period).sort();
   const columns = units.flatMap((unit) =>
     CHARGE_ORDER.map((chargeType) => ({
       unitId: unit.id,
       unitName: unit.unitName,
       chargeType,
-      label: `${unit.unitName} — ${CHARGE_TYPE_LABELS[chargeType]}`,
+      label: columnLabel(unit.unitName, chargeType),
     }))
   );
 
@@ -302,12 +345,20 @@ export function buildRentPaymentNoticeMatrix(
 
   let grandTotal = 0;
   let totalAllocated = 0;
+  let priorArrearsTotal = 0;
+  const priorArrearsPeriods: string[] = [];
+  let priorPaidTotal = 0;
+  const priorPaidPeriods: string[] = [];
+  let currentPeriodDue = 0;
+  let currentPeriodOutstanding = 0;
+
   const rows = periods.map((p) => {
     const cells = columns.map((col) => {
       const item = chargeMap.get(`${col.unitId}:${p}:${col.chargeType}`);
       const amountDue = item?.amountDue || 0;
       const amountAllocated = item?.amountAllocated || 0;
       const outstanding = chargeOutstanding({ amountDue, amountAllocated });
+      const status = cellPaymentStatus(item ?? null);
       grandTotal += outstanding;
       totalAllocated += amountAllocated;
       return {
@@ -315,13 +366,49 @@ export function buildRentPaymentNoticeMatrix(
         amountDue,
         amountAllocated,
         outstanding,
+        status,
       };
     });
-    return { period: p, cells, rowTotal: cells.reduce((s, c) => s + c.outstanding, 0) };
+    const rowTotal = cells.reduce((s, c) => s + c.outstanding, 0);
+    const rowDue = cells.reduce((s, c) => s + c.amountDue, 0);
+    const isFullyPaid = rowDue > 0 && rowTotal <= 0;
+
+    if (p < period) {
+      if (rowTotal > 0) {
+        priorArrearsTotal += rowTotal;
+        if (!priorArrearsPeriods.includes(p)) priorArrearsPeriods.push(p);
+      } else if (rowDue > 0) {
+        priorPaidTotal += rowDue;
+        if (!priorPaidPeriods.includes(p)) priorPaidPeriods.push(p);
+      }
+    } else if (p === period) {
+      currentPeriodDue = rowDue;
+      currentPeriodOutstanding = rowTotal;
+    }
+
+    return {
+      period: p,
+      periodLabel: formatBillingPeriodLabel(p),
+      cells,
+      rowTotal,
+      isFullyPaid,
+    };
   });
 
+  const summary: RentPaymentNoticeSummary = {
+    priorArrearsTotal,
+    priorArrearsPeriods: priorArrearsPeriods.sort(),
+    priorPaidTotal,
+    priorPaidPeriods: priorPaidPeriods.sort(),
+    currentPeriodDue,
+    currentPeriodOutstanding,
+    dueDate,
+    dueDateDisplay,
+    reminderText: buildReminderText(period, dueDateDisplay, priorArrearsPeriods, grandTotal),
+  };
+
   return {
-    tenant, units, period, fromPeriod: from, columns, rows, grandTotal, totalAllocated,
+    tenant, units, period, fromPeriod: from, columns, rows, summary, grandTotal, totalAllocated,
   };
 }
 

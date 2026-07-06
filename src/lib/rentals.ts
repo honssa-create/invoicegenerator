@@ -417,12 +417,27 @@ export interface RentPaymentNoticeCell {
   amountDue: number;
   amountAllocated: number;
   outstanding: number;
+  status: 'empty' | 'paid' | 'unpaid' | 'partial';
 }
 
 export interface RentPaymentNoticeRow {
   period: string;
+  periodLabel: string;
   cells: RentPaymentNoticeCell[];
   rowTotal: number;
+  isFullyPaid: boolean;
+}
+
+export interface RentPaymentNoticeSummary {
+  priorArrearsTotal: number;
+  priorArrearsPeriods: string[];
+  priorPaidTotal: number;
+  priorPaidPeriods: string[];
+  currentPeriodDue: number;
+  currentPeriodOutstanding: number;
+  dueDate: string;
+  dueDateDisplay: string;
+  reminderText: string;
 }
 
 export interface RentPaymentNoticeMatrix {
@@ -432,10 +447,41 @@ export interface RentPaymentNoticeMatrix {
   fromPeriod: string;
   columns: RentPaymentNoticeColumn[];
   rows: RentPaymentNoticeRow[];
+  summary: RentPaymentNoticeSummary;
   grandTotal: number;
   totalAllocated: number;
 }
 
+/** YYYY-MM → MM/YYYY for matrix row labels */
+export function formatBillingPeriodLabel(period: string): string {
+  const [y, m] = period.split('-');
+  if (!y || !m) return period;
+  return `${m}/${y}`;
+}
+
+/** Short period for reminder text e.g. 02-03/2026 */
+export function formatPeriodRangeShort(periods: string[]): string {
+  if (!periods.length) return '';
+  if (periods.length === 1) return formatBillingPeriodLabel(periods[0]);
+  const sorted = [...periods].sort();
+  const first = sorted[0].split('-');
+  const last = sorted[sorted.length - 1].split('-');
+  if (first[0] === last[0]) {
+    return `${first[1]}-${last[1]}/${first[0]}`;
+  }
+  return sorted.map(formatBillingPeriodLabel).join('、');
+}
+
 export function chargeOutstanding(item: Pick<RentalChargeItem, 'amountDue' | 'amountAllocated'>): number {
   return Math.max(0, (item.amountDue || 0) - (item.amountAllocated || 0));
+}
+
+export function cellPaymentStatus(
+  item: Pick<RentalChargeItem, 'amountDue' | 'amountAllocated'> | null
+): RentPaymentNoticeCell['status'] {
+  if (!item || item.amountDue <= 0) return 'empty';
+  const outstanding = chargeOutstanding(item);
+  if (outstanding <= 0) return 'paid';
+  if ((item.amountAllocated || 0) > 0) return 'partial';
+  return 'unpaid';
 }

@@ -87,9 +87,8 @@ function UnitRentPaymentNoticeContent() {
 
         <RentPaymentNoticeMatrixView matrix={matrix} compact />
 
-        <div className="mt-10 pt-6 border-t border-gray-200 text-xs text-gray-500 space-y-1">
-          <p>「/」= 該月無此費用 · 「—」= 已付清</p>
-          <p>Please settle outstanding amounts by the due date. 請於到期日前繳付以上款項。</p>
+        <div className="mt-6 text-xs text-gray-500 print:hidden">
+          <p>Document: 繳付租金通知單 Rent Payment Notice</p>
           {tenantId && (
             <p className="no-print">
               <Link href={`/rentals/tenants/${tenantId}`} className="text-brand-600">Manage tenant ledger →</Link>

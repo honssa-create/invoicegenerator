@@ -66,6 +66,7 @@ export default function ExpensesPage() {
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
   const [importing, setImporting] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -410,6 +411,41 @@ export default function ExpensesPage() {
     router.push(`/expenses/print?ids=${ids.join(',')}`);
   };
 
+  const deleteSelected = async () => {
+    if (!selected.size) return;
+    const ids = displayed.filter((e) => selected.has(e.id)).map((e) => e.id);
+    if (
+      !confirm(
+        `Move ${ids.length} expense(s) to Deleted Records? You can restore them within 60 days.`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      const res = await fetch('/api/expenses/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setToast({ msg: data.error || 'Bulk delete failed', kind: 'error' });
+        return;
+      }
+      setSelected(new Set());
+      if (detail && ids.includes(detail.id)) setDetail(null);
+      loadExpenses();
+      let msg = `Moved ${data.deleted} expense(s) to Deleted Records`;
+      if (data.not_found?.length) msg += ` · ${data.not_found.length} skipped (not found or no access)`;
+      setToast({ msg, kind: 'success' });
+    } catch {
+      setToast({ msg: 'Bulk delete failed', kind: 'error' });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
@@ -459,6 +495,13 @@ export default function ExpensesPage() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">Track costs, scan receipts, import sheets, and export your books</p>
         </div>
         <div className="page-actions">
+          <button
+            onClick={deleteSelected}
+            disabled={selected.size === 0 || bulkDeleting}
+            className="px-4 py-2 bg-white border border-red-200 text-red-700 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {bulkDeleting ? 'Deleting…' : `🗑 Delete Selected${selected.size > 0 ? ` (${selected.size})` : ''}`}
+          </button>
           <button
             onClick={printSelected}
             disabled={selected.size === 0}

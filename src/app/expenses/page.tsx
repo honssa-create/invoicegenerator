@@ -516,8 +516,8 @@ export default function ExpensesPage() {
                 {sortTh('platform', 'Platform 消費平台')}
                 {sortTh('supplier', 'Supplier 供應商')}
                 <th className="px-4 py-3 whitespace-nowrap">Notes 注意事項</th>
-                {sortTh('rmb', 'RMB')}
-                {sortTh('hkd', 'Amount HKD')}
+                {sortTh('rmb', '支出金額(RMB)')}
+                {sortTh('hkd', '支出金額(HKD)')}
                 {sortTh('payment', 'Payment 支付方式')}
                 {sortTh('reason', 'Reason 支出原因')}
                 <th className="px-4 py-3 whitespace-nowrap">Receipts 付款收據</th>
@@ -634,11 +634,11 @@ export default function ExpensesPage() {
                   <TagSelect value={form.payment_method} options={options.payment_method} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount (RMB) 人民幣</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">支出金額(RMB)</label>
                   <input type="number" step="0.01" min="0" value={form.amount_rmb} onChange={(ev) => setForm({ ...form, amount_rmb: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount (HKD) 港幣</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">支出金額(HKD)</label>
                   <input type="number" step="0.01" min="0" value={form.amount_hkd} onChange={(ev) => setForm({ ...form, amount_hkd: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
                 </div>
                 <div>
@@ -708,8 +708,8 @@ export default function ExpensesPage() {
               {detailField('Paid Date 支出日期', detail.paid_date)}
               {detailField('Platform 消費平台', detail.platform)}
               {detailField('Supplier 供應商', detail.merchant)}
-              {detailField('Amount RMB 人民幣', formatMoney(detail.amount_rmb, 'CNY'))}
-              {detailField('Amount HKD 港幣', formatMoney(detail.amount_hkd, 'HKD'))}
+              {detailField('支出金額(RMB)', formatMoney(detail.amount_rmb, 'CNY'))}
+              {detailField('支出金額(HKD)', formatMoney(detail.amount_hkd, 'HKD'))}
               {detailField('Payment 支付方式', detail.payment_method)}
               {detailField('Reason 支出原因', categoryLabel(detail.category))}
               {detailField('Order No. 訂單編號', detail.order_no)}

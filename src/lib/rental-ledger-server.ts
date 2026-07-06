@@ -6,9 +6,17 @@ import {
   deriveChargeItemStatus,
   dueDateForPeriod,
   formatBillingPeriodLabel,
+  formatDebitNoteChargeDescription,
+  formatDebitNotePeriodLong,
   formatDisplayDate,
   formatPeriodRangeShort,
   buildDebitNoteFooterRemark,
+  DEFAULT_DEBIT_NOTE_COMPANY,
+  displayRentalStatus,
+  type DebitNoteCompanyInfo,
+  type FormalDebitNote,
+  type FormalDebitNoteArrearRow,
+  type FormalDebitNoteLine,
   type RentalChargeItem,
   type RentalChargeItemStatus,
   type RentalChargeType,
@@ -22,6 +30,7 @@ import {
   type RentPaymentNoticeQuery,
   type RentPaymentNoticeSummary,
   type RentRecord,
+  type TenantBillingHistoryRow,
 } from './rentals';
 
 function logRentalActivity(
@@ -412,6 +421,10 @@ export function buildRentPaymentNoticeMatrix(
   if (mode === 'single' && filterUnitId) {
     units = units.filter((u) => u.id === filterUnitId);
     if (!units.length) return null;
+  } else if (query.unitIds?.length) {
+    const idSet = new Set(query.unitIds);
+    units = units.filter((u) => idSet.has(u.id));
+    if (!units.length) return null;
   }
 
   const emptySummary: RentPaymentNoticeSummary = {
@@ -522,6 +535,204 @@ export function buildRentPaymentNoticeMatrix(
 }
 
 // ---------------------------------------------------------------------------
+// Formal debit note (繳費通知單) document builder
+// ---------------------------------------------------------------------------
+
+const CHARGE_SORT: Record<RentalChargeType, number> = { rent: 1, water: 2, electricity: 3 };
+
+function buildArrearDetails(
+  items: { unitName: string; chargeType: RentalChargeType }[],
+): string {
+  const units = Array.from(new Set(items.map((i) => i.unitName)));
+  const types = Array.from(new Set(items.map((i) => i.chargeType)));
+  const unitStr = units.join(', ');
+  if (types.length === 1 && types[0] === 'rent') return `${unitStr} (全月租金)`;
+  const typeLabels = types.map((t) => CHARGE_TYPE_LABELS[t]).join('、');
+  return `${unitStr} (${typeLabels})`;
+}
+
+function buildSettledPeriodsNote(
+  charges: RentalChargeItem[],
+  arrearPeriods: string[],
+  targetPeriod: string,
+): string | null {
+  if (!arrearPeriods.length) return null;
+  const earliest = arrearPeriods.sort()[0];
+  const settled: string[] = [];
+  const [ey, em] = earliest.split('-').map(Number);
+  const [ty, tm] = targetPeriod.split('-').map(Number);
+  let y = ey;
+  let m = em;
+  while (y < ty || (y === ty && m < tm)) {
+    const p = `${y}-${String(m).padStart(2, '0')}`;
+    if (!arrearPeriods.includes(p)) {
+      const items = charges.filter((c) => c.billingPeriod === p && c.amountDue > 0);
+      if (items.length > 0 && items.every((c) => chargeOutstanding(c) <= 0)) {
+        settled.push(p);
+      }
+    }
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  if (!settled.length) return '*註：以下為截至發單日之未結清結餘*';
+  const labels = settled.map(formatDebitNotePeriodLong).join('及');
+  return `*註：${labels}賬項已結清，以下為截至發單日之未結清結餘*`;
+}
+
+export function peekDebitNoteNumber(userId: number, targetPeriod: string): string {
+  const ym = targetPeriod.replace('-', '');
+  const row = db.prepare(
+    'SELECT last_seq FROM rental_debit_note_seq WHERE user_id = ? AND note_month = ?'
+  ).get(userId, ym) as { last_seq: number } | undefined;
+  const next = (row?.last_seq ?? 0) + 1;
+  return `DN-${ym}-${String(next).padStart(4, '0')}`;
+}
+
+export function buildFormalDebitNote(
+  tenantId: number | string,
+  userId: number,
+  targetPeriod: string,
+  options?: RentPaymentNoticeQuery & { company?: Partial<DebitNoteCompanyInfo> },
+): FormalDebitNote | null {
+  const matrix = buildRentPaymentNoticeMatrix(tenantId, userId, targetPeriod, options);
+  if (!matrix) return null;
+
+  const unitIds = matrix.units.map((u) => u.id);
+  const charges = getTenantChargeItems(Number(tenantId), userId, unitIds);
+  const unitNameMap = Object.fromEntries(matrix.units.map((u) => [u.id, u.unitName]));
+
+  const currentCharges: FormalDebitNoteLine[] = [];
+  for (const col of matrix.columns) {
+    const item = charges.find(
+      (c) => c.unitId === col.unitId && c.billingPeriod === targetPeriod && c.chargeType === col.chargeType,
+    );
+    if (!item || item.amountDue <= 0) continue;
+    const outstanding = chargeOutstanding(item);
+    if (outstanding <= 0) continue;
+    currentCharges.push({
+      unitName: col.unitName,
+      description: formatDebitNoteChargeDescription(targetPeriod, col.chargeType),
+      amount: outstanding,
+    });
+  }
+  currentCharges.sort((a, b) => {
+    const unitCmp = a.unitName.localeCompare(b.unitName);
+    if (unitCmp !== 0) return unitCmp;
+    return 0;
+  });
+
+  const arrearPeriods = matrix.summary.priorArrearsPeriods.filter(Boolean).sort();
+  const arrearRows: FormalDebitNoteArrearRow[] = [];
+  for (const p of arrearPeriods) {
+    const periodItems = charges.filter((c) => c.billingPeriod === p && chargeOutstanding(c) > 0);
+    if (!periodItems.length) continue;
+    const amount = periodItems.reduce((s, c) => s + chargeOutstanding(c), 0);
+    arrearRows.push({
+      period: p,
+      periodLabel: formatBillingPeriodLabel(p),
+      details: buildArrearDetails(periodItems.map((c) => ({
+        unitName: unitNameMap[c.unitId] || `Unit ${c.unitId}`,
+        chargeType: c.chargeType,
+      }))),
+      amount,
+    });
+  }
+
+  const currentSubtotal = currentCharges.reduce((s, l) => s + l.amount, 0);
+  const totalArrears = arrearRows.reduce((s, r) => s + r.amount, 0);
+  const grandTotal = currentSubtotal + totalArrears;
+
+  const company: DebitNoteCompanyInfo = { ...DEFAULT_DEBIT_NOTE_COMPANY, ...options?.company };
+  const issuedDate = new Date().toISOString().slice(0, 10);
+  const premises = matrix.units.map((u) => u.unitName).join(', ');
+
+  const dueDateChinese = matrix.summary.dueDateDisplay.split('/').length >= 2
+    ? `${matrix.summary.dueDateDisplay.split('/')[2] || targetPeriod.split('-')[0]}年${Number(matrix.summary.dueDateDisplay.split('/')[1])}月${Number(matrix.summary.dueDateDisplay.split('/')[0])}日`
+    : matrix.summary.dueDateDisplay;
+
+  const paymentInstructions = [
+    `敬請於到期日 (${dueDateChinese}) 或之前繳清上述款項。`,
+    `支票抬頭請寫：「${company.chequePayee}」 / 轉帳銀行戶口：${company.bankAccount}。`,
+  ];
+
+  return {
+    noteNo: peekDebitNoteNumber(userId, targetPeriod),
+    issuedDate,
+    issuedDateDisplay: formatDisplayDate(issuedDate),
+    dueDate: matrix.summary.dueDate,
+    dueDateDisplay: matrix.summary.dueDateDisplay,
+    tenant: matrix.tenant,
+    premises,
+    targetPeriod,
+    targetPeriodLabel: formatBillingPeriodLabel(targetPeriod),
+    company,
+    currentCharges,
+    currentSubtotal,
+    arrearRows,
+    settledPeriodsNote: buildSettledPeriodsNote(charges, arrearPeriods, targetPeriod),
+    totalArrears,
+    grandTotal,
+    footerRemark: matrix.summary.reminderText,
+    paymentInstructions,
+    units: matrix.units,
+  };
+}
+
+export function getTenantBillingHistory(
+  tenantId: number | string,
+  userId: number,
+): TenantBillingHistoryRow[] {
+  const units = getTenantUnits(Number(tenantId), userId);
+  if (!units.length) return [];
+  const unitIds = units.map((u) => u.id);
+  const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
+  const placeholders = unitIds.map(() => '?').join(',');
+
+  interface HistoryRow {
+    id: number; unit_id: number; billing_period: string;
+    base_rent: number; water_fee: number; electricity_fee: number;
+    actual_amount: number; amount_paid: number; paid_date: string | null;
+    paid_at: string | null; status: string;
+  }
+
+  const rows = db.prepare(
+    `SELECT id, unit_id, billing_period, base_rent, water_fee, electricity_fee,
+            actual_amount, amount_paid, paid_date, paid_at, status
+     FROM rental_records
+     WHERE user_id = ? AND unit_id IN (${placeholders})
+     ORDER BY billing_period DESC, unit_id ASC`
+  ).all(userId, ...unitIds) as HistoryRow[];
+
+  return rows.map((r) => {
+    const record: RentRecord = {
+      id: r.id, user_id: userId, unitId: r.unit_id, billingPeriod: r.billing_period,
+      baseRent: r.base_rent || 0, baseRentPeriodFrom: null, baseRentPeriodTo: null,
+      waterFee: r.water_fee || 0, electricityFee: r.electricity_fee || 0,
+      waterPeriodFrom: null, waterPeriodTo: null, electricityPeriodFrom: null, electricityPeriodTo: null,
+      actualAmount: r.actual_amount || 0, amountPaid: r.amount_paid || 0,
+      status: (r.status as RentRecord['status']) || 'pending',
+      paidDate: r.paid_date || null, invoiceRef: null, receiptRef: null,
+      receiptImagePath: null, invoiceSentAt: null, receiptSentAt: null,
+      paidAt: r.paid_at || null, customInvoiceNote: null, customReceiptNote: null,
+      created_at: '', updated_at: '',
+    };
+    return {
+      recordId: r.id,
+      unitId: r.unit_id,
+      unitName: unitNameMap[r.unit_id] || `Unit ${r.unit_id}`,
+      billingPeriod: r.billing_period,
+      baseRent: r.base_rent || 0,
+      waterFee: r.water_fee || 0,
+      electricityFee: r.electricity_fee || 0,
+      actualAmount: r.actual_amount || 0,
+      amountPaid: r.amount_paid || 0,
+      paidDate: r.paid_date || r.paid_at?.slice(0, 10) || null,
+      status: displayRentalStatus(record),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Tenant detail — charges, payments, allocations
 // ---------------------------------------------------------------------------
 
@@ -549,8 +760,9 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
   const allocationLedger = getTenantAllocationLedger(tenant.id, userId);
   const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
   const paymentsWithAllocations = payments.map((p) => hydratePaymentWithAllocations(p, userId, unitNameMap));
+  const billingHistory = getTenantBillingHistory(tenant.id, userId);
 
-  return { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger };
+  return { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory };
 }
 
 function hydratePaymentWithAllocations(

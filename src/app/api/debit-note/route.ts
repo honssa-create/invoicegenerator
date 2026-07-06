@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server';
 import { requireApiAccess } from '@/lib/api-guard';
 import { rentalOwnerId } from '@/lib/org-server';
-import { buildRentPaymentNoticeMatrix } from '@/lib/rental-ledger-server';
+import { buildFormalDebitNote, buildRentPaymentNoticeMatrix } from '@/lib/rental-ledger-server';
 import { currentBillingPeriod, type DebitNoteMode } from '@/lib/rentals';
 
+function parseUnitIds(searchParams: URLSearchParams): number[] | undefined {
+  const raw = searchParams.get('unit_ids') || searchParams.get('unitIds');
+  if (!raw) return undefined;
+  const ids = raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
+  return ids.length ? ids : undefined;
+}
+
 /**
- * Debit note pivot matrix API.
- * GET /api/debit-note?tenantId=1&targetPeriod=2026-06&mode=grouped|single&unitId=4
+ * Debit note API.
+ * GET /api/debit-note?tenantId=1&targetPeriod=2026-06&mode=grouped&unitIds=1,2,3&format=formal|matrix
  */
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
@@ -28,6 +35,8 @@ export async function GET(request: Request) {
   const mode = (searchParams.get('mode') || 'grouped') as DebitNoteMode;
   const unitIdRaw = searchParams.get('unit_id') || searchParams.get('unitId');
   const unitId = unitIdRaw ? Number(unitIdRaw) : undefined;
+  const unitIds = parseUnitIds(searchParams);
+  const format = searchParams.get('format') || 'formal';
 
   if (mode === 'single' && !unitId) {
     return NextResponse.json({ error: 'unitId is required when mode is single' }, { status: 400 });
@@ -39,19 +48,28 @@ export async function GET(request: Request) {
     ? Number(paidLookbackRaw)
     : undefined;
 
-  try {
-    const matrix = buildRentPaymentNoticeMatrix(Number(tenantId), ownerId, targetPeriod, {
-      fromPeriod,
-      paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
-      mode,
-      unitId,
-    });
+  const query = {
+    fromPeriod,
+    paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
+    mode,
+    unitId,
+    unitIds,
+  };
 
-    if (!matrix) {
-      return NextResponse.json({ error: 'Tenant or unit not found' }, { status: 404 });
+  try {
+    if (format === 'matrix') {
+      const matrix = buildRentPaymentNoticeMatrix(Number(tenantId), ownerId, targetPeriod, query);
+      if (!matrix) {
+        return NextResponse.json({ error: 'Tenant or unit not found' }, { status: 404 });
+      }
+      return NextResponse.json(matrix);
     }
 
-    return NextResponse.json(matrix);
+    const doc = buildFormalDebitNote(Number(tenantId), ownerId, targetPeriod, query);
+    if (!doc) {
+      return NextResponse.json({ error: 'Tenant or unit not found' }, { status: 404 });
+    }
+    return NextResponse.json(doc);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Failed to build debit note' },

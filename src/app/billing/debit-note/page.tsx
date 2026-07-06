@@ -3,19 +3,18 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import RentPaymentNoticeMatrixView from '@/components/RentPaymentNoticeMatrix';
+import FormalDebitNoteDocument from '@/components/FormalDebitNoteDocument';
 import {
   currentBillingPeriod,
-  formatDisplayDate,
-  formatMoney,
   type DebitNoteMode,
-  type RentPaymentNoticeMatrix,
+  type FormalDebitNote,
 } from '@/lib/rentals';
 
 function DebitNoteContent() {
   const searchParams = useSearchParams();
   const tenantId = searchParams.get('tenantId') || searchParams.get('tenant_id');
   const unitId = searchParams.get('unitId') || searchParams.get('unit_id');
+  const unitIds = searchParams.get('unitIds') || searchParams.get('unit_ids');
   const targetPeriod =
     searchParams.get('targetPeriod') ||
     searchParams.get('target_period') ||
@@ -25,7 +24,7 @@ function DebitNoteContent() {
   const paidLookback = searchParams.get('paid_lookback') || '2';
   const from = searchParams.get('from') || '';
 
-  const [matrix, setMatrix] = useState<RentPaymentNoticeMatrix | null>(null);
+  const [doc, setDoc] = useState<FormalDebitNote | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -42,8 +41,10 @@ function DebitNoteContent() {
       targetPeriod,
       mode,
       paid_lookback: paidLookback,
+      format: 'formal',
     });
     if (unitId) qs.set('unitId', unitId);
+    if (unitIds) qs.set('unitIds', unitIds);
     if (from) qs.set('from', from);
 
     fetch(`/api/debit-note?${qs}`)
@@ -57,18 +58,18 @@ function DebitNoteContent() {
         return data;
       })
       .then((d) => {
-        if (d?.tenant) setMatrix(d);
+        if (d?.tenant) setDoc(d);
         else if (!error) setError('Debit note not available');
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
-  }, [tenantId, unitId, targetPeriod, mode, paidLookback, from]);
+  }, [tenantId, unitId, unitIds, targetPeriod, mode, paidLookback, from]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
   }
 
-  if (error || !matrix) {
+  if (error || !doc) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-gray-500 px-6 text-center">
         <p>{error || 'Debit note unavailable'}</p>
@@ -76,11 +77,6 @@ function DebitNoteContent() {
       </div>
     );
   }
-
-  const issued = formatDisplayDate(new Date().toISOString().slice(0, 10));
-  const title = mode === 'single'
-    ? `繳費通知單 Debit Note — ${matrix.units[0]?.unitName || 'Single Unit'}`
-    : '繳費通知單 Debit Note — All Units 綜合';
 
   return (
     <div className="rent-notice-print-root min-h-screen bg-gray-100 print:bg-white">
@@ -93,30 +89,8 @@ function DebitNoteContent() {
         </button>
       </div>
 
-      <main className="max-w-5xl mx-auto my-8 bg-white p-10 shadow print:shadow-none print:my-0 print:p-6">
-        <div className="border-b-4 border-brand-600 pb-6 mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{title}</h1>
-          <p className="text-gray-500 mt-2 text-sm">
-            Target {matrix.targetPeriod} · {matrix.fromPeriod} → {matrix.targetPeriod}
-            {mode === 'single' ? ' · Single unit' : ` · ${matrix.units.length} unit(s)`}
-            · Issued {issued}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-6 mb-8 text-sm">
-          <div>
-            <p className="text-gray-400 uppercase text-xs">Tenant 租客</p>
-            <p className="font-semibold text-lg mt-1">{matrix.tenant.name}</p>
-            {matrix.tenant.phone && <p className="text-gray-600">{matrix.tenant.phone}</p>}
-            <p className="text-gray-600">{matrix.tenant.email || '—'}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-gray-400 uppercase text-xs">Total Outstanding 應付總額</p>
-            <p className="text-3xl font-bold text-red-700 mt-1">{formatMoney(matrix.grandTotal)}</p>
-          </div>
-        </div>
-
-        <RentPaymentNoticeMatrixView matrix={matrix} compact />
+      <main className="max-w-4xl mx-auto my-8 bg-white p-10 shadow print:shadow-none print:my-0 print:p-8">
+        <FormalDebitNoteDocument doc={doc} />
       </main>
     </div>
   );

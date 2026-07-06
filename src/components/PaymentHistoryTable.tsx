@@ -26,7 +26,7 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate }: 
       <thead className="bg-gray-50 text-xs uppercase text-gray-500">
         <tr>
           <th className="px-4 py-3 text-left w-8" />
-          <th className="px-4 py-3 text-left">Payment Date 收款日期</th>
+          <th className="px-4 py-3 text-left">Paid Date 交租日</th>
           <th className="px-4 py-3 text-left">Method / Ref</th>
           <th className="px-4 py-3 text-right">Total 總額</th>
           <th className="px-4 py-3 text-right">Allocated</th>

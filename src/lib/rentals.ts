@@ -515,6 +515,94 @@ export interface RentPaymentNoticeQuery {
   /** grouped = all tenant units; single = one unit only (requires unitId). */
   mode?: DebitNoteMode;
   unitId?: number;
+  /** Subset of units for grouped debit note (optional). */
+  unitIds?: number[];
+}
+
+/** Company header block for formal debit notes. */
+export interface DebitNoteCompanyInfo {
+  nameZh: string;
+  nameEn: string;
+  address: string;
+  phone: string;
+  taxId: string;
+  chequePayee: string;
+  bankAccount: string;
+}
+
+export const DEFAULT_DEBIT_NOTE_COMPANY: DebitNoteCompanyInfo = {
+  nameZh: '鴻宇商標有限公司 / 鴻宇有限公司',
+  nameEn: 'HONOUR LABEL LIMITED / HONOUR ELITE LIMITED',
+  address: '(公司地址)',
+  phone: '(電話)',
+  taxId: '(稅務編號)',
+  chequePayee: '鴻宇商標有限公司',
+  bankAccount: '匯豐銀行 004-xxx-xxxxxx',
+};
+
+export interface FormalDebitNoteLine {
+  unitName: string;
+  description: string;
+  amount: number;
+}
+
+export interface FormalDebitNoteArrearRow {
+  period: string;
+  periodLabel: string;
+  details: string;
+  amount: number;
+}
+
+export interface FormalDebitNote {
+  noteNo: string;
+  issuedDate: string;
+  issuedDateDisplay: string;
+  dueDate: string;
+  dueDateDisplay: string;
+  tenant: RentalTenant;
+  premises: string;
+  targetPeriod: string;
+  targetPeriodLabel: string;
+  company: DebitNoteCompanyInfo;
+  currentCharges: FormalDebitNoteLine[];
+  currentSubtotal: number;
+  arrearRows: FormalDebitNoteArrearRow[];
+  settledPeriodsNote: string | null;
+  totalArrears: number;
+  grandTotal: number;
+  footerRemark: string;
+  paymentInstructions: string[];
+  units: Pick<RentalUnit, 'id' | 'unitName'>[];
+}
+
+/** Per-unit billing row for tenant payment history. */
+export interface TenantBillingHistoryRow {
+  recordId: number;
+  unitId: number;
+  unitName: string;
+  billingPeriod: string;
+  baseRent: number;
+  waterFee: number;
+  electricityFee: number;
+  actualAmount: number;
+  amountPaid: number;
+  paidDate: string | null;
+  status: RentalDisplayStatus;
+}
+
+/** YYYY-MM → 2026年6月份 for debit note line descriptions */
+export function formatDebitNotePeriodLong(period: string): string {
+  const [y, m] = period.split('-');
+  if (!y || !m) return period;
+  return `${y}年${Number(m)}月份`;
+}
+
+/** Charge line description e.g. 2026年6月份 租金 (Rent) */
+export function formatDebitNoteChargeDescription(period: string, chargeType: RentalChargeType): string {
+  const p = formatDebitNotePeriodLong(period);
+  if (chargeType === 'rent') return `${p} 租金 (Rent)`;
+  if (chargeType === 'water') return `${p} 水費 (Utilities)`;
+  return `${p} 電費 (Utilities)`;
 }
 
 /** YYYY-MM → MM/YYYY for matrix row labels */

@@ -17,10 +17,13 @@ import { useAuth } from '@/components/AuthProvider';
 import {
   CHARGE_TYPE_LABELS,
   CHARGE_STATUS_LABELS,
+  RENTAL_STATUS_BADGE,
+  RENTAL_STATUS_LABELS,
   chargeOutstanding,
   currentBillingPeriod,
   formatDisplayDate,
   formatMoney,
+  formatUtilityAmount,
   todayFormDate,
   type RentalChargeItem,
   type RentalPayment,
@@ -28,6 +31,7 @@ import {
   type RentalPaymentWithAllocations,
   type RentalTenant,
   type RentPaymentNoticeMatrix as MatrixType,
+  type TenantBillingHistoryRow,
 } from '@/lib/rentals';
 import { isSectionReadOnly } from '@/lib/permissions';
 
@@ -38,6 +42,7 @@ interface TenantDetail {
   payments: RentalPayment[];
   paymentsWithAllocations: RentalPaymentWithAllocations[];
   allocationLedger: RentalPaymentAllocationDetail[];
+  billingHistory: TenantBillingHistoryRow[];
 }
 
 export default function TenantDetailPage() {
@@ -58,6 +63,7 @@ export default function TenantDetailPage() {
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
   const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [allocations, setAllocations] = useState<Record<number, string>>({});
+  const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
 
   const load = () => {
     setLoading(true);
@@ -75,7 +81,13 @@ export default function TenantDetailPage() {
       }),
     ])
       .then(([d, m]) => {
-        if (d.tenant) setDetail(d);
+        if (d.tenant) {
+          setDetail(d);
+          setSelectedUnitIds((prev) => {
+            if (prev.length && d.units?.every((u: { id: number }) => prev.includes(u.id))) return prev;
+            return (d.units || []).map((u: { id: number }) => u.id);
+          });
+        }
         if (m?.tenant) setMatrix(m);
       })
       .catch((e) => setLoadError(e instanceof Error ? e.message : 'Failed to load tenant'))
@@ -189,7 +201,27 @@ export default function TenantDetailPage() {
     );
   }
 
-  const { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger } = detail;
+  const { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory } = detail;
+
+  const toggleUnit = (unitId: number) => {
+    setSelectedUnitIds((prev) =>
+      prev.includes(unitId) ? prev.filter((id) => id !== unitId) : [...prev, unitId],
+    );
+  };
+
+  const debitNoteHref = () => {
+    const qs = new URLSearchParams({
+      tenantId: String(id),
+      targetPeriod: period,
+      mode: 'grouped',
+      paid_lookback: String(paidLookback),
+    });
+    if (fromPeriod) qs.set('from', fromPeriod);
+    if (selectedUnitIds.length && selectedUnitIds.length < units.length) {
+      qs.set('unitIds', selectedUnitIds.join(','));
+    }
+    return `/billing/debit-note?${qs}`;
+  };
 
   return (
     <AppLayout>
@@ -210,8 +242,8 @@ export default function TenantDetailPage() {
           <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} title="Paid lookback months" />
           <span className="text-xs text-gray-400 self-center">paid mo.</span>
           <Link
-            href={`/billing/debit-note?tenantId=${id}&targetPeriod=${period}&mode=grouped&paid_lookback=${paidLookback}${fromPeriod ? `&from=${fromPeriod}` : ''}`}
-            className="btn border border-gray-300 text-gray-700 hover:bg-gray-50"
+            href={debitNoteHref()}
+            className={`btn border border-gray-300 text-gray-700 hover:bg-gray-50 ${!selectedUnitIds.length ? 'opacity-40 pointer-events-none' : ''}`}
           >
             繳費通知單 Debit Note
           </Link>
@@ -231,9 +263,16 @@ export default function TenantDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 uppercase">Units 單位</p>
           <p className="text-2xl font-bold mt-1">{units.length}</p>
-          <ul className="mt-2 text-sm text-gray-600 space-y-1">
+          <p className="text-xs text-gray-500 mt-2 mb-1">Select units for grouped debit note 合併繳費通知單</p>
+          <ul className="mt-1 text-sm text-gray-600 space-y-1.5">
             {units.map((u) => (
-              <li key={u.id}>
+              <li key={u.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedUnitIds.includes(u.id)}
+                  onChange={() => toggleUnit(u.id)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
                 <Link href={`/rentals/${u.id}`} className="text-brand-600 hover:underline">{u.unitName}</Link>
               </li>
             ))}
@@ -302,6 +341,55 @@ export default function TenantDetailPage() {
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold">Payment History 以往租金紀錄</h2>
+          <p className="text-xs text-gray-500 mt-0.5">All units under this tenant · includes paid date 交租日</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="px-4 py-3 text-left">Unit 單位</th>
+                <th className="px-4 py-3 text-left">Period 帳期</th>
+                <th className="px-4 py-3 text-right">Rent 租金</th>
+                <th className="px-4 py-3 text-right">Water 水費</th>
+                <th className="px-4 py-3 text-right">Elec 電費</th>
+                <th className="px-4 py-3 text-right">Total 總額</th>
+                <th className="px-4 py-3 text-left">Paid Date 交租日</th>
+                <th className="px-4 py-3 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {(billingHistory || []).map((r) => (
+                <tr key={`${r.unitId}-${r.billingPeriod}`} className="hover:bg-gray-50/80">
+                  <td className="px-4 py-3 font-medium">{r.unitName}</td>
+                  <td className="px-4 py-3">{r.billingPeriod}</td>
+                  <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.baseRent)}</td>
+                  <td className="px-4 py-3 text-right text-gray-600">{formatUtilityAmount(r.waterFee)}</td>
+                  <td className="px-4 py-3 text-right text-gray-600">{formatUtilityAmount(r.electricityFee)}</td>
+                  <td className="px-4 py-3 text-right font-semibold">
+                    {formatMoney(r.actualAmount)}
+                    {r.amountPaid > 0 && r.amountPaid < r.actualAmount && (
+                      <p className="text-[10px] text-orange-600 font-normal">Paid {formatMoney(r.amountPaid)}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">{formatDisplayDate(r.paidDate) || '—'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[r.status]}`}>
+                      {RENTAL_STATUS_LABELS[r.status]}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {(!billingHistory || billingHistory.length === 0) && (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No billing history yet</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="font-semibold">Payments 收款紀錄</h2>
           <p className="text-xs text-gray-500 mt-0.5">Expand rows for itemized unit / period / charge-type breakdown</p>
         </div>
@@ -333,7 +421,7 @@ export default function TenantDetailPage() {
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-500">Date 日期</label>
+                  <label className="text-xs text-gray-500">Paid Date 交租日</label>
                   <input className={inp} value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} placeholder="DD/MM/YYYY" />
                 </div>
                 <div>

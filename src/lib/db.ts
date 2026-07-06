@@ -635,6 +635,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_rental_payments_tenant ON rental_payments(tenant_id);
   CREATE INDEX IF NOT EXISTS idx_rental_allocations_payment ON rental_payment_allocations(payment_id);
   CREATE INDEX IF NOT EXISTS idx_rental_allocations_charge ON rental_payment_allocations(charge_item_id);
+
+  CREATE TABLE IF NOT EXISTS rental_debit_note_seq (
+    user_id INTEGER NOT NULL,
+    note_month TEXT NOT NULL,
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, note_month),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 {

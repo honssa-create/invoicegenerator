@@ -660,6 +660,17 @@ db.exec(`
       `);
     } catch { /* exists */ }
   }
+  if (!ciCols.includes('tenant_id')) {
+    try {
+      db.exec(`ALTER TABLE rental_charge_items ADD COLUMN tenant_id INTEGER REFERENCES rental_tenants(id)`);
+      db.exec(`
+        UPDATE rental_charge_items SET tenant_id = (
+          SELECT tenant_id FROM rental_units WHERE rental_units.id = rental_charge_items.unit_id
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rental_charge_items_tenant ON rental_charge_items(tenant_id)`);
+    } catch { /* exists */ }
+  }
 }
 
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.

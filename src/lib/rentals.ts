@@ -380,6 +380,7 @@ export interface RentalTenant {
 export interface RentalChargeItem {
   id: number;
   user_id: number;
+  tenantId: number | null;
   unitId: number;
   billingPeriod: string;
   chargeType: RentalChargeType;
@@ -389,6 +390,21 @@ export interface RentalChargeItem {
   legacyRecordId: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Payment with itemized allocation breakdown for history tables. */
+export interface RentalPaymentWithAllocations extends RentalPayment {
+  allocations: RentalPaymentAllocationLine[];
+}
+
+export interface RentalPaymentAllocationLine {
+  id: number;
+  amount: number;
+  chargeItemId: number;
+  unitId: number;
+  unitName: string;
+  billingPeriod: string;
+  chargeType: RentalChargeType;
 }
 
 export interface RentalPayment {
@@ -469,6 +485,8 @@ export interface RentPaymentNoticeSummary {
   reminderText: string;
 }
 
+export type DebitNoteMode = 'grouped' | 'single';
+
 export interface RentPaymentNoticeMatrix {
   tenant: RentalTenant;
   units: Pick<RentalUnit, 'id' | 'unitName'>[];
@@ -476,6 +494,9 @@ export interface RentPaymentNoticeMatrix {
   period: string;
   targetPeriod: string;
   fromPeriod: string;
+  mode: DebitNoteMode;
+  /** Set when mode === 'single'. */
+  unitId: number | null;
   columns: RentPaymentNoticeColumn[];
   rows: RentPaymentNoticeRow[];
   summary: RentPaymentNoticeSummary;
@@ -491,6 +512,9 @@ export interface RentPaymentNoticeQuery {
   fromPeriod?: string;
   /** Include up to N recent fully-paid months before target (default 2). */
   paidLookbackMonths?: number;
+  /** grouped = all tenant units; single = one unit only (requires unitId). */
+  mode?: DebitNoteMode;
+  unitId?: number;
 }
 
 /** YYYY-MM → MM/YYYY for matrix row labels */

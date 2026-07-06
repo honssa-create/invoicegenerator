@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import DebitNoteActions from '@/components/DebitNoteActions';
+import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import ChargeAllocationGrid, {
   chargeRowsFromRecord,
   fillOutstandingValues,
@@ -33,6 +35,7 @@ import {
   type RentalActivityLog,
   type RentalChargeItem,
   type RentalPaymentReceipt,
+  type RentalPaymentWithAllocations,
   type RentalUnit,
   type RentalUnitWithRecord,
 } from '@/lib/rentals';
@@ -44,6 +47,7 @@ interface DetailPayload {
   history: RentRecord[];
   activities: RentalActivityLog[];
   latestReceipt: RentalPaymentReceipt | null;
+  paymentHistory?: RentalPaymentWithAllocations[];
 }
 
 export default function RentalDetailPage() {
@@ -359,12 +363,12 @@ function RentalDetailInner() {
                 >
                   Tenant Ledger 租客
                 </Link>
-                <Link
-                  href={`/rentals/units/${unit.id}/rent-payment-notice?period=${period}`}
-                  className="px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700"
-                >
-                  繳付租金通知單 Notice
-                </Link>
+                <DebitNoteActions
+                  tenantId={unit.tenantId}
+                  unitId={unit.id}
+                  unitName={unit.unitName}
+                  period={period}
+                />
               </>
             ) : (
               <p className="text-xs text-amber-600 self-center">Save tenant name to enable rent payment notice</p>
@@ -537,6 +541,16 @@ function RentalDetailInner() {
                   📝 Add Note
                 </button>
               </div>
+            </div>
+          )}
+
+          {unit.tenantId && (data.paymentHistory?.length ?? 0) > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="font-semibold text-gray-900">收款紀錄 Payment Receipts</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Allocations for {unit.unitName} only</p>
+              </div>
+              <PaymentHistoryTable payments={data.paymentHistory || []} readOnly />
             </div>
           )}
 

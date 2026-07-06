@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import { requireApiAccess } from '@/lib/api-guard';
 import { rentalOwnerId } from '@/lib/org-server';
 import { buildRentPaymentNoticeMatrix } from '@/lib/rental-ledger-server';
-import { currentBillingPeriod } from '@/lib/rentals';
+import { currentBillingPeriod, type DebitNoteMode } from '@/lib/rentals';
 
 /**
- * Tenant-scoped debit note / rent payment notice (multi-unit pivot matrix).
- * GET /api/debit-note?tenant_id=1&target_period=2026-06&paid_lookback=2&from=2026-02
+ * Debit note pivot matrix API.
+ * GET /api/debit-note?tenantId=1&targetPeriod=2026-06&mode=grouped|single&unitId=4
  */
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
 
   const tenantId = searchParams.get('tenant_id') || searchParams.get('tenantId');
   if (!tenantId) {
-    return NextResponse.json({ error: 'tenant_id query parameter is required' }, { status: 400 });
+    return NextResponse.json({ error: 'tenantId query parameter is required' }, { status: 400 });
   }
 
   const targetPeriod =
@@ -25,20 +25,37 @@ export async function GET(request: Request) {
     searchParams.get('period') ||
     currentBillingPeriod();
 
+  const mode = (searchParams.get('mode') || 'grouped') as DebitNoteMode;
+  const unitIdRaw = searchParams.get('unit_id') || searchParams.get('unitId');
+  const unitId = unitIdRaw ? Number(unitIdRaw) : undefined;
+
+  if (mode === 'single' && !unitId) {
+    return NextResponse.json({ error: 'unitId is required when mode is single' }, { status: 400 });
+  }
+
   const fromPeriod = searchParams.get('from') || searchParams.get('from_period') || undefined;
   const paidLookbackRaw = searchParams.get('paid_lookback') || searchParams.get('paidLookback');
   const paidLookbackMonths = paidLookbackRaw !== null && paidLookbackRaw !== ''
     ? Number(paidLookbackRaw)
     : undefined;
 
-  const matrix = buildRentPaymentNoticeMatrix(Number(tenantId), ownerId, targetPeriod, {
-    fromPeriod,
-    paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
-  });
+  try {
+    const matrix = buildRentPaymentNoticeMatrix(Number(tenantId), ownerId, targetPeriod, {
+      fromPeriod,
+      paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
+      mode,
+      unitId,
+    });
 
-  if (!matrix) {
-    return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
+    if (!matrix) {
+      return NextResponse.json({ error: 'Tenant or unit not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(matrix);
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Failed to build debit note' },
+      { status: 400 },
+    );
   }
-
-  return NextResponse.json(matrix);
 }

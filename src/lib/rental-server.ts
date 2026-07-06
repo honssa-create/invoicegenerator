@@ -2,7 +2,14 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
-import { ensureUnitTenantLink, allocateChargeItemsDirect, getChargeItemsForRecord, recordTenantPaymentWithAllocations, syncChargeItemsFromRecord } from './rental-ledger-server';
+import {
+  allocateChargeItemsDirect,
+  ensureUnitTenantLink,
+  getChargeItemsForRecord,
+  getUnitPaymentHistory,
+  recordTenantPaymentWithAllocations,
+  syncChargeItemsFromRecord,
+} from './rental-ledger-server';
 import {
   computeTotal,
   chargeOutstanding,
@@ -408,6 +415,7 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
   return {
     unit, currentRecord, history, activities,
     chargeItems,
+    paymentHistory: getUnitPaymentHistory(unit.id, userId),
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
   };
 }

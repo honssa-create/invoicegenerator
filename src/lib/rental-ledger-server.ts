@@ -14,6 +14,7 @@ import {
   type RentalPayment,
   type RentalPaymentAllocation,
   type RentalPaymentAllocationDetail,
+  type RentalPaymentWithAllocations,
   type RentalTenant,
   type RentalUnit,
   type RentPaymentNoticeMatrix,
@@ -42,7 +43,7 @@ interface TenantRow {
 }
 
 interface ChargeRow {
-  id: number; user_id: number; unit_id: number; billing_period: string;
+  id: number; user_id: number; tenant_id?: number | null; unit_id: number; billing_period: string;
   charge_type: RentalChargeType; amount_due: number; amount_allocated: number;
   status?: RentalChargeItemStatus;
   legacy_record_id: number | null; created_at: string; updated_at: string;
@@ -74,7 +75,7 @@ function hydrateCharge(row: ChargeRow): RentalChargeItem {
     ? row.status
     : deriveChargeItemStatus(amountDue, amountAllocated);
   return {
-    id: row.id, user_id: row.user_id, unitId: row.unit_id,
+    id: row.id, user_id: row.user_id, tenantId: row.tenant_id ?? null, unitId: row.unit_id,
     billingPeriod: row.billing_period, chargeType: row.charge_type,
     amountDue, amountAllocated, status,
     legacyRecordId: row.legacy_record_id, created_at: row.created_at, updated_at: row.updated_at,
@@ -205,22 +206,28 @@ function distributeLegacyPaid(amountPaid: number, dues: { id: number; due: numbe
 }
 
 export function syncChargeItemsFromRecord(record: RentRecord) {
+  const unitTenant = db.prepare(
+    'SELECT tenant_id FROM rental_units WHERE id = ? AND user_id = ?'
+  ).get(record.unitId, record.user_id) as { tenant_id: number | null } | undefined;
+  const tenantId = unitTenant?.tenant_id ?? null;
+
   const charges: [RentalChargeType, number][] = [
     ['rent', record.baseRent || 0],
     ['water', record.waterFee || 0],
     ['electricity', record.electricityFee || 0],
   ];
   const upsert = db.prepare(
-    `INSERT INTO rental_charge_items (user_id, unit_id, billing_period, charge_type, amount_due, amount_allocated, legacy_record_id)
-     VALUES (?, ?, ?, ?, ?, 0, ?)
+    `INSERT INTO rental_charge_items (user_id, tenant_id, unit_id, billing_period, charge_type, amount_due, amount_allocated, legacy_record_id)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)
      ON CONFLICT(user_id, unit_id, billing_period, charge_type) DO UPDATE SET
        amount_due = excluded.amount_due,
+       tenant_id = excluded.tenant_id,
        legacy_record_id = excluded.legacy_record_id,
        updated_at = datetime('now')`
   );
   const itemIds: { id: number; due: number }[] = [];
   for (const [type, due] of charges) {
-    upsert.run(record.user_id, record.unitId, record.billingPeriod, type, due, record.id);
+    upsert.run(record.user_id, tenantId, record.unitId, record.billingPeriod, type, due, record.id);
     const row = db.prepare(
       `SELECT id, amount_due FROM rental_charge_items
        WHERE user_id = ? AND unit_id = ? AND billing_period = ? AND charge_type = ?`
@@ -295,15 +302,15 @@ function buildReminderText(
   grandTotal: number,
 ): string {
   if (grandTotal <= 0) return '所有款項已付清 All amounts settled.';
-  const [y, m] = period.split('-').map(Number);
-  const yy = String(y).slice(-2);
   const parts: string[] = [];
   if (priorArrearsPeriods.length) {
-    parts.push(`延期${formatPeriodRangeShort(priorArrearsPeriods)}租金`);
+    parts.push(`延期 ${formatPeriodRangeShort(priorArrearsPeriods)} 租金`);
   }
   parts.push(formatBillingPeriodLabel(period));
   const amount = new Intl.NumberFormat('en-HK', { style: 'currency', currency: 'HKD', maximumFractionDigits: 2 }).format(grandTotal);
-  return `${yy}年${m}月${dueDateDisplay.split('/')[0]}日前必須應繳交 ${parts.join('、')} ${amount}`;
+  const [day, month, year] = dueDateDisplay.split('/');
+  const yr = year || period.split('-')[0];
+  return `請於 ${yr}年${month}月${day}日前 繳交 ${parts.join('、')} 總計 ${amount}`;
 }
 
 function normalizeNoticeQuery(
@@ -408,10 +415,22 @@ export function buildRentPaymentNoticeMatrix(
 ): RentPaymentNoticeMatrix | null {
   const query = normalizeNoticeQuery(options);
   const paidLookbackMonths = query.paidLookbackMonths ?? 2;
+  const mode = query.mode ?? 'grouped';
+  const filterUnitId = query.unitId ?? null;
+
+  if (mode === 'single' && !filterUnitId) {
+    throw new Error('unitId is required when mode is single');
+  }
+
   const tenant = getRentalTenant(tenantId, userId);
   if (!tenant) return null;
 
-  const units = getTenantUnits(tenant.id, userId);
+  let units = getTenantUnits(tenant.id, userId);
+  if (mode === 'single' && filterUnitId) {
+    units = units.filter((u) => u.id === filterUnitId);
+    if (!units.length) return null;
+  }
+
   const emptySummary: RentPaymentNoticeSummary = {
     priorArrearsTotal: 0, priorArrearsPeriods: [], priorPaidTotal: 0, priorPaidPeriods: [],
     currentPeriodDue: 0, currentPeriodOutstanding: 0,
@@ -422,13 +441,17 @@ export function buildRentPaymentNoticeMatrix(
   if (!units.length) {
     return {
       tenant, units, period: targetPeriod, targetPeriod, fromPeriod: targetPeriod,
+      mode, unitId: filterUnitId,
       columns: [], rows: [], summary: emptySummary, grandTotal: 0, totalAllocated: 0,
       paidLookbackMonths,
     };
   }
 
   const unitIds = units.map((u) => u.id);
-  const charges = getTenantChargeItems(tenant.id, userId, unitIds);
+  let charges = getTenantChargeItems(tenant.id, userId, unitIds);
+  if (mode === 'single' && filterUnitId) {
+    charges = charges.filter((c) => c.unitId === filterUnitId);
+  }
 
   const unitMeta = db.prepare(
     `SELECT due_date_day FROM rental_units WHERE tenant_id = ? AND user_id = ? LIMIT 1`
@@ -511,7 +534,7 @@ export function buildRentPaymentNoticeMatrix(
 
   return {
     tenant, units, period: targetPeriod, targetPeriod, fromPeriod, columns, rows, summary,
-    grandTotal, totalAllocated, paidLookbackMonths,
+    grandTotal, totalAllocated, paidLookbackMonths, mode, unitId: filterUnitId,
   };
 }
 
@@ -541,8 +564,49 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
   ).all(tenantId, userId) as PaymentRow[]).map(hydratePayment);
 
   const allocationLedger = getTenantAllocationLedger(tenant.id, userId);
+  const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
+  const paymentsWithAllocations = payments.map((p) => hydratePaymentWithAllocations(p, userId, unitNameMap));
 
-  return { tenant, units, outstandingCharges, payments, allocationLedger };
+  return { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger };
+}
+
+function hydratePaymentWithAllocations(
+  payment: RentalPayment,
+  userId: number,
+  unitNameMap: Record<number, string>,
+): RentalPaymentWithAllocations {
+  const allocs = getPaymentAllocations(payment.id, userId);
+  return {
+    ...payment,
+    allocations: allocs.map((a) => ({
+      id: a.id,
+      amount: a.amount,
+      chargeItemId: a.chargeItemId,
+      unitId: a.charge.unitId,
+      unitName: unitNameMap[a.charge.unitId] || `Unit ${a.charge.unitId}`,
+      billingPeriod: a.charge.billingPeriod,
+      chargeType: a.charge.chargeType,
+    })),
+  };
+}
+
+/** Payment history for a unit (tenant payments filtered to this unit's allocations). */
+export function getUnitPaymentHistory(unitId: number, userId: number): RentalPaymentWithAllocations[] {
+  const tenantId = getTenantIdForUnit(unitId, userId);
+  if (!tenantId) return [];
+  const units = getTenantUnits(tenantId, userId);
+  const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
+  const payments = (db.prepare(
+    'SELECT * FROM rental_payments WHERE tenant_id = ? AND user_id = ? ORDER BY payment_date DESC, id DESC'
+  ).all(tenantId, userId) as PaymentRow[]).map(hydratePayment);
+
+  return payments
+    .map((p) => hydratePaymentWithAllocations(p, userId, unitNameMap))
+    .filter((p) => p.allocations.some((a) => a.unitId === unitId) || p.amountUnallocated > 0)
+    .map((p) => ({
+      ...p,
+      allocations: p.allocations.filter((a) => a.unitId === unitId),
+    }));
 }
 
 export function getRentalPaymentDetail(paymentId: number | string, userId: number) {

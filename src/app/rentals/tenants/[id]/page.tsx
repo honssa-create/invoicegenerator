@@ -11,6 +11,7 @@ import ChargeAllocationGrid, {
   fillRentOnlyValues,
   sumAllocationValues,
 } from '@/components/ChargeAllocationGrid';
+import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import PaymentAllocationLedger from '@/components/PaymentAllocationLedger';
 import { useAuth } from '@/components/AuthProvider';
 import {
@@ -24,6 +25,7 @@ import {
   type RentalChargeItem,
   type RentalPayment,
   type RentalPaymentAllocationDetail,
+  type RentalPaymentWithAllocations,
   type RentalTenant,
   type RentPaymentNoticeMatrix as MatrixType,
 } from '@/lib/rentals';
@@ -34,6 +36,7 @@ interface TenantDetail {
   units: { id: number; unitName: string; tenantName: string }[];
   outstandingCharges: RentalChargeItem[];
   payments: RentalPayment[];
+  paymentsWithAllocations: RentalPaymentWithAllocations[];
   allocationLedger: RentalPaymentAllocationDetail[];
 }
 
@@ -52,7 +55,6 @@ export default function TenantDetailPage() {
   const [busy, setBusy] = useState(false);
   const [paymentModal, setPaymentModal] = useState(false);
   const [allocateModal, setAllocateModal] = useState<RentalPayment | null>(null);
-  const [viewPaymentId, setViewPaymentId] = useState<number | null>(null);
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
   const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [allocations, setAllocations] = useState<Record<number, string>>({});
@@ -139,7 +141,8 @@ export default function TenantDetailPage() {
   };
 
   const openAllocate = (payment: RentalPayment) => {
-    setAllocateModal(payment);
+    const p = payments.find((x) => x.id === payment.id) || payment;
+    setAllocateModal(p);
     const init: Record<number, string> = {};
     for (const c of detail?.outstandingCharges || []) {
       init[c.id] = '';
@@ -186,7 +189,7 @@ export default function TenantDetailPage() {
     );
   }
 
-  const { tenant, units, outstandingCharges, payments, allocationLedger } = detail;
+  const { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger } = detail;
 
   return (
     <AppLayout>
@@ -207,10 +210,10 @@ export default function TenantDetailPage() {
           <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} title="Paid lookback months" />
           <span className="text-xs text-gray-400 self-center">paid mo.</span>
           <Link
-            href={`/rentals/tenants/${id}/rent-payment-notice?period=${period}${fromPeriod ? `&from=${fromPeriod}` : ''}&paid_lookback=${paidLookback}`}
+            href={`/billing/debit-note?tenantId=${id}&targetPeriod=${period}&mode=grouped&paid_lookback=${paidLookback}${fromPeriod ? `&from=${fromPeriod}` : ''}`}
             className="btn border border-gray-300 text-gray-700 hover:bg-gray-50"
           >
-            繳付租金通知單 Print
+            繳費通知單 Debit Note
           </Link>
           {!readOnly && (
             <button onClick={openPaymentModal} className="btn bg-brand-600 text-white hover:bg-brand-700">
@@ -300,48 +303,16 @@ export default function TenantDetailPage() {
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="font-semibold">Payments 收款紀錄</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Expand rows for itemized unit / period / charge-type breakdown</p>
         </div>
-        {payments.length === 0 ? (
-          <p className="p-8 text-center text-gray-400 text-sm">No tenant-level payments yet</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3 text-left">Date</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3 text-right">Allocated</th>
-                <th className="px-4 py-3 text-right">Unallocated</th>
-                <th className="px-4 py-3 text-left">Reference</th>
-                <th className="px-4 py-3 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {payments.map((p) => (
-                <tr key={p.id}>
-                  <td className="px-4 py-3">{formatDisplayDate(p.paymentDate)}</td>
-                  <td className="px-4 py-3 text-right font-semibold">{formatMoney(p.amount)}</td>
-                  <td className="px-4 py-3 text-right text-green-700">{formatMoney(p.amountAllocated)}</td>
-                  <td className="px-4 py-3 text-right text-orange-600">{formatMoney(p.amountUnallocated)}</td>
-                  <td className="px-4 py-3 text-gray-500">{p.reference || p.method || '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="space-x-2">
-                      {p.amountAllocated > 0 && (
-                        <button onClick={() => setViewPaymentId(p.id)} className="text-gray-600 text-xs font-medium hover:underline">
-                          View 明細
-                        </button>
-                      )}
-                      {!readOnly && p.amountUnallocated > 0 && (
-                        <button onClick={() => openAllocate(p)} className="text-brand-600 text-xs font-medium hover:underline">
-                          Allocate 分配
-                        </button>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <PaymentHistoryTable
+          payments={paymentsWithAllocations || []}
+          readOnly={readOnly}
+          onAllocate={(paymentId) => {
+            const p = payments.find((x) => x.id === paymentId);
+            if (p) openAllocate(p);
+          }}
+        />
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
@@ -464,22 +435,6 @@ export default function TenantDetailPage() {
               <button onClick={saveAllocation} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
                 {busy ? 'Saving…' : 'Allocate'}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {viewPaymentId && (
-        <div className="modal-overlay">
-          <div className="modal-panel sm:max-w-3xl max-h-[85vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-1">Payment #{viewPaymentId} Allocations</h2>
-            <p className="text-sm text-gray-500 mb-4">Billing items covered by this receipt</p>
-            <PaymentAllocationLedger
-              rows={(allocationLedger || []).filter((r) => r.paymentId === viewPaymentId)}
-              compact
-            />
-            <div className="flex justify-end mt-6">
-              <button onClick={() => setViewPaymentId(null)} className="px-4 py-2 border rounded-lg text-sm">Close</button>
             </div>
           </div>
         </div>

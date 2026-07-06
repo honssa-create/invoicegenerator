@@ -33,6 +33,8 @@ import {
   type RentPaymentNoticeSummary,
   type RentRecord,
   type TenantBillingHistoryRow,
+  utilityChargeTypesForMode,
+  type UtilityBillingMode,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
 
@@ -52,6 +54,7 @@ function logRentalActivity(
 interface TenantRow {
   id: number; user_id: number; name: string;
   phone: string | null; email: string | null; notes: string | null;
+  utility_billing_mode?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -73,10 +76,15 @@ interface AllocationRow {
   amount: number; created_at: string;
 }
 
+function normalizeUtilityBillingMode(value: string | null | undefined): UtilityBillingMode {
+  return value === 'tenant_pays' ? 'tenant_pays' : 'company_proxy';
+}
+
 function hydrateTenant(row: TenantRow, unitCount = 0): RentalTenant {
   return {
     id: row.id, user_id: row.user_id, name: row.name,
     phone: row.phone || '', email: row.email || '', notes: row.notes || '',
+    utilityBillingMode: normalizeUtilityBillingMode(row.utility_billing_mode),
     unitCount, created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -163,7 +171,13 @@ export function getRentalTenant(id: number | string, userId: number): RentalTena
 export function updateRentalTenant(
   tenantId: number | string,
   userId: number,
-  input: { name?: string; phone?: string | null; email?: string | null; notes?: string | null },
+  input: {
+    name?: string;
+    phone?: string | null;
+    email?: string | null;
+    notes?: string | null;
+    utilityBillingMode?: UtilityBillingMode;
+  },
 ): RentalTenant | null {
   const existing = getRentalTenant(tenantId, userId);
   if (!existing) return null;
@@ -172,13 +186,17 @@ export function updateRentalTenant(
   const phone = input.phone !== undefined ? (input.phone?.trim() || null) : (existing.phone || null);
   const email = input.email !== undefined ? (input.email?.trim() || null) : (existing.email || null);
   const notes = input.notes !== undefined ? (input.notes?.trim() || null) : (existing.notes || null);
+  const utilityBillingMode = input.utilityBillingMode !== undefined
+    ? normalizeUtilityBillingMode(input.utilityBillingMode)
+    : existing.utilityBillingMode;
 
   if (!name) throw new Error('Tenant name is required');
 
   db.prepare(
-    `UPDATE rental_tenants SET name = ?, phone = ?, email = ?, notes = ?, updated_at = datetime('now')
+    `UPDATE rental_tenants SET name = ?, phone = ?, email = ?, notes = ?, utility_billing_mode = ?,
+      updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(name, phone, email, notes, tenantId, userId);
+  ).run(name, phone, email, notes, utilityBillingMode, tenantId, userId);
 
   db.prepare(
     `UPDATE rental_units SET tenant_name = ?, tenant_phone = ?, tenant_email = ?, updated_at = datetime('now')
@@ -396,10 +414,12 @@ function resolveNoticePeriods(
 function buildNoticeColumns(
   units: Pick<RentalUnit, 'id' | 'unitName'>[],
   charges: RentalChargeItem[],
+  allowedChargeTypes: RentalChargeType[] = CHARGE_ORDER,
 ): RentPaymentNoticeMatrix['columns'] {
+  const chargeTypes = CHARGE_ORDER.filter((t) => allowedChargeTypes.includes(t));
   const cols: RentPaymentNoticeMatrix['columns'] = [];
   for (const unit of units) {
-    for (const chargeType of CHARGE_ORDER) {
+    for (const chargeType of chargeTypes) {
       const hasActivity = charges.some(
         (c) => c.unitId === unit.id && c.chargeType === chargeType &&
           (c.amountDue > 0 || c.amountAllocated > 0),
@@ -415,7 +435,7 @@ function buildNoticeColumns(
   }
   if (!cols.length) {
     return units.flatMap((unit) =>
-      CHARGE_ORDER.map((chargeType) => ({
+      chargeTypes.map((chargeType) => ({
         unitId: unit.id,
         unitName: unit.unitName,
         chargeType,
@@ -493,7 +513,8 @@ export function buildRentPaymentNoticeMatrix(
   const dueDateDisplay = formatDisplayDate(dueDate);
 
   const { periods, fromPeriod } = resolveNoticePeriods(charges, targetPeriod, query);
-  const columns = buildNoticeColumns(units, charges);
+  const billableChargeTypes = utilityChargeTypesForMode(tenant.utilityBillingMode);
+  const columns = buildNoticeColumns(units, charges, billableChargeTypes);
 
   const chargeMap = new Map<string, RentalChargeItem>();
   for (const c of charges) {
@@ -636,9 +657,11 @@ export function buildFormalDebitNote(
   const unitIds = matrix.units.map((u) => u.id);
   const charges = getTenantChargeItems(Number(tenantId), userId, unitIds);
   const unitNameMap = Object.fromEntries(matrix.units.map((u) => [u.id, u.unitName]));
+  const billableChargeTypes = utilityChargeTypesForMode(matrix.tenant.utilityBillingMode);
 
   const currentCharges: FormalDebitNoteLine[] = [];
   for (const col of matrix.columns) {
+    if (!billableChargeTypes.includes(col.chargeType)) continue;
     const item = charges.find(
       (c) => c.unitId === col.unitId && c.billingPeriod === targetPeriod && c.chargeType === col.chargeType,
     );
@@ -660,7 +683,9 @@ export function buildFormalDebitNote(
   const arrearPeriods = matrix.summary.priorArrearsPeriods.filter(Boolean).sort();
   const arrearRows: FormalDebitNoteArrearRow[] = [];
   for (const p of arrearPeriods) {
-    const periodItems = charges.filter((c) => c.billingPeriod === p && chargeOutstanding(c) > 0);
+    const periodItems = charges.filter(
+      (c) => c.billingPeriod === p && chargeOutstanding(c) > 0 && billableChargeTypes.includes(c.chargeType),
+    );
     if (!periodItems.length) continue;
     const amount = periodItems.reduce((s, c) => s + chargeOutstanding(c), 0);
     arrearRows.push({
@@ -787,6 +812,8 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
          AND amount_due > amount_allocated
        ORDER BY billing_period ASC, unit_id ASC, charge_type ASC`
     ).all(userId, ...unitIds) as ChargeRow[]).map(hydrateCharge);
+    const billableTypes = utilityChargeTypesForMode(tenant.utilityBillingMode);
+    outstandingCharges = outstandingCharges.filter((c) => billableTypes.includes(c.chargeType));
   }
 
   const payments = (db.prepare(

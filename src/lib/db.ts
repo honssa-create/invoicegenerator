@@ -726,6 +726,16 @@ db.exec(`
   }
 }
 
+// Per-tenant utility billing: tenant pays utilities directly vs company proxy-bills on debit note.
+{
+  const rtCols = (db.prepare('PRAGMA table_info(rental_tenants)').all() as { name: string }[]).map((c) => c.name);
+  if (!rtCols.includes('utility_billing_mode')) {
+    try {
+      db.exec(`ALTER TABLE rental_tenants ADD COLUMN utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'`);
+    } catch { /* exists */ }
+  }
+}
+
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.
 {
   const unitsNeedingTenant = db.prepare(

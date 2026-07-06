@@ -485,6 +485,22 @@ export const CHARGE_STATUS_LABELS: Record<RentalChargeItemStatus, string> = {
   paid: '已付 Paid',
 };
 
+export type UtilityBillingMode = 'tenant_pays' | 'company_proxy';
+
+export const UTILITY_BILLING_MODE_LABELS: Record<UtilityBillingMode, string> = {
+  tenant_pays: '租客自行繳付水電費',
+  company_proxy: '水電費由公司代交 再向租客收取',
+};
+
+/** Charge types included on tenant bills / debit notes for this utility mode. */
+export function utilityChargeTypesForMode(mode: UtilityBillingMode): RentalChargeType[] {
+  return mode === 'company_proxy' ? ['rent', 'water', 'electricity'] : ['rent'];
+}
+
+export function tenantBillsUtilities(mode: UtilityBillingMode): boolean {
+  return mode === 'company_proxy';
+}
+
 export interface RentalTenant {
   id: number;
   user_id: number;
@@ -492,6 +508,7 @@ export interface RentalTenant {
   phone: string;
   email: string;
   notes: string;
+  utilityBillingMode: UtilityBillingMode;
   unitCount?: number;
   created_at: string;
   updated_at: string;

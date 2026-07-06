@@ -28,6 +28,7 @@ import {
   formatMoney,
   formatUtilityAmount,
   todayFormDate,
+  UTILITY_BILLING_MODE_LABELS,
   type RentalChargeItem,
   type RentalPayment,
   type RentalPaymentAllocationDetail,
@@ -37,6 +38,7 @@ import {
   type TenantBillingHistoryRow,
   type TenantLeaseHistoryRow,
   type TenantProfileSummary,
+  type UtilityBillingMode,
 } from '@/lib/rentals';
 import { isSectionReadOnly } from '@/lib/permissions';
 
@@ -72,6 +74,8 @@ export default function TenantDetailPage() {
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
   const [contactForm, setContactForm] = useState({ name: '', phone: '', email: '', notes: '' });
+  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
+  const [utilitySaving, setUtilitySaving] = useState(false);
   const [contactSaving, setContactSaving] = useState(false);
   const [contactEditing, setContactEditing] = useState(false);
 
@@ -99,6 +103,7 @@ export default function TenantDetailPage() {
             email: d.tenant.email || '',
             notes: d.tenant.notes || '',
           });
+          setUtilityBillingMode(d.tenant.utilityBillingMode || 'company_proxy');
           setSelectedUnitIds((prev) => {
             if (prev.length && d.units?.every((u: { id: number }) => prev.includes(u.id))) return prev;
             return (d.units || []).map((u: { id: number }) => u.id);
@@ -128,6 +133,25 @@ export default function TenantDetailPage() {
     }
     setContactEditing(false);
     setToast('Contact details saved');
+    load();
+  };
+
+  const saveUtilityBillingMode = async (mode: UtilityBillingMode) => {
+    if (readOnly || mode === utilityBillingMode) return;
+    setUtilitySaving(true);
+    const res = await fetch(`/api/rentals/tenants/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ utilityBillingMode: mode }),
+    });
+    setUtilitySaving(false);
+    if (!res.ok) {
+      const d = await res.json();
+      setToast(d.error || 'Failed to save utility billing setting');
+      return;
+    }
+    setUtilityBillingMode(mode);
+    setToast('水電費安排已更新');
     load();
   };
 
@@ -384,6 +408,49 @@ export default function TenantDetailPage() {
               )}
             </dl>
           )}
+        </div>
+      </div>
+
+      {/* Utility billing arrangement */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold text-gray-900">水電費安排 Utility Billing</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Controls whether water &amp; electricity appear on debit notes / payment notices for this tenant
+          </p>
+        </div>
+        <div className="p-6">
+          <div className="grid sm:grid-cols-2 gap-3">
+            {(['tenant_pays', 'company_proxy'] as UtilityBillingMode[]).map((mode) => {
+              const selected = utilityBillingMode === mode;
+              return (
+                <label
+                  key={mode}
+                  className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer transition-colors ${
+                    selected ? 'border-brand-400 bg-brand-50/50 ring-1 ring-brand-200' : 'border-gray-200 hover:border-gray-300'
+                  } ${readOnly || utilitySaving ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="utilityBillingMode"
+                    value={mode}
+                    checked={selected}
+                    disabled={readOnly || utilitySaving}
+                    onChange={() => saveUtilityBillingMode(mode)}
+                    className="mt-1 h-4 w-4 border-gray-300 text-brand-600"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-gray-900">{UTILITY_BILLING_MODE_LABELS[mode]}</span>
+                    <span className="block text-xs text-gray-500 mt-1">
+                      {mode === 'tenant_pays'
+                        ? 'Water & electricity are not billed on company debit notes — tenant settles directly with utility providers.'
+                        : 'Company pays utilities on behalf of tenant; amounts are calculated and shown on the debit note.'}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
 

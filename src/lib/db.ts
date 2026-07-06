@@ -636,6 +636,9 @@ try {
   if (!expenseCols.some((c) => c.name === 'special_notes')) {
     db.exec('ALTER TABLE expenses ADD COLUMN special_notes TEXT');
   }
+  if (!expenseCols.some((c) => c.name === 'supplier_input')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN supplier_input TEXT');
+  }
 }
 
 db.exec(`

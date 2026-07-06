@@ -80,6 +80,7 @@ export interface Expense {
   receipt_no: string | null;
   category: string;
   merchant: string | null;
+  supplier_input: string | null;
   amount_hkd: number | null;
   amount_rmb: number | null;
   paid_date: string | null;

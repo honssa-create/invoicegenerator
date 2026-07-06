@@ -72,8 +72,8 @@ export async function POST(request: Request) {
       const result = db
         .prepare(
           `INSERT INTO expenses
-            (user_id, created_by_user_id, receipt_no, category, merchant, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (user_id, created_by_user_id, receipt_no, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
@@ -81,6 +81,7 @@ export async function POST(request: Request) {
           receiptNo,
           category,
           body.merchant?.trim() || null,
+          body.supplier_input?.trim() || null,
           amount_hkd,
           amount_rmb,
           body.paid_date?.trim() || null,

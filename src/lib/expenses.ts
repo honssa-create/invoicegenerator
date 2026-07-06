@@ -59,6 +59,14 @@ export function categoryLabel(value: string | null | undefined): string {
   return CATEGORY_LABELS[value] || value;
 }
 
+/** Dropdown supplier, or one-time free-text supplier when not in the list. */
+export function expenseSupplierName(expense: {
+  merchant?: string | null;
+  supplier_input?: string | null;
+}): string {
+  return expense.merchant?.trim() || expense.supplier_input?.trim() || '';
+}
+
 export function formatMoney(amount: number | null | undefined, currency: 'HKD' | 'CNY'): string {
   if (amount === null || amount === undefined) return '—';
   return new Intl.NumberFormat('en-HK', {

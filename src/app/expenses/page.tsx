@@ -13,6 +13,7 @@ import {
   PAYMENT_STATUSES,
   EXPENSE_STATUS_COLORS,
   categoryLabel,
+  expenseSupplierName,
   formatMoney,
   type OptionType,
 } from '@/lib/expenses';
@@ -28,6 +29,7 @@ import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
 const EMPTY_FORM = {
   category: '',
   merchant: '',
+  supplier_input: '',
   amount_hkd: '',
   amount_rmb: '',
   paid_date: '',
@@ -80,6 +82,7 @@ export default function ExpensesPage() {
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [options, setOptions] = useState<Options>(cloneDefaultOptions);
   const [supplierOcrMatch, setSupplierOcrMatch] = useState<SupplierMatch | null>(null);
+  const [supplierInputOcrHint, setSupplierInputOcrHint] = useState(false);
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
@@ -160,7 +163,7 @@ export default function ExpensesPage() {
       if (filters.reason && e.category !== filters.reason) return false;
       if (filters.platform && e.platform !== filters.platform) return false;
       if (q) {
-        const hay = [e.receipt_no, e.merchant, e.platform, e.payment_method, e.category, e.notes, e.special_notes]
+        const hay = [e.receipt_no, e.merchant, e.supplier_input, e.platform, e.payment_method, e.category, e.notes, e.special_notes]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -179,7 +182,7 @@ export default function ExpensesPage() {
           base = categoryLabel(a.category).localeCompare(categoryLabel(b.category));
           break;
         case 'supplier':
-          base = String(a.merchant || '').localeCompare(String(b.merchant || ''));
+          base = expenseSupplierName(a).localeCompare(expenseSupplierName(b));
           break;
         case 'payment':
           base = String(a.payment_method || '').localeCompare(String(b.payment_method || ''));
@@ -228,6 +231,7 @@ export default function ExpensesPage() {
     setEditingId(null);
     setScanMessage('');
     setSupplierOcrMatch(null);
+    setSupplierInputOcrHint(false);
     setError('');
     setShowForm(true);
   };
@@ -236,6 +240,7 @@ export default function ExpensesPage() {
     setForm({
       category: e.category || '',
       merchant: e.merchant || '',
+      supplier_input: e.supplier_input || '',
       amount_hkd: e.amount_hkd?.toString() || '',
       amount_rmb: e.amount_rmb?.toString() || '',
       paid_date: e.paid_date || '',
@@ -250,6 +255,7 @@ export default function ExpensesPage() {
     setEditingId(e.id);
     setScanMessage('');
     setSupplierOcrMatch(null);
+    setSupplierInputOcrHint(false);
     setError('');
     setShowForm(true);
   };
@@ -286,35 +292,46 @@ export default function ExpensesPage() {
         const supplierList = mergeSupplierLists(options.supplier, expenses.map((ex) => ex.merchant));
         const ocrBlob = [r.merchant, r.raw_text].filter(Boolean).join('\n');
         const supplierMatch = ocrBlob ? matchSupplierFromOcr(ocrBlob, supplierList) : null;
-        const autoSupplier =
-          supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD
-            ? supplierMatch.supplier
-            : r.merchant?.trim() || '';
+        const matchedDropdown =
+          supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD;
+        const ocrSupplierText = r.merchant?.trim() || '';
 
         let showOcrMatch = false;
+        let showInputOcrHint = false;
         setForm((prev) => {
-          if (!prev.merchant && supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD) {
-            showOcrMatch = true;
-          }
-          return {
+          const next = {
             ...prev,
-            merchant: prev.merchant || autoSupplier,
             paid_date: prev.paid_date || r.date || '',
             amount_hkd: prev.amount_hkd || (r.amount_hkd != null ? String(r.amount_hkd) : ''),
             amount_rmb: prev.amount_rmb || (r.amount_rmb != null ? String(r.amount_rmb) : ''),
           };
+          if (!prev.merchant && !prev.supplier_input) {
+            if (matchedDropdown) {
+              showOcrMatch = true;
+              next.merchant = supplierMatch!.supplier;
+              next.supplier_input = '';
+            } else if (ocrSupplierText) {
+              showInputOcrHint = true;
+              next.supplier_input = ocrSupplierText;
+              next.merchant = '';
+            }
+          }
+          return next;
         });
         setSupplierOcrMatch(showOcrMatch ? supplierMatch : null);
+        setSupplierInputOcrHint(showInputOcrHint);
 
         const found: string[] = [];
-        if (autoSupplier) found.push('supplier');
+        if (matchedDropdown) found.push('supplier (list)');
+        else if (ocrSupplierText) found.push('supplier (one-time)');
         if (r.date) found.push('date');
         if (r.amount_hkd != null) found.push('HKD');
         if (r.amount_rmb != null) found.push('RMB');
         const via = r.source === 'ai' ? 'AI vision' : 'OCR';
-        const supplierNote =
-          supplierMatch && supplierMatch.score >= SUPPLIER_OCR_AUTO_FILL_THRESHOLD
-            ? ` · supplier matched (${Math.round(supplierMatch.score * 100)}%)`
+        const supplierNote = matchedDropdown
+          ? ` · supplier matched (${Math.round(supplierMatch!.score * 100)}%)`
+          : ocrSupplierText
+            ? ' · one-time supplier filled (not in list)'
             : '';
         setScanMessage(
           found.length
@@ -383,10 +400,6 @@ export default function ExpensesPage() {
       return;
     }
     setSaving(true);
-    const merchant = form.merchant.trim();
-    if (merchant && !supplierOptions.includes(merchant)) {
-      await addOption('supplier', merchant);
-    }
     const url = editingId ? `/api/expenses/${editingId}` : '/api/expenses';
     const method = editingId ? 'PUT' : 'POST';
     const res = await fetch(url, {
@@ -402,6 +415,7 @@ export default function ExpensesPage() {
     }
     setShowForm(false);
     setSupplierOcrMatch(null);
+    setSupplierInputOcrHint(false);
     loadExpenses();
   };
 
@@ -665,7 +679,7 @@ export default function ExpensesPage() {
                   <td className={`px-4 py-3 sticky left-14 z-10 min-w-[7.5rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm font-mono text-brand-700 whitespace-nowrap font-medium ${stickyCell}`}>{e.receipt_no || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.paid_date || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.platform || '—'}</td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[160px] truncate" title={e.merchant || ''}>{e.merchant || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[160px] truncate" title={expenseSupplierName(e)}>{expenseSupplierName(e) || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.notes || ''}>{e.notes || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_rmb, 'CNY')}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_hkd, 'HKD')}</td>
@@ -753,12 +767,41 @@ export default function ExpensesPage() {
                   <SupplierSelect
                     value={form.merchant}
                     options={supplierOptions}
-                    onChange={(v) => setForm((f) => ({ ...f, merchant: v }))}
+                    onChange={(v) => setForm((f) => ({ ...f, merchant: v, supplier_input: v ? '' : f.supplier_input }))}
                     onAdd={(v) => addOption('supplier', v)}
                     ocrMatch={supplierOcrMatch}
                     onDismissOcrMatch={() => setSupplierOcrMatch(null)}
                     placeholder="Select supplier 供應商…"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">供應商 (input)</label>
+                  {supplierInputOcrHint && form.supplier_input && (
+                    <div className="mb-1.5 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+                      <span className="shrink-0" aria-hidden>✨</span>
+                      <span className="flex-1">
+                        One-time supplier from receipt: <strong>{form.supplier_input}</strong> (not added to list)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSupplierInputOcrHint(false)}
+                        className="shrink-0 text-amber-700 hover:text-amber-900 font-medium"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                  <input
+                    value={form.supplier_input}
+                    onChange={(ev) => {
+                      const v = ev.target.value;
+                      setForm((f) => ({ ...f, supplier_input: v, merchant: v.trim() ? '' : f.merchant }));
+                      if (v.trim()) setSupplierInputOcrHint(false);
+                    }}
+                    className={`${inputCls} ${supplierInputOcrHint && form.supplier_input ? 'ring-2 ring-amber-400 border-amber-300 bg-amber-50/40' : ''}`}
+                    placeholder="One-time supplier — not saved to dropdown list"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">Use when the supplier is not in the list above</p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>
@@ -819,7 +862,7 @@ export default function ExpensesPage() {
               <div>
                 <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
                 <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
-                <p className="text-sm text-gray-500 mt-1">{detail.merchant || 'Unnamed supplier'}</p>
+                <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(detail) || 'Unnamed supplier'}</p>
               </div>
               <div className="flex gap-2 shrink-0">
                 <button
@@ -843,6 +886,7 @@ export default function ExpensesPage() {
               {detailField('Paid Date 支出日期', detail.paid_date)}
               {detailField('Platform 消費平台', detail.platform)}
               {detailField('Supplier 供應商', detail.merchant)}
+              {detail.supplier_input && detailField('供應商 (input)', detail.supplier_input)}
               {detailField('支出金額(RMB)', formatMoney(detail.amount_rmb, 'CNY'))}
               {detailField('支出金額(HKD)', formatMoney(detail.amount_hkd, 'HKD'))}
               {detailField('Payment 支付方式', detail.payment_method)}

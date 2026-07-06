@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     'Paid Date (支出日期)': e.paid_date || '',
     'Platform (消費平台)': e.platform || '',
     'Supplier (供應商)': e.merchant || '',
+    'Supplier Input 供應商(input)': e.supplier_input || '',
     'Notes (注意事項)': e.notes || '',
     'Amount (RMB)': e.amount_rmb ?? null,
     'Amount (HKD)': e.amount_hkd ?? null,

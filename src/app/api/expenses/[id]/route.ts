@@ -53,13 +53,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     const update = db.transaction(() => {
       db.prepare(
         `UPDATE expenses SET
-           category = ?, merchant = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
+           category = ?, merchant = ?, supplier_input = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
            order_no = ?, platform = ?, payment_method = ?, notes = ?, special_notes = ?, payment_status = ?, receipt_path = ?,
            updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`
       ).run(
         category,
         body.merchant?.trim() || null,
+        body.supplier_input?.trim() || null,
         amount_hkd,
         amount_rmb,
         body.paid_date?.trim() || null,

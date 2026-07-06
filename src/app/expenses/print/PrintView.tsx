@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { categoryLabel, formatMoney } from '@/lib/expenses';
+import { categoryLabel, expenseSupplierName, formatMoney } from '@/lib/expenses';
 import type { Expense } from '@/lib/types';
 import { expenseReceiptUrl } from '@/lib/image-url';
 
@@ -85,7 +85,7 @@ export default function PrintView() {
                   <p className="text-2xl font-bold font-mono">{e.receipt_no || `EXP-${e.id}`}</p>
                 </div>
                 <div className="text-right text-sm">
-                  <p className="font-semibold">{e.merchant || 'Unnamed merchant'}</p>
+                  <p className="font-semibold">{expenseSupplierName(e) || 'Unnamed merchant'}</p>
                   <p className="opacity-80">{e.paid_date || '—'}</p>
                 </div>
               </div>
@@ -94,6 +94,9 @@ export default function PrintView() {
                 <div><span className="text-gray-500">Paid Date (支出日期):</span> {e.paid_date || '—'}</div>
                 <div><span className="text-gray-500">Platform (消費平台):</span> {e.platform || '—'}</div>
                 <div><span className="text-gray-500">Supplier (供應商):</span> {e.merchant || '—'}</div>
+                {e.supplier_input && (
+                  <div><span className="text-gray-500">供應商 (input):</span> {e.supplier_input}</div>
+                )}
                 <div><span className="text-gray-500">Reason (支出原因):</span> {categoryLabel(e.category)}</div>
                 <div><span className="text-gray-500">Amount (RMB):</span> {formatMoney(e.amount_rmb, 'CNY')}</div>
                 <div><span className="text-gray-500">Amount (HKD):</span> {formatMoney(e.amount_hkd, 'HKD')}</div>
@@ -109,7 +112,7 @@ export default function PrintView() {
                   (e.receipts || []).map((r, ri) => (
                     <div key={r.id} className="border border-gray-200 rounded-lg overflow-hidden break-inside-avoid">
                       <div className="bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border-b border-gray-200">
-                        {e.receipt_no || `EXP-${e.id}`} · #{ri + 1} — {e.merchant || ''}
+                        {e.receipt_no || `EXP-${e.id}`} · #{ri + 1} — {expenseSupplierName(e)}
                       </div>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img

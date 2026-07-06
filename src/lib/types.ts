@@ -76,9 +76,11 @@ export interface ExpenseReceipt {
 export interface Expense {
   id: number;
   user_id: number;
+  created_by_user_id?: number | null;
   receipt_no: string | null;
   category: string;
   merchant: string | null;
+  supplier_input: string | null;
   amount_hkd: number | null;
   amount_rmb: number | null;
   paid_date: string | null;
@@ -86,6 +88,7 @@ export interface Expense {
   platform: string | null;
   payment_method: string | null;
   notes: string | null;
+  special_notes: string | null;
   payment_status: PaymentStatus;
   receipt_path: string | null;
   receipts: ExpenseReceipt[];

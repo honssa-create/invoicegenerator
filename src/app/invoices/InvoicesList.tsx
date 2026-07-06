@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
+import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
+import { isSectionReadOnly } from '@/lib/permissions';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
 
@@ -14,6 +16,8 @@ const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
 
 export default function InvoicesList() {
   const searchParams = useSearchParams();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
   const [invoices, setInvoices] = useState<InvoiceWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -92,7 +96,7 @@ export default function InvoicesList() {
   );
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this invoice?')) return;
+    if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     setInvoices((prev) => prev.filter((i) => i.id !== id));
   };
@@ -126,21 +130,25 @@ export default function InvoicesList() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-500 mt-1">Create and manage your invoices</p>
+          <h1 className="page-title">Invoices</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? 'View invoices (read-only)' : 'Create and manage your invoices'}</p>
         </div>
-        <div className="flex gap-3">
-          <button onClick={runReminders} disabled={remindering} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
-            {remindering ? 'Checking…' : '⏰ Run 30-day reminders'}
-          </button>
+        <div className="page-actions">
+          {!readOnly && (
+            <button onClick={runReminders} disabled={remindering} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
+              {remindering ? 'Checking…' : '⏰ Run 30-day reminders'}
+            </button>
+          )}
           <a href="/api/invoices/export" className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             ⬇ Export to Excel
           </a>
+          {!readOnly && (
           <Link href="/invoices/new" className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
             + New Invoice
           </Link>
+          )}
         </div>
       </div>
 
@@ -178,10 +186,11 @@ export default function InvoicesList() {
         ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
             <p>No invoices match your filters.</p>
-            <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">Create an invoice</Link>
+            {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">Create an invoice</Link>}
           </div>
         ) : (
-          <table className="w-full">
+          <div className="table-scroll">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 {sortTh('number', 'Invoice #')}
@@ -207,12 +216,15 @@ export default function InvoicesList() {
                   <td className="px-6 py-4 text-sm space-x-3">
                     <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">View</Link>
                     <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">Print</Link>
+                    {!readOnly && (
                     <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </AppLayout>

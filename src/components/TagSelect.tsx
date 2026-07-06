@@ -10,7 +10,7 @@ interface TagSelectProps {
   placeholder?: string;
 }
 
-export default function TagSelect({ value, options, onChange, onAdd, placeholder }: TagSelectProps) {
+export default function TagSelect({ value, options = [], onChange, onAdd, placeholder }: TagSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);

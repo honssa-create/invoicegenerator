@@ -88,7 +88,7 @@ export default function InboundPage() {
   };
 
   const del = async (id: number) => {
-    if (!confirm('Delete this shipment record?')) return;
+    if (!confirm('Move this shipment to Deleted Records? You can restore it within 60 days.')) return;
     const res = await fetch(`/api/inbound/${id}`, { method: 'DELETE' });
     if (res.ok) load();
   };
@@ -97,9 +97,11 @@ export default function InboundPage() {
 
   return (
     <AppLayout>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Inbound Shipments 到件紀錄</h1>
-        <p className="text-gray-500 mt-1">Snap a courier label — AI reads the waybill number &amp; sender, then confirm &amp; save</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Inbound Shipments 到件紀錄</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Snap a courier label — AI reads the waybill number &amp; sender, then confirm &amp; save</p>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6 mb-8">

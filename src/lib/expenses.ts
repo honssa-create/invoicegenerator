@@ -1,4 +1,5 @@
 import type { PaymentStatus } from './types';
+import { DEFAULT_SUPPLIERS } from './expense-suppliers';
 
 // Legacy category values (kept so older records still display a friendly label).
 export const EXPENSE_CATEGORIES: { value: string; label: string }[] = [
@@ -27,9 +28,9 @@ export const EXPENSE_STATUS_COLORS: Record<string, string> = {
 
 // Dynamic dropdown option types + their built-in defaults. Users can add more
 // (stored in the expense_options table) and they merge with these.
-export type OptionType = 'payment_method' | 'category' | 'platform';
+export type OptionType = 'payment_method' | 'category' | 'platform' | 'supplier';
 
-export const OPTION_TYPES: OptionType[] = ['payment_method', 'category', 'platform'];
+export const OPTION_TYPES: OptionType[] = ['payment_method', 'category', 'platform', 'supplier'];
 
 export const DEFAULT_OPTIONS: Record<OptionType, string[]> = {
   payment_method: ['Credit Card 0860', '現金', '淘寶', '拼多多', '其他，請註明', 'Hing現金'],
@@ -43,17 +44,27 @@ export const DEFAULT_OPTIONS: Record<OptionType, string[]> = {
     'Honour貨款(單次)',
   ],
   platform: ['淘寶', '拼多多', '支付寶', 'e-print', '其他，見收據', '其他'],
+  supplier: [...DEFAULT_SUPPLIERS],
 };
 
 export const OPTION_LABELS: Record<OptionType, string> = {
   payment_method: 'Payment Method 支付方式',
   category: 'Expense Reason 支出原因',
   platform: 'Shopping Platform 消費平台',
+  supplier: 'Supplier 供應商',
 };
 
 export function categoryLabel(value: string | null | undefined): string {
   if (!value) return '—';
   return CATEGORY_LABELS[value] || value;
+}
+
+/** Dropdown supplier, or one-time free-text supplier when not in the list. */
+export function expenseSupplierName(expense: {
+  merchant?: string | null;
+  supplier_input?: string | null;
+}): string {
+  return expense.merchant?.trim() || expense.supplier_input?.trim() || '';
 }
 
 export function formatMoney(amount: number | null | undefined, currency: 'HKD' | 'CNY'): string {

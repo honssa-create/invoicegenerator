@@ -304,14 +304,14 @@ export default function OrderDetailPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-4 gap-3">
-        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to orders</button>
-        <Link href={`/orders/${order.id}/delivery-note`} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to orders</button>
+        <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
           🚚 Generate Delivery Note
         </Link>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:h-[calc(100vh-7rem)]">
+      <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)]">
         {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}
         <div className="w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2">
           {/* Header */}
@@ -339,7 +339,7 @@ export default function OrderDetailPage() {
                 )
               ); })()}
             </div>
-            <h1 className="text-2xl font-bold text-gray-900">{orderTitle(order)}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{orderTitle(order)}</h1>
             <input
               value={order.description}
               onChange={(e) => setCoreLocal('description', e.target.value)}

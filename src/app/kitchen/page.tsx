@@ -80,9 +80,11 @@ export default function KitchenPage() {
 
   return (
     <AppLayout>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Kitchen 智能廚房排程</h1>
-        <p className="text-gray-500 mt-1">Order routing → batch brewing → two-tier inventory, all linked</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Kitchen 智能廚房排程</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Order routing → batch brewing → two-tier inventory, all linked</p>
+        </div>
       </div>
 
       {/* Two-tier inventory */}
@@ -101,7 +103,8 @@ export default function KitchenPage() {
 
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="font-semibold text-gray-900 mb-4">原材料庫存 Raw Materials (Available = Total − Allocated)</h2>
-          <table className="w-full text-sm">
+          <div className="table-scroll">
+          <table className="w-full text-sm min-w-[320px]">
             <thead><tr className="text-left text-xs text-gray-500 uppercase"><th className="py-1">Material</th><th className="py-1 text-right">Total</th><th className="py-1 text-right">Allocated</th><th className="py-1 text-right">Available</th></tr></thead>
             <tbody className="divide-y divide-gray-100">
               {state.raw.map((r) => (
@@ -114,6 +117,7 @@ export default function KitchenPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 

@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { calculateInvoiceTotals } from '@/lib/utils';
+import { isSectionReadOnly } from '@/lib/permissions';
 import type { Customer } from '@/lib/types';
 
 interface LineItem {
@@ -18,6 +20,14 @@ const DEFAULT_ITEM: LineItem = { description: '', quantity: 1, unit_price: 0 };
 
 export default function NewInvoicePage() {
   const router = useRouter();
+  const { user, loading } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!loading && readOnly) router.replace('/invoices');
+  }, [loading, readOnly, router]);
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
@@ -30,7 +40,6 @@ export default function NewInvoicePage() {
   const [status, setStatus] = useState('draft');
   const [items, setItems] = useState<LineItem[]>([{ ...DEFAULT_ITEM }]);
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch('/api/customers')

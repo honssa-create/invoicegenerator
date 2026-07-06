@@ -5,8 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { calculateInvoiceTotals } from '@/lib/utils';
+import { isSectionReadOnly } from '@/lib/permissions';
 import { QUOTATION_STATUSES, QUOTATION_STATUS_COLORS, type QuotationWithDetails } from '@/lib/quotations';
 import type { Customer } from '@/lib/types';
 
@@ -15,6 +17,8 @@ interface LineItem { description: string; quantity: number; unit_price: number; 
 export default function QuotationDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'quotations') : false;
   const [quote, setQuote] = useState<QuotationWithDetails | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
@@ -93,7 +97,7 @@ export default function QuotationDetailPage() {
   };
 
   const del = async () => {
-    if (!confirm('Delete this quotation?')) return;
+    if (!confirm('Move this quotation to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/quotations/${id}`, { method: 'DELETE' });
     router.push('/quotations');
   };
@@ -111,21 +115,25 @@ export default function QuotationDetailPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div className="page-header">
         <div>
           <Link href="/quotations" className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to quotations</Link>
-          <div className="flex items-center gap-3 mt-2">
-            <h1 className="text-2xl font-bold text-gray-900">{quote.quote_number}</h1>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <h1 className="page-title">{quote.quote_number}</h1>
             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[status]}`}>{status}</span>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="page-actions">
           <Link href={`/quotations/${id}/print`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">🧾 Generate PDF</Link>
           <a href={`/api/quotations/${id}/export`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">⬇ Export Excel</a>
+          {!readOnly && (
+          <>
           <button onClick={copyToInvoice} disabled={copying} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">{copying ? 'Copying…' : '📋 Copy to New Invoice'}</button>
           <button onClick={() => convert('order')} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">→ Convert to Order</button>
           <button onClick={save} disabled={saving} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
           <button onClick={del} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">Delete</button>
+          </>
+          )}
         </div>
       </div>
       {msg && <div className="mb-4 text-sm text-green-700">{msg}</div>}
@@ -136,34 +144,34 @@ export default function QuotationDetailPage() {
             <div className="grid md:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Customer</label>
-                <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={`${inputCls} w-full`}>
+                <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={readOnly} className={`${inputCls} w-full`}>
                   <option value="">— None —</option>
                   {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-                <select value={status} onChange={(e) => setStatus(e.target.value)} className={`${inputCls} w-full`}>
+                <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={readOnly} className={`${inputCls} w-full`}>
                   {QUOTATION_STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Issue Date</label>
-                <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className={`${inputCls} w-full`} />
+                <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} disabled={readOnly} className={`${inputCls} w-full`} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Valid Until</label>
-                <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} className={`${inputCls} w-full`} />
+                <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} disabled={readOnly} className={`${inputCls} w-full`} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Tax Rate (%)</label>
-                <input type="number" step="0.01" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} className={`${inputCls} w-full`} />
+                <input type="number" step="0.01" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} disabled={readOnly} className={`${inputCls} w-full`} />
               </div>
             </div>
 
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-semibold text-gray-900">Line Items</h2>
-              <button onClick={addItem} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Add line</button>
+              {!readOnly && <button onClick={addItem} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Add line</button>}
             </div>
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase font-medium">
@@ -171,11 +179,11 @@ export default function QuotationDetailPage() {
               </div>
               {items.map((item, i) => (
                 <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <input value={item.description} onChange={(e) => updateItem(i, 'description', e.target.value)} placeholder="Description" className="col-span-6 px-2 py-1.5 border border-gray-300 rounded text-sm" />
-                  <input type="number" value={item.quantity} onChange={(e) => updateItem(i, 'quantity', Number(e.target.value))} className="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-sm" />
-                  <input type="number" value={item.unit_price} onChange={(e) => updateItem(i, 'unit_price', Number(e.target.value))} className="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input value={item.description} onChange={(e) => updateItem(i, 'description', e.target.value)} disabled={readOnly} placeholder="Description" className="col-span-6 px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input type="number" value={item.quantity} onChange={(e) => updateItem(i, 'quantity', Number(e.target.value))} disabled={readOnly} className="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input type="number" value={item.unit_price} onChange={(e) => updateItem(i, 'unit_price', Number(e.target.value))} disabled={readOnly} className="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-sm" />
                   <div className="col-span-1 text-sm">{formatCurrency(item.quantity * item.unit_price)}</div>
-                  <button onClick={() => removeItem(i)} className="col-span-1 text-red-500 hover:text-red-700 text-sm">✕</button>
+                  {!readOnly && <button onClick={() => removeItem(i)} className="col-span-1 text-red-500 hover:text-red-700 text-sm">✕</button>}
                 </div>
               ))}
               {items.length === 0 && <p className="text-sm text-gray-400 py-2">No line items. Click “+ Add line”.</p>}
@@ -193,11 +201,11 @@ export default function QuotationDetailPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-6 grid md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={`${inputCls} w-full`} />
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} disabled={readOnly} rows={3} className={`${inputCls} w-full`} />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Terms</label>
-              <textarea value={terms} onChange={(e) => setTerms(e.target.value)} rows={3} className={`${inputCls} w-full`} />
+              <textarea value={terms} onChange={(e) => setTerms(e.target.value)} disabled={readOnly} rows={3} className={`${inputCls} w-full`} />
             </div>
           </div>
         </div>

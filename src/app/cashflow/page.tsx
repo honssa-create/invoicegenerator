@@ -79,14 +79,14 @@ export default function CashflowPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cash Flow &amp; Reconciliation 營運收支中央看板</h1>
-          <p className="text-gray-500 mt-1">All incoming revenue — product sales + other income — in one ledger</p>
+          <h1 className="page-title">Cash Flow &amp; Reconciliation 營運收支中央看板</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">All incoming revenue — product sales + other income — in one ledger</p>
         </div>
-        <div className="flex items-center gap-3">
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
-          <button onClick={openForm} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">➕ Add Income 新增其他收入</button>
+        <div className="page-actions">
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full sm:w-auto px-3 py-2.5 sm:py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+          <button onClick={openForm} className="btn bg-brand-600 text-white hover:bg-brand-700">➕ Add Income 新增其他收入</button>
         </div>
       </div>
 
@@ -152,14 +152,14 @@ export default function CashflowPage() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl w-full max-w-lg p-6 shadow-xl my-8">
+        <div className="modal-overlay overflow-y-auto">
+          <div className="modal-panel my-0 sm:my-8">
             <h2 className="text-lg font-semibold mb-4">Add Other Income 新增其他收入</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
             <div className="space-y-3">
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Income Category 收入類別</label>
                 <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={input}>{INCOME_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Transaction Date 入帳日期</label><input type="date" value={form.txn_date} onChange={(e) => setForm({ ...form, txn_date: e.target.value })} className={input} /></div>
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">Amount ($) 金額</label><input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={input} placeholder="0.00" /></div>
               </div>

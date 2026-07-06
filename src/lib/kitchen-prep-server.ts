@@ -1,4 +1,5 @@
 import db from './db';
+import { trashKitchenPrep } from '@/lib/trash';
 import type { PrepCapacity, PrepCompletionSplit, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
 import {
   buildKitchenCompletionActivityBody,
@@ -260,8 +261,7 @@ export function updatePrepOrder(
 }
 
 export function deletePrepOrder(id: number | string, userId: number): boolean {
-  const res = db.prepare('DELETE FROM kitchen_prep_orders WHERE id = ? AND user_id = ?').run(id, userId);
-  return res.changes > 0;
+  return trashKitchenPrep(userId, Number(id));
 }
 
 export function completePrepProduction(

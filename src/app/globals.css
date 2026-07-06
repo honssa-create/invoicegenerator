@@ -3,8 +3,56 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
-    @apply antialiased text-gray-900;
+    @apply antialiased text-gray-900 overflow-x-hidden;
+  }
+
+  /* Prevent iOS Safari zoom-on-focus for form fields */
+  @media (max-width: 639px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+}
+
+@layer components {
+  .page-header {
+    @apply mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-start sm:justify-between;
+  }
+
+  .page-title {
+    @apply text-xl font-bold text-gray-900 sm:text-2xl;
+  }
+
+  .page-actions {
+    @apply flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end;
+  }
+
+  .page-actions > a,
+  .page-actions > button {
+    @apply min-h-[44px] sm:min-h-0;
+  }
+
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center px-4 py-2.5 text-sm font-medium rounded-lg transition-colors sm:min-h-0 sm:py-2;
+  }
+
+  .table-scroll {
+    @apply overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0;
+  }
+
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4;
+  }
+
+  .modal-panel {
+    @apply max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-w-xl sm:rounded-2xl sm:p-6;
   }
 }
 

@@ -42,14 +42,16 @@ export default function OrdersPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Orders 訂單管理</h1>
-          <p className="text-gray-500 mt-1">Manage production orders with a ClickUp-style detail view</p>
+          <h1 className="page-title">Orders 訂單管理</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Manage production orders with a ClickUp-style detail view</p>
         </div>
-        <button onClick={() => { setForm(EMPTY); setShowForm(true); }} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
-          + New Order
-        </button>
+        <div className="page-actions">
+          <button onClick={() => { setForm(EMPTY); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
+            + New Order
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
@@ -58,7 +60,8 @@ export default function OrdersPage() {
         ) : orders.length === 0 ? (
           <div className="p-12 text-center text-gray-500">No orders yet. Create your first order.</div>
         ) : (
-          <table className="w-full">
+          <div className="table-scroll">
+          <table className="w-full min-w-[560px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3">Order</th>
@@ -82,12 +85,13 @@ export default function OrdersPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg p-6 shadow-xl">
+        <div className="modal-overlay">
+          <div className="modal-panel">
             <h2 className="text-lg font-semibold mb-4">New Order</h2>
             <form onSubmit={create} className="space-y-3">
               <div>

@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getOrder, logActivity } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
+import { trashOrder } from '@/lib/trash';
 
 const CORE_COLUMNS = [
   'po_number',
@@ -130,9 +131,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const result = db
-    .prepare('DELETE FROM orders WHERE id = ? AND user_id = ?')
-    .run(params.id, session.userId);
-  if (result.changes === 0) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-  return NextResponse.json({ success: true });
+  if (!trashOrder(session.userId, Number(params.id))) {
+    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  }
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

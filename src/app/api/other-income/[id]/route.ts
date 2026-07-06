@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { trashOtherIncome } from '@/lib/trash';
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -19,7 +20,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const res = db.prepare('DELETE FROM other_income WHERE id = ? AND user_id = ?').run(params.id, session.userId);
-  if (res.changes === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ success: true });
+  if (!trashOtherIncome(session.userId, Number(params.id))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  return NextResponse.json({ success: true, trashed: true, retention_days: 60 });
 }

@@ -84,10 +84,10 @@ export default function KitchenPrepDetailPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to schedule</button>
-        <div className="flex gap-3">
-          <Link href={`/kitchen-prep/${id}/print`} className="px-5 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
+        <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to schedule</button>
+        <div className="page-actions w-full sm:w-auto">
+          <Link href={`/kitchen-prep/${id}/print`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🖨 Print Prep Sheet 列印備料單
           </Link>
         </div>

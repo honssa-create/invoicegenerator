@@ -589,6 +589,108 @@ if (legacyReceipts.length) {
   migrate();
 }
 
+// Recycle bin — deleted records kept for 60 days before permanent purge.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS deleted_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    summary TEXT,
+    payload TEXT NOT NULL,
+    deleted_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_deleted_records_user ON deleted_records(user_id);
+  CREATE INDEX IF NOT EXISTS idx_deleted_records_expires ON deleted_records(expires_at);
+`);
+
+try {
+  db.prepare("DELETE FROM deleted_records WHERE expires_at < datetime('now')").run();
+} catch {
+  /* table may not exist on first boot before exec above — ignore */
+}
+
+// User roles + per-role section permissions.
+{
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+  if (!userCols.some((c) => c.name === 'role')) {
+    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
+    db.exec("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''");
+  }
+  if (!userCols.some((c) => c.name === 'owner_user_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN owner_user_id INTEGER REFERENCES users(id)');
+    db.exec('UPDATE users SET owner_user_id = id WHERE owner_user_id IS NULL');
+  }
+}
+
+// Track who uploaded each expense (for operator-scoped visibility).
+{
+  const expenseCols = db.prepare('PRAGMA table_info(expenses)').all() as { name: string }[];
+  if (!expenseCols.some((c) => c.name === 'created_by_user_id')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN created_by_user_id INTEGER REFERENCES users(id)');
+    db.exec('UPDATE expenses SET created_by_user_id = user_id WHERE created_by_user_id IS NULL');
+  }
+  if (!expenseCols.some((c) => c.name === 'special_notes')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN special_notes TEXT');
+  }
+  if (!expenseCols.some((c) => c.name === 'supplier_input')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN supplier_input TEXT');
+  }
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS role_permissions (
+    role TEXT NOT NULL,
+    section TEXT NOT NULL,
+    allowed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (role, section)
+  );
+`);
+
+// Seed default operator/accountant permissions once.
+{
+  const permCount = (db.prepare('SELECT COUNT(*) as c FROM role_permissions').get() as { c: number }).c;
+  if (permCount === 0) {
+    const defaults: Record<string, Record<string, boolean>> = {
+      operator: {
+        dashboard: true, quotations: true, invoices: true, orders: true, inbound: true,
+        kitchen: true, kitchen_prep: true, rentals: false, expenses: true, accounting: false,
+        cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
+      },
+      accountant: {
+        dashboard: true, quotations: true, invoices: true, orders: false, inbound: false,
+        kitchen: false, kitchen_prep: false, rentals: true, expenses: true, accounting: true,
+        cashflow: true, scan_table: true, customers: true, trash: true, admin: false,
+      },
+    };
+    const insert = db.prepare(
+      'INSERT INTO role_permissions (role, section, allowed) VALUES (?, ?, ?)'
+    );
+    const seed = db.transaction(() => {
+      for (const [role, sections] of Object.entries(defaults)) {
+        for (const [section, allowed] of Object.entries(sections)) {
+          insert.run(role, section, allowed ? 1 : 0);
+        }
+      }
+    });
+    seed();
+  }
+}
+
+// Grant operators view access to invoices, quotations, and expenses.
+{
+  const upsert = db.prepare(
+    `INSERT INTO role_permissions (role, section, allowed) VALUES ('operator', ?, 1)
+     ON CONFLICT(role, section) DO UPDATE SET allowed = 1`
+  );
+  for (const section of ['invoices', 'quotations', 'expenses']) {
+    upsert.run(section);
+  }
+}
+
   dbInstance = db;
   return dbInstance;
 }

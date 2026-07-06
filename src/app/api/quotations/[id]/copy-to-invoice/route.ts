@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
 import { generateInvoiceNumber } from '@/lib/invoices';
+import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
 // Copy a quotation into a BRAND NEW invoice. The source quotation (and its line
@@ -11,7 +13,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const quote = getQuotationWithDetails(params.id, session.userId);
+  const denied = denyReadOnlyWrite(session, 'quotations', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+  const quote = getQuotationWithDetails(params.id, ownerId);
   if (!quote) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
   // Client details (name, email, phone, shipping address) are carried through the
@@ -25,7 +31,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const today = new Date().toISOString().slice(0, 10);
   const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-  const invoiceNumber = generateInvoiceNumber(session.userId);
+  const invoiceNumber = generateInvoiceNumber(ownerId);
 
   const create = db.transaction(() => {
     const result = db
@@ -33,7 +39,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
          VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)`
       )
-      .run(session.userId, quote.customer_id, invoiceNumber, today, due, quote.tax_rate, quote.notes, quote.terms);
+      .run(ownerId, quote.customer_id, invoiceNumber, today, due, quote.tax_rate, quote.notes, quote.terms);
     const invoiceId = result.lastInsertRowid as number;
 
     const insertItem = db.prepare(

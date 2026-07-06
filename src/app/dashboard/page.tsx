@@ -41,17 +41,16 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 mt-1">Overview of your invoicing activity</p>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Overview of your invoicing activity</p>
         </div>
-        <Link
-          href="/invoices/new"
-          className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
-        >
-          + New Invoice
-        </Link>
+        <div className="page-actions">
+          <Link href="/invoices/new" className="btn bg-brand-600 text-white hover:bg-brand-700">
+            + New Invoice
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
@@ -90,7 +89,8 @@ export default function DashboardPage() {
             </Link>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="table-scroll">
+          <table className="w-full min-w-[640px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider">
                 <th className="px-6 py-3">Invoice</th>
@@ -116,6 +116,7 @@ export default function DashboardPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </AppLayout>

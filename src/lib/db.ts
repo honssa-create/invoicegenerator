@@ -644,6 +644,24 @@ db.exec(`
   }
 }
 
+// Billing-item status (unpaid / partially_paid / paid) on rental_charge_items.
+{
+  const ciCols = (db.prepare('PRAGMA table_info(rental_charge_items)').all() as { name: string }[]).map((c) => c.name);
+  if (!ciCols.includes('status')) {
+    try {
+      db.exec(`ALTER TABLE rental_charge_items ADD COLUMN status TEXT NOT NULL DEFAULT 'unpaid'`);
+      db.exec(`
+        UPDATE rental_charge_items SET status = CASE
+          WHEN amount_due <= 0 THEN 'empty'
+          WHEN amount_allocated >= amount_due - 0.009 THEN 'paid'
+          WHEN amount_allocated > 0 THEN 'partially_paid'
+          ELSE 'unpaid'
+        END
+      `);
+    } catch { /* exists */ }
+  }
+}
+
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.
 {
   const unitsNeedingTenant = db.prepare(

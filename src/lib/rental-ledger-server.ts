@@ -3,11 +3,13 @@ import {
   CHARGE_TYPE_LABELS,
   chargeOutstanding,
   cellPaymentStatus,
+  deriveChargeItemStatus,
   dueDateForPeriod,
   formatBillingPeriodLabel,
   formatDisplayDate,
   formatPeriodRangeShort,
   type RentalChargeItem,
+  type RentalChargeItemStatus,
   type RentalChargeType,
   type RentalPayment,
   type RentalPaymentAllocation,
@@ -40,6 +42,7 @@ interface TenantRow {
 interface ChargeRow {
   id: number; user_id: number; unit_id: number; billing_period: string;
   charge_type: RentalChargeType; amount_due: number; amount_allocated: number;
+  status?: RentalChargeItemStatus;
   legacy_record_id: number | null; created_at: string; updated_at: string;
 }
 
@@ -63,12 +66,28 @@ function hydrateTenant(row: TenantRow, unitCount = 0): RentalTenant {
 }
 
 function hydrateCharge(row: ChargeRow): RentalChargeItem {
+  const amountDue = row.amount_due || 0;
+  const amountAllocated = row.amount_allocated || 0;
+  const status = row.status && ['empty', 'unpaid', 'partially_paid', 'paid'].includes(row.status)
+    ? row.status
+    : deriveChargeItemStatus(amountDue, amountAllocated);
   return {
     id: row.id, user_id: row.user_id, unitId: row.unit_id,
     billingPeriod: row.billing_period, chargeType: row.charge_type,
-    amountDue: row.amount_due || 0, amountAllocated: row.amount_allocated || 0,
+    amountDue, amountAllocated, status,
     legacyRecordId: row.legacy_record_id, created_at: row.created_at, updated_at: row.updated_at,
   };
+}
+
+function refreshChargeItemStatus(chargeItemId: number) {
+  const row = db.prepare(
+    'SELECT amount_due, amount_allocated FROM rental_charge_items WHERE id = ?'
+  ).get(chargeItemId) as { amount_due: number; amount_allocated: number } | undefined;
+  if (!row) return;
+  const status = deriveChargeItemStatus(row.amount_due || 0, row.amount_allocated || 0);
+  db.prepare(
+    `UPDATE rental_charge_items SET status = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(status, chargeItemId);
 }
 
 function paymentAllocated(paymentId: number): number {
@@ -225,9 +244,13 @@ export function syncChargeItemsFromRecord(record: RentRecord) {
     const setAllocated = db.prepare(
       `UPDATE rental_charge_items SET amount_allocated = ?, updated_at = datetime('now') WHERE id = ?`
     );
-    for (const row of byItem) setAllocated.run(row.allocated, row.id);
+    for (const row of byItem) {
+      setAllocated.run(row.allocated, row.id);
+      refreshChargeItemStatus(row.id);
+    }
   } else {
     distributeLegacyPaid(record.amountPaid || 0, itemIds);
+    for (const item of itemIds) refreshChargeItemStatus(item.id);
   }
 }
 
@@ -440,6 +463,26 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
   return { tenant, units, outstandingCharges, payments };
 }
 
+export function getChargeItemsForRecord(recordId: number, userId: number): RentalChargeItem[] {
+  return (db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE legacy_record_id = ? AND user_id = ?
+     ORDER BY CASE charge_type WHEN 'rent' THEN 1 WHEN 'water' THEN 2 ELSE 3 END`
+  ).all(recordId, userId) as ChargeRow[]).map(hydrateCharge);
+}
+
+export function getChargeItemByRecordAndType(
+  recordId: number,
+  userId: number,
+  chargeType: RentalChargeType,
+): RentalChargeItem | null {
+  const row = db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE legacy_record_id = ? AND user_id = ? AND charge_type = ?`
+  ).get(recordId, userId, chargeType) as ChargeRow | undefined;
+  return row ? hydrateCharge(row) : null;
+}
+
 export function getChargeItemsForTenant(tenantId: number, userId: number): RentalChargeItem[] {
   const units = getTenantUnits(tenantId, userId);
   if (!units.length) return [];
@@ -455,6 +498,25 @@ export function getChargeItemsForTenant(tenantId: number, userId: number): Renta
 // ---------------------------------------------------------------------------
 
 export function createRentalPayment(
+  userId: number,
+  input: {
+    tenantId: number;
+    paymentDate: string;
+    amount: number;
+    method?: string | null;
+    reference?: string | null;
+    notes?: string | null;
+    receiptImagePath?: string | null;
+  },
+  allocations?: { chargeItemId: number; amount: number }[],
+): RentalPayment | { payment: RentalPayment; allocations: RentalPaymentAllocation[] } {
+  const payment = createRentalPaymentOnly(userId, input);
+  if (!allocations?.length) return payment;
+  const result = applyPaymentAllocations(payment.id, userId, allocations);
+  return result;
+}
+
+function createRentalPaymentOnly(
   userId: number,
   input: {
     tenantId: number;
@@ -484,7 +546,7 @@ export function createRentalPayment(
   return payment;
 }
 
-export function allocatePayment(
+function applyPaymentAllocations(
   paymentId: number | string,
   userId: number,
   allocations: { chargeItemId: number; amount: number }[],
@@ -510,6 +572,7 @@ export function allocatePayment(
   const getCharge = db.prepare('SELECT * FROM rental_charge_items WHERE id = ? AND user_id = ?');
 
   const result: RentalPaymentAllocation[] = [];
+  const touchedChargeIds: number[] = [];
   const run = db.transaction(() => {
     for (const alloc of allocations) {
       const charge = getCharge.get(alloc.chargeItemId, userId) as ChargeRow | undefined;
@@ -526,10 +589,12 @@ export function allocatePayment(
       }
       const res = insertAlloc.run(userId, payment.id, alloc.chargeItemId, alloc.amount);
       updateCharge.run(alloc.amount, alloc.chargeItemId, userId);
+      touchedChargeIds.push(alloc.chargeItemId);
       result.push(hydrateAllocation(
         db.prepare('SELECT * FROM rental_payment_allocations WHERE id = ?').get(Number(res.lastInsertRowid)) as AllocationRow
       ));
     }
+    for (const id of touchedChargeIds) refreshChargeItemStatus(id);
   });
   run();
 
@@ -545,6 +610,59 @@ export function allocatePayment(
   return { payment: freshPayment, allocations: result };
 }
 
+export function allocatePayment(
+  paymentId: number | string,
+  userId: number,
+  allocations: { chargeItemId: number; amount: number }[],
+): { payment: RentalPayment; allocations: RentalPaymentAllocation[] } {
+  return applyPaymentAllocations(paymentId, userId, allocations);
+}
+
+/** Apply allocations directly to billing items (when no tenant payment record is needed). */
+export function allocateChargeItemsDirect(
+  userId: number,
+  allocations: { chargeItemId: number; amount: number }[],
+) {
+  if (!allocations.length) return;
+  const updateCharge = db.prepare(
+    `UPDATE rental_charge_items SET amount_allocated = amount_allocated + ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+  );
+  const getCharge = db.prepare('SELECT * FROM rental_charge_items WHERE id = ? AND user_id = ?');
+  const run = db.transaction(() => {
+    for (const alloc of allocations) {
+      const charge = getCharge.get(alloc.chargeItemId, userId) as ChargeRow | undefined;
+      if (!charge) throw new Error(`Charge item ${alloc.chargeItemId} not found`);
+      const item = hydrateCharge(charge);
+      const outstanding = chargeOutstanding(item);
+      if (alloc.amount > outstanding + 0.01) {
+        throw new Error(`Allocation exceeds outstanding for ${item.billingPeriod} ${item.chargeType}`);
+      }
+      updateCharge.run(alloc.amount, alloc.chargeItemId, userId);
+      refreshChargeItemStatus(alloc.chargeItemId);
+    }
+  });
+  run();
+  syncLegacyRecordFromCharges(allocations.map((a) => a.chargeItemId), userId);
+}
+
+/** Record a tenant payment and immediately allocate to specific billing items (rent/water/electricity). */
+export function recordTenantPaymentWithAllocations(
+  userId: number,
+  input: {
+    tenantId: number;
+    paymentDate: string;
+    amount: number;
+    method?: string | null;
+    reference?: string | null;
+    notes?: string | null;
+    receiptImagePath?: string | null;
+  },
+  allocations: { chargeItemId: number; amount: number }[],
+) {
+  const payment = createRentalPaymentOnly(userId, input);
+  return applyPaymentAllocations(payment.id, userId, allocations);
+}
+
 function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number) {
   const legacyIds = new Set<number>();
   for (const id of chargeItemIds) {
@@ -554,11 +672,12 @@ function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number) {
   }
   for (const recordId of Array.from(legacyIds)) {
     const items = (db.prepare(
-      'SELECT amount_due, amount_allocated FROM rental_charge_items WHERE legacy_record_id = ? AND user_id = ?'
-    ).all(recordId, userId) as { amount_due: number; amount_allocated: number }[]);
+      'SELECT id, amount_due, amount_allocated FROM rental_charge_items WHERE legacy_record_id = ? AND user_id = ?'
+    ).all(recordId, userId) as { id: number; amount_due: number; amount_allocated: number }[]);
     const totalPaid = items.reduce((s, i) => s + (i.amount_allocated || 0), 0);
     const totalDue = items.reduce((s, i) => s + (i.amount_due || 0), 0);
     const fullyPaid = totalPaid >= totalDue - 0.01;
+    for (const item of items) refreshChargeItemStatus(item.id);
     db.prepare(
       `UPDATE rental_records SET amount_paid = ?, status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
     ).run(totalPaid, fullyPaid ? 'paid' : 'pending', recordId, userId);

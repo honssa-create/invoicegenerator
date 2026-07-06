@@ -16,6 +16,16 @@ export async function POST(request: Request, { params }: { params: { id: string 
       note: body.note || null,
       paidDate: body.paidDate || null,
       amount: body.amount !== undefined && body.amount !== null ? Number(body.amount) : undefined,
+      chargeAllocations: Array.isArray(body.chargeAllocations)
+        ? (body.chargeAllocations as { chargeType: string; amount: number }[])
+            .map((a) => ({
+              chargeType: a.chargeType as 'rent' | 'water' | 'electricity',
+              amount: Number(a.amount),
+            }))
+            .filter((a: { chargeType: string; amount: number }) => a.amount > 0)
+        : undefined,
+      method: body.method || null,
+      reference: body.reference || null,
     });
     return NextResponse.json(result);
   } catch (e) {

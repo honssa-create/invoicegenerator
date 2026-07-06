@@ -349,10 +349,20 @@ export function normalizeStoredDate(value: string | null | undefined): string | 
 
 export type RentalChargeType = 'rent' | 'water' | 'electricity';
 
+/** Persisted billing-item payment status (maps to rental_charge_items.status). */
+export type RentalChargeItemStatus = 'empty' | 'unpaid' | 'partially_paid' | 'paid';
+
 export const CHARGE_TYPE_LABELS: Record<RentalChargeType, string> = {
   rent: '租金 Rent',
   water: '水費 Water',
   electricity: '電費 Electricity',
+};
+
+export const CHARGE_STATUS_LABELS: Record<RentalChargeItemStatus, string> = {
+  empty: '—',
+  unpaid: '未付 Unpaid',
+  partially_paid: '部分付款 Partial',
+  paid: '已付 Paid',
 };
 
 export interface RentalTenant {
@@ -375,6 +385,7 @@ export interface RentalChargeItem {
   chargeType: RentalChargeType;
   amountDue: number;
   amountAllocated: number;
+  status: RentalChargeItemStatus;
   legacyRecordId: number | null;
   created_at: string;
   updated_at: string;
@@ -474,6 +485,18 @@ export function formatPeriodRangeShort(periods: string[]): string {
 
 export function chargeOutstanding(item: Pick<RentalChargeItem, 'amountDue' | 'amountAllocated'>): number {
   return Math.max(0, (item.amountDue || 0) - (item.amountAllocated || 0));
+}
+
+/** Derive persisted billing-item status from due vs allocated amounts. */
+export function deriveChargeItemStatus(
+  amountDue: number,
+  amountAllocated: number,
+): RentalChargeItemStatus {
+  if (amountDue <= 0) return 'empty';
+  const outstanding = Math.max(0, amountDue - (amountAllocated || 0));
+  if (outstanding <= 0.009) return 'paid';
+  if ((amountAllocated || 0) > 0) return 'partially_paid';
+  return 'unpaid';
 }
 
 export function cellPaymentStatus(

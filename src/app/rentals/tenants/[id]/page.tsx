@@ -5,9 +5,16 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import RentPaymentNoticeMatrix from '@/components/RentPaymentNoticeMatrix';
+import ChargeAllocationGrid, {
+  chargeRowsFromItems,
+  fillOutstandingValues,
+  fillRentOnlyValues,
+  sumAllocationValues,
+} from '@/components/ChargeAllocationGrid';
 import { useAuth } from '@/components/AuthProvider';
 import {
   CHARGE_TYPE_LABELS,
+  CHARGE_STATUS_LABELS,
   chargeOutstanding,
   currentBillingPeriod,
   formatDisplayDate,
@@ -46,6 +53,7 @@ export default function TenantDetailPage() {
   const [paymentModal, setPaymentModal] = useState(false);
   const [allocateModal, setAllocateModal] = useState<RentalPayment | null>(null);
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
+  const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [allocations, setAllocations] = useState<Record<number, string>>({});
 
   const load = () => {
@@ -73,8 +81,35 @@ export default function TenantDetailPage() {
 
   useEffect(() => { load(); }, [id, period, fromPeriod]);
 
+  const openPaymentModal = () => {
+    if (!detail) return;
+    const unitNames = Object.fromEntries(detail.units.map((u) => [u.id, u.unitName]));
+    const rows = chargeRowsFromItems(detail.outstandingCharges, unitNames);
+    const filled = fillOutstandingValues(rows);
+    setChargeAllocValues(filled);
+    setPaymentForm((f) => ({
+      ...f,
+      amount: String(sumAllocationValues(filled) || ''),
+    }));
+    setPaymentModal(true);
+  };
+
   const savePayment = async () => {
     if (!detail) return;
+    const allocSum = sumAllocationValues(chargeAllocValues);
+    const amount = Number(paymentForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setToast('Enter a valid payment amount');
+      return;
+    }
+    if (allocSum > amount + 0.01) {
+      setToast('Allocated total exceeds payment amount');
+      return;
+    }
+    const allocations = Object.entries(chargeAllocValues)
+      .filter(([, v]) => v && Number(v) > 0)
+      .map(([chargeItemId, v]) => ({ chargeItemId: Number(chargeItemId), amount: Number(v) }));
+
     setBusy(true);
     const res = await fetch('/api/rentals/payments', {
       method: 'POST',
@@ -82,10 +117,11 @@ export default function TenantDetailPage() {
       body: JSON.stringify({
         tenantId: detail.tenant.id,
         paymentDate: paymentForm.paymentDate,
-        amount: Number(paymentForm.amount),
+        amount,
         method: paymentForm.method || null,
         reference: paymentForm.reference || null,
         notes: paymentForm.notes || null,
+        allocations: allocations.length ? allocations : undefined,
       }),
     });
     setBusy(false);
@@ -95,8 +131,9 @@ export default function TenantDetailPage() {
       return;
     }
     setPaymentModal(false);
+    setChargeAllocValues({});
     setPaymentForm({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
-    setToast('Payment recorded');
+    setToast(allocations.length ? 'Payment recorded and allocated' : 'Payment recorded — allocate remaining balance when ready');
     load();
   };
 
@@ -173,7 +210,7 @@ export default function TenantDetailPage() {
             繳付租金通知單 Print
           </Link>
           {!readOnly && (
-            <button onClick={() => setPaymentModal(true)} className="btn bg-brand-600 text-white hover:bg-brand-700">
+            <button onClick={openPaymentModal} className="btn bg-brand-600 text-white hover:bg-brand-700">
               + Record Payment
             </button>
           )}
@@ -220,6 +257,45 @@ export default function TenantDetailPage() {
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold">Outstanding Billing Items 未付明細</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Per unit · month · charge type (rent / water / electricity)</p>
+        </div>
+        {outstandingCharges.length === 0 ? (
+          <p className="p-8 text-center text-gray-400 text-sm">All billing items paid</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="px-4 py-3 text-left">Unit / Period</th>
+                <th className="px-4 py-3 text-left">Type</th>
+                <th className="px-4 py-3 text-right">Due</th>
+                <th className="px-4 py-3 text-right">Paid</th>
+                <th className="px-4 py-3 text-right">Outstanding</th>
+                <th className="px-4 py-3 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {outstandingCharges.map((c) => {
+                const unit = units.find((u) => u.id === c.unitId);
+                const out = chargeOutstanding(c);
+                return (
+                  <tr key={c.id}>
+                    <td className="px-4 py-3 font-medium">{unit?.unitName} · {c.billingPeriod}</td>
+                    <td className="px-4 py-3 text-gray-600">{CHARGE_TYPE_LABELS[c.chargeType]}</td>
+                    <td className="px-4 py-3 text-right">{formatMoney(c.amountDue)}</td>
+                    <td className="px-4 py-3 text-right text-green-700">{formatMoney(c.amountAllocated)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-red-700">{formatMoney(out)}</td>
+                    <td className="px-4 py-3 text-xs font-semibold">{CHARGE_STATUS_LABELS[c.status]}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="font-semibold">Payments 收款紀錄</h2>
         </div>
         {payments.length === 0 ? (
@@ -258,32 +334,76 @@ export default function TenantDetailPage() {
         )}
       </div>
 
-      {paymentModal && (
+      {paymentModal && detail && (
         <div className="modal-overlay">
-          <div className="modal-panel sm:max-w-md">
-            <h2 className="text-lg font-bold mb-4">Record Payment 記錄收款</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-gray-500">Date 日期</label>
-                <input className={inp} value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} placeholder="DD/MM/YYYY" />
+          <div className="modal-panel sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+            <h2 className="text-lg font-bold mb-1">Record Payment 記錄收款</h2>
+            <p className="text-sm text-gray-500 mb-4">Split payment across rent / water / electricity per unit and month</p>
+            <div className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500">Date 日期</label>
+                  <input className={inp} value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} placeholder="DD/MM/YYYY" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Total Amount 收款總額</label>
+                  <input type="number" className={inp} value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Method 方式</label>
+                  <input className={inp} value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Reference 參考</label>
+                  <input className={inp} value={paymentForm.reference} onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })} />
+                </div>
               </div>
+
               <div>
-                <label className="text-xs text-gray-500">Amount 金額</label>
-                <input type="number" className={inp} value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">Method 方式</label>
-                <input className={inp} value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">Reference 參考</label>
-                <input className={inp} value={paymentForm.reference} onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })} />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-600 uppercase">Allocate to billing items 分配至收費細項</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                      onClick={() => {
+                        const rows = chargeRowsFromItems(detail.outstandingCharges, Object.fromEntries(detail.units.map((u) => [u.id, u.unitName])));
+                        const filled = fillRentOnlyValues(rows);
+                        setChargeAllocValues(filled);
+                        setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
+                      }}
+                    >
+                      Rent only 只交租金
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                      onClick={() => {
+                        const rows = chargeRowsFromItems(detail.outstandingCharges, Object.fromEntries(detail.units.map((u) => [u.id, u.unitName])));
+                        const filled = fillOutstandingValues(rows);
+                        setChargeAllocValues(filled);
+                        setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
+                      }}
+                    >
+                      Fill all 填滿未付
+                    </button>
+                  </div>
+                </div>
+                <ChargeAllocationGrid
+                  rows={chargeRowsFromItems(detail.outstandingCharges, Object.fromEntries(detail.units.map((u) => [u.id, u.unitName])))}
+                  values={chargeAllocValues}
+                  onChange={setChargeAllocValues}
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  Allocated: {formatMoney(sumAllocationValues(chargeAllocValues))}
+                  {paymentForm.amount && ` / Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setPaymentModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
               <button onClick={savePayment} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
-                {busy ? 'Saving…' : 'Save'}
+                {busy ? 'Saving…' : 'Save & Allocate'}
               </button>
             </div>
           </div>

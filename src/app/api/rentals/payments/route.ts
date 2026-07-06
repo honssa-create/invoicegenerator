@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
 import { rentalOwnerId } from '@/lib/org-server';
-import { createRentalPayment } from '@/lib/rental-ledger-server';
+import { createRentalPayment, recordTenantPaymentWithAllocations } from '@/lib/rental-ledger-server';
 import { normalizeStoredDate } from '@/lib/rentals';
 
 export async function POST(request: Request) {
@@ -17,6 +17,28 @@ export async function POST(request: Request) {
     if (!tenantId || !Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ error: 'tenantId and positive amount required' }, { status: 400 });
     }
+    const allocations = Array.isArray(body.allocations)
+      ? (body.allocations as { chargeItemId: number; amount: number }[])
+          .map((a) => ({
+            chargeItemId: Number(a.chargeItemId),
+            amount: Number(a.amount),
+          }))
+          .filter((a) => a.chargeItemId && a.amount > 0)
+      : [];
+
+    if (allocations.length) {
+      const result = recordTenantPaymentWithAllocations(rentalOwnerId(session.userId), {
+        tenantId,
+        paymentDate,
+        amount,
+        method: body.method,
+        reference: body.reference,
+        notes: body.notes,
+        receiptImagePath: body.receiptImagePath,
+      }, allocations);
+      return NextResponse.json(result, { status: 201 });
+    }
+
     const payment = createRentalPayment(rentalOwnerId(session.userId), {
       tenantId,
       paymentDate,

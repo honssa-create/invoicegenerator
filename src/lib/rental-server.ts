@@ -2,9 +2,10 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
-import { ensureUnitTenantLink, syncChargeItemsFromRecord } from './rental-ledger-server';
+import { ensureUnitTenantLink, allocateChargeItemsDirect, getChargeItemsForRecord, recordTenantPaymentWithAllocations, syncChargeItemsFromRecord } from './rental-ledger-server';
 import {
   computeTotal,
+  chargeOutstanding,
   currentBillingPeriod,
   displayRentalStatus,
   defaultRentPeriod,
@@ -17,6 +18,8 @@ import {
   outstandingBalance,
   normalizeStoredDate,
   type PreviousYearRent,
+  type RentalChargeItem,
+  type RentalChargeType,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -389,6 +392,11 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
       .get(userId, unit.id, period) as { id: number })?.id,
     userId
   );
+  let chargeItems: RentalChargeItem[] = [];
+  if (currentRecord) {
+    syncChargeItemsFromRecord(currentRecord);
+    chargeItems = getChargeItemsForRecord(currentRecord.id, userId);
+  }
   const history = (db.prepare(
     'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC'
   ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
@@ -399,6 +407,7 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     : undefined;
   return {
     unit, currentRecord, history, activities,
+    chargeItems,
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
   };
 }
@@ -612,23 +621,80 @@ export async function extractRentalReceipt(
 
 export async function markRentPaid(
   recordId: number | string, userId: number,
-  input: { autoSendReceiptEmail?: boolean; note?: string | null; paidDate?: string | null; amount?: number | null }
+  input: {
+    autoSendReceiptEmail?: boolean;
+    note?: string | null;
+    paidDate?: string | null;
+    amount?: number | null;
+    /** Per charge-type split (rent / water / electricity). Overrides FIFO when provided. */
+    chargeAllocations?: { chargeType: RentalChargeType; amount: number }[];
+    method?: string | null;
+    reference?: string | null;
+  }
 ) {
   const record = getRentRecord(recordId, userId);
   if (!record) throw new Error('Rent record not found');
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
 
-  const paymentAmount = input.amount !== undefined && input.amount !== null
-    ? Number(input.amount)
-    : outstandingBalance(record);
+  syncChargeItemsFromRecord(record);
+  const chargeItems = getChargeItemsForRecord(record.id, userId);
+  const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
+
+  const CHARGE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+  let allocations: { chargeItemId: number; amount: number }[] = [];
+
+  if (input.chargeAllocations?.length) {
+    for (const ca of input.chargeAllocations) {
+      if (!ca.amount || ca.amount <= 0) continue;
+      const item = chargeItems.find((c) => c.chargeType === ca.chargeType);
+      if (!item) continue;
+      const outstanding = chargeOutstanding(item);
+      if (ca.amount > outstanding + 0.01) {
+        throw new Error(`Allocation for ${ca.chargeType} exceeds outstanding ${outstanding}`);
+      }
+      allocations.push({ chargeItemId: item.id, amount: ca.amount });
+    }
+  } else {
+    const paymentAmount = input.amount !== undefined && input.amount !== null
+      ? Number(input.amount)
+      : outstandingBalance(record);
+    if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
+    let remaining = paymentAmount;
+    for (const type of CHARGE_ORDER) {
+      const item = chargeItems.find((c) => c.chargeType === type);
+      if (!item || remaining <= 0) continue;
+      const out = chargeOutstanding(item);
+      const alloc = Math.min(remaining, out);
+      if (alloc > 0) {
+        allocations.push({ chargeItemId: item.id, amount: alloc });
+        remaining -= alloc;
+      }
+    }
+  }
+
+  const paymentAmount = allocations.reduce((s, a) => s + a.amount, 0);
   if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
 
-  const newAmountPaid = (record.amountPaid || 0) + paymentAmount;
+  const tenant = ensureUnitTenantLink(unit);
+  if (tenant && allocations.length) {
+    recordTenantPaymentWithAllocations(unit.user_id, {
+      tenantId: tenant.id,
+      paymentDate: paidDate,
+      amount: paymentAmount,
+      method: input.method,
+      reference: input.reference,
+      notes: input.note,
+    }, allocations);
+  } else if (allocations.length) {
+    allocateChargeItemsDirect(userId, allocations);
+  }
+
+  const freshCharges = getChargeItemsForRecord(record.id, userId);
+  const newAmountPaid = freshCharges.reduce((s, c) => s + (c.amountAllocated || 0), 0);
   const fullyPaid = newAmountPaid >= record.actualAmount - 0.01;
   const receiptRef = `/rentals/records/${record.id}/receipt`;
   const shouldSend = input.autoSendReceiptEmail ?? unit.autoSendReceiptEmail;
-  const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
   db.prepare(
     `UPDATE rental_records SET
@@ -654,7 +720,6 @@ export async function markRentPaid(
   }
 
   const fresh = getRentRecord(record.id, userId)!;
-  syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (shouldSend && unit.tenantEmail) {
     email = await sendEmail(

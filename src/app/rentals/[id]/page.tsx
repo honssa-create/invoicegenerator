@@ -4,11 +4,18 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import ChargeAllocationGrid, {
+  chargeRowsFromRecord,
+  fillOutstandingValues,
+  fillRentOnlyValues,
+  sumAllocationValues,
+} from '@/components/ChargeAllocationGrid';
 import { compressImage } from '@/lib/imageCompression';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
   calculateBasicRentPeriod,
+  chargeOutstanding,
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
@@ -24,6 +31,7 @@ import {
   utilityLineLabel,
   type RentRecord,
   type RentalActivityLog,
+  type RentalChargeItem,
   type RentalPaymentReceipt,
   type RentalUnit,
   type RentalUnitWithRecord,
@@ -32,6 +40,7 @@ import {
 interface DetailPayload {
   unit: RentalUnit;
   currentRecord: RentRecord | null;
+  chargeItems?: RentalChargeItem[];
   history: RentRecord[];
   activities: RentalActivityLog[];
   latestReceipt: RentalPaymentReceipt | null;
@@ -84,6 +93,7 @@ function RentalDetailInner() {
   const [autoSendReceipt, setAutoSendReceipt] = useState(false);
   const [paidDate, setPaidDate] = useState(todayFormDate());
   const [paidAmount, setPaidAmount] = useState('');
+  const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [paidNote, setPaidNote] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [ocrResult, setOcrResult] = useState<{ extracted: { amount: number | null; method: string | null; transfer_date: string | null; receiving_account: string | null }; matched: boolean } | null>(null);
@@ -243,8 +253,35 @@ function RentalDetailInner() {
     }
   };
 
+  const openPaidModal = () => {
+    if (!data?.currentRecord) return;
+    const items = data.chargeItems?.length
+      ? data.chargeItems
+      : [
+          { chargeType: 'rent' as const, amountDue: data.currentRecord.baseRent, amountAllocated: 0 },
+          { chargeType: 'water' as const, amountDue: data.currentRecord.waterFee, amountAllocated: 0 },
+          { chargeType: 'electricity' as const, amountDue: data.currentRecord.electricityFee, amountAllocated: 0 },
+        ];
+    const rows = chargeRowsFromRecord(items);
+    const filled = fillOutstandingValues(rows);
+    setChargeAllocValues(filled);
+    setPaidAmount(String(sumAllocationValues(filled) || outstandingBalance(data.currentRecord)));
+    setShowPaidModal(true);
+    setOcrResult(null);
+    setReceiptFile(null);
+    setPaidDate(data.currentRecord.paidDate ? toFormDate(data.currentRecord.paidDate) : todayFormDate());
+  };
+
   const confirmPaid = async () => {
     if (!data?.currentRecord) return;
+    const chargeAllocations = (['rent', 'water', 'electricity'] as const)
+      .map((chargeType) => ({ chargeType, amount: Number(chargeAllocValues[chargeType] || 0) }))
+      .filter((a) => a.amount > 0);
+    const allocSum = chargeAllocations.reduce((s, a) => s + a.amount, 0);
+    if (allocSum <= 0) {
+      setToast('Allocate at least one charge type (rent / water / electricity)');
+      return;
+    }
     setBusy(true);
     const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/paid`, {
       method: 'POST',
@@ -253,7 +290,8 @@ function RentalDetailInner() {
         autoSendReceiptEmail: autoSendReceipt,
         note: paidNote || null,
         paidDate: fromFormDate(paidDate),
-        amount: Number(paidAmount) || undefined,
+        amount: allocSum,
+        chargeAllocations,
       }),
     });
     setBusy(false);
@@ -477,13 +515,7 @@ function RentalDetailInner() {
                   className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700">
                   📄 Send Invoice
                 </button>
-                <button onClick={() => {
-                  setShowPaidModal(true);
-                  setOcrResult(null);
-                  setReceiptFile(null);
-                  setPaidDate(rec.paidDate ? toFormDate(rec.paidDate) : todayFormDate());
-                  setPaidAmount(String(balance || rec.actualAmount));
-                }}
+                <button onClick={openPaidModal}
                   disabled={recStatus === 'paid'}
                   className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-40">
                   {recStatus === 'partial' ? '💰 Record Payment' : '✓ Record Payment 記錄收款'}
@@ -655,14 +687,49 @@ function RentalDetailInner() {
               <input type="number" min={0} step="0.01" className={inp} value={paidAmount}
                 onChange={(e) => setPaidAmount(e.target.value)} />
               <div className="flex gap-2 mt-2 flex-wrap">
-                <button type="button" onClick={() => setPaidAmount(String(balance))}
+                <button type="button" onClick={() => {
+                  const items = data?.chargeItems || [];
+                  const rows = chargeRowsFromRecord(items.length ? items : [
+                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0 },
+                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0 },
+                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0 },
+                  ]);
+                  const filled = fillRentOnlyValues(rows);
+                  setChargeAllocValues(filled);
+                  setPaidAmount(String(sumAllocationValues(filled)));
+                }}
+                  className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Rent only 只交租金</button>
+                <button type="button" onClick={() => {
+                  const items = data?.chargeItems || [];
+                  const rows = chargeRowsFromRecord(items.length ? items : [
+                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0 },
+                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0 },
+                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0 },
+                  ]);
+                  const filled = fillOutstandingValues(rows);
+                  setChargeAllocValues(filled);
+                  setPaidAmount(String(sumAllocationValues(filled)));
+                }}
                   className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Full balance 全數</button>
-                {rec.actualAmount > 0 && (
-                  <button type="button" onClick={() => setPaidAmount(String(Math.round(rec.actualAmount / 2)))}
-                    className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Half 一半</button>
-                )}
               </div>
-              <p className="text-xs text-gray-400 mt-1">Leave as outstanding balance for full payment, or enter a smaller amount for partial payment.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-2">Split by charge type 分拆入帳</label>
+              <ChargeAllocationGrid
+                rows={chargeRowsFromRecord(
+                  (data?.chargeItems?.length ? data.chargeItems : [
+                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0, status: 'unpaid' as const },
+                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0, status: 'unpaid' as const },
+                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0, status: 'unpaid' as const },
+                  ])
+                )}
+                values={chargeAllocValues}
+                onChange={(v) => {
+                  setChargeAllocValues(v);
+                  setPaidAmount(String(sumAllocationValues(v)));
+                }}
+              />
             </div>
 
             {/* AI Receipt Upload */}
@@ -722,8 +789,8 @@ function RentalDetailInner() {
 
             <div className="flex justify-end gap-3">
               <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button onClick={confirmPaid} disabled={busy || !paidAmount || Number(paidAmount) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
-                {busy ? 'Saving…' : Number(paidAmount) >= balance ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
+              <button onClick={confirmPaid} disabled={busy || sumAllocationValues(chargeAllocValues) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                {busy ? 'Saving…' : sumAllocationValues(chargeAllocValues) >= balance - 0.01 ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
               </button>
             </div>
           </div>

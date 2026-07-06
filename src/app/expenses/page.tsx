@@ -8,6 +8,8 @@ import TagSelect from '@/components/TagSelect';
 import SupplierSelect from '@/components/SupplierSelect';
 import FilterBar from '@/components/FilterBar';
 import {
+  DEFAULT_OPTIONS,
+  OPTION_TYPES,
   PAYMENT_STATUSES,
   EXPENSE_STATUS_COLORS,
   categoryLabel,
@@ -44,6 +46,25 @@ type SortKey = 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'd
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
 
+function cloneDefaultOptions(): Options {
+  return {
+    payment_method: [...DEFAULT_OPTIONS.payment_method],
+    category: [...DEFAULT_OPTIONS.category],
+    platform: [...DEFAULT_OPTIONS.platform],
+    supplier: [...DEFAULT_OPTIONS.supplier],
+  };
+}
+
+function normalizeOptions(raw?: Partial<Options>): Options {
+  const result = cloneDefaultOptions();
+  if (!raw) return result;
+  for (const type of OPTION_TYPES) {
+    const list = raw[type];
+    if (Array.isArray(list) && list.length) result[type] = list;
+  }
+  return result;
+}
+
 export default function ExpensesPage() {
   const router = useRouter();
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -57,7 +78,7 @@ export default function ExpensesPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [detail, setDetail] = useState<Expense | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
-  const [options, setOptions] = useState<Options>({ payment_method: [], category: [], platform: [], supplier: [] });
+  const [options, setOptions] = useState<Options>(cloneDefaultOptions);
   const [supplierOcrMatch, setSupplierOcrMatch] = useState<SupplierMatch | null>(null);
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -74,15 +95,28 @@ export default function ExpensesPage() {
   const loadExpenses = () => {
     setLoading(true);
     fetch('/api/expenses')
-      .then((res) => res.json())
-      .then((data) => setExpenses(data.expenses || []))
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) {
+          setToast({ msg: data.error || 'Failed to load expenses', kind: 'error' });
+          setExpenses([]);
+          return;
+        }
+        setExpenses(data.expenses || []);
+      })
+      .catch(() => {
+        setToast({ msg: 'Failed to load expenses', kind: 'error' });
+        setExpenses([]);
+      })
       .finally(() => setLoading(false));
   };
 
   const loadOptions = () => {
     fetch('/api/expense-options')
       .then((res) => res.json())
-      .then((data) => data.options && setOptions(data.options))
+      .then((data) => {
+        if (data.options) setOptions(normalizeOptions(data.options));
+      })
       .catch(() => {});
   };
 
@@ -104,7 +138,9 @@ export default function ExpensesPage() {
       body: JSON.stringify({ type, value }),
     });
     const data = await res.json();
-    if (res.ok && data.options) setOptions((prev) => ({ ...prev, [type]: data.options }));
+    if (res.ok && data.options) {
+      setOptions((prev) => normalizeOptions({ ...prev, [type]: data.options }));
+    }
   };
 
   const reasonOptions = Array.from(new Set([...(options.category || []), ...expenses.map((e) => e.category).filter(Boolean)]));
@@ -592,13 +628,13 @@ export default function ExpensesPage() {
             <p>No expenses match. Add one, import a sheet, or clear filters.</p>
           </div>
         ) : (
-          <table className="w-full min-w-[1400px]">
+          <table className="w-full min-w-[1400px] border-separate border-spacing-0">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-4 py-3 sticky left-0 z-10 bg-white">
+                <th className="px-4 py-3 sticky left-0 z-20 bg-white w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('number', 'Receipt No.', 'sticky left-10 z-10 bg-white')}
+                {sortTh('number', 'Receipt No.', 'sticky left-14 z-20 bg-white min-w-[7.5rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
                 {sortTh('supplier', 'Supplier 供應商')}
@@ -610,20 +646,23 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 whitespace-nowrap">Receipts 付款收據</th>
                 <th className="px-4 py-3 whitespace-nowrap min-w-[120px]">Special Notes 特別事項</th>
                 {sortTh('status', 'Status')}
-                <th className="px-4 py-3 sticky right-0 z-10 bg-white whitespace-nowrap">Actions</th>
+                <th className="px-4 py-3 sticky right-0 z-20 bg-white whitespace-nowrap shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {displayed.map((e) => (
+              {displayed.map((e) => {
+                const rowBg = selected.has(e.id) ? 'bg-brand-50/40' : 'bg-white';
+                const stickyCell = `${rowBg} group-hover:bg-gray-50`;
+                return (
                 <tr
                   key={e.id}
                   onClick={() => openDetail(e)}
-                  className={`hover:bg-gray-50 cursor-pointer ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}
+                  className={`group hover:bg-gray-50 cursor-pointer ${selected.has(e.id) ? 'bg-brand-50/40' : ''}`}
                 >
-                  <td className="px-4 py-3 sticky left-0 z-[1] bg-inherit" onClick={(ev) => ev.stopPropagation()}>
+                  <td className={`px-4 py-3 sticky left-0 z-10 w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] ${stickyCell}`} onClick={(ev) => ev.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label={`Select ${e.receipt_no || e.id}`} />
                   </td>
-                  <td className="px-4 py-3 sticky left-10 z-[1] bg-inherit text-sm font-mono text-brand-700 whitespace-nowrap font-medium">{e.receipt_no || '—'}</td>
+                  <td className={`px-4 py-3 sticky left-14 z-10 min-w-[7.5rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm font-mono text-brand-700 whitespace-nowrap font-medium ${stickyCell}`}>{e.receipt_no || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.paid_date || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.platform || '—'}</td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[160px] truncate" title={e.merchant || ''}>{e.merchant || '—'}</td>
@@ -639,21 +678,22 @@ export default function ExpensesPage() {
                       {e.payment_status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 sticky right-0 z-[1] bg-inherit text-sm space-x-3 whitespace-nowrap" onClick={(ev) => ev.stopPropagation()}>
+                  <td className={`px-4 py-3 sticky right-0 z-10 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm space-x-3 whitespace-nowrap ${stickyCell}`} onClick={(ev) => ev.stopPropagation()}>
                     <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">View</button>
                     <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
                     <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         )}
       </div>
 
       {showForm && (
-        <div className="modal-overlay overflow-y-auto">
-          <div className="modal-panel sm:max-w-2xl my-0 sm:my-8">
+        <div className="modal-overlay overflow-y-auto py-4">
+          <div className="modal-panel sm:max-w-2xl my-0 sm:my-8 !overflow-visible max-h-none">
             <h2 className="text-lg font-semibold mb-4">{editingId ? 'Edit Expense' : 'New Expense'}</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
 
@@ -706,7 +746,7 @@ export default function ExpensesPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Shopping Platform 消費平台</label>
-                  <TagSelect value={form.platform} options={options.platform} onChange={(v) => setForm((f) => ({ ...f, platform: v }))} onAdd={(v) => addOption('platform', v)} placeholder="Select or add a platform" />
+                  <TagSelect value={form.platform} options={options.platform || []} onChange={(v) => setForm((f) => ({ ...f, platform: v }))} onAdd={(v) => addOption('platform', v)} placeholder="Select or add a platform" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Supplier 供應商</label>
@@ -722,11 +762,11 @@ export default function ExpensesPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Expense Reason 支出原因</label>
-                  <TagSelect value={form.category} options={options.category} onChange={(v) => setForm((f) => ({ ...f, category: v }))} onAdd={(v) => addOption('category', v)} placeholder="Select or add a reason" />
+                  <TagSelect value={form.category} options={options.category || []} onChange={(v) => setForm((f) => ({ ...f, category: v }))} onAdd={(v) => addOption('category', v)} placeholder="Select or add a reason" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method 支付方式</label>
-                  <TagSelect value={form.payment_method} options={options.payment_method} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
+                  <TagSelect value={form.payment_method} options={options.payment_method || []} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">支出金額(RMB)</label>

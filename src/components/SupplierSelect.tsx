@@ -15,7 +15,7 @@ interface SupplierSelectProps {
 
 export default function SupplierSelect({
   value,
-  options,
+  options = [],
   onChange,
   onAdd,
   placeholder = 'Select supplier…',

@@ -136,10 +136,13 @@ export function matchSupplierFromOcr(ocrText: string, suppliers: string[]): Supp
   return best;
 }
 
-export function mergeSupplierLists(...lists: (string | null | undefined)[][]): string[] {
+export function mergeSupplierLists(
+  ...lists: ((string | null | undefined)[] | undefined | null)[]
+): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const list of lists) {
+    if (!list) continue;
     for (const v of list) {
       const key = (v || '').trim();
       if (!key || seen.has(key)) continue;

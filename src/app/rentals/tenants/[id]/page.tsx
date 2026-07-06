@@ -42,11 +42,8 @@ export default function TenantDetailPage() {
   const { user } = useAuth();
   const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
   const [period, setPeriod] = useState(currentBillingPeriod());
-  const [fromPeriod, setFromPeriod] = useState(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 5);
-    return d.toISOString().slice(0, 7);
-  });
+  const [fromPeriod, setFromPeriod] = useState(''); // optional override; auto-detect arrears when empty
+  const [paidLookback, setPaidLookback] = useState(2);
   const [detail, setDetail] = useState<TenantDetail | null>(null);
   const [matrix, setMatrix] = useState<MatrixType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,7 +66,7 @@ export default function TenantDetailPage() {
         if (!r.ok) throw new Error(data.error || 'Tenant not found');
         return data;
       }),
-      fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${fromPeriod}`).then(async (r) => {
+      fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}${fromPeriod ? `&from=${fromPeriod}` : ''}&paid_lookback=${paidLookback}`).then(async (r) => {
         const data = await r.json();
         if (!r.ok) return null;
         return data;
@@ -83,7 +80,7 @@ export default function TenantDetailPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [id, period, fromPeriod]);
+  useEffect(() => { load(); }, [id, period, fromPeriod, paidLookback]);
 
   const openPaymentModal = () => {
     if (!detail) return;
@@ -204,11 +201,13 @@ export default function TenantDetailPage() {
           </p>
         </div>
         <div className="page-actions flex-wrap">
-          <input type="month" value={fromPeriod} onChange={(e) => setFromPeriod(e.target.value)} className={`${inp} w-auto`} title="From period" />
+          <input type="month" value={fromPeriod} onChange={(e) => setFromPeriod(e.target.value)} className={`${inp} w-auto`} title="From period (optional — auto-detects arrears)" placeholder="From (auto)" />
           <span className="text-gray-400 self-center">→</span>
-          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} title="To period" />
+          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} title="Target period" />
+          <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} title="Paid lookback months" />
+          <span className="text-xs text-gray-400 self-center">paid mo.</span>
           <Link
-            href={`/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${fromPeriod}`}
+            href={`/rentals/tenants/${id}/rent-payment-notice?period=${period}${fromPeriod ? `&from=${fromPeriod}` : ''}&paid_lookback=${paidLookback}`}
             className="btn border border-gray-300 text-gray-700 hover:bg-gray-50"
           >
             繳付租金通知單 Print
@@ -251,7 +250,7 @@ export default function TenantDetailPage() {
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="font-semibold text-gray-900">繳付租金通知單 Rent Payment Notice</h2>
-            <p className="text-sm text-gray-500">{fromPeriod} → {period}</p>
+            <p className="text-sm text-gray-500">{matrix.fromPeriod} → {matrix.targetPeriod}{matrix.paidLookbackMonths ? ` · ${matrix.paidLookbackMonths} paid mo. lookback` : ''}</p>
           </div>
           <div className="p-4">
             <RentPaymentNoticeMatrix matrix={matrix} />

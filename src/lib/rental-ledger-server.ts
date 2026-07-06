@@ -17,6 +17,7 @@ import {
   type RentalTenant,
   type RentalUnit,
   type RentPaymentNoticeMatrix,
+  type RentPaymentNoticeQuery,
   type RentPaymentNoticeSummary,
   type RentRecord,
 } from './rentals';
@@ -177,12 +178,12 @@ export function getTenantIdForUnit(unitId: number | string, userId: number): num
 export function buildRentPaymentNoticeForUnit(
   unitId: number | string,
   userId: number,
-  period: string,
-  fromPeriod?: string,
+  targetPeriod: string,
+  options?: string | RentPaymentNoticeQuery,
 ): RentPaymentNoticeMatrix | null {
   const tenantId = getTenantIdForUnit(unitId, userId);
   if (!tenantId) return null;
-  return buildRentPaymentNoticeMatrix(tenantId, userId, period, fromPeriod);
+  return buildRentPaymentNoticeMatrix(tenantId, userId, targetPeriod, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -305,12 +306,108 @@ function buildReminderText(
   return `${yy}年${m}月${dueDateDisplay.split('/')[0]}日前必須應繳交 ${parts.join('、')} ${amount}`;
 }
 
+function normalizeNoticeQuery(
+  options?: string | RentPaymentNoticeQuery,
+): RentPaymentNoticeQuery {
+  if (typeof options === 'string') return { targetPeriod: '', fromPeriod: options };
+  return options ?? {};
+}
+
+function periodCharges(charges: RentalChargeItem[], period: string): RentalChargeItem[] {
+  return charges.filter((c) => c.billingPeriod === period && c.amountDue > 0);
+}
+
+function isPeriodFullyPaid(charges: RentalChargeItem[], period: string): boolean {
+  const items = periodCharges(charges, period);
+  return items.length > 0 && items.every((c) => chargeOutstanding(c) <= 0);
+}
+
+/** Auto-detect matrix rows: arrears + target month + optional paid lookback. */
+function resolveNoticePeriods(
+  charges: RentalChargeItem[],
+  targetPeriod: string,
+  options: RentPaymentNoticeQuery,
+): { periods: string[]; fromPeriod: string } {
+  const paidLookback = options.paidLookbackMonths ?? 2;
+  const periodSet = new Set<string>();
+
+  periodSet.add(targetPeriod);
+
+  // Arrears: UNPAID / PARTIALLY_PAID before target_period
+  for (const c of charges) {
+    if (c.billingPeriod < targetPeriod && c.amountDue > 0 && chargeOutstanding(c) > 0) {
+      periodSet.add(c.billingPeriod);
+    }
+  }
+
+  // Optional: recent fully PAID months for layout (前期已付 rows)
+  if (paidLookback > 0) {
+    const beforeTarget = new Set(
+      charges.filter((c) => c.billingPeriod < targetPeriod && c.amountDue > 0).map((c) => c.billingPeriod),
+    );
+    const fullyPaid = Array.from(beforeTarget).filter((p) => isPeriodFullyPaid(charges, p)).sort();
+    for (const p of fullyPaid.slice(-paidLookback)) periodSet.add(p);
+  }
+
+  if (options.fromPeriod) {
+    for (const p of periodRange(options.fromPeriod, targetPeriod)) periodSet.add(p);
+  }
+
+  const periods = Array.from(periodSet).filter((p) => p <= targetPeriod).sort();
+  return { periods, fromPeriod: periods[0] || targetPeriod };
+}
+
+/** Dynamic columns: unit × charge_type only where billing items exist. */
+function buildNoticeColumns(
+  units: Pick<RentalUnit, 'id' | 'unitName'>[],
+  charges: RentalChargeItem[],
+): RentPaymentNoticeMatrix['columns'] {
+  const cols: RentPaymentNoticeMatrix['columns'] = [];
+  for (const unit of units) {
+    for (const chargeType of CHARGE_ORDER) {
+      const hasActivity = charges.some(
+        (c) => c.unitId === unit.id && c.chargeType === chargeType &&
+          (c.amountDue > 0 || c.amountAllocated > 0),
+      );
+      if (!hasActivity) continue;
+      cols.push({
+        unitId: unit.id,
+        unitName: unit.unitName,
+        chargeType,
+        label: columnLabel(unit.unitName, chargeType),
+      });
+    }
+  }
+  if (!cols.length) {
+    return units.flatMap((unit) =>
+      CHARGE_ORDER.map((chargeType) => ({
+        unitId: unit.id,
+        unitName: unit.unitName,
+        chargeType,
+        label: columnLabel(unit.unitName, chargeType),
+      })),
+    );
+  }
+  return cols;
+}
+
+function getTenantChargeItems(tenantId: number, userId: number, unitIds: number[]): RentalChargeItem[] {
+  if (!unitIds.length) return [];
+  const placeholders = unitIds.map(() => '?').join(',');
+  return (db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE user_id = ? AND unit_id IN (${placeholders})`
+  ).all(userId, ...unitIds) as ChargeRow[]).map(hydrateCharge);
+}
+
 export function buildRentPaymentNoticeMatrix(
   tenantId: number | string,
   userId: number,
-  period: string,
-  fromPeriod?: string,
+  targetPeriod: string,
+  options?: string | RentPaymentNoticeQuery,
 ): RentPaymentNoticeMatrix | null {
+  const query = normalizeNoticeQuery(options);
+  const paidLookbackMonths = query.paidLookbackMonths ?? 2;
   const tenant = getRentalTenant(tenantId, userId);
   if (!tenant) return null;
 
@@ -318,49 +415,30 @@ export function buildRentPaymentNoticeMatrix(
   const emptySummary: RentPaymentNoticeSummary = {
     priorArrearsTotal: 0, priorArrearsPeriods: [], priorPaidTotal: 0, priorPaidPeriods: [],
     currentPeriodDue: 0, currentPeriodOutstanding: 0,
-    dueDate: dueDateForPeriod(period, 1), dueDateDisplay: formatDisplayDate(dueDateForPeriod(period, 1)),
+    dueDate: dueDateForPeriod(targetPeriod, 1), dueDateDisplay: formatDisplayDate(dueDateForPeriod(targetPeriod, 1)),
     reminderText: '',
   };
 
   if (!units.length) {
     return {
-      tenant, units, period, fromPeriod: fromPeriod || period,
+      tenant, units, period: targetPeriod, targetPeriod, fromPeriod: targetPeriod,
       columns: [], rows: [], summary: emptySummary, grandTotal: 0, totalAllocated: 0,
+      paidLookbackMonths,
     };
   }
 
   const unitIds = units.map((u) => u.id);
-  const placeholders = unitIds.map(() => '?').join(',');
-  const charges = (db.prepare(
-    `SELECT * FROM rental_charge_items
-     WHERE user_id = ? AND unit_id IN (${placeholders})`
-  ).all(userId, ...unitIds) as ChargeRow[]).map(hydrateCharge);
+  const charges = getTenantChargeItems(tenant.id, userId, unitIds);
 
   const unitMeta = db.prepare(
     `SELECT due_date_day FROM rental_units WHERE tenant_id = ? AND user_id = ? LIMIT 1`
   ).get(tenantId, userId) as { due_date_day: number } | undefined;
   const dueDateDay = unitMeta?.due_date_day || 1;
-  const dueDate = dueDateForPeriod(period, dueDateDay);
+  const dueDate = dueDateForPeriod(targetPeriod, dueDateDay);
   const dueDateDisplay = formatDisplayDate(dueDate);
 
-  const from = fromPeriod || period;
-  const basePeriods = new Set<string>();
-
-  for (const c of charges) {
-    if (c.amountDue > 0 || c.amountAllocated > 0) basePeriods.add(c.billingPeriod);
-    if (chargeOutstanding(c) > 0) basePeriods.add(c.billingPeriod);
-  }
-  for (const p of periodRange(from, period)) basePeriods.add(p);
-
-  const periods = Array.from(basePeriods).filter((p) => p <= period).sort();
-  const columns = units.flatMap((unit) =>
-    CHARGE_ORDER.map((chargeType) => ({
-      unitId: unit.id,
-      unitName: unit.unitName,
-      chargeType,
-      label: columnLabel(unit.unitName, chargeType),
-    }))
-  );
+  const { periods, fromPeriod } = resolveNoticePeriods(charges, targetPeriod, query);
+  const columns = buildNoticeColumns(units, charges);
 
   const chargeMap = new Map<string, RentalChargeItem>();
   for (const c of charges) {
@@ -397,7 +475,7 @@ export function buildRentPaymentNoticeMatrix(
     const rowDue = cells.reduce((s, c) => s + c.amountDue, 0);
     const isFullyPaid = rowDue > 0 && rowTotal <= 0;
 
-    if (p < period) {
+    if (p < targetPeriod) {
       if (rowTotal > 0) {
         priorArrearsTotal += rowTotal;
         if (!priorArrearsPeriods.includes(p)) priorArrearsPeriods.push(p);
@@ -405,7 +483,7 @@ export function buildRentPaymentNoticeMatrix(
         priorPaidTotal += rowDue;
         if (!priorPaidPeriods.includes(p)) priorPaidPeriods.push(p);
       }
-    } else if (p === period) {
+    } else if (p === targetPeriod) {
       currentPeriodDue = rowDue;
       currentPeriodOutstanding = rowTotal;
     }
@@ -428,11 +506,12 @@ export function buildRentPaymentNoticeMatrix(
     currentPeriodOutstanding,
     dueDate,
     dueDateDisplay,
-    reminderText: buildReminderText(period, dueDateDisplay, priorArrearsPeriods, grandTotal),
+    reminderText: buildReminderText(targetPeriod, dueDateDisplay, priorArrearsPeriods, grandTotal),
   };
 
   return {
-    tenant, units, period, fromPeriod: from, columns, rows, summary, grandTotal, totalAllocated,
+    tenant, units, period: targetPeriod, targetPeriod, fromPeriod, columns, rows, summary,
+    grandTotal, totalAllocated, paidLookbackMonths,
   };
 }
 

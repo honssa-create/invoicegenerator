@@ -25,9 +25,18 @@ export async function GET(
   }
 
   const { searchParams } = new URL(request.url);
-  const period = searchParams.get('period') || currentBillingPeriod();
+  const targetPeriod =
+    searchParams.get('target_period') ||
+    searchParams.get('period') ||
+    currentBillingPeriod();
   const from = searchParams.get('from') || undefined;
-  const matrix = buildRentPaymentNoticeForUnit(params.id, ownerId, period, from);
+  const paidLookbackRaw = searchParams.get('paid_lookback');
+  const paidLookbackMonths = paidLookbackRaw ? Number(paidLookbackRaw) : undefined;
+
+  const matrix = buildRentPaymentNoticeForUnit(params.id, ownerId, targetPeriod, {
+    fromPeriod: from,
+    paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
+  });
   if (!matrix) return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
   return NextResponse.json({ ...matrix, tenantId, unitId: unit.id });
 }

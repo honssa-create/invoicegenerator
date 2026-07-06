@@ -9,8 +9,9 @@ import { currentBillingPeriod, formatDisplayDate, formatMoney, type RentPaymentN
 function RentPaymentNoticeContent() {
   const { id } = useParams();
   const searchParams = useSearchParams();
-  const period = searchParams.get('period') || currentBillingPeriod();
+  const period = searchParams.get('target_period') || searchParams.get('period') || currentBillingPeriod();
   const from = searchParams.get('from') || period;
+  const paidLookback = searchParams.get('paid_lookback') || '2';
   const [matrix, setMatrix] = useState<RentPaymentNoticeMatrix | null>(null);
   const [error, setError] = useState('');
   const [unitHint, setUnitHint] = useState<{ unitId: number; unitName: string; tenantId: number | null } | null>(null);
@@ -20,7 +21,7 @@ function RentPaymentNoticeContent() {
     setLoading(true);
     setError('');
     setUnitHint(null);
-    fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${from}`)
+    fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}${from && from !== period ? `&from=${from}` : ''}&paid_lookback=${paidLookback}`)
       .then(async (r) => {
         if (r.status === 401) {
           window.location.href = '/login';
@@ -49,7 +50,7 @@ function RentPaymentNoticeContent() {
         }
       })
       .finally(() => setLoading(false));
-  }, [id, period, from]);
+  }, [id, period, from, paidLookback]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
@@ -99,7 +100,7 @@ function RentPaymentNoticeContent() {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             繳付租金通知單 Rent Payment Notice
           </h1>
-          <p className="text-gray-500 mt-2 text-sm">Period 期間: {from} → {period} · Issued 發出日期: {issued}</p>
+          <p className="text-gray-500 mt-2 text-sm">Target 目標月份: {matrix.targetPeriod} · Range: {matrix.fromPeriod} → {matrix.targetPeriod} · Issued 發出日期: {issued}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-6 mb-8 text-sm">

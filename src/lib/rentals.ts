@@ -472,13 +472,25 @@ export interface RentPaymentNoticeSummary {
 export interface RentPaymentNoticeMatrix {
   tenant: RentalTenant;
   units: Pick<RentalUnit, 'id' | 'unitName'>[];
+  /** Target billing month (YYYY-MM). Alias: targetPeriod. */
   period: string;
+  targetPeriod: string;
   fromPeriod: string;
   columns: RentPaymentNoticeColumn[];
   rows: RentPaymentNoticeRow[];
   summary: RentPaymentNoticeSummary;
   grandTotal: number;
   totalAllocated: number;
+  /** Months of fully-paid history included for layout (default 2). */
+  paidLookbackMonths: number;
+}
+
+export interface RentPaymentNoticeQuery {
+  targetPeriod?: string;
+  /** Override auto-detected arrears window (optional). */
+  fromPeriod?: string;
+  /** Include up to N recent fully-paid months before target (default 2). */
+  paidLookbackMonths?: number;
 }
 
 /** YYYY-MM → MM/YYYY for matrix row labels */

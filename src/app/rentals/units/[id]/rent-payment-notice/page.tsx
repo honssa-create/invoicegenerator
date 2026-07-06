@@ -11,8 +11,9 @@ type UnitNoticePayload = RentPaymentNoticeMatrix & { tenantId?: number; unitId?:
 function UnitRentPaymentNoticeContent() {
   const { id } = useParams();
   const searchParams = useSearchParams();
-  const period = searchParams.get('period') || currentBillingPeriod();
-  const from = searchParams.get('from') || period;
+  const period = searchParams.get('target_period') || searchParams.get('period') || currentBillingPeriod();
+  const from = searchParams.get('from') || '';
+  const paidLookback = searchParams.get('paid_lookback') || '2';
   const [matrix, setMatrix] = useState<UnitNoticePayload | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -20,7 +21,7 @@ function UnitRentPaymentNoticeContent() {
   useEffect(() => {
     setLoading(true);
     setError('');
-    fetch(`/api/rentals/units/${id}/rent-payment-notice?period=${period}&from=${from}`)
+    fetch(`/api/rentals/units/${id}/rent-payment-notice?period=${period}${from ? `&from=${from}` : ''}&paid_lookback=${paidLookback}`)
       .then(async (r) => {
         if (r.status === 401) {
           window.location.href = '/login';
@@ -36,7 +37,7 @@ function UnitRentPaymentNoticeContent() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load notice'))
       .finally(() => setLoading(false));
-  }, [id, period, from]);
+  }, [id, period, from, paidLookback]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
@@ -69,7 +70,7 @@ function UnitRentPaymentNoticeContent() {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             繳付租金通知單 Rent Payment Notice
           </h1>
-          <p className="text-gray-500 mt-2 text-sm">Period 期間: {from} → {period} · Issued 發出日期: {issued}</p>
+          <p className="text-gray-500 mt-2 text-sm">Target 目標月份: {matrix.targetPeriod} · Units: {matrix.units.map((u) => u.unitName).join(', ')} · Issued: {issued}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-6 mb-8 text-sm">

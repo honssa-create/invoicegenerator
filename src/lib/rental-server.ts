@@ -11,8 +11,19 @@ import {
   syncChargeItemsFromRecord,
 } from './rental-ledger-server';
 import {
+  ensureCurrentLeaseFromUnit,
+  getCurrentLeaseForUnit,
+  getLeaseDocuments,
+  getLeaseHistory,
+  getRentalDashboardAlerts,
+  shouldAutoDispatchInvoice,
+  syncAllLeaseStatuses,
+  updateCurrentLeaseFromUnit,
+} from './rental-lease-server';
+import {
   computeTotal,
   chargeOutstanding,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   displayRentalStatus,
   defaultRentPeriod,
@@ -24,6 +35,7 @@ import {
   utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
+  billingPeriodAfterLeaseEnd,
   type PreviousYearRent,
   type RentalChargeItem,
   type RentalChargeType,
@@ -183,6 +195,7 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
   const unit = getRentalUnit(Number(res.lastInsertRowid), userId)!;
   logRentalActivity(userId, unit.id, 'Unit created');
   ensureUnitTenantLink(unit);
+  ensureCurrentLeaseFromUnit(unit);
   return unit;
 }
 
@@ -234,6 +247,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     syncRentPeriodsForUnit(updated);
   }
   ensureUnitTenantLink(updated);
+  updateCurrentLeaseFromUnit(updated);
   return updated;
 }
 
@@ -364,6 +378,7 @@ function applyOverdueStatuses(userId: number, period: string) {
 // ---------------------------------------------------------------------------
 
 export function listRentalDashboard(userId: number, period = currentBillingPeriod()) {
+  syncAllLeaseStatuses(userId);
   const unitRows = db.prepare(
     'SELECT * FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE ASC'
   ).all(userId) as UnitRow[];
@@ -379,14 +394,17 @@ export function listRentalDashboard(userId: number, period = currentBillingPerio
     const history = (db.prepare(
       'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC LIMIT 24'
     ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
-    return { ...unit, currentRecord, history };
+    const currentLease = getCurrentLeaseForUnit(unit.id, userId);
+    const leaseStatus = currentLease ? computeLeaseDisplayStatus(currentLease) : 'vacant';
+    return { ...unit, currentRecord, history, currentLease, leaseStatus };
   });
 
   const records = withRecords.map((u) => u.currentRecord);
   const totalRevenue = records.reduce((s, r) => s + (r.amountPaid || 0), 0);
   const outstanding = records.reduce((s, r) => s + outstandingBalance(r), 0);
   const paidCount = records.filter((r) => displayRentalStatus(r) === 'paid').length;
-  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period };
+  const alerts = getRentalDashboardAlerts(userId, period);
+  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts };
 }
 
 export function getRentalUnitDetail(unitId: number | string, userId: number, period = currentBillingPeriod()) {
@@ -412,11 +430,15 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     ? (db.prepare('SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1')
         .get(currentRecord.id) as ReceiptRow | undefined)
     : undefined;
+  const currentLease = getCurrentLeaseForUnit(unit.id, userId);
   return {
     unit, currentRecord, history, activities,
     chargeItems,
     paymentHistory: getUnitPaymentHistory(unit.id, userId),
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
+    currentLease,
+    leaseHistory: getLeaseHistory(unit.id, userId),
+    leaseDocuments: currentLease ? getLeaseDocuments(currentLease.id, userId) : [],
   };
 }
 
@@ -472,6 +494,11 @@ export async function sendRentInvoice(
   if (!record) throw new Error('Rent record not found');
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
+
+  const lease = getCurrentLeaseForUnit(unit.id, userId);
+  if (lease && billingPeriodAfterLeaseEnd(record.billingPeriod, lease.actualEndDate || lease.leaseEndDate)) {
+    throw new Error(`Cannot send invoice for ${record.billingPeriod} — after lease end date`);
+  }
 
   const water = Number(input.waterFee ?? record.waterFee) || 0;
   const elec = Number(input.electricityFee ?? record.electricityFee) || 0;
@@ -752,15 +779,23 @@ export async function runRentalInvoiceDispatch(userId: number | null, period = c
   const rows = db.prepare(
     `SELECT * FROM rental_units WHERE automation_enabled = 1 ${userId === null ? '' : 'AND user_id = ?'}`
   ).all(...(userId === null ? [] : [userId])) as UnitRow[];
-  const results = [];
+  const results: { unit: string; skipped?: string; record?: RentRecord }[] = [];
+  const skipped: { unit: string; reason: string }[] = [];
+
   for (const unitRow of rows) {
     const unit = hydrateUnit(unitRow);
+    const check = shouldAutoDispatchInvoice(unit.user_id, unit.id, period);
+    if (!check.allowed) {
+      skipped.push({ unit: unit.unitName, reason: check.reason || 'Not billable' });
+      continue;
+    }
     const record = ensureRentRecord(unit, period);
     if (!record.invoiceSentAt) {
-      results.push({ unit: unit.unitName, ...(await sendRentInvoice(record.id, unit.user_id, {})) });
+      const sent = await sendRentInvoice(record.id, unit.user_id, {});
+      results.push({ unit: unit.unitName, record: sent.record });
     }
   }
-  return { period, processed: results.length, results };
+  return { period, processed: results.length, skipped: skipped.length, results, skippedDetails: skipped };
 }
 
 // ---------------------------------------------------------------------------

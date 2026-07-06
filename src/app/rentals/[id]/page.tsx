@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import DebitNoteActions from '@/components/DebitNoteActions';
+import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import ChargeAllocationGrid, {
   chargeRowsFromRecord,
@@ -18,6 +19,7 @@ import {
   RENTAL_STATUS_LABELS,
   calculateBasicRentPeriod,
   chargeOutstanding,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
@@ -34,6 +36,8 @@ import {
   type RentRecord,
   type RentalActivityLog,
   type RentalChargeItem,
+  type RentalLease,
+  type RentalLeaseDocument,
   type RentalPaymentReceipt,
   type RentalPaymentWithAllocations,
   type RentalUnit,
@@ -48,6 +52,9 @@ interface DetailPayload {
   activities: RentalActivityLog[];
   latestReceipt: RentalPaymentReceipt | null;
   paymentHistory?: RentalPaymentWithAllocations[];
+  currentLease?: RentalLease | null;
+  leaseHistory?: RentalLease[];
+  leaseDocuments?: RentalLeaseDocument[];
 }
 
 export default function RentalDetailPage() {
@@ -118,6 +125,22 @@ function RentalDetailInner() {
   // activity note modal
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [noteText, setNoteText] = useState('');
+
+  // end contract modal
+  const [showEndContractModal, setShowEndContractModal] = useState(false);
+  const [endContractForm, setEndContractForm] = useState({
+    actualEndDate: todayFormDate(),
+    depositRefund: '',
+    depositDeductions: '',
+    endNotes: '',
+    startNew: false,
+    newTenantName: '',
+    newLeaseStart: todayFormDate(),
+    newLeaseEnd: '',
+    newBaseRent: '',
+  });
+  const [leaseDocUploading, setLeaseDocUploading] = useState(false);
+  const leaseDocInputRef = useRef<HTMLInputElement>(null);
 
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -321,15 +344,66 @@ function RentalDetailInner() {
     load();
   };
 
+  const submitEndContract = async () => {
+    setBusy(true);
+    const body: Record<string, unknown> = {
+      actualEndDate: fromFormDate(endContractForm.actualEndDate),
+      depositRefund: endContractForm.depositRefund ? Number(endContractForm.depositRefund) : undefined,
+      depositDeductions: endContractForm.depositDeductions ? Number(endContractForm.depositDeductions) : undefined,
+      endNotes: endContractForm.endNotes || undefined,
+      forceEnd: true,
+    };
+    if (endContractForm.startNew && endContractForm.newTenantName.trim()) {
+      body.startNewLease = {
+        tenantName: endContractForm.newTenantName.trim(),
+        leaseStartDate: fromFormDate(endContractForm.newLeaseStart),
+        leaseEndDate: fromFormDate(endContractForm.newLeaseEnd),
+        baseRent: Number(endContractForm.newBaseRent) || Number(baseRent) || 0,
+        dueDateDay: Number(dueDateDay) || 1,
+      };
+    }
+    const res = await fetch(`/api/rentals/units/${id}/end-contract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const d = await res.json();
+      setToast(d.error || 'Failed to end contract');
+      return;
+    }
+    setShowEndContractModal(false);
+    setToast(endContractForm.startNew ? 'Contract ended — new lease started' : 'Contract ended');
+    load();
+  };
+
+  const uploadLeaseDoc = async (file: File) => {
+    const leaseId = data?.currentLease?.id;
+    if (!leaseId) return;
+    setLeaseDocUploading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('docType', 'agreement');
+    const res = await fetch(`/api/rentals/leases/${leaseId}/documents`, { method: 'POST', body: fd });
+    setLeaseDocUploading(false);
+    setToast(res.ok ? 'Document uploaded' : 'Upload failed');
+    load();
+  };
+
   if (loading) return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
   if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">Unit not found. <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">Back</button></div></AppLayout>;
 
-  const { unit, currentRecord, history, activities } = data;
+  const { unit, currentRecord, history, activities, currentLease, leaseHistory, leaseDocuments } = data;
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
   const recStatus = rec ? displayRentalStatus(rec) : 'pending';
   const balance = rec ? outstandingBalance(rec) : 0;
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
+  const leaseStatus = currentLease
+    ? computeLeaseDisplayStatus(currentLease)
+    : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
+  const contractEnded = leaseStatus === 'ended' || leaseStatus === 'terminated' || leaseStatus === 'vacant';
 
   return (
     <AppLayout>
@@ -353,8 +427,29 @@ function RentalDetailInner() {
                 </span>
               )}
             </p>
+            <div className="mt-2">
+              <LeaseStatusBadge status={leaseStatus} />
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {!contractEnded && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEndContractForm((f) => ({
+                    ...f,
+                    actualEndDate: todayFormDate(),
+                    newTenantName: '',
+                    newLeaseEnd: '',
+                    newBaseRent: String(unit.currentYearRent || ''),
+                  }));
+                  setShowEndContractModal(true);
+                }}
+                className="px-3 py-2 text-sm border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+              >
+                完約 End Contract
+              </button>
+            )}
             {unit.tenantId ? (
               <>
                 <Link
@@ -406,6 +501,78 @@ function RentalDetailInner() {
           <button onClick={saveProfile} disabled={profileSaving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
             {profileSaving ? 'Saving…' : 'Save Profile 儲存資料'}
           </button>
+        </div>
+      </div>
+
+      {/* Occupancy history + lease documents */}
+      <div className="grid lg:grid-cols-2 gap-6 mb-6">
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="font-semibold text-gray-900">Occupancy History 租約紀錄</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Past and current tenants for this unit</p>
+          </div>
+          <div className="p-4 space-y-3 max-h-72 overflow-y-auto">
+            {(leaseHistory || []).length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">No lease history yet</p>
+            ) : (
+              (leaseHistory || []).map((l) => (
+                <div key={l.id} className={`rounded-xl border p-3 text-sm ${l.isCurrent ? 'border-brand-200 bg-brand-50/40' : 'border-gray-100'}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-gray-900">{l.tenantName}</p>
+                    <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
+                    {l.isCurrent && <span className="ml-1 text-brand-600 font-medium">(Current)</span>}
+                  </p>
+                  <p className="text-xs text-gray-500">Rent {formatMoney(l.baseRent)} · Deposit {formatMoney(l.depositAmount)}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <div>
+              <h2 className="font-semibold text-gray-900">Lease Documents 租約文件</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Agreement, handover, deposit receipt</p>
+            </div>
+            {currentLease && (
+              <>
+                <input ref={leaseDocInputRef} type="file" accept="image/*,.pdf" className="hidden"
+                  onChange={(e) => { if (e.target.files?.[0]) uploadLeaseDoc(e.target.files[0]); e.target.value = ''; }} />
+                <button
+                  type="button"
+                  disabled={leaseDocUploading}
+                  onClick={() => leaseDocInputRef.current?.click()}
+                  className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {leaseDocUploading ? 'Uploading…' : '+ Upload'}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
+            {!currentLease ? (
+              <p className="text-sm text-gray-400 text-center py-4">No active lease</p>
+            ) : (leaseDocuments || []).length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">No documents uploaded</p>
+            ) : (
+              (leaseDocuments || []).map((d) => (
+                <a
+                  key={d.id}
+                  href={`/api/rentals/leases/${currentLease.id}/documents?docId=${d.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  <span>{d.label || d.docType}</span>
+                  <span className="text-xs text-brand-600">View</span>
+                </a>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -516,7 +683,8 @@ function RentalDetailInner() {
               <h2 className="font-semibold text-gray-900 mb-4">Actions</h2>
               <div className="flex flex-wrap gap-3">
                 <button onClick={() => { setInvoiceNote(rec.customInvoiceNote || ''); setShowInvoiceModal(true); }}
-                  className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700">
+                  disabled={contractEnded}
+                  className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
                   📄 Send Invoice
                 </button>
                 <button onClick={openPaidModal}
@@ -806,6 +974,53 @@ function RentalDetailInner() {
               <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
               <button onClick={confirmPaid} disabled={busy || sumAllocationValues(chargeAllocValues) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
                 {busy ? 'Saving…' : sumAllocationValues(chargeAllocValues) >= balance - 0.01 ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* End Contract modal */}
+      {showEndContractModal && (
+        <Modal title="End Contract 完約" onClose={() => setShowEndContractModal(false)}>
+          <div className="space-y-4 text-sm">
+            <p className="text-gray-600">Close the current lease for <strong>{unit.tenantName}</strong>. Auto-invoices will stop after the lease end date.</p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Actual move-out date 實際退租日</label>
+              <input className={inp} value={endContractForm.actualEndDate} onChange={(e) => setEndContractForm({ ...endContractForm, actualEndDate: e.target.value })} placeholder="DD/MM/YYYY" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Deposit refund 退按金</label>
+                <input type="number" className={inp} value={endContractForm.depositRefund} onChange={(e) => setEndContractForm({ ...endContractForm, depositRefund: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Deductions 扣除</label>
+                <input type="number" className={inp} value={endContractForm.depositDeductions} onChange={(e) => setEndContractForm({ ...endContractForm, depositDeductions: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Notes 備註</label>
+              <textarea className={inp} rows={2} value={endContractForm.endNotes} onChange={(e) => setEndContractForm({ ...endContractForm, endNotes: e.target.value })} />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={endContractForm.startNew} onChange={(e) => setEndContractForm({ ...endContractForm, startNew: e.target.checked })} />
+              Start new lease immediately 立即新租約
+            </label>
+            {endContractForm.startNew && (
+              <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/50">
+                <input className={inp} placeholder="New tenant name" value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={inp} placeholder="Start DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
+                  <input className={inp} placeholder="End DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                </div>
+                <input type="number" className={inp} placeholder="Base rent" value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setShowEndContractModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={submitEndContract} disabled={busy} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+                {busy ? 'Processing…' : 'Confirm End Contract'}
               </button>
             </div>
           </div>

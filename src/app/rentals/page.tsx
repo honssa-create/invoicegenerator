@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import { useAuth } from '@/components/AuthProvider';
 import { isSectionReadOnly } from '@/lib/permissions';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
@@ -16,7 +18,9 @@ import {
   formatDueDayLabel,
   formatMoney,
   toFormDate,
+  type LeaseDisplayStatus,
   type PreviousYearRent,
+  type RentalDashboardAlert,
   type RentalTenant,
   type RentalUnit,
   type RentalUnitWithRecord,
@@ -26,6 +30,7 @@ interface DashboardData {
   units: RentalUnitWithRecord[];
   metrics: { totalRevenue: number; outstanding: number; paidCount: number; totalUnits: number };
   period: string;
+  alerts?: RentalDashboardAlert[];
 }
 
 const blankUnit: Partial<RentalUnit> = {
@@ -47,6 +52,7 @@ export default function RentalsPage() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
+  const [leaseFilter, setLeaseFilter] = useState<LeaseDisplayStatus | 'all'>('all');
 
   const load = () => {
     setLoading(true);
@@ -64,7 +70,12 @@ export default function RentalsPage() {
   useEffect(() => { load(); }, [period]);
 
   const units = data?.units || [];
+  const alerts = data?.alerts || [];
   const metrics = data?.metrics || { totalRevenue: 0, outstanding: 0, paidCount: 0, totalUnits: 0 };
+
+  const filteredUnits = leaseFilter === 'all'
+    ? units
+    : units.filter((u) => (u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || { leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false })) === leaseFilter);
 
   const tenantGroupKey = (u: Pick<RentalUnit, 'tenantId' | 'tenantName'>) => {
     if (u.tenantId) return `id:${u.tenantId}`;
@@ -146,7 +157,12 @@ export default function RentalsPage() {
     const res = await fetch(`/api/cron/rental-invoices?period=${period}`, { method: 'POST' });
     const d = await res.json();
     setBusy(false);
-    setToast(res.ok ? `Dispatched ${d.processed} rental invoices` : d.error || 'Scheduler failed');
+    if (!res.ok) {
+      setToast(d.error || 'Scheduler failed');
+      return;
+    }
+    const skipMsg = d.skipped ? ` · ${d.skipped} skipped (after lease end / inactive)` : '';
+    setToast(`Dispatched ${d.processed} rental invoices${skipMsg}`);
     load();
   };
 
@@ -172,6 +188,20 @@ export default function RentalsPage() {
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 rounded-lg bg-brand-50 text-brand-700 text-sm cursor-pointer">{toast} ✕</div>}
+
+      {alerts.length > 0 && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <p className="text-sm font-semibold text-amber-900 mb-2">Contract Alerts 合約提醒 ({alerts.length})</p>
+          <ul className="space-y-1.5 text-sm text-amber-800">
+            {alerts.slice(0, 8).map((a, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2">
+                <span className="flex-1 min-w-0">{a.message}</span>
+                <Link href={`/rentals/${a.unitId}?period=${period}`} className="text-xs font-medium text-brand-700 hover:underline shrink-0">View →</Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Tenants — multi-unit rent payment notice */}
       {tenants.length > 0 && (
@@ -239,9 +269,22 @@ export default function RentalsPage() {
           <div>
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Lease Overview Master Panel 租約主控面板</p>
             <p className="text-sm text-gray-500 mt-0.5">
-              Period: {period} · Tick units with the same tenant to generate a grouped debit note
+              Period: {period} · Tick units with the same tenant for grouped debit note
             </p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={leaseFilter}
+              onChange={(e) => setLeaseFilter(e.target.value as LeaseDisplayStatus | 'all')}
+              className={`${inp} w-auto text-sm`}
+            >
+              <option value="all">All contract status</option>
+              <option value="active">生效中 Active</option>
+              <option value="ending_soon">即將到期 Ending soon</option>
+              <option value="ended">合約完結 Ended</option>
+              <option value="terminated">提早終止 Terminated</option>
+              <option value="vacant">空置 Vacant</option>
+            </select>
           {selectedUnitIds.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-gray-600">
@@ -266,12 +309,15 @@ export default function RentalsPage() {
               </button>
             </div>
           )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           {loading ? (
             <div className="p-12 text-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" /></div>
           ) : units.length === 0 ? (
             <div className="p-12 text-center text-gray-400 text-sm">No rental units yet — add the first one.</div>
+          ) : filteredUnits.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 text-sm">No units match this contract filter.</div>
           ) : (
             <table className="w-full min-w-[900px] text-sm">
               <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
@@ -279,6 +325,7 @@ export default function RentalsPage() {
                   <th className="px-3 py-3 text-left w-10" title="Select units with same tenant for grouped debit note">☑</th>
                   <th className="px-4 py-3 text-left">單位 Unit</th>
                   <th className="px-4 py-3 text-left">租單位人士 Tenant</th>
+                  <th className="px-4 py-3 text-left">Contract 合約</th>
                   <th className="px-4 py-3 text-right">Base Rent</th>
                   <th className="px-4 py-3 text-left">起租日</th>
                   <th className="px-4 py-3 text-left">完租日</th>
@@ -289,10 +336,13 @@ export default function RentalsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {units.map((u) => {
+                {filteredUnits.map((u) => {
                   const remaining = daysRemaining(u.leaseEndDate);
                   const rec = u.currentRecord;
                   const recStatus = displayRentalStatus(rec);
+                  const leaseStatus = u.leaseStatus || (u.currentLease
+                    ? computeLeaseDisplayStatus(u.currentLease)
+                    : 'vacant');
                   const selectable = canSelectUnit(u);
                   const groupKey = tenantGroupKey(u);
                   const sameTenantCount = groupKey
@@ -330,6 +380,12 @@ export default function RentalsPage() {
                       <td className="px-4 py-3.5">
                         <p className="font-medium text-gray-900">{u.tenantName}</p>
                         {u.tenantPhone && <p className="text-xs text-gray-400">{u.tenantPhone}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <LeaseStatusBadge status={leaseStatus} />
+                        {remaining !== null && leaseStatus === 'ending_soon' && (
+                          <p className="text-[10px] text-amber-700 mt-1">{remaining} days left</p>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 text-right font-semibold">{formatMoney(u.currentYearRent)}</td>
                       <td className="px-4 py-3.5 text-gray-600">{formatDisplayDate(u.leaseStartDate)}</td>

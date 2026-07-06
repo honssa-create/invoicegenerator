@@ -643,6 +643,51 @@ db.exec(`
     PRIMARY KEY (user_id, note_month),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS rental_leases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    tenant_name TEXT NOT NULL,
+    tenant_phone TEXT,
+    tenant_email TEXT,
+    lease_start_date TEXT NOT NULL,
+    lease_end_date TEXT NOT NULL,
+    actual_end_date TEXT,
+    base_rent REAL NOT NULL DEFAULT 0,
+    due_date_day INTEGER NOT NULL DEFAULT 1,
+    deposit_amount REAL NOT NULL DEFAULT 0,
+    deposit_refund REAL,
+    deposit_deductions REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    end_reason TEXT,
+    end_notes TEXT,
+    auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
+    automation_enabled INTEGER NOT NULL DEFAULT 1,
+    is_current INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id) REFERENCES rental_tenants(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_lease_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    lease_id INTEGER NOT NULL,
+    doc_type TEXT NOT NULL DEFAULT 'agreement',
+    file_path TEXT NOT NULL,
+    label TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (lease_id) REFERENCES rental_leases(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rental_leases_unit ON rental_leases(unit_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_leases_current ON rental_leases(unit_id, is_current);
+  CREATE INDEX IF NOT EXISTS idx_rental_lease_docs_lease ON rental_lease_documents(lease_id);
 `);
 
 {
@@ -767,6 +812,51 @@ db.exec(`
     }
   });
   if (records.length) syncRecords();
+}
+
+// Backfill rental_leases from existing units (one current lease per unit).
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('current_lease_id')) {
+    try { db.exec('ALTER TABLE rental_units ADD COLUMN current_lease_id INTEGER REFERENCES rental_leases(id)'); } catch { /* exists */ }
+  }
+
+  const unitsNeedingLease = db.prepare(
+    `SELECT u.* FROM rental_units u
+     WHERE NOT EXISTS (SELECT 1 FROM rental_leases l WHERE l.unit_id = u.id AND l.is_current = 1)`
+  ).all() as {
+    id: number; user_id: number; tenant_name: string; tenant_phone: string | null; tenant_email: string | null;
+    current_year_rent: number; lease_start_date: string | null; lease_end_date: string | null;
+    due_date_day: number; auto_send_receipt_email: number; automation_enabled: number; tenant_id: number | null;
+  }[];
+
+  const insertLease = db.prepare(
+    `INSERT INTO rental_leases
+      (user_id, unit_id, tenant_id, tenant_name, tenant_phone, tenant_email,
+       lease_start_date, lease_end_date, base_rent, due_date_day,
+       auto_send_receipt_email, automation_enabled, is_current, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active')`
+  );
+  const linkUnit = db.prepare(
+    `UPDATE rental_units SET current_lease_id = ?, updated_at = datetime('now') WHERE id = ?`
+  );
+
+  const backfillLeases = db.transaction(() => {
+    for (const u of unitsNeedingLease) {
+      const name = (u.tenant_name || '').trim();
+      if (!name) continue;
+      const start = u.lease_start_date || new Date().toISOString().slice(0, 10);
+      const end = u.lease_end_date || start;
+      const res = insertLease.run(
+        u.user_id, u.id, u.tenant_id ?? null, name,
+        u.tenant_phone || null, u.tenant_email || null,
+        start, end, u.current_year_rent || 0, u.due_date_day || 1,
+        u.auto_send_receipt_email ? 1 : 0, u.automation_enabled !== 0 ? 1 : 0,
+      );
+      linkUnit.run(Number(res.lastInsertRowid), u.id);
+    }
+  });
+  if (unitsNeedingLease.length) backfillLeases();
 }
 
 // Backfill: move any single receipt_path into the expense_receipts table once.

@@ -98,6 +98,86 @@ export interface RentalActivityLog {
 export interface RentalUnitWithRecord extends RentalUnit {
   currentRecord: RentRecord;
   history: RentRecord[];
+  currentLease?: RentalLease | null;
+  leaseStatus?: LeaseDisplayStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Lease / contract lifecycle (unit occupancy periods)
+// ---------------------------------------------------------------------------
+
+export type LeaseStoredStatus = 'active' | 'ending_soon' | 'ended' | 'terminated' | 'vacant';
+export type LeaseDisplayStatus = LeaseStoredStatus;
+
+export const LEASE_STATUS_LABELS: Record<LeaseDisplayStatus, string> = {
+  active: '生效中 Active',
+  ending_soon: '即將到期 Ending soon',
+  ended: '合約完結 Ended',
+  terminated: '提早終止 Terminated',
+  vacant: '空置 Vacant',
+};
+
+export const LEASE_STATUS_BADGE: Record<LeaseDisplayStatus, string> = {
+  active: 'bg-green-100 text-green-800 border border-green-200',
+  ending_soon: 'bg-amber-100 text-amber-800 border border-amber-200',
+  ended: 'bg-gray-100 text-gray-700 border border-gray-200',
+  terminated: 'bg-red-100 text-red-800 border border-red-200',
+  vacant: 'bg-slate-100 text-slate-600 border border-slate-200',
+};
+
+export type LeaseDocumentType = 'agreement' | 'handover' | 'deposit_receipt' | 'other';
+
+export const LEASE_DOC_TYPE_LABELS: Record<LeaseDocumentType, string> = {
+  agreement: '租約 Tenancy Agreement',
+  handover: '交吉 Handover',
+  deposit_receipt: '按金收據 Deposit Receipt',
+  other: '其他 Other',
+};
+
+export interface RentalLease {
+  id: number;
+  user_id: number;
+  unitId: number;
+  tenantId: number | null;
+  tenantName: string;
+  tenantPhone: string;
+  tenantEmail: string;
+  leaseStartDate: string;
+  leaseEndDate: string;
+  actualEndDate: string | null;
+  baseRent: number;
+  dueDateDay: number;
+  depositAmount: number;
+  depositRefund: number | null;
+  depositDeductions: number;
+  status: LeaseStoredStatus;
+  endReason: string | null;
+  endNotes: string | null;
+  autoSendReceiptEmail: boolean;
+  automationEnabled: boolean;
+  isCurrent: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RentalLeaseDocument {
+  id: number;
+  user_id: number;
+  leaseId: number;
+  docType: LeaseDocumentType;
+  filePath: string;
+  label: string | null;
+  created_at: string;
+}
+
+export interface RentalDashboardAlert {
+  type: 'ending_soon' | 'ended_stale' | 'vacant' | 'outstanding_at_end';
+  unitId: number;
+  unitName: string;
+  tenantName: string;
+  leaseId?: number;
+  message: string;
+  daysRemaining?: number | null;
 }
 
 export interface BasicRentPeriod {
@@ -296,6 +376,46 @@ export function daysRemaining(leaseEndDate: string): number | null {
   if (Number.isNaN(end.getTime())) return null;
   const diff = end.getTime() - Date.now();
   return Math.ceil(diff / 86400000);
+}
+
+/** True when billing period YYYY-MM is after the lease end month — block auto-invoice. */
+export function billingPeriodAfterLeaseEnd(period: string, leaseEndDate: string | null | undefined): boolean {
+  const iso = normalizeStoredDate(leaseEndDate ?? null);
+  if (!iso) return false;
+  const endMonth = iso.slice(0, 7);
+  return period > endMonth;
+}
+
+const ENDING_SOON_DAYS = 60;
+
+/** Derive display status from lease dates + stored status. */
+export function computeLeaseDisplayStatus(
+  lease: Pick<RentalLease, 'leaseEndDate' | 'actualEndDate' | 'status' | 'isCurrent'>,
+  endingSoonDays = ENDING_SOON_DAYS,
+): LeaseDisplayStatus {
+  const stored = lease.status;
+  if (stored === 'terminated') return 'terminated';
+  if (stored === 'ended') return 'ended';
+  if (stored === 'vacant' || !lease.isCurrent) return 'vacant';
+  const endIso = normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate) || '';
+  const today = new Date().toISOString().slice(0, 10);
+  if (endIso && today > endIso) return 'ended';
+  const days = endIso ? daysRemaining(endIso) : null;
+  if (days !== null && days >= 0 && days <= endingSoonDays) return 'ending_soon';
+  return stored === 'ending_soon' ? 'ending_soon' : 'active';
+}
+
+export function isLeaseBillingActive(
+  lease: Pick<RentalLease, 'leaseEndDate' | 'actualEndDate' | 'status' | 'isCurrent' | 'automationEnabled'> | null | undefined,
+  period: string,
+): boolean {
+  if (!lease || !lease.isCurrent) return false;
+  const display = computeLeaseDisplayStatus(lease);
+  if (display === 'ended' || display === 'terminated' || display === 'vacant') return false;
+  if (!lease.automationEnabled) return false;
+  const endDate = lease.actualEndDate || lease.leaseEndDate;
+  if (billingPeriodAfterLeaseEnd(period, endDate)) return false;
+  return true;
 }
 
 /** Returns ISO YYYY-MM-DD (for server comparisons). Display via formatDateToDDMMYYYY. */

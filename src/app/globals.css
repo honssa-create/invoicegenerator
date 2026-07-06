@@ -57,14 +57,33 @@
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  .expense-print-root {
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
   .no-print {
     display: none !important;
   }
   .print-only {
     display: block !important;
-  }
-  body {
-    background: white !important;
   }
   /* Ensure colored headers (e.g. the receipt-number banner) render in print. */
   * {
@@ -80,31 +99,49 @@
     padding: 0.65rem 0.85rem !important;
   }
 
-  /* Expense receipt print: keep summary + image together per page */
+  /* Expense receipt print */
+  .expense-print-stack {
+    max-width: none !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
   .expense-print-sheet {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
     page-break-after: always;
     break-after: page;
   }
+
   .expense-print-sheet:last-child {
     page-break-after: auto;
     break-after: auto;
   }
-  .expense-print-summary {
+
+  /* Keep summary + first receipt image on the same printed page */
+  .expense-print-page-unit {
     break-inside: avoid;
     page-break-inside: avoid;
   }
-  .expense-print-receipt {
-    break-inside: avoid;
-    page-break-inside: avoid;
+
+  .expense-print-receipt--extra {
+    break-before: page;
+    page-break-before: always;
+    margin-top: 0 !important;
   }
-  .expense-print-receipt img {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    height: auto;
-    /* Fit below metadata on one sheet — avoids blank pages from full-size mobile screenshots */
-    max-height: 7.5in;
-    object-fit: contain;
-    object-position: top center;
+
+  .expense-print-receipt img.expense-print-receipt-img {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 6.5in !important;
+    object-fit: contain !important;
+    object-position: top center !important;
   }
 }

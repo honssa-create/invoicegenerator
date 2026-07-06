@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
+import { rentalOwnerId } from '@/lib/org-server';
 import { createRentalPayment } from '@/lib/rental-ledger-server';
 import { normalizeStoredDate } from '@/lib/rentals';
 
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
     if (!tenantId || !Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ error: 'tenantId and positive amount required' }, { status: 400 });
     }
-    const payment = createRentalPayment(session.userId, {
+    const payment = createRentalPayment(rentalOwnerId(session.userId), {
       tenantId,
       paymentDate,
       amount,

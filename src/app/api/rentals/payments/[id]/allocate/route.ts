@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
+import { rentalOwnerId } from '@/lib/org-server';
 import { allocatePayment } from '@/lib/rental-ledger-server';
 
 export async function POST(
@@ -18,7 +19,7 @@ export async function POST(
     }
     const result = allocatePayment(
       params.id,
-      session.userId,
+      rentalOwnerId(session.userId),
       allocations.map((a: { chargeItemId: number; amount: number }) => ({
         chargeItemId: Number(a.chargeItemId),
         amount: Number(a.amount),

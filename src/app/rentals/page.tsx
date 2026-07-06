@@ -233,14 +233,24 @@ export default function RentalsPage() {
                         ) : null}
                       </td>
                       <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        {!readOnly && (
-                          <button
-                            onClick={() => openUnitModal(u)}
-                            className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
-                          >
-                            Edit Lease
-                          </button>
-                        )}
+                        <div className="flex flex-col items-end gap-1">
+                          {u.tenantId ? (
+                            <Link
+                              href={`/rentals/units/${u.id}/rent-payment-notice?period=${period}`}
+                              className="text-brand-600 hover:text-brand-700 text-xs font-medium hover:underline"
+                            >
+                              通知單 Notice
+                            </Link>
+                          ) : null}
+                          {!readOnly && (
+                            <button
+                              onClick={() => openUnitModal(u)}
+                              className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
+                            >
+                              Edit Lease
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

@@ -140,6 +140,25 @@ export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUni
   }));
 }
 
+/** Resolve tenant id from a rental unit (for notice links from unit context). */
+export function getTenantIdForUnit(unitId: number | string, userId: number): number | null {
+  const row = db.prepare(
+    'SELECT tenant_id FROM rental_units WHERE id = ? AND user_id = ?'
+  ).get(unitId, userId) as { tenant_id: number | null } | undefined;
+  return row?.tenant_id ?? null;
+}
+
+export function buildRentPaymentNoticeForUnit(
+  unitId: number | string,
+  userId: number,
+  period: string,
+  fromPeriod?: string,
+): RentPaymentNoticeMatrix | null {
+  const tenantId = getTenantIdForUnit(unitId, userId);
+  if (!tenantId) return null;
+  return buildRentPaymentNoticeMatrix(tenantId, userId, period, fromPeriod);
+}
+
 // ---------------------------------------------------------------------------
 // Charge item sync from legacy rental_records (parallel run)
 // ---------------------------------------------------------------------------

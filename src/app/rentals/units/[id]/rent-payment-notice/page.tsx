@@ -6,21 +6,21 @@ import { useParams, useSearchParams } from 'next/navigation';
 import RentPaymentNoticeMatrixView from '@/components/RentPaymentNoticeMatrix';
 import { currentBillingPeriod, formatDisplayDate, formatMoney, type RentPaymentNoticeMatrix } from '@/lib/rentals';
 
-function RentPaymentNoticeContent() {
+type UnitNoticePayload = RentPaymentNoticeMatrix & { tenantId?: number; unitId?: number };
+
+function UnitRentPaymentNoticeContent() {
   const { id } = useParams();
   const searchParams = useSearchParams();
   const period = searchParams.get('period') || currentBillingPeriod();
   const from = searchParams.get('from') || period;
-  const [matrix, setMatrix] = useState<RentPaymentNoticeMatrix | null>(null);
+  const [matrix, setMatrix] = useState<UnitNoticePayload | null>(null);
   const [error, setError] = useState('');
-  const [unitHint, setUnitHint] = useState<{ unitId: number; unitName: string; tenantId: number | null } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
     setError('');
-    setUnitHint(null);
-    fetch(`/api/rentals/tenants/${id}/rent-payment-notice?period=${period}&from=${from}`)
+    fetch(`/api/rentals/units/${id}/rent-payment-notice?period=${period}&from=${from}`)
       .then(async (r) => {
         if (r.status === 401) {
           window.location.href = '/login';
@@ -32,22 +32,9 @@ function RentPaymentNoticeContent() {
       })
       .then((d) => {
         if (d?.tenant) setMatrix(d);
-        else setError('Tenant not found');
+        else setError('Notice not available');
       })
-      .catch(async (e) => {
-        setError(e instanceof Error ? e.message : 'Failed to load notice');
-        const unitRes = await fetch(`/api/rentals/units/${id}?period=${period}`);
-        if (unitRes.ok) {
-          const unitData = await unitRes.json();
-          if (unitData?.unit) {
-            setUnitHint({
-              unitId: unitData.unit.id,
-              unitName: unitData.unit.unitName,
-              tenantId: unitData.unit.tenantId ?? null,
-            });
-          }
-        }
-      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load notice'))
       .finally(() => setLoading(false));
   }, [id, period, from]);
 
@@ -57,38 +44,21 @@ function RentPaymentNoticeContent() {
 
   if (error || !matrix) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-gray-500 px-6 text-center max-w-lg mx-auto">
-        <p className="font-medium text-gray-700">繳付租金通知單 unavailable</p>
-        <p className="text-sm">{error || 'Tenant not found'}</p>
-        {unitHint && (
-          <div className="text-sm bg-amber-50 border border-amber-200 rounded-lg p-4 text-left w-full">
-            <p className="text-amber-800">
-              <strong>{id}</strong> is a <strong>unit</strong> ({unitHint.unitName}), not a tenant ID.
-            </p>
-            {unitHint.tenantId ? (
-              <Link
-                href={`/rentals/units/${unitHint.unitId}/rent-payment-notice?period=${period}&from=${from}`}
-                className="text-brand-600 font-medium mt-2 inline-block"
-              >
-                Open rent payment notice for this unit →
-              </Link>
-            ) : (
-              <p className="text-amber-700 mt-2">Save a tenant name on the unit lease first.</p>
-            )}
-          </div>
-        )}
-        <Link href="/rentals" className="text-brand-600 text-sm font-medium">← Back to Rentals</Link>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-gray-500 px-6 text-center">
+        <p>{error || 'Notice not available'}</p>
+        <Link href={`/rentals/${id}`} className="text-brand-600 text-sm font-medium">← Back to Unit</Link>
       </div>
     );
   }
 
   const { tenant } = matrix;
   const issued = formatDisplayDate(new Date().toISOString().slice(0, 10));
+  const tenantId = matrix.tenantId ?? tenant.id;
 
   return (
     <div className="rent-notice-print-root min-h-screen bg-gray-100 print:bg-white">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center">
-        <Link href={`/rentals/tenants/${id}`} className="text-sm text-brand-600 font-medium">← Back to Tenant</Link>
+        <Link href={`/rentals/${id}`} className="text-sm text-brand-600 font-medium">← Back to Unit</Link>
         <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg">
           Print / Save PDF
         </button>
@@ -120,16 +90,21 @@ function RentPaymentNoticeContent() {
         <div className="mt-10 pt-6 border-t border-gray-200 text-xs text-gray-500 space-y-1">
           <p>「/」= 該月無此費用 · 「—」= 已付清</p>
           <p>Please settle outstanding amounts by the due date. 請於到期日前繳付以上款項。</p>
+          {tenantId && (
+            <p className="no-print">
+              <Link href={`/rentals/tenants/${tenantId}`} className="text-brand-600">Manage tenant ledger →</Link>
+            </p>
+          )}
         </div>
       </main>
     </div>
   );
 }
 
-export default function RentPaymentNoticePage() {
+export default function UnitRentPaymentNoticePage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>}>
-      <RentPaymentNoticeContent />
+      <UnitRentPaymentNoticeContent />
     </Suspense>
   );
 }

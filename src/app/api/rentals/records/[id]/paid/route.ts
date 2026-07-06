@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
+import { rentalOwnerId } from '@/lib/org-server';
 import { markRentPaid } from '@/lib/rental-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -7,9 +8,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
+  const ownerId = rentalOwnerId(session.userId);
   try {
     const body = await request.json();
-    const result = await markRentPaid(params.id, session.userId, {
+    const result = await markRentPaid(params.id, ownerId, {
       autoSendReceiptEmail: body.autoSendReceiptEmail !== undefined ? Boolean(body.autoSendReceiptEmail) : undefined,
       note: body.note || null,
       paidDate: body.paidDate || null,

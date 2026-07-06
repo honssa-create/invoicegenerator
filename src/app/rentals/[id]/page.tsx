@@ -312,6 +312,26 @@ function RentalDetailInner() {
               )}
             </p>
           </div>
+          <div className="flex flex-wrap gap-2">
+            {unit.tenantId ? (
+              <>
+                <Link
+                  href={`/rentals/tenants/${unit.tenantId}`}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Tenant Ledger 租客
+                </Link>
+                <Link
+                  href={`/rentals/units/${unit.id}/rent-payment-notice?period=${period}`}
+                  className="px-3 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700"
+                >
+                  繳付租金通知單 Notice
+                </Link>
+              </>
+            ) : (
+              <p className="text-xs text-amber-600 self-center">Save tenant name to enable rent payment notice</p>
+            )}
+          </div>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>

@@ -23,3 +23,8 @@ export function canAccessExpense(session: SessionPayload, expenseId: number): bo
   const row = db.prepare(`SELECT 1 FROM expenses WHERE id = ? AND ${sql}`).get(expenseId, ...params);
   return Boolean(row);
 }
+
+/** Rental data is org-scoped like expenses/invoices. */
+export function rentalOwnerId(userId: number): number {
+  return getDataOwnerId(userId);
+}

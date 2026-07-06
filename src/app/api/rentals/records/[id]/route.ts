@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
+import { rentalOwnerId } from '@/lib/org-server';
 import { getRentRecord, updateRentRecordUtilities } from '@/lib/rental-server';
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
@@ -7,12 +8,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
+  const ownerId = rentalOwnerId(session.userId);
   try {
-    if (!getRentRecord(params.id, session.userId)) {
+    if (!getRentRecord(params.id, ownerId)) {
       return NextResponse.json({ error: 'Record not found' }, { status: 404 });
     }
     const body = await request.json();
-    const record = updateRentRecordUtilities(params.id, session.userId, {
+    const record = updateRentRecordUtilities(params.id, ownerId, {
       baseRent: body.baseRent !== undefined ? Number(body.baseRent) : undefined,
       baseRentPeriodFrom: body.baseRentPeriodFrom,
       baseRentPeriodTo: body.baseRentPeriodTo,

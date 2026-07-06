@@ -10,7 +10,6 @@ import FilterBar from '@/components/FilterBar';
 import {
   DEFAULT_OPTIONS,
   OPTION_TYPES,
-  PAYMENT_STATUSES,
   EXPENSE_STATUS_COLORS,
   categoryLabel,
   expenseSupplierName,
@@ -38,7 +37,6 @@ const EMPTY_FORM = {
   payment_method: '',
   notes: '',
   special_notes: '',
-  payment_status: 'unpaid',
 };
 
 type FormState = typeof EMPTY_FORM;
@@ -249,7 +247,6 @@ export default function ExpensesPage() {
       payment_method: e.payment_method || '',
       notes: e.notes || '',
       special_notes: e.special_notes || '',
-      payment_status: e.payment_status,
     });
     setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r) })));
     setEditingId(e.id);
@@ -405,7 +402,7 @@ export default function ExpensesPage() {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, receipt_paths: formReceipts.map((r) => r.path) }),
+      body: JSON.stringify({ ...form, payment_status: 'paid', receipt_paths: formReceipts.map((r) => r.path) }),
     });
     const data = await res.json();
     setSaving(false);
@@ -822,12 +819,6 @@ export default function ExpensesPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Order No. 訂單編號</label>
                   <input value={form.order_no} onChange={(ev) => setForm({ ...form, order_no: ev.target.value })} className={inputCls} placeholder="Order / reference no." />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Payment Status 付款狀態</label>
-                  <select value={form.payment_status} onChange={(ev) => setForm({ ...form, payment_status: ev.target.value })} className={inputCls}>
-                    {PAYMENT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
                 </div>
               </div>
               <div>

@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const category = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : 'other';
-    const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'unpaid';
+    const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'paid';
     const amount_hkd = normalizeNumber(body.amount_hkd);
     const amount_rmb = normalizeNumber(body.amount_rmb);
     const receiptPaths = receiptPathsFromBody(body);

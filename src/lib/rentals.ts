@@ -496,6 +496,15 @@ export const CHARGE_TYPE_LABELS: Record<RentalChargeType, string> = {
   electricity: '電費 Electricity',
 };
 
+/** Display / debit-note row order: 租金 → 電費 → 水費 */
+export const CHARGE_DISPLAY_ORDER: RentalChargeType[] = ['rent', 'electricity', 'water'];
+
+export const CHARGE_SORT: Record<RentalChargeType, number> = {
+  rent: 1,
+  electricity: 2,
+  water: 3,
+};
+
 export const CHARGE_STATUS_LABELS: Record<RentalChargeItemStatus, string> = {
   empty: '—',
   unpaid: '未付 Unpaid',
@@ -1022,6 +1031,8 @@ export interface FormalDebitNoteLine {
   unitName: string;
   description: string;
   amount: number;
+  /** Used for row ordering (租金 → 電費 → 水費); omitted from print output */
+  chargeType: RentalChargeType;
 }
 
 export interface FormalDebitNoteArrearRow {

@@ -44,6 +44,7 @@ import {
   nextBillingPeriod,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
+  CHARGE_DISPLAY_ORDER,
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
@@ -813,7 +814,7 @@ export async function markRentPaid(
   const chargeItems = getChargeItemsForRecord(record.id, userId);
   const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
-  const CHARGE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+  const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
   let allocations: { chargeItemId: number; amount: number }[] = [];
 
   if (input.chargeAllocations?.length) {

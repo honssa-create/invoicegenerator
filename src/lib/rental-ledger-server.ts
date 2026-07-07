@@ -25,6 +25,8 @@ import {
   type RentalChargeItem,
   type RentalChargeItemStatus,
   type RentalChargeType,
+  CHARGE_DISPLAY_ORDER,
+  CHARGE_SORT,
   type RentalPayment,
   type RentalPaymentAllocation,
   type RentalPaymentAllocationDetail,
@@ -277,7 +279,7 @@ export function buildRentPaymentNoticeForUnit(
 // Charge item sync from legacy rental_records (parallel run)
 // ---------------------------------------------------------------------------
 
-const CHARGE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
 
 function distributeLegacyPaid(amountPaid: number, dues: { id: number; due: number }[]) {
   let remaining = amountPaid || 0;
@@ -621,8 +623,6 @@ export function buildRentPaymentNoticeMatrix(
 // Formal debit note (繳費通知單) document builder
 // ---------------------------------------------------------------------------
 
-const CHARGE_SORT: Record<RentalChargeType, number> = { rent: 1, water: 2, electricity: 3 };
-
 function buildArrearDetails(
   items: { unitName: string; chargeType: RentalChargeType }[],
 ): string {
@@ -702,12 +702,13 @@ export function buildFormalDebitNote(
       unitName: formatDebitNoteUnitLabel(col.unitName),
       description: formatDebitNoteChargeDescription(targetPeriod, col.chargeType),
       amount: outstanding,
+      chargeType: col.chargeType,
     });
   }
   currentCharges.sort((a, b) => {
     const unitCmp = a.unitName.localeCompare(b.unitName);
     if (unitCmp !== 0) return unitCmp;
-    return 0;
+    return CHARGE_SORT[a.chargeType] - CHARGE_SORT[b.chargeType];
   });
 
   const arrearPeriods = matrix.summary.priorArrearsPeriods.filter(Boolean).sort();

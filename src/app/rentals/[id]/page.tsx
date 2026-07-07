@@ -814,52 +814,6 @@ function RentalDetailInner() {
                   </p>
                 </div>
 
-                {/* Water */}
-                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
-                  <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
-                  {waterMeterFormula ? (
-                    <>
-                      <p className="text-xs text-blue-700/80 mb-3">213A formula: 用水度數 = 今次錶數 − 前次錶數</p>
-                      <WaterMeterCalculator
-                        prevReading={waterMeterPrev}
-                        currReading={waterMeterCurr}
-                        ratePerUnit={waterMeterRate}
-                        onPrevReading={setWaterMeterPrev}
-                        onCurrReading={setWaterMeterCurr}
-                        onRatePerUnit={setWaterMeterRate}
-                        suggestedPrevReading={suggestedPrevWaterReading}
-                        inpClassName={utilityEditing ? inp : roInp}
-                        readOnly={!utilityEditing}
-                      />
-                      <div className="grid md:grid-cols-2 gap-3 mt-4">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="grid md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} placeholder="0 → shows /" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* Electricity */}
                 <div className="rounded-xl border border-yellow-100 bg-yellow-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-yellow-800 mb-3">電費 Electricity Fee</p>
@@ -912,6 +866,52 @@ function RentalDetailInner() {
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
                         <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Water */}
+                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
+                  <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
+                  {waterMeterFormula ? (
+                    <>
+                      <p className="text-xs text-blue-700/80 mb-3">213A formula: 用水度數 = 今次錶數 − 前次錶數</p>
+                      <WaterMeterCalculator
+                        prevReading={waterMeterPrev}
+                        currReading={waterMeterCurr}
+                        ratePerUnit={waterMeterRate}
+                        onPrevReading={setWaterMeterPrev}
+                        onCurrReading={setWaterMeterCurr}
+                        onRatePerUnit={setWaterMeterRate}
+                        suggestedPrevReading={suggestedPrevWaterReading}
+                        inpClassName={utilityEditing ? inp : roInp}
+                        readOnly={!utilityEditing}
+                      />
+                      <div className="grid md:grid-cols-2 gap-3 mt-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} placeholder="0 → shows /" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                       </div>
                     </div>
                   )}

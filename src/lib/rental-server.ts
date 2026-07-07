@@ -2,6 +2,7 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
+import { getRentalTemplate } from './rental-template-server';
 import {
   allocateChargeItemsDirect,
   ensureUnitTenantLink,
@@ -43,6 +44,7 @@ import {
   outstandingBalance,
   normalizeStoredDate,
   billingPeriodAfterLeaseEnd,
+  billingPeriodWithinLease,
   nextBillingPeriod,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
@@ -61,6 +63,7 @@ import {
   type RentalChargeItem,
   type RentalChargeType,
   type DebitNotePaymentTemplateId,
+  type RentalLease,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -342,7 +345,52 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
   updateCurrentLeaseFromUnit(updated, {
     depositAmount: input.depositAmount !== undefined ? Number(input.depositAmount) || 0 : undefined,
   });
+  if (input.currentYearRent !== undefined) {
+    const lease = getCurrentLeaseForUnit(updated.id, userId);
+    if (lease) syncLeaseBaseRentToRecords(userId, updated.id, lease);
+  }
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Lease-scoped base rent
+// ---------------------------------------------------------------------------
+
+/** Apply lease base_rent to unpaid records within the lease month range. */
+export function syncLeaseBaseRentToRecords(
+  userId: number,
+  unitId: number,
+  lease: Pick<RentalLease, 'baseRent' | 'leaseStartDate' | 'leaseEndDate' | 'actualEndDate'>,
+) {
+  const startMonth = (normalizeStoredDate(lease.leaseStartDate) || lease.leaseStartDate).slice(0, 7);
+  const endMonth = (normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate) || lease.leaseEndDate).slice(0, 7);
+  db.prepare(
+    `UPDATE rental_records SET
+      base_rent = ?,
+      actual_amount = ? + COALESCE(water_fee, 0) + COALESCE(electricity_fee, 0),
+      updated_at = datetime('now')
+     WHERE user_id = ? AND unit_id = ?
+       AND billing_period >= ? AND billing_period <= ?
+       AND status != 'paid' AND COALESCE(amount_paid, 0) <= 0`
+  ).run(lease.baseRent, lease.baseRent, userId, unitId, startMonth, endMonth);
+
+  const rows = db.prepare(
+    `SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ?
+     AND billing_period >= ? AND billing_period <= ?
+     AND status != 'paid' AND COALESCE(amount_paid, 0) <= 0`
+  ).all(userId, unitId, startMonth, endMonth) as { id: number }[];
+  for (const row of rows) {
+    const rec = getRentRecord(row.id, userId);
+    if (rec) syncChargeItemsFromRecord(rec);
+  }
+}
+
+function resolveBaseRentForPeriod(unit: RentalUnit, period: string, userId: number): number {
+  const lease = getCurrentLeaseForUnit(unit.id, userId);
+  if (lease && billingPeriodWithinLease(period, lease.leaseStartDate, lease.leaseEndDate)) {
+    return lease.baseRent;
+  }
+  return unit.currentYearRent || 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,22 +403,25 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
     'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?'
   ).get(unit.user_id, unit.id, period) as RecordRow | undefined;
   if (found) {
+    const leaseRent = resolveBaseRentForPeriod(unit, period, unit.user_id);
     const updates: string[] = [];
     const vals: (string | number)[] = [];
-    if (!found.base_rent && unit.currentYearRent > 0) {
+    const targetRent = leaseRent || unit.currentYearRent || found.base_rent || 0;
+    if ((found.base_rent || 0) !== targetRent && targetRent > 0
+        && found.status !== 'paid' && (found.amount_paid || 0) <= 0) {
       updates.push('base_rent = ?');
-      vals.push(unit.currentYearRent);
+      vals.push(targetRent);
+    } else if (!found.base_rent && targetRent > 0) {
+      updates.push('base_rent = ?');
+      vals.push(targetRent);
     }
     if (!found.base_rent_period_from || !found.base_rent_period_to) {
       updates.push('base_rent_period_from = ?', 'base_rent_period_to = ?');
       vals.push(defaults.from, defaults.to);
     }
     if (updates.length) {
-      const total = computeTotal(
-        unit.currentYearRent || found.base_rent || 0,
-        found.water_fee || 0,
-        found.electricity_fee || 0,
-      );
+      const rent = targetRent;
+      const total = computeTotal(rent, found.water_fee || 0, found.electricity_fee || 0);
       updates.push('actual_amount = ?', "updated_at = datetime('now')");
       vals.push(total, found.id);
       db.prepare(`UPDATE rental_records SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
@@ -383,7 +434,7 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
     return hydrated;
   }
 
-  const base = unit.currentYearRent;
+  const base = resolveBaseRentForPeriod(unit, period, unit.user_id) || unit.currentYearRent;
   const res = db.prepare(
     `INSERT INTO rental_records
       (user_id, unit_id, billing_period, base_rent, base_rent_period_from, base_rent_period_to,
@@ -419,10 +470,14 @@ export function updateRentRecordUtilities(
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
   if (!existing) return null;
-  const base = Number(input.baseRent ?? existing.baseRent) || 0;
+  const unit = getRentalUnit(existing.unitId, userId);
+  const lease = unit ? getCurrentLeaseForUnit(unit.id, userId) : null;
+  let base = Number(existing.baseRent) || 0;
+  if (lease && billingPeriodWithinLease(existing.billingPeriod, lease.leaseStartDate, lease.leaseEndDate)) {
+    base = lease.baseRent;
+  }
   let water = Number(input.waterFee ?? existing.waterFee) || 0;
   let elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
-  const unit = getRentalUnit(existing.unitId, userId);
   const elecFormula = unit ? electricityFormulaForUnit(unit.unitName) : null;
   const waterFormula = unit ? unitHasWaterMeterFormula(unit.unitName) : false;
   const meter = input.electricityMeter !== undefined ? input.electricityMeter : existing.electricityMeter;
@@ -670,17 +725,20 @@ export async function sendRentInvoice(
     const dueDisplay = formatDisplayDate(dueDate);
     const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
     const templateId = input.paymentTemplate ?? debitNoteCompanyForUnit(unit.unitName);
+    const savedTpl = getRentalTemplate(userId, templateId);
     const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
     const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
       templateId,
       noteNo,
       dueDateChinese,
       input.paymentRemark,
+      savedTpl?.paymentInstructions,
     );
+    const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
     email = await sendEmail(
       unit.tenantEmail,
       `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, input.note, paymentInstructionsText)
+      invoiceHtml(unit, fresh, invoiceNote, paymentInstructionsText)
     );
   }
   logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);

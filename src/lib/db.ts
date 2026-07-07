@@ -694,6 +694,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_rental_leases_unit ON rental_leases(unit_id);
   CREATE INDEX IF NOT EXISTS idx_rental_leases_current ON rental_leases(unit_id, is_current);
   CREATE INDEX IF NOT EXISTS idx_rental_lease_docs_lease ON rental_lease_documents(lease_id);
+
+  CREATE TABLE IF NOT EXISTS rental_document_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    template_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    payment_instructions TEXT NOT NULL DEFAULT '',
+    footer_remark TEXT NOT NULL DEFAULT '',
+    rent_invoice_note TEXT NOT NULL DEFAULT '',
+    company_json TEXT,
+    updated_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, template_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 {

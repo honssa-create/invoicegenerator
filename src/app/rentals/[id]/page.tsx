@@ -372,7 +372,6 @@ function RentalDetailInner() {
   const buildUtilityPayload = useCallback((snap?: UtilitySnapshot) => {
     const s = snap ?? captureUtilitySnapshot();
     const payload: Record<string, unknown> = {
-      baseRent: Number(baseRent),
       baseRentPeriodFrom: fromFormDate(s.baseRentPeriodFrom),
       baseRentPeriodTo: fromFormDate(s.baseRentPeriodTo),
       waterFee: Number(s.waterFee),
@@ -393,7 +392,7 @@ function RentalDetailInner() {
       payload.waterMeter = waterMeterDataFromInputs(s.waterMeterPrev, s.waterMeterCurr, s.waterMeterRate);
     }
     return payload;
-  }, [baseRent, captureUtilitySnapshot, electricityFormula, waterMeterFormula]);
+  }, [captureUtilitySnapshot, electricityFormula, waterMeterFormula]);
 
   const saveUtilities = useCallback(async (opts?: { reload?: boolean; snapshot?: UtilitySnapshot; skipUndo?: boolean }) => {
     const recordId = data?.currentRecord?.id;
@@ -472,13 +471,6 @@ function RentalDetailInner() {
         address: unitAddress.trim(),
       }),
     });
-    if (data?.currentRecord) {
-      await fetch(`/api/rentals/records/${data.currentRecord.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseRent: Number(baseRent) || 0 }),
-      });
-    }
     setProfileSaving(false);
     setToast('Profile saved');
     load();
@@ -756,6 +748,9 @@ function RentalDetailInner() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
             <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
+            <p className="text-xs text-gray-400 mt-1">
+              Fixed for lease period 起租日–完租日; applies to all months in the lease.
+            </p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">已交按金 Deposit Paid</label>
@@ -833,7 +828,7 @@ function RentalDetailInner() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
-                    Auto ({formatDueDayLabel(Number(dueDateDay) || 1)}): {autoRentPeriod.formattedRange}
+                    Amount locked to lease base rent · Auto ({formatDueDayLabel(Number(dueDateDay) || 1)}): {autoRentPeriod.formattedRange}
                   </p>
                 </div>
 

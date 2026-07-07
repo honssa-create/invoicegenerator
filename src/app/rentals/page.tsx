@@ -182,6 +182,7 @@ export default function RentalsPage() {
           </p>
         </div>
         <div className="page-actions">
+          <Link href="/rentals/templates" className="btn border border-gray-300 text-gray-700 hover:bg-gray-50">Templates 範本</Link>
           <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
           <button onClick={runScheduler} disabled={busy || readOnly} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
           {!readOnly && (

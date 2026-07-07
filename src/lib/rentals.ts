@@ -416,6 +416,25 @@ export function billingPeriodAfterLeaseEnd(period: string, leaseEndDate: string 
   return period > endMonth;
 }
 
+/** True when billing period YYYY-MM falls within lease start/end months (inclusive). */
+export function billingPeriodWithinLease(
+  period: string,
+  leaseStartDate: string | null | undefined,
+  leaseEndDate: string | null | undefined,
+): boolean {
+  const startIso = normalizeStoredDate(leaseStartDate ?? null);
+  const endIso = normalizeStoredDate(leaseEndDate ?? null);
+  if (!startIso || !endIso) return false;
+  const startMonth = startIso.slice(0, 7);
+  const endMonth = endIso.slice(0, 7);
+  return period >= startMonth && period <= endMonth;
+}
+
+/** Replace {{placeholders}} in a template body. */
+export function applyTemplatePlaceholders(body: string, vars: Record<string, string>): string {
+  return body.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? '');
+}
+
 const ENDING_SOON_DAYS = 60;
 
 /** Derive display status from lease dates + stored status. */
@@ -1011,8 +1030,27 @@ export function buildDebitNotePaymentInstructionsText(
   noteNo: string,
   dueDateChinese: string,
   manualRemark?: string | null,
+  customBody?: string | null,
 ): string {
   const profile = DEBIT_NOTE_COMPANY_PROFILES[templateId];
+  const bankLines = templateId === 'label'
+    ? '374-279610-001\nHONOUR LABEL LIMITED\nHANG SENG BANK (bank code : 024)'
+    : '-\n\n-';
+  const remark = manualRemark?.trim() || '';
+  const vars: Record<string, string> = {
+    noteNo,
+    dueDateChinese,
+    chequePayee: profile.chequePayee,
+    bankLines,
+    manualRemark: remark,
+  };
+  if (customBody?.trim()) {
+    let out = applyTemplatePlaceholders(customBody.trim(), vars);
+    if (remark && !customBody.includes('{{manualRemark}}')) {
+      out = `${out}\n\n${remark}`;
+    }
+    return out;
+  }
   const lines: string[] = [
     `1. 敬請於到期日 (發單日7日內, ${dueDateChinese}) 或之前繳清上述款項。`,
     '2.',
@@ -1027,18 +1065,10 @@ export function buildDebitNotePaymentInstructionsText(
     '',
     'Bank transfer detail:',
     '',
+    ...bankLines.split('\n'),
   ];
-  if (templateId === 'label') {
-    lines.push(
-      '374-279610-001',
-      'HONOUR LABEL LIMITED',
-      'HANG SENG BANK (bank code : 024)',
-    );
-  } else {
-    lines.push('-', '', '-');
-  }
-  if (manualRemark?.trim()) {
-    lines.push('', manualRemark.trim());
+  if (remark) {
+    lines.push('', remark);
   }
   return lines.join('\n');
 }
@@ -1212,6 +1242,37 @@ export function buildDebitNoteFooterRemark(
   }
 
   return `請於 ${dueLabel}前繳交 ${currentLabel} 應繳款項，總計 ${amount}`;
+}
+
+/** Render footer remark from saved template or built-in logic. */
+export function renderDebitNoteFooterRemark(
+  customTemplate: string | null | undefined,
+  targetPeriod: string,
+  dueDateDisplay: string,
+  priorArrearsPeriods: string[],
+  grandTotal: number,
+): string {
+  if (grandTotal <= 0) return '所有款項已付清 All amounts settled.';
+
+  const dueLabel = formatDueDateChinese(dueDateDisplay, targetPeriod.split('-')[0]);
+  const currentLabel = formatBillingPeriodLabel(targetPeriod);
+  const amount = formatFooterAmount(grandTotal);
+  const arrears = priorArrearsPeriods.filter(Boolean).sort();
+  let chargeLabel = `${currentLabel} 應繳款項`;
+  if (arrears.length > 0) {
+    const arrearRange = formatArrearPeriodRangeLabel(arrears);
+    chargeLabel = `延期 ${arrearRange} 租金/費用及 ${currentLabel} 應繳款項`;
+  }
+  if (customTemplate?.trim()) {
+    return applyTemplatePlaceholders(customTemplate.trim(), {
+      dueDate: dueLabel,
+      periodLabel: currentLabel,
+      amount,
+      chargeLabel,
+      arrearRange: arrears.length ? formatArrearPeriodRangeLabel(arrears) : '',
+    });
+  }
+  return buildDebitNoteFooterRemark(targetPeriod, dueDateDisplay, priorArrearsPeriods, grandTotal);
 }
 
 export function chargeOutstanding(item: Pick<RentalChargeItem, 'amountDue' | 'amountAllocated'>): number {

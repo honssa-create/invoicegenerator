@@ -16,6 +16,7 @@ import {
   buildDebitNotePaymentInstructionsText,
   defaultPaymentTemplateForUnits,
   formatDebitNoteUnitLabel,
+  renderDebitNoteFooterRemark,
   resolveDebitNoteCompanyHeader,
   resolveDebitNoteCompanyIds,
   displayRentalStatus,
@@ -48,6 +49,7 @@ import {
   utilityChargeTypesForMode,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
+import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
 
 function logRentalActivity(
   userId: number, unitId: number, action: string,
@@ -737,7 +739,22 @@ export function buildFormalDebitNote(
   const grandTotal = currentSubtotal + totalArrears;
 
   const companyIds = resolveDebitNoteCompanyIds(matrix.units.map((u) => u.unitName));
-  const company: DebitNoteCompanyInfo = { ...resolveDebitNoteCompanyHeader(companyIds), ...options?.company };
+  const paymentTemplateId: DebitNotePaymentTemplateId =
+    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
+  const savedTemplate = getRentalTemplate(userId, paymentTemplateId);
+  const companyOverride = resolveCompanyFromTemplate(paymentTemplateId, savedTemplate);
+  const company: DebitNoteCompanyInfo = {
+    ...resolveDebitNoteCompanyHeader(companyIds),
+    ...options?.company,
+    ...(companyOverride ? {
+      nameZh: companyOverride.nameZh,
+      nameEn: companyOverride.nameEn,
+      address: companyOverride.address,
+      phone: companyOverride.phone,
+      taxId: companyOverride.taxId,
+      chequePayee: companyOverride.chequePayee,
+    } : {}),
+  };
   const issuedDate = new Date().toISOString().slice(0, 10);
   const dueDate = debitNoteDueDate(issuedDate);
   const dueDateDisplay = formatDisplayDate(dueDate);
@@ -752,16 +769,16 @@ export function buildFormalDebitNote(
     .join(' · ');
 
   const noteNo = peekDebitNoteNumber(userId, targetPeriod);
-  const paymentTemplateId: DebitNotePaymentTemplateId =
-    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
   const paymentInstructionsText = options?.paymentInstructionsText ?? buildDebitNotePaymentInstructionsText(
     paymentTemplateId,
     noteNo,
     dueDateChinese,
     options?.paymentRemark,
+    savedTemplate?.paymentInstructions,
   );
   const paymentInstructions = paymentInstructionsText.split('\n').filter((l) => l !== '');
-  const footerRemark = options?.footerRemark ?? buildDebitNoteFooterRemark(
+  const footerRemark = options?.footerRemark ?? renderDebitNoteFooterRemark(
+    savedTemplate?.footerRemark,
     targetPeriod,
     dueDateDisplay,
     arrearPeriods,

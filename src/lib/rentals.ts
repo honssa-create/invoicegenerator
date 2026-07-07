@@ -245,6 +245,18 @@ export function formatDisplayDate(iso: string | null | undefined): string {
   return formatDateToDDMMYYYY(iso);
 }
 
+/** Add calendar days to an ISO date (YYYY-MM-DD). */
+export function addDaysToIsoDate(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate.slice(0, 10)}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Formal debit note due date: 發單日期 + 7 days. */
+export function debitNoteDueDate(issuedDate: string): string {
+  return addDaysToIsoDate(issuedDate, 7);
+}
+
 /** @alias formatDateToDDMMYYYY */
 export function formatPeriodDate(iso: string): string {
   const f = formatDateToDDMMYYYY(iso);
@@ -494,6 +506,15 @@ export const CHARGE_TYPE_LABELS: Record<RentalChargeType, string> = {
   rent: '租金 Rent',
   water: '水費 Water',
   electricity: '電費 Electricity',
+};
+
+/** Display / debit-note row order: 租金 → 電費 → 水費 */
+export const CHARGE_DISPLAY_ORDER: RentalChargeType[] = ['rent', 'electricity', 'water'];
+
+export const CHARGE_SORT: Record<RentalChargeType, number> = {
+  rent: 1,
+  electricity: 2,
+  water: 3,
 };
 
 export const CHARGE_STATUS_LABELS: Record<RentalChargeItemStatus, string> = {
@@ -866,6 +887,10 @@ export interface RentPaymentNoticeQuery {
   paymentTemplate?: DebitNotePaymentTemplateId;
   /** Extra manual text appended to payment instructions. */
   paymentRemark?: string;
+  /** Override generated payment-instruction block (e.g. user-edited on debit note page). */
+  paymentInstructionsText?: string;
+  /** Override generated footer remark. */
+  footerRemark?: string;
 }
 
 /** Billing company for debit notes. */
@@ -1022,6 +1047,8 @@ export interface FormalDebitNoteLine {
   unitName: string;
   description: string;
   amount: number;
+  /** Used for row ordering (租金 → 電費 → 水費); omitted from print output */
+  chargeType: RentalChargeType;
 }
 
 export interface FormalDebitNoteArrearRow {

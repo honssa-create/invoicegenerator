@@ -37,6 +37,8 @@ import {
   baseRentLineLabel,
   buildDebitNotePaymentInstructionsText,
   debitNoteCompanyForUnit,
+  debitNoteDueDate,
+  formatDueDateChinese,
   utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
@@ -44,6 +46,7 @@ import {
   nextBillingPeriod,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
+  CHARGE_DISPLAY_ORDER,
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
@@ -304,7 +307,7 @@ function syncRentPeriodsForUnit(unit: RentalUnit) {
   }
 }
 
-export function updateRentalUnit(id: number | string, userId: number, input: Partial<RentalUnit>): RentalUnit | null {
+export function updateRentalUnit(id: number | string, userId: number, input: Partial<RentalUnit> & { depositAmount?: number }): RentalUnit | null {
   const existing = getRentalUnit(id, userId);
   if (!existing) return null;
   const newDueDay = Number(input.dueDateDay ?? existing.dueDateDay) || 1;
@@ -336,7 +339,9 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     syncRentPeriodsForUnit(updated);
   }
   ensureUnitTenantLink(updated);
-  updateCurrentLeaseFromUnit(updated);
+  updateCurrentLeaseFromUnit(updated, {
+    depositAmount: input.depositAmount !== undefined ? Number(input.depositAmount) || 0 : undefined,
+  });
   return updated;
 }
 
@@ -660,12 +665,10 @@ export async function sendRentInvoice(
   syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (unit.tenantEmail) {
-    const dueDate = dueDateForPeriod(record.billingPeriod, unit.dueDateDay);
+    const issuedDate = new Date().toISOString().slice(0, 10);
+    const dueDate = debitNoteDueDate(issuedDate);
     const dueDisplay = formatDisplayDate(dueDate);
-    const dueParts = dueDisplay.split('/');
-    const dueDateChinese = dueParts.length >= 3
-      ? `${dueParts[2]}年${Number(dueParts[1])}月${Number(dueParts[0])}日`
-      : dueDisplay;
+    const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
     const templateId = input.paymentTemplate ?? debitNoteCompanyForUnit(unit.unitName);
     const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
     const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
@@ -813,7 +816,7 @@ export async function markRentPaid(
   const chargeItems = getChargeItemsForRecord(record.id, userId);
   const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
-  const CHARGE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+  const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
   let allocations: { chargeItemId: number; amount: number }[] = [];
 
   if (input.chargeAllocations?.length) {

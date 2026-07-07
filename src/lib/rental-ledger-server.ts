@@ -4,7 +4,9 @@ import {
   chargeOutstanding,
   cellPaymentStatus,
   deriveChargeItemStatus,
+  debitNoteDueDate,
   dueDateForPeriod,
+  formatDueDateChinese,
   formatBillingPeriodLabel,
   formatDebitNoteChargeDescription,
   formatDebitNotePeriodLong,
@@ -25,6 +27,8 @@ import {
   type RentalChargeItem,
   type RentalChargeItemStatus,
   type RentalChargeType,
+  CHARGE_DISPLAY_ORDER,
+  CHARGE_SORT,
   type RentalPayment,
   type RentalPaymentAllocation,
   type RentalPaymentAllocationDetail,
@@ -277,7 +281,7 @@ export function buildRentPaymentNoticeForUnit(
 // Charge item sync from legacy rental_records (parallel run)
 // ---------------------------------------------------------------------------
 
-const CHARGE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
 
 function distributeLegacyPaid(amountPaid: number, dues: { id: number; due: number }[]) {
   let remaining = amountPaid || 0;
@@ -621,8 +625,6 @@ export function buildRentPaymentNoticeMatrix(
 // Formal debit note (繳費通知單) document builder
 // ---------------------------------------------------------------------------
 
-const CHARGE_SORT: Record<RentalChargeType, number> = { rent: 1, water: 2, electricity: 3 };
-
 function buildArrearDetails(
   items: { unitName: string; chargeType: RentalChargeType }[],
 ): string {
@@ -702,12 +704,13 @@ export function buildFormalDebitNote(
       unitName: formatDebitNoteUnitLabel(col.unitName),
       description: formatDebitNoteChargeDescription(targetPeriod, col.chargeType),
       amount: outstanding,
+      chargeType: col.chargeType,
     });
   }
   currentCharges.sort((a, b) => {
     const unitCmp = a.unitName.localeCompare(b.unitName);
     if (unitCmp !== 0) return unitCmp;
-    return 0;
+    return CHARGE_SORT[a.chargeType] - CHARGE_SORT[b.chargeType];
   });
 
   const arrearPeriods = matrix.summary.priorArrearsPeriods.filter(Boolean).sort();
@@ -736,6 +739,9 @@ export function buildFormalDebitNote(
   const companyIds = resolveDebitNoteCompanyIds(matrix.units.map((u) => u.unitName));
   const company: DebitNoteCompanyInfo = { ...resolveDebitNoteCompanyHeader(companyIds), ...options?.company };
   const issuedDate = new Date().toISOString().slice(0, 10);
+  const dueDate = debitNoteDueDate(issuedDate);
+  const dueDateDisplay = formatDisplayDate(dueDate);
+  const dueDateChinese = formatDueDateChinese(dueDateDisplay, targetPeriod.split('-')[0]);
 
   const addressRows = db.prepare(
     `SELECT id, address FROM rental_units WHERE user_id = ? AND id IN (${unitIds.map(() => '?').join(',')})`
@@ -745,27 +751,29 @@ export function buildFormalDebitNote(
     .map((u) => addressMap[u.id]?.trim() || u.unitName)
     .join(' · ');
 
-  const dueDateChinese = matrix.summary.dueDateDisplay.split('/').length >= 2
-    ? `${matrix.summary.dueDateDisplay.split('/')[2] || targetPeriod.split('-')[0]}年${Number(matrix.summary.dueDateDisplay.split('/')[1])}月${Number(matrix.summary.dueDateDisplay.split('/')[0])}日`
-    : matrix.summary.dueDateDisplay;
-
   const noteNo = peekDebitNoteNumber(userId, targetPeriod);
   const paymentTemplateId: DebitNotePaymentTemplateId =
     options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
-  const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+  const paymentInstructionsText = options?.paymentInstructionsText ?? buildDebitNotePaymentInstructionsText(
     paymentTemplateId,
     noteNo,
     dueDateChinese,
     options?.paymentRemark,
   );
   const paymentInstructions = paymentInstructionsText.split('\n').filter((l) => l !== '');
+  const footerRemark = options?.footerRemark ?? buildDebitNoteFooterRemark(
+    targetPeriod,
+    dueDateDisplay,
+    arrearPeriods,
+    grandTotal,
+  );
 
   return {
     noteNo,
     issuedDate,
     issuedDateDisplay: formatDisplayDate(issuedDate),
-    dueDate: matrix.summary.dueDate,
-    dueDateDisplay: matrix.summary.dueDateDisplay,
+    dueDate,
+    dueDateDisplay,
     tenant: matrix.tenant,
     premises,
     targetPeriod,
@@ -777,7 +785,7 @@ export function buildFormalDebitNote(
     settledPeriodsNote: buildSettledPeriodsNote(charges, arrearPeriods, targetPeriod),
     totalArrears,
     grandTotal,
-    footerRemark: matrix.summary.reminderText,
+    footerRemark,
     paymentInstructions,
     paymentInstructionsText,
     paymentTemplateId,

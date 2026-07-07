@@ -121,6 +121,7 @@ function RentalDetailInner() {
   const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
   const [leaseStartDate, setLeaseStartDate] = useState('');
   const [leaseEndDate, setLeaseEndDate] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
   const [unitAddress, setUnitAddress] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
 
@@ -223,6 +224,7 @@ function RentalDetailInner() {
           setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
           setLeaseStartDate(d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : '');
           setLeaseEndDate(d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : '');
+          setDepositAmount(d.currentLease?.depositAmount != null ? String(d.currentLease.depositAmount) : '');
           setUnitAddress(d.unit.address || '');
           const rec = d.currentRecord;
           if (rec) {
@@ -466,6 +468,7 @@ function RentalDetailInner() {
         utilityBillingMode,
         leaseStartDate: fromFormDate(leaseStartDate),
         leaseEndDate: fromFormDate(leaseEndDate),
+        depositAmount: Number(depositAmount) || 0,
         address: unitAddress.trim(),
       }),
     });
@@ -753,6 +756,10 @@ function RentalDetailInner() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
             <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">已交按金 Deposit Paid</label>
+            <input type="number" min={0} className={inp} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0" />
           </div>
           <div className="md:col-span-2 lg:col-span-3">
             <label className="block text-xs font-medium text-gray-500 mb-1">地址 Address</label>

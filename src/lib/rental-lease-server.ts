@@ -185,20 +185,24 @@ export function ensureCurrentLeaseFromUnit(unit: RentalUnit): RentalLease | null
   });
 }
 
-export function updateCurrentLeaseFromUnit(unit: RentalUnit) {
+export function updateCurrentLeaseFromUnit(unit: RentalUnit, extra?: { depositAmount?: number }) {
   const lease = ensureCurrentLeaseFromUnit(unit);
   if (!lease) return null;
   const tenant = ensureUnitTenantLink(unit);
+  const depositAmount = extra?.depositAmount !== undefined
+    ? Number(extra.depositAmount) || 0
+    : lease.depositAmount;
   db.prepare(
     `UPDATE rental_leases SET tenant_id = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?,
       lease_start_date = ?, lease_end_date = ?, base_rent = ?, due_date_day = ?,
-      auto_send_receipt_email = ?, automation_enabled = ?, updated_at = datetime('now')
+      deposit_amount = ?, auto_send_receipt_email = ?, automation_enabled = ?, updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
     tenant?.id ?? lease.tenantId, unit.tenantName, unit.tenantPhone || null, unit.tenantEmail || null,
     normalizeStoredDate(unit.leaseStartDate) || lease.leaseStartDate,
     normalizeStoredDate(unit.leaseEndDate) || lease.leaseEndDate,
     unit.currentYearRent, unit.dueDateDay,
+    depositAmount,
     unit.autoSendReceiptEmail ? 1 : 0, unit.automationEnabled ? 1 : 0,
     lease.id, unit.user_id,
   );

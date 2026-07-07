@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "dev:clean": "bash -c 'pkill -f \"node.*\\.bin/next dev\" 2>/dev/null || true; pkill -f next-server 2>/dev/null || true; sleep 1; rm -rf .next; exec next dev'",
+    "dev:clean": "bash -c 'pkill -9 -f next-server 2>/dev/null || true; sleep 1; rm -rf .next; exec next dev'",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

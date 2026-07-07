@@ -41,7 +41,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Record<PermissionSection
     inbound: true,
     kitchen: true,
     kitchen_prep: true,
-    rentals: false,
+    rentals: true,
     expenses: true,
     accounting: false,
     cashflow: false,
@@ -127,7 +127,7 @@ export function navHrefToSection(href: string): PermissionSection | undefined {
 }
 
 /** Operators may view invoices & quotations but cannot create or edit them. */
-export const OPERATOR_READ_ONLY_SECTIONS: PermissionSection[] = ['invoices', 'quotations'];
+export const OPERATOR_READ_ONLY_SECTIONS: PermissionSection[] = ['invoices', 'quotations', 'rentals'];
 
 export function isSectionReadOnly(role: UserRole, section: PermissionSection): boolean {
   return role === 'operator' && OPERATOR_READ_ONLY_SECTIONS.includes(section);

@@ -3,7 +3,30 @@ import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
 import {
+  allocateChargeItemsDirect,
+  ensureUnitTenantLink,
+  getChargeItemsForRecord,
+  getOutstandingChargeItemsForUnits,
+  getRentalTenant,
+  getTenantUnits,
+  getUnitPaymentHistory,
+  recordTenantPaymentWithAllocations,
+  syncChargeItemsFromRecord,
+} from './rental-ledger-server';
+import {
+  ensureCurrentLeaseFromUnit,
+  getCurrentLeaseForUnit,
+  getLeaseDocuments,
+  getLeaseHistory,
+  getRentalDashboardAlerts,
+  shouldAutoDispatchInvoice,
+  syncAllLeaseStatuses,
+  updateCurrentLeaseFromUnit,
+} from './rental-lease-server';
+import {
   computeTotal,
+  chargeOutstanding,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   displayRentalStatus,
   defaultRentPeriod,
@@ -15,7 +38,19 @@ import {
   utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
+  billingPeriodAfterLeaseEnd,
+  nextBillingPeriod,
+  resolveUtilityBillingMode,
+  utilityChargeTypesForMode,
+  DEFAULT_RENTAL_UNITS,
+  parseElectricityMeterJson,
+  parseWaterMeterJson,
+  type ElectricityMeterData,
+  type WaterMeterData,
+  type PeriodPaymentAllocation,
   type PreviousYearRent,
+  type RentalChargeItem,
+  type RentalChargeType,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -30,11 +65,13 @@ import {
 
 interface UnitRow {
   id: number; user_id: number; unit_name: string; tenant_name: string;
+  tenant_id: number | null;
   tenant_phone: string | null; tenant_email: string | null;
   current_year_rent: number; previous_years_rent_json: string | null;
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
-  automation_enabled: number; created_at: string; updated_at: string;
+  automation_enabled: number; utility_billing_mode?: string | null;
+  created_at: string; updated_at: string;
 }
 
 interface RecordRow {
@@ -49,7 +86,9 @@ interface RecordRow {
   receipt_image_path: string | null;
   invoice_sent_at: string | null; receipt_sent_at: string | null;
   paid_at: string | null; custom_invoice_note: string | null;
-  custom_receipt_note: string | null; created_at: string; updated_at: string;
+  custom_receipt_note: string | null; electricity_meter_json?: string | null;
+  water_meter_json?: string | null;
+  created_at: string; updated_at: string;
 }
 
 interface ReceiptRow {
@@ -72,12 +111,16 @@ function parsePrevious(raw: string | null): PreviousYearRent[] {
 function hydrateUnit(row: UnitRow): RentalUnit {
   return {
     id: row.id, user_id: row.user_id, unitName: row.unit_name, tenantName: row.tenant_name,
+    tenantId: row.tenant_id ?? null,
     tenantPhone: row.tenant_phone || '', tenantEmail: row.tenant_email || '',
     currentYearRent: row.current_year_rent || 0,
     previousYearsRent: parsePrevious(row.previous_years_rent_json),
     leaseStartDate: row.lease_start_date || '', leaseEndDate: row.lease_end_date || '',
     dueDateDay: row.due_date_day || 1, autoSendReceiptEmail: Boolean(row.auto_send_receipt_email),
     automationEnabled: Boolean(row.automation_enabled),
+    utilityBillingMode: (row.utility_billing_mode === 'tenant_pays' || row.utility_billing_mode === 'company_proxy'
+      ? row.utility_billing_mode
+      : 'company_proxy') as RentalUnit['utilityBillingMode'],
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -105,6 +148,8 @@ function hydrateRecord(row: RecordRow): RentRecord {
     invoiceSentAt: row.invoice_sent_at, receiptSentAt: row.receipt_sent_at,
     paidAt: row.paid_at, customInvoiceNote: row.custom_invoice_note,
     customReceiptNote: row.custom_receipt_note,
+    electricityMeter: parseElectricityMeterJson(row.electricity_meter_json),
+    waterMeter: parseWaterMeterJson(row.water_meter_json),
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -147,6 +192,62 @@ export function getRentalActivities(unitId: number, userId: number): RentalActiv
     .all(unitId, userId) as ActivityRow[]).map(hydrateActivity);
 }
 
+export function getSuggestedPrevWaterReading(
+  userId: number, unitId: number, beforePeriod: string,
+): number | null {
+  const rows = db.prepare(
+    `SELECT water_meter_json FROM rental_records
+     WHERE user_id = ? AND unit_id = ? AND billing_period < ?
+       AND water_meter_json IS NOT NULL AND water_meter_json != ''
+     ORDER BY billing_period DESC`
+  ).all(userId, unitId, beforePeriod) as { water_meter_json: string }[];
+  for (const row of rows) {
+    const m = parseWaterMeterJson(row.water_meter_json);
+    if (m?.currReading != null && Number.isFinite(m.currReading)) {
+      return m.currReading;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Default unit seed (fixed portfolio)
+// ---------------------------------------------------------------------------
+
+export function ensureDefaultRentalUnits(userId: number) {
+  for (const def of DEFAULT_RENTAL_UNITS) {
+    const existing = db.prepare(
+      'SELECT id FROM rental_units WHERE user_id = ? AND unit_name = ? COLLATE NOCASE'
+    ).get(userId, def.unitName) as { id: number } | undefined;
+    if (!existing) {
+      createRentalUnit(userId, {
+        unitName: def.unitName,
+        tenantName: def.tenantName || 'Vacant 空置',
+        utilityBillingMode: def.utilityBillingMode,
+        automationEnabled: true,
+      });
+    }
+  }
+}
+
+export function getSuggestedPrevElectricityReading(
+  userId: number, unitId: number, beforePeriod: string,
+): number | null {
+  const rows = db.prepare(
+    `SELECT electricity_meter_json FROM rental_records
+     WHERE user_id = ? AND unit_id = ? AND billing_period < ?
+       AND electricity_meter_json IS NOT NULL AND electricity_meter_json != ''
+     ORDER BY billing_period DESC`
+  ).all(userId, unitId, beforePeriod) as { electricity_meter_json: string }[];
+  for (const row of rows) {
+    const m = parseElectricityMeterJson(row.electricity_meter_json);
+    if (m?.currReading != null && Number.isFinite(m.currReading)) {
+      return m.currReading;
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Unit CRUD
 // ---------------------------------------------------------------------------
@@ -156,8 +257,8 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
     `INSERT INTO rental_units
       (user_id, unit_name, tenant_name, tenant_phone, tenant_email, current_year_rent,
        previous_years_rent_json, lease_start_date, lease_end_date, due_date_day,
-       auto_send_receipt_email, automation_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       auto_send_receipt_email, automation_enabled, utility_billing_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     userId, input.unitName?.trim() || 'New Unit', input.tenantName?.trim() || 'Tenant',
     input.tenantPhone?.trim() || null, input.tenantEmail?.trim() || null,
@@ -165,10 +266,13 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
     normalizeStoredDate(input.leaseStartDate) || null,
     normalizeStoredDate(input.leaseEndDate) || null,
     Number(input.dueDateDay) || 1, input.autoSendReceiptEmail ? 1 : 0,
-    input.automationEnabled === false ? 0 : 1
+    input.automationEnabled === false ? 0 : 1,
+    input.utilityBillingMode === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
   );
   const unit = getRentalUnit(Number(res.lastInsertRowid), userId)!;
   logRentalActivity(userId, unit.id, 'Unit created');
+  ensureUnitTenantLink(unit);
+  ensureCurrentLeaseFromUnit(unit);
   return unit;
 }
 
@@ -200,6 +304,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
+      utility_billing_mode = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
@@ -213,12 +318,15 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
     (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
+    (input.utilityBillingMode ?? existing.utilityBillingMode) === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
     id, userId
   );
   const updated = getRentalUnit(id, userId)!;
   if (input.dueDateDay !== undefined && newDueDay !== existing.dueDateDay) {
     syncRentPeriodsForUnit(updated);
   }
+  ensureUnitTenantLink(updated);
+  updateCurrentLeaseFromUnit(updated);
   return updated;
 }
 
@@ -251,9 +359,13 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
       updates.push('actual_amount = ?', "updated_at = datetime('now')");
       vals.push(total, found.id);
       db.prepare(`UPDATE rental_records SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
-      return getRentRecord(found.id, unit.user_id)!;
+      const synced = getRentRecord(found.id, unit.user_id)!;
+      syncChargeItemsFromRecord(synced);
+      return synced;
     }
-    return hydrateRecord(found);
+    const hydrated = hydrateRecord(found);
+    syncChargeItemsFromRecord(hydrated);
+    return hydrated;
   }
 
   const base = unit.currentYearRent;
@@ -263,7 +375,9 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
        water_fee, electricity_fee, actual_amount, status)
      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 'pending')`
   ).run(unit.user_id, unit.id, period, base, defaults.from, defaults.to, base);
-  return getRentRecord(Number(res.lastInsertRowid), unit.user_id)!;
+  const created = getRentRecord(Number(res.lastInsertRowid), unit.user_id)!;
+  syncChargeItemsFromRecord(created);
+  return created;
 }
 
 export function getRentRecord(id: number | string, userId: number): RentRecord | null {
@@ -284,6 +398,8 @@ export function updateRentRecordUtilities(
     electricityPeriodFrom?: string | null;
     electricityPeriodTo?: string | null;
     customInvoiceNote?: string | null;
+    electricityMeter?: ElectricityMeterData | null;
+    waterMeter?: WaterMeterData | null;
   }
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
@@ -291,6 +407,12 @@ export function updateRentRecordUtilities(
   const base = Number(input.baseRent ?? existing.baseRent) || 0;
   const water = Number(input.waterFee ?? existing.waterFee) || 0;
   const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
+  const meterJson = input.electricityMeter !== undefined
+    ? (input.electricityMeter ? JSON.stringify(input.electricityMeter) : null)
+    : (existing.electricityMeter ? JSON.stringify(existing.electricityMeter) : null);
+  const waterMeterJson = input.waterMeter !== undefined
+    ? (input.waterMeter ? JSON.stringify(input.waterMeter) : null)
+    : (existing.waterMeter ? JSON.stringify(existing.waterMeter) : null);
   const total = computeTotal(base, water, elec);
   const waterFrom = normalizeStoredDate(
     input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : existing.waterPeriodFrom,
@@ -315,10 +437,13 @@ export function updateRentRecordUtilities(
       water_fee = ?, electricity_fee = ?,
       water_period_from = ?, water_period_to = ?,
       electricity_period_from = ?, electricity_period_to = ?,
-      actual_amount = ?, custom_invoice_note = ?, updated_at = datetime('now')
+      actual_amount = ?, custom_invoice_note = ?, electricity_meter_json = ?, water_meter_json = ?,
+      updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
-  return getRentRecord(id, userId);
+  ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, meterJson, waterMeterJson, id, userId);
+  const updated = getRentRecord(id, userId)!;
+  syncChargeItemsFromRecord(updated);
+  return updated;
 }
 
 function applyOverdueStatuses(userId: number, period: string) {
@@ -341,6 +466,8 @@ function applyOverdueStatuses(userId: number, period: string) {
 // ---------------------------------------------------------------------------
 
 export function listRentalDashboard(userId: number, period = currentBillingPeriod()) {
+  ensureDefaultRentalUnits(userId);
+  syncAllLeaseStatuses(userId);
   const unitRows = db.prepare(
     'SELECT * FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE ASC'
   ).all(userId) as UnitRow[];
@@ -356,26 +483,37 @@ export function listRentalDashboard(userId: number, period = currentBillingPerio
     const history = (db.prepare(
       'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC LIMIT 24'
     ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
-    return { ...unit, currentRecord, history };
+    const currentLease = getCurrentLeaseForUnit(unit.id, userId);
+    const leaseStatus = currentLease ? computeLeaseDisplayStatus(currentLease) : 'vacant';
+    return { ...unit, currentRecord, history, currentLease, leaseStatus };
   });
 
   const records = withRecords.map((u) => u.currentRecord);
   const totalRevenue = records.reduce((s, r) => s + (r.amountPaid || 0), 0);
   const outstanding = records.reduce((s, r) => s + outstandingBalance(r), 0);
   const paidCount = records.filter((r) => displayRentalStatus(r) === 'paid').length;
-  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period };
+  const alerts = getRentalDashboardAlerts(userId, period);
+  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts };
 }
 
 export function getRentalUnitDetail(unitId: number | string, userId: number, period = currentBillingPeriod()) {
+  ensureDefaultRentalUnits(userId);
   const unit = getRentalUnit(unitId, userId);
   if (!unit) return null;
   ensureRentRecord(unit, period);
   applyOverdueStatuses(userId, period);
+  const suggestedPrevElectricityReading = getSuggestedPrevElectricityReading(userId, Number(unitId), period);
+  const suggestedPrevWaterReading = getSuggestedPrevWaterReading(userId, Number(unitId), period);
   const currentRecord = getRentRecord(
     (db.prepare('SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?')
       .get(userId, unit.id, period) as { id: number })?.id,
     userId
   );
+  let chargeItems: RentalChargeItem[] = [];
+  if (currentRecord) {
+    syncChargeItemsFromRecord(currentRecord);
+    chargeItems = getChargeItemsForRecord(currentRecord.id, userId);
+  }
   const history = (db.prepare(
     'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC'
   ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
@@ -384,9 +522,17 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     ? (db.prepare('SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1')
         .get(currentRecord.id) as ReceiptRow | undefined)
     : undefined;
+  const currentLease = getCurrentLeaseForUnit(unit.id, userId);
   return {
     unit, currentRecord, history, activities,
+    chargeItems,
+    paymentHistory: getUnitPaymentHistory(unit.id, userId),
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
+    currentLease,
+    leaseHistory: getLeaseHistory(unit.id, userId),
+    leaseDocuments: currentLease ? getLeaseDocuments(currentLease.id, userId) : [],
+    suggestedPrevElectricityReading,
+    suggestedPrevWaterReading,
   };
 }
 
@@ -443,6 +589,11 @@ export async function sendRentInvoice(
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
 
+  const lease = getCurrentLeaseForUnit(unit.id, userId);
+  if (lease && billingPeriodAfterLeaseEnd(record.billingPeriod, lease.actualEndDate || lease.leaseEndDate)) {
+    throw new Error(`Cannot send invoice for ${record.billingPeriod} — after lease end date`);
+  }
+
   const water = Number(input.waterFee ?? record.waterFee) || 0;
   const elec = Number(input.electricityFee ?? record.electricityFee) || 0;
   const total = computeTotal(record.baseRent, water, elec);
@@ -477,6 +628,7 @@ export async function sendRentInvoice(
   ).run(water, elec, rentFrom, rentTo, waterFrom, waterTo, elecFrom, elecTo, total, invoiceRef, input.note?.trim() || null, record.id, userId);
 
   const fresh = getRentRecord(record.id, userId)!;
+  syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (unit.tenantEmail) {
     email = await sendEmail(
@@ -598,23 +750,80 @@ export async function extractRentalReceipt(
 
 export async function markRentPaid(
   recordId: number | string, userId: number,
-  input: { autoSendReceiptEmail?: boolean; note?: string | null; paidDate?: string | null; amount?: number | null }
+  input: {
+    autoSendReceiptEmail?: boolean;
+    note?: string | null;
+    paidDate?: string | null;
+    amount?: number | null;
+    /** Per charge-type split (rent / water / electricity). Overrides FIFO when provided. */
+    chargeAllocations?: { chargeType: RentalChargeType; amount: number }[];
+    method?: string | null;
+    reference?: string | null;
+  }
 ) {
   const record = getRentRecord(recordId, userId);
   if (!record) throw new Error('Rent record not found');
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
 
-  const paymentAmount = input.amount !== undefined && input.amount !== null
-    ? Number(input.amount)
-    : outstandingBalance(record);
+  syncChargeItemsFromRecord(record);
+  const chargeItems = getChargeItemsForRecord(record.id, userId);
+  const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
+
+  const CHARGE_ORDER: RentalChargeType[] = ['rent', 'water', 'electricity'];
+  let allocations: { chargeItemId: number; amount: number }[] = [];
+
+  if (input.chargeAllocations?.length) {
+    for (const ca of input.chargeAllocations) {
+      if (!ca.amount || ca.amount <= 0) continue;
+      const item = chargeItems.find((c) => c.chargeType === ca.chargeType);
+      if (!item) continue;
+      const outstanding = chargeOutstanding(item);
+      if (ca.amount > outstanding + 0.01) {
+        throw new Error(`Allocation for ${ca.chargeType} exceeds outstanding ${outstanding}`);
+      }
+      allocations.push({ chargeItemId: item.id, amount: ca.amount });
+    }
+  } else {
+    const paymentAmount = input.amount !== undefined && input.amount !== null
+      ? Number(input.amount)
+      : outstandingBalance(record);
+    if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
+    let remaining = paymentAmount;
+    for (const type of CHARGE_ORDER) {
+      const item = chargeItems.find((c) => c.chargeType === type);
+      if (!item || remaining <= 0) continue;
+      const out = chargeOutstanding(item);
+      const alloc = Math.min(remaining, out);
+      if (alloc > 0) {
+        allocations.push({ chargeItemId: item.id, amount: alloc });
+        remaining -= alloc;
+      }
+    }
+  }
+
+  const paymentAmount = allocations.reduce((s, a) => s + a.amount, 0);
   if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
 
-  const newAmountPaid = (record.amountPaid || 0) + paymentAmount;
+  const tenant = ensureUnitTenantLink(unit);
+  if (tenant && allocations.length) {
+    recordTenantPaymentWithAllocations(unit.user_id, {
+      tenantId: tenant.id,
+      paymentDate: paidDate,
+      amount: paymentAmount,
+      method: input.method,
+      reference: input.reference,
+      notes: input.note,
+    }, allocations);
+  } else if (allocations.length) {
+    allocateChargeItemsDirect(userId, allocations);
+  }
+
+  const freshCharges = getChargeItemsForRecord(record.id, userId);
+  const newAmountPaid = freshCharges.reduce((s, c) => s + (c.amountAllocated || 0), 0);
   const fullyPaid = newAmountPaid >= record.actualAmount - 0.01;
   const receiptRef = `/rentals/records/${record.id}/receipt`;
   const shouldSend = input.autoSendReceiptEmail ?? unit.autoSendReceiptEmail;
-  const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
   db.prepare(
     `UPDATE rental_records SET
@@ -664,15 +873,23 @@ export async function runRentalInvoiceDispatch(userId: number | null, period = c
   const rows = db.prepare(
     `SELECT * FROM rental_units WHERE automation_enabled = 1 ${userId === null ? '' : 'AND user_id = ?'}`
   ).all(...(userId === null ? [] : [userId])) as UnitRow[];
-  const results = [];
+  const results: { unit: string; skipped?: string; record?: RentRecord }[] = [];
+  const skipped: { unit: string; reason: string }[] = [];
+
   for (const unitRow of rows) {
     const unit = hydrateUnit(unitRow);
+    const check = shouldAutoDispatchInvoice(unit.user_id, unit.id, period);
+    if (!check.allowed) {
+      skipped.push({ unit: unit.unitName, reason: check.reason || 'Not billable' });
+      continue;
+    }
     const record = ensureRentRecord(unit, period);
     if (!record.invoiceSentAt) {
-      results.push({ unit: unit.unitName, ...(await sendRentInvoice(record.id, unit.user_id, {})) });
+      const sent = await sendRentInvoice(record.id, unit.user_id, {});
+      results.push({ unit: unit.unitName, record: sent.record });
     }
   }
-  return { period, processed: results.length, results };
+  return { period, processed: results.length, skipped: skipped.length, results, skippedDetails: skipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -685,4 +902,188 @@ export function getRentDocument(id: number | string, userId: number) {
   const unit = getRentalUnit(record.unitId, userId);
   if (!unit) return null;
   return { unit, record, dueDate: dueDateForPeriod(record.billingPeriod, unit.dueDateDay) };
+}
+
+// ---------------------------------------------------------------------------
+// Advance / period-based payment allocation
+// ---------------------------------------------------------------------------
+
+function getNextAllocatablePeriod(userId: number, unitId: number): string {
+  const outstanding = db.prepare(
+    `SELECT billing_period FROM rental_charge_items
+     WHERE user_id = ? AND unit_id = ? AND amount_due > amount_allocated
+     ORDER BY billing_period ASC LIMIT 1`
+  ).get(userId, unitId) as { billing_period: string } | undefined;
+  if (outstanding) return outstanding.billing_period;
+
+  const maxRow = db.prepare(
+    `SELECT billing_period FROM rental_records
+     WHERE user_id = ? AND unit_id = ?
+     ORDER BY billing_period DESC LIMIT 1`
+  ).get(userId, unitId) as { billing_period: string } | undefined;
+  if (maxRow) return nextBillingPeriod(maxRow.billing_period);
+
+  return currentBillingPeriod();
+}
+
+function allocateToPeriodItems(
+  items: RentalChargeItem[],
+  billableTypes: RentalChargeType[],
+  remaining: number,
+  explicit?: { rent?: number; water?: number; electricity?: number },
+): { allocations: { chargeItemId: number; amount: number }[]; remaining: number } {
+  const allocations: { chargeItemId: number; amount: number }[] = [];
+  let left = remaining;
+
+  if (explicit && (explicit.rent !== undefined || explicit.water !== undefined || explicit.electricity !== undefined)) {
+    for (const type of billableTypes) {
+      const val = explicit[type];
+      if (!val || val <= 0) continue;
+      const item = items.find((c) => c.chargeType === type);
+      if (!item) continue;
+      const out = chargeOutstanding(item);
+      const cap = out > 0 ? out : item.amountDue || 0;
+      const alloc = Math.min(val, cap);
+      if (alloc > 0.009) {
+        allocations.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+        left -= alloc;
+      }
+    }
+    return { allocations, remaining: left };
+  }
+
+  for (const type of billableTypes) {
+    if (left <= 0.009) break;
+    const item = items.find((c) => c.chargeType === type);
+    if (!item) continue;
+    const out = chargeOutstanding(item);
+    const cap = out > 0 ? out : item.amountDue || 0;
+    if (cap <= 0) continue;
+    const alloc = Math.min(left, cap);
+    if (alloc > 0.009) {
+      allocations.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+      left -= alloc;
+    }
+  }
+  return { allocations, remaining: left };
+}
+
+/** Build charge-item allocations from period rows and/or auto FIFO (creates future months for advance rent). */
+export function prepareAdvancePaymentAllocations(
+  userId: number,
+  tenantId: number,
+  options: {
+    amount: number;
+    unitIds?: number[];
+    periodAllocations?: PeriodPaymentAllocation[];
+    autoAllocate?: boolean;
+  },
+): { chargeItemId: number; amount: number }[] {
+  const tenant = getRentalTenant(tenantId, userId);
+  if (!tenant) throw new Error('Tenant not found');
+
+  let units = getTenantUnits(tenantId, userId);
+  if (options.unitIds?.length) {
+    const idSet = new Set(options.unitIds);
+    units = units.filter((u) => idSet.has(u.id));
+  }
+  if (!units.length) throw new Error('No units linked to tenant');
+
+  const unitIds = units.map((u) => u.id);
+  const billableTypesForUnit = (unitId: number) => {
+    const unit = units.find((u) => u.id === unitId);
+    const mode = resolveUtilityBillingMode(unit?.utilityBillingMode, tenant.utilityBillingMode);
+    return utilityChargeTypesForMode(mode);
+  };
+  const result: { chargeItemId: number; amount: number }[] = [];
+
+  if (options.periodAllocations?.length) {
+    for (const row of options.periodAllocations) {
+      if (!unitIds.includes(row.unitId)) {
+        throw new Error(`Unit ${row.unitId} is not linked to this tenant`);
+      }
+      const unit = getRentalUnit(row.unitId, userId);
+      if (!unit) throw new Error(`Unit ${row.unitId} not found`);
+      const billableTypes = billableTypesForUnit(row.unitId);
+      const record = ensureRentRecord(unit, row.billingPeriod);
+      const items = getChargeItemsForRecord(record.id, userId);
+      const hasExplicit = row.rent !== undefined || row.water !== undefined || row.electricity !== undefined;
+      if (hasExplicit) {
+        const { allocations } = allocateToPeriodItems(
+          items, billableTypes, 0,
+          { rent: row.rent, water: row.water, electricity: row.electricity },
+        );
+        result.push(...allocations);
+      } else if (row.amount !== undefined && row.amount > 0) {
+        const { allocations } = allocateToPeriodItems(items, billableTypes, row.amount);
+        result.push(...allocations);
+      }
+    }
+    return mergeAllocationAmounts(result);
+  }
+
+  if (!options.autoAllocate) {
+    throw new Error('Provide periodAllocations or enable autoAllocate');
+  }
+
+  let remaining = options.amount;
+  const existing = getOutstandingChargeItemsForUnits(userId, unitIds).filter(
+    (c) => billableTypesForUnit(c.unitId).includes(c.chargeType),
+  );
+  for (const item of existing) {
+    if (remaining <= 0.009) break;
+    const out = chargeOutstanding(item);
+    const alloc = Math.min(remaining, out);
+    if (alloc > 0.009) {
+      result.push({ chargeItemId: item.id, amount: Math.round(alloc * 100) / 100 });
+      remaining -= alloc;
+    }
+  }
+
+  const nextPeriodByUnit = new Map<number, string>();
+  for (const uid of unitIds) {
+    nextPeriodByUnit.set(uid, getNextAllocatablePeriod(userId, uid));
+  }
+
+  let safety = 0;
+  while (remaining > 0.009 && safety < 120) {
+    safety += 1;
+    let roundProgress = false;
+    for (const uid of unitIds) {
+      if (remaining <= 0.009) break;
+      const unit = getRentalUnit(uid, userId);
+      if (!unit) continue;
+      const period = nextPeriodByUnit.get(uid)!;
+      const record = ensureRentRecord(unit, period);
+      const items = getChargeItemsForRecord(record.id, userId);
+      const billableTypes = billableTypesForUnit(uid);
+      const { allocations, remaining: left } = allocateToPeriodItems(items, billableTypes, remaining);
+      if (allocations.length) {
+        result.push(...allocations);
+        remaining = left;
+        roundProgress = true;
+      }
+      nextPeriodByUnit.set(uid, nextBillingPeriod(period));
+    }
+    if (!roundProgress) break;
+  }
+
+  if (remaining > 0.5) {
+    throw new Error(`Could not allocate ${formatMoney(remaining)} — check amount or add period rows manually`);
+  }
+
+  return mergeAllocationAmounts(result);
+}
+
+function mergeAllocationAmounts(
+  items: { chargeItemId: number; amount: number }[],
+): { chargeItemId: number; amount: number }[] {
+  const map = new Map<number, number>();
+  for (const a of items) {
+    map.set(a.chargeItemId, (map.get(a.chargeItemId) || 0) + a.amount);
+  }
+  return Array.from(map.entries()).map(([chargeItemId, amount]) => ({
+    chargeItemId,
+    amount: Math.round(amount * 100) / 100,
+  }));
 }

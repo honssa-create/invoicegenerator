@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getSessionFromRequest } from '@/lib/auth';
+import { requireApiAccess } from '@/lib/api-guard';
+import { rentalOwnerId } from '@/lib/org-server';
 import { getRentDocument } from '@/lib/rental-server';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const session = await getSessionFromRequest(request);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const doc = getRentDocument(params.id, session.userId);
+  const session = await requireApiAccess(request, 'rentals');
+  if (session instanceof NextResponse) return session;
+  const doc = getRentDocument(params.id, rentalOwnerId(session.userId));
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json(doc);
 }

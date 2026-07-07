@@ -4,11 +4,25 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import DebitNoteActions from '@/components/DebitNoteActions';
+import UtilityBillingPicker from '@/components/UtilityBillingPicker';
+import ElectricityMeterCalculator from '@/components/ElectricityMeterCalculator';
+import WaterMeterCalculator from '@/components/WaterMeterCalculator';
+import LeaseStatusBadge from '@/components/LeaseStatusBadge';
+import PaymentHistoryTable from '@/components/PaymentHistoryTable';
+import ChargeAllocationGrid, {
+  chargeRowsFromRecord,
+  fillOutstandingValues,
+  fillRentOnlyValues,
+  sumAllocationValues,
+} from '@/components/ChargeAllocationGrid';
 import { compressImage } from '@/lib/imageCompression';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
   calculateBasicRentPeriod,
+  chargeOutstanding,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
@@ -22,19 +36,38 @@ import {
   toFormDate,
   todayFormDate,
   utilityLineLabel,
+  calcElectricityFeeForFormula,
+  calcWaterFeeFromMeter,
+  electricityFormulaForUnit,
+  formatBillingPeriodLabel,
+  meterDataFromInputs,
+  unitHasWaterMeterFormula,
+  waterMeterDataFromInputs,
   type RentRecord,
   type RentalActivityLog,
+  type RentalChargeItem,
+  type RentalLease,
+  type RentalLeaseDocument,
   type RentalPaymentReceipt,
+  type RentalPaymentWithAllocations,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UtilityBillingMode,
 } from '@/lib/rentals';
 
 interface DetailPayload {
   unit: RentalUnit;
   currentRecord: RentRecord | null;
+  chargeItems?: RentalChargeItem[];
   history: RentRecord[];
   activities: RentalActivityLog[];
   latestReceipt: RentalPaymentReceipt | null;
+  paymentHistory?: RentalPaymentWithAllocations[];
+  currentLease?: RentalLease | null;
+  leaseHistory?: RentalLease[];
+  leaseDocuments?: RentalLeaseDocument[];
+  suggestedPrevElectricityReading?: number | null;
+  suggestedPrevWaterReading?: number | null;
 }
 
 export default function RentalDetailPage() {
@@ -61,6 +94,9 @@ function RentalDetailInner() {
   const [tenantEmail, setTenantEmail] = useState('');
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
+  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
+  const [leaseStartDate, setLeaseStartDate] = useState('');
+  const [leaseEndDate, setLeaseEndDate] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
 
   // utility inputs
@@ -72,6 +108,17 @@ function RentalDetailInner() {
   const [electricityFee, setElectricityFee] = useState('');
   const [electricityPeriodFrom, setElectricityPeriodFrom] = useState('');
   const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
+  const [meterPrevReading, setMeterPrevReading] = useState('');
+  const [meterCurrReading, setMeterCurrReading] = useState('');
+  const [meter213B, setMeter213B] = useState('');
+  const [meterStockRoom1, setMeterStockRoom1] = useState('');
+  const [meterStockRoom2, setMeterStockRoom2] = useState('');
+  const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
+  const [waterMeterPrev, setWaterMeterPrev] = useState('');
+  const [waterMeterCurr, setWaterMeterCurr] = useState('');
+  const [waterMeterRate, setWaterMeterRate] = useState('');
+  const [suggestedPrevReading, setSuggestedPrevReading] = useState<number | null>(null);
+  const [suggestedPrevWaterReading, setSuggestedPrevWaterReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
   const [utilitySaving, setUtilitySaving] = useState(false);
 
@@ -84,6 +131,7 @@ function RentalDetailInner() {
   const [autoSendReceipt, setAutoSendReceipt] = useState(false);
   const [paidDate, setPaidDate] = useState(todayFormDate());
   const [paidAmount, setPaidAmount] = useState('');
+  const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [paidNote, setPaidNote] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [ocrResult, setOcrResult] = useState<{ extracted: { amount: number | null; method: string | null; transfer_date: string | null; receiving_account: string | null }; matched: boolean } | null>(null);
@@ -105,6 +153,22 @@ function RentalDetailInner() {
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [noteText, setNoteText] = useState('');
 
+  // end contract modal
+  const [showEndContractModal, setShowEndContractModal] = useState(false);
+  const [endContractForm, setEndContractForm] = useState({
+    actualEndDate: todayFormDate(),
+    depositRefund: '',
+    depositDeductions: '',
+    endNotes: '',
+    startNew: false,
+    newTenantName: '',
+    newLeaseStart: todayFormDate(),
+    newLeaseEnd: '',
+    newBaseRent: '',
+  });
+  const [leaseDocUploading, setLeaseDocUploading] = useState(false);
+  const leaseDocInputRef = useRef<HTMLInputElement>(null);
+
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
 
@@ -121,6 +185,9 @@ function RentalDetailInner() {
           setTenantEmail(d.unit.tenantEmail || '');
           setDueDateDay(String(d.unit.dueDateDay || 1));
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
+          setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
+          setLeaseStartDate(d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : '');
+          setLeaseEndDate(d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : '');
           const rec = d.currentRecord;
           if (rec) {
             const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
@@ -132,6 +199,25 @@ function RentalDetailInner() {
             setElectricityFee(String(rec.electricityFee || 0));
             setElectricityPeriodFrom(toFormDate(rec.electricityPeriodFrom));
             setElectricityPeriodTo(toFormDate(rec.electricityPeriodTo));
+            const meter = rec.electricityMeter;
+            setMeterPrevReading(meter?.prevReading != null ? String(meter.prevReading) : '');
+            setMeterCurrReading(meter?.currReading != null ? String(meter.currReading) : '');
+            setMeter213B(meter?.meter213B != null ? String(meter.meter213B) : '');
+            setMeterStockRoom1(meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '');
+            setMeterStockRoom2(meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '');
+            setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
+            setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
+            setSuggestedPrevWaterReading(d.suggestedPrevWaterReading ?? null);
+            const waterMeter = rec.waterMeter;
+            setWaterMeterPrev(waterMeter?.prevReading != null ? String(waterMeter.prevReading) : '');
+            setWaterMeterCurr(waterMeter?.currReading != null ? String(waterMeter.currReading) : '');
+            setWaterMeterRate(waterMeter?.ratePerUnit != null ? String(waterMeter.ratePerUnit) : '');
+            if (!waterMeter?.prevReading && d.suggestedPrevWaterReading != null) {
+              setWaterMeterPrev(String(d.suggestedPrevWaterReading));
+            }
+            if (!meter?.prevReading && d.suggestedPrevElectricityReading != null) {
+              setMeterPrevReading(String(d.suggestedPrevElectricityReading));
+            }
             setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
             setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
@@ -154,6 +240,25 @@ function RentalDetailInner() {
     setBaseRentPeriodTo(calc.periodTo);
   }, [dueDateDay, period]);
 
+  const electricityFormula = data?.unit ? electricityFormulaForUnit(data.unit.unitName) : null;
+  const waterMeterFormula = data?.unit ? unitHasWaterMeterFormula(data.unit.unitName) : false;
+
+  useEffect(() => {
+    if (!waterMeterFormula) return;
+    const meter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
+    const fee = calcWaterFeeFromMeter(meter);
+    setWaterFee(fee > 0 || meter.currReading != null ? String(fee) : '');
+  }, [waterMeterFormula, waterMeterPrev, waterMeterCurr, waterMeterRate]);
+
+  useEffect(() => {
+    if (!electricityFormula) return;
+    const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
+      meter213B, meterStockRoom1, meterStockRoom2,
+    });
+    const fee = calcElectricityFeeForFormula(electricityFormula, meter);
+    setElectricityFee(fee > 0 || meter.currReading != null ? String(fee) : '');
+  }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
+
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
   const saveProfile = async () => {
@@ -167,6 +272,9 @@ function RentalDetailInner() {
         tenantEmail: tenantEmail.trim(),
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
+        utilityBillingMode,
+        leaseStartDate: fromFormDate(leaseStartDate),
+        leaseEndDate: fromFormDate(leaseEndDate),
       }),
     });
     if (data?.currentRecord) {
@@ -181,18 +289,30 @@ function RentalDetailInner() {
     load();
   };
 
-  const utilityPayload = () => ({
-    baseRent: Number(baseRent),
-    baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
-    baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
-    waterFee: Number(waterFee),
-    electricityFee: Number(electricityFee),
-    waterPeriodFrom: fromFormDate(waterPeriodFrom),
-    waterPeriodTo: fromFormDate(waterPeriodTo),
-    electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
-    electricityPeriodTo: fromFormDate(electricityPeriodTo),
-    customInvoiceNote: utilityNote || null,
-  });
+  const utilityPayload = () => {
+    const payload: Record<string, unknown> = {
+      baseRent: Number(baseRent),
+      baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
+      baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
+      waterFee: Number(waterFee),
+      electricityFee: Number(electricityFee),
+      waterPeriodFrom: fromFormDate(waterPeriodFrom),
+      waterPeriodTo: fromFormDate(waterPeriodTo),
+      electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
+      electricityPeriodTo: fromFormDate(electricityPeriodTo),
+      customInvoiceNote: utilityNote || null,
+    };
+    if (electricityFormula) {
+      payload.electricityMeter = meterDataFromInputs(
+        meterPrevReading, meterCurrReading, meterRatePerUnit,
+        { meter213B, meterStockRoom1, meterStockRoom2 },
+      );
+    }
+    if (waterMeterFormula) {
+      payload.waterMeter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
+    }
+    return payload;
+  };
 
   const saveUtilities = async () => {
     if (!data?.currentRecord) return;
@@ -243,8 +363,35 @@ function RentalDetailInner() {
     }
   };
 
+  const openPaidModal = () => {
+    if (!data?.currentRecord) return;
+    const items = data.chargeItems?.length
+      ? data.chargeItems
+      : [
+          { chargeType: 'rent' as const, amountDue: data.currentRecord.baseRent, amountAllocated: 0 },
+          { chargeType: 'water' as const, amountDue: data.currentRecord.waterFee, amountAllocated: 0 },
+          { chargeType: 'electricity' as const, amountDue: data.currentRecord.electricityFee, amountAllocated: 0 },
+        ];
+    const rows = chargeRowsFromRecord(items);
+    const filled = fillOutstandingValues(rows);
+    setChargeAllocValues(filled);
+    setPaidAmount(String(sumAllocationValues(filled) || outstandingBalance(data.currentRecord)));
+    setShowPaidModal(true);
+    setOcrResult(null);
+    setReceiptFile(null);
+    setPaidDate(data.currentRecord.paidDate ? toFormDate(data.currentRecord.paidDate) : todayFormDate());
+  };
+
   const confirmPaid = async () => {
     if (!data?.currentRecord) return;
+    const chargeAllocations = (['rent', 'water', 'electricity'] as const)
+      .map((chargeType) => ({ chargeType, amount: Number(chargeAllocValues[chargeType] || 0) }))
+      .filter((a) => a.amount > 0);
+    const allocSum = chargeAllocations.reduce((s, a) => s + a.amount, 0);
+    if (allocSum <= 0) {
+      setToast('Allocate at least one charge type (rent / water / electricity)');
+      return;
+    }
     setBusy(true);
     const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/paid`, {
       method: 'POST',
@@ -253,7 +400,8 @@ function RentalDetailInner() {
         autoSendReceiptEmail: autoSendReceipt,
         note: paidNote || null,
         paidDate: fromFormDate(paidDate),
-        amount: Number(paidAmount) || undefined,
+        amount: allocSum,
+        chargeAllocations,
       }),
     });
     setBusy(false);
@@ -279,15 +427,67 @@ function RentalDetailInner() {
     load();
   };
 
+  const submitEndContract = async () => {
+    setBusy(true);
+    const body: Record<string, unknown> = {
+      actualEndDate: fromFormDate(endContractForm.actualEndDate),
+      depositRefund: endContractForm.depositRefund ? Number(endContractForm.depositRefund) : undefined,
+      depositDeductions: endContractForm.depositDeductions ? Number(endContractForm.depositDeductions) : undefined,
+      endNotes: endContractForm.endNotes || undefined,
+      forceEnd: true,
+    };
+    if (endContractForm.startNew && endContractForm.newTenantName.trim()) {
+      body.startNewLease = {
+        tenantName: endContractForm.newTenantName.trim(),
+        leaseStartDate: fromFormDate(endContractForm.newLeaseStart),
+        leaseEndDate: fromFormDate(endContractForm.newLeaseEnd),
+        baseRent: Number(endContractForm.newBaseRent) || Number(baseRent) || 0,
+        dueDateDay: Number(dueDateDay) || 1,
+      };
+    }
+    const res = await fetch(`/api/rentals/units/${id}/end-contract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const d = await res.json();
+      setToast(d.error || 'Failed to end contract');
+      return;
+    }
+    setShowEndContractModal(false);
+    setToast(endContractForm.startNew ? 'Contract ended — new lease started' : 'Contract ended');
+    load();
+  };
+
+  const uploadLeaseDoc = async (file: File) => {
+    const leaseId = data?.currentLease?.id;
+    if (!leaseId) return;
+    setLeaseDocUploading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('docType', 'agreement');
+    const res = await fetch(`/api/rentals/leases/${leaseId}/documents`, { method: 'POST', body: fd });
+    setLeaseDocUploading(false);
+    setToast(res.ok ? 'Document uploaded' : 'Upload failed');
+    load();
+  };
+
   if (loading) return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
   if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">Unit not found. <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">Back</button></div></AppLayout>;
 
-  const { unit, currentRecord, history, activities } = data;
+  const { unit, currentRecord, history, activities, currentLease, leaseHistory, leaseDocuments } = data;
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
   const recStatus = rec ? displayRentalStatus(rec) : 'pending';
   const balance = rec ? outstandingBalance(rec) : 0;
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
+  const leaseStatus = currentLease
+    ? computeLeaseDisplayStatus(currentLease)
+    : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
+  const contractEnded = leaseStatus === 'ended' || leaseStatus === 'terminated' || leaseStatus === 'vacant';
+  const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
 
   return (
     <AppLayout>
@@ -304,13 +504,58 @@ function RentalDetailInner() {
           <div>
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
-            <p className="text-xs text-gray-400 mt-2">Lease {formatDisplayDate(unit.leaseStartDate)} → {formatDisplayDate(unit.leaseEndDate)}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-sm font-medium text-brand-800">
+                帳期 Billing: {formatBillingPeriodLabel(period)}
+              </span>
+              <LeaseStatusBadge status={leaseStatus} />
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              租期 Rental period: {formatDisplayDate(unit.leaseStartDate) || '—'} → {formatDisplayDate(unit.leaseEndDate) || '—'}
               {remaining !== null && (
                 <span className={`ml-2 font-semibold ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
                   · {remaining} days remaining
                 </span>
               )}
             </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {!contractEnded && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEndContractForm((f) => ({
+                    ...f,
+                    actualEndDate: todayFormDate(),
+                    newTenantName: '',
+                    newLeaseEnd: '',
+                    newBaseRent: String(unit.currentYearRent || ''),
+                  }));
+                  setShowEndContractModal(true);
+                }}
+                className="px-3 py-2 text-sm border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+              >
+                完約 End Contract
+              </button>
+            )}
+            {unit.tenantId ? (
+              <>
+                <Link
+                  href={`/rentals/tenants/${unit.tenantId}`}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Tenant Ledger 租客
+                </Link>
+                <DebitNoteActions
+                  tenantId={unit.tenantId}
+                  unitId={unit.id}
+                  unitName={unit.unitName}
+                  period={period}
+                />
+              </>
+            ) : (
+              <p className="text-xs text-amber-600 self-center">Save tenant name to enable rent payment notice</p>
+            )}
           </div>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -339,6 +584,22 @@ function RentalDetailInner() {
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
             <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start 租期</label>
+            <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End 租期</label>
+            <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} />
+          </div>
+        </div>
+        <div className="mt-6 pt-5 border-t border-gray-100">
+          <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>
+          <p className="text-xs text-gray-400 mb-3">Controls whether water &amp; electricity appear on debit notes for this unit</p>
+          <UtilityBillingPicker
+            value={utilityBillingMode}
+            onChange={setUtilityBillingMode}
+          />
         </div>
         <div className="mt-4 flex justify-end">
           <button onClick={saveProfile} disabled={profileSaving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
@@ -381,39 +642,102 @@ function RentalDetailInner() {
                 {/* Water */}
                 <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                      <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                  {waterMeterFormula ? (
+                    <>
+                      <p className="text-xs text-blue-700/80 mb-3">213A formula: 用水度數 = 今次錶數 − 前次錶數</p>
+                      <WaterMeterCalculator
+                        prevReading={waterMeterPrev}
+                        currReading={waterMeterCurr}
+                        ratePerUnit={waterMeterRate}
+                        onPrevReading={setWaterMeterPrev}
+                        onCurrReading={setWaterMeterCurr}
+                        onRatePerUnit={setWaterMeterRate}
+                        suggestedPrevReading={suggestedPrevWaterReading}
+                        inpClassName={inp}
+                      />
+                      <div className="grid md:grid-cols-2 gap-3 mt-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Electricity */}
                 <div className="rounded-xl border border-yellow-100 bg-yellow-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-yellow-800 mb-3">電費 Electricity Fee</p>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                      <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                  {electricityFormula ? (
+                    <>
+                      <p className="text-xs text-yellow-700/80 mb-3">
+                        {electricityFormula === '213a'
+                          ? '213A formula: net usage (after deducting other units) × rate'
+                          : 'Stock Room formula: (current − previous reading) × rate'}
+                      </p>
+                      <ElectricityMeterCalculator
+                        formula={electricityFormula}
+                        prevReading={meterPrevReading}
+                        currReading={meterCurrReading}
+                        meter213B={meter213B}
+                        meterStockRoom1={meterStockRoom1}
+                        meterStockRoom2={meterStockRoom2}
+                        ratePerUnit={meterRatePerUnit}
+                        onPrevReading={setMeterPrevReading}
+                        onCurrReading={setMeterCurrReading}
+                        onMeter213B={setMeter213B}
+                        onMeterStockRoom1={setMeterStockRoom1}
+                        onMeterStockRoom2={setMeterStockRoom2}
+                        onRatePerUnit={setMeterRatePerUnit}
+                        suggestedPrevReading={suggestedPrevReading}
+                        inpClassName={inp}
+                      />
+                      <div className="grid md:grid-cols-2 gap-3 mt-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
-                    </div>
-                  </div>
+                  )}
                 </div>
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
@@ -454,16 +778,11 @@ function RentalDetailInner() {
               <h2 className="font-semibold text-gray-900 mb-4">Actions</h2>
               <div className="flex flex-wrap gap-3">
                 <button onClick={() => { setInvoiceNote(rec.customInvoiceNote || ''); setShowInvoiceModal(true); }}
-                  className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700">
+                  disabled={contractEnded}
+                  className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
                   📄 Send Invoice
                 </button>
-                <button onClick={() => {
-                  setShowPaidModal(true);
-                  setOcrResult(null);
-                  setReceiptFile(null);
-                  setPaidDate(rec.paidDate ? toFormDate(rec.paidDate) : todayFormDate());
-                  setPaidAmount(String(balance || rec.actualAmount));
-                }}
+                <button onClick={openPaidModal}
                   disabled={recStatus === 'paid'}
                   className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-40">
                   {recStatus === 'partial' ? '💰 Record Payment' : '✓ Record Payment 記錄收款'}
@@ -485,6 +804,16 @@ function RentalDetailInner() {
                   📝 Add Note
                 </button>
               </div>
+            </div>
+          )}
+
+          {unit.tenantId && (data.paymentHistory?.length ?? 0) > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="font-semibold text-gray-900">收款紀錄 Payment Receipts</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Allocations for {unit.unitName} only</p>
+              </div>
+              <PaymentHistoryTable payments={data.paymentHistory || []} readOnly />
             </div>
           )}
 
@@ -573,6 +902,148 @@ function RentalDetailInner() {
         </div>
       </div>
 
+      {/* Tenant history + lease documents — last row */}
+      <div className="grid lg:grid-cols-2 gap-6 mt-6">
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="font-semibold text-gray-900">Tenant History 租客紀錄</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Current and past tenants for this unit</p>
+          </div>
+          <div className="p-4 space-y-5 max-h-[28rem] overflow-y-auto">
+            {currentLease && (
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-2">Current Tenant 現任租客</p>
+                <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {currentLease.tenantId ? (
+                      <Link href={`/rentals/tenants/${currentLease.tenantId}`} className="font-semibold text-brand-700 hover:underline">
+                        {currentLease.tenantName}
+                      </Link>
+                    ) : (
+                      <p className="font-semibold text-gray-900">{currentLease.tenantName}</p>
+                    )}
+                    <LeaseStatusBadge status={computeLeaseDisplayStatus(currentLease)} />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formatDisplayDate(currentLease.leaseStartDate)} → {formatDisplayDate(currentLease.leaseEndDate)}
+                  </p>
+                  {(currentLease.tenantPhone || currentLease.tenantEmail) && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {currentLease.tenantPhone && <span>{currentLease.tenantPhone}</span>}
+                      {currentLease.tenantPhone && currentLease.tenantEmail && <span className="mx-1">·</span>}
+                      {currentLease.tenantEmail && <span>{currentLease.tenantEmail}</span>}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Rent {formatMoney(currentLease.baseRent)} · Deposit {formatMoney(currentLease.depositAmount)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold mb-2">Previous Tenants 歷任租客</p>
+              {previousTenants.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200">
+                  No previous tenants recorded yet.
+                  {!currentLease && (leaseHistory || []).length === 0 && (
+                    <span className="block mt-1 text-xs">Use <strong>完約 End Contract</strong> when a tenant moves out to keep a full history.</span>
+                  )}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {previousTenants.map((l) => (
+                    <div key={l.id} className="rounded-xl border border-gray-100 p-3 text-sm hover:border-gray-200 transition-colors">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {l.tenantId ? (
+                          <Link href={`/rentals/tenants/${l.tenantId}`} className="font-semibold text-brand-700 hover:underline">
+                            {l.tenantName}
+                          </Link>
+                        ) : (
+                          <p className="font-semibold text-gray-900">{l.tenantName}</p>
+                        )}
+                        <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
+                      </p>
+                      {(l.tenantPhone || l.tenantEmail) && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {l.tenantPhone && <span>{l.tenantPhone}</span>}
+                          {l.tenantPhone && l.tenantEmail && <span className="mx-1">·</span>}
+                          {l.tenantEmail && <span>{l.tenantEmail}</span>}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Rent {formatMoney(l.baseRent)} · Deposit {formatMoney(l.depositAmount)}
+                        {l.depositRefund != null && (
+                          <span> · Refund {formatMoney(l.depositRefund)}</span>
+                        )}
+                      </p>
+                      {(l.endReason || l.endNotes) && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {l.endReason}
+                          {l.endReason && l.endNotes && ' — '}
+                          {l.endNotes}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {previousTenants.length > 0 && (
+                <p className="text-[11px] text-gray-400 mt-3">
+                  History is recorded when you use <strong>完約 End Contract</strong>. Older manual edits may not appear here.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <div>
+              <h2 className="font-semibold text-gray-900">Lease Documents 租約文件</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Agreement, handover, deposit receipt</p>
+            </div>
+            {currentLease && (
+              <>
+                <input ref={leaseDocInputRef} type="file" accept="image/*,.pdf" className="hidden"
+                  onChange={(e) => { if (e.target.files?.[0]) uploadLeaseDoc(e.target.files[0]); e.target.value = ''; }} />
+                <button
+                  type="button"
+                  disabled={leaseDocUploading}
+                  onClick={() => leaseDocInputRef.current?.click()}
+                  className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {leaseDocUploading ? 'Uploading…' : '+ Upload'}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
+            {!currentLease ? (
+              <p className="text-sm text-gray-400 text-center py-4">No active lease</p>
+            ) : (leaseDocuments || []).length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">No documents uploaded</p>
+            ) : (
+              (leaseDocuments || []).map((d) => (
+                <a
+                  key={d.id}
+                  href={`/api/rentals/leases/${currentLease.id}/documents?docId=${d.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  <span>{d.label || d.docType}</span>
+                  <span className="text-xs text-brand-600">View</span>
+                </a>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Invoice Modal */}
       {showInvoiceModal && rec && (
         <Modal title="Send Invoice 發送租金單" onClose={() => setShowInvoiceModal(false)}>
@@ -635,14 +1106,50 @@ function RentalDetailInner() {
               <input type="number" min={0} step="0.01" className={inp} value={paidAmount}
                 onChange={(e) => setPaidAmount(e.target.value)} />
               <div className="flex gap-2 mt-2 flex-wrap">
-                <button type="button" onClick={() => setPaidAmount(String(balance))}
+                <button type="button" onClick={() => {
+                  const items = data?.chargeItems || [];
+                  const rows = chargeRowsFromRecord(items.length ? items : [
+                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0 },
+                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0 },
+                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0 },
+                  ]);
+                  const filled = fillRentOnlyValues(rows);
+                  setChargeAllocValues(filled);
+                  setPaidAmount(String(sumAllocationValues(filled)));
+                }}
+                  className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Rent only 只交租金</button>
+                <button type="button" onClick={() => {
+                  const items = data?.chargeItems || [];
+                  const rows = chargeRowsFromRecord(items.length ? items : [
+                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0 },
+                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0 },
+                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0 },
+                  ]);
+                  const filled = fillOutstandingValues(rows);
+                  setChargeAllocValues(filled);
+                  setPaidAmount(String(sumAllocationValues(filled)));
+                }}
                   className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Full balance 全數</button>
-                {rec.actualAmount > 0 && (
-                  <button type="button" onClick={() => setPaidAmount(String(Math.round(rec.actualAmount / 2)))}
-                    className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Half 一半</button>
-                )}
               </div>
-              <p className="text-xs text-gray-400 mt-1">Leave as outstanding balance for full payment, or enter a smaller amount for partial payment.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-2">Split by charge type 分拆入帳</label>
+              <ChargeAllocationGrid
+                rows={chargeRowsFromRecord(
+                  (data?.chargeItems?.length ? data.chargeItems : [
+                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0, status: 'unpaid' as const },
+                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0, status: 'unpaid' as const },
+                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0, status: 'unpaid' as const },
+                  ])
+                )}
+                values={chargeAllocValues}
+                onChange={(v) => {
+                  setChargeAllocValues(v);
+                  setPaidAmount(String(sumAllocationValues(v)));
+                }}
+                threeRow
+              />
             </div>
 
             {/* AI Receipt Upload */}
@@ -702,8 +1209,55 @@ function RentalDetailInner() {
 
             <div className="flex justify-end gap-3">
               <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button onClick={confirmPaid} disabled={busy || !paidAmount || Number(paidAmount) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
-                {busy ? 'Saving…' : Number(paidAmount) >= balance ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
+              <button onClick={confirmPaid} disabled={busy || sumAllocationValues(chargeAllocValues) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                {busy ? 'Saving…' : sumAllocationValues(chargeAllocValues) >= balance - 0.01 ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* End Contract modal */}
+      {showEndContractModal && (
+        <Modal title="End Contract 完約" onClose={() => setShowEndContractModal(false)}>
+          <div className="space-y-4 text-sm">
+            <p className="text-gray-600">Close the current lease for <strong>{unit.tenantName}</strong>. Auto-invoices will stop after the lease end date.</p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Actual move-out date 實際退租日</label>
+              <input className={inp} value={endContractForm.actualEndDate} onChange={(e) => setEndContractForm({ ...endContractForm, actualEndDate: e.target.value })} placeholder="DD/MM/YYYY" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Deposit refund 退按金</label>
+                <input type="number" className={inp} value={endContractForm.depositRefund} onChange={(e) => setEndContractForm({ ...endContractForm, depositRefund: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Deductions 扣除</label>
+                <input type="number" className={inp} value={endContractForm.depositDeductions} onChange={(e) => setEndContractForm({ ...endContractForm, depositDeductions: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Notes 備註</label>
+              <textarea className={inp} rows={2} value={endContractForm.endNotes} onChange={(e) => setEndContractForm({ ...endContractForm, endNotes: e.target.value })} />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={endContractForm.startNew} onChange={(e) => setEndContractForm({ ...endContractForm, startNew: e.target.checked })} />
+              Start new lease immediately 立即新租約
+            </label>
+            {endContractForm.startNew && (
+              <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/50">
+                <input className={inp} placeholder="New tenant name" value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={inp} placeholder="Start DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
+                  <input className={inp} placeholder="End DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                </div>
+                <input type="number" className={inp} placeholder="Base rent" value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setShowEndContractModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={submitEndContract} disabled={busy} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+                {busy ? 'Processing…' : 'Confirm End Contract'}
               </button>
             </div>
           </div>

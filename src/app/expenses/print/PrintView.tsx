@@ -104,7 +104,7 @@ function ReceiptImage({
   const src = receiptSrc(e, receipt);
   return (
     <figure className="expense-print-figure m-0">
-      <figcaption className="expense-print-caption bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border border-gray-200 border-b-0">
+      <figcaption className="expense-print-caption bg-gray-50 px-3 py-1.5 text-xs font-mono font-semibold text-gray-700 border border-gray-200 border-b-0 print:hidden">
         {e.receipt_no || `EXP-${e.id}`} · #{index + 1} — {expenseSupplierName(e)}
       </figcaption>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -279,11 +279,11 @@ export default function PrintView() {
       {!loadError && printPages.length === 0 ? (
         <div className="p-12 text-center text-gray-500">No receipts selected.</div>
       ) : (
-        <div className="expense-print-stack max-w-3xl mx-auto p-4 sm:p-6 print:p-0 print:max-w-none">
-          {printPages.map((page) => (
+        <div className="expense-print-stack max-w-3xl mx-auto p-4 sm:p-6 print:p-0 print:max-w-none print:block">
+          {printPages.map((page, pageIndex) => (
             <article
               key={page.key}
-              className="expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none"
+              className={`expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none${pageIndex > 0 ? ' expense-print-sheet--continued' : ''}`}
             >
               {page.showFullSummary ? (
                 <ExpenseSummary e={page.expense} />

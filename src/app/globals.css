@@ -88,14 +88,24 @@
     background: white !important;
   }
 
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
   .expense-print-root .expense-print-stack {
+    display: block !important;
     max-width: none !important;
     width: 100% !important;
     padding: 0 !important;
     margin: 0 !important;
+    columns: 1 !important;
+    column-count: 1 !important;
   }
 
-  /* One printed page per sheet — natural height, no viewport hacks */
+  /* One receipt block per sheet; allow tall content to flow across pages */
   .expense-print-root .expense-print-sheet {
     display: block !important;
     box-sizing: border-box !important;
@@ -106,10 +116,13 @@
     border: none !important;
     box-shadow: none !important;
     border-radius: 0 !important;
+    float: none !important;
+    clear: both !important;
+    position: static !important;
     page-break-after: always !important;
     break-after: page !important;
-    break-inside: avoid !important;
-    page-break-inside: avoid !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-sheet:last-child {
@@ -117,7 +130,20 @@
     break-after: auto !important;
   }
 
+  .expense-print-root .expense-print-sheet--continued {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .expense-print-root .expense-print-summary,
+  .expense-print-root .expense-print-mini-header,
+  .expense-print-root .expense-print-banner {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   .expense-print-root .expense-print-body {
+    display: block !important;
     overflow: visible !important;
     padding: 2mm 0 0 !important;
   }
@@ -126,26 +152,30 @@
     display: block !important;
     overflow: visible !important;
     margin: 0 !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-receipt-img {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    max-height: 22cm !important;
+    max-height: none !important;
     height: auto !important;
     object-fit: contain !important;
     object-position: top center !important;
     border-left: none !important;
     border-right: none !important;
     border-bottom: none !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-details {
     font-size: 10pt !important;
     line-height: 1.35 !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
   }
 
   .expense-print-root .expense-print-notes {

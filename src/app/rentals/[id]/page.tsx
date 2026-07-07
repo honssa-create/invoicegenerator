@@ -720,13 +720,17 @@ function RentalDetailInner() {
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
             <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start 租期</label>
-            <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End 租期</label>
-            <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} />
+          <div className="md:col-span-2 lg:col-span-2">
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start 租期</label>
+                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End 租期</label>
+                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} />
+              </div>
+            </div>
           </div>
         </div>
         <div className="mt-6 pt-5 border-t border-gray-100">

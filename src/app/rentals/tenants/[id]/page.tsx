@@ -299,11 +299,47 @@ export default function TenantDetailPage() {
     load();
   };
 
+  const inp = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm';
+
+  if (loading && !detail) {
+    return <AppLayout><div className="p-12 text-center text-gray-400">Loading…</div></AppLayout>;
+  }
+  if (loadError || !detail) {
+    return (
+      <AppLayout>
+        <div className="p-12 text-center">
+          <p className="text-gray-500">{loadError || 'Tenant not found'}</p>
+          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← Back to Rentals</Link>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const {
+    tenant,
+    units,
+    outstandingCharges,
+    payments,
+    paymentsWithAllocations,
+    allocationLedger,
+    billingHistory,
+    leaseHistory = [],
+    summary: rawSummary,
+  } = detail;
+
+  const summary: TenantProfileSummary = rawSummary ?? {
+    activeUnits: units.length,
+    contractCount: leaseHistory.length,
+    totalPaid: payments.reduce((s, p) => s + (p.amount || 0), 0),
+    totalOutstanding: outstandingCharges.reduce((s, c) => s + chargeOutstanding(c), 0),
+    lastPaymentDate: payments[0]?.paymentDate ?? null,
+  };
+
   const openAllocate = (payment: RentalPayment) => {
     const p = payments.find((x) => x.id === payment.id) || payment;
     setAllocateModal(p);
     const init: Record<number, string> = {};
-    for (const c of detail?.outstandingCharges || []) {
+    for (const c of outstandingCharges) {
       init[c.id] = '';
     }
     setAllocations(init);
@@ -331,24 +367,6 @@ export default function TenantDetailPage() {
     setToast('Payment allocated');
     load();
   };
-
-  const inp = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm';
-
-  if (loading && !detail) {
-    return <AppLayout><div className="p-12 text-center text-gray-400">Loading…</div></AppLayout>;
-  }
-  if (loadError || !detail) {
-    return (
-      <AppLayout>
-        <div className="p-12 text-center">
-          <p className="text-gray-500">{loadError || 'Tenant not found'}</p>
-          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← Back to Rentals</Link>
-        </div>
-      </AppLayout>
-    );
-  }
-
-  const { tenant, units, outstandingCharges, payments, paymentsWithAllocations, allocationLedger, billingHistory, leaseHistory, summary } = detail;
 
   const toggleUnit = (unitId: number) => {
     setSelectedUnitIds((prev) =>
@@ -594,10 +612,10 @@ export default function TenantDetailPage() {
             <p className="text-xs text-gray-500 mt-0.5">All past and current leases across units</p>
           </div>
           <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
-            {(leaseHistory || []).length === 0 ? (
+            {(leaseHistory).length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-4">No contract history yet</p>
             ) : (
-              (leaseHistory || []).map((l) => (
+              leaseHistory.map((l) => (
                 <div key={l.id} className={`rounded-xl border p-3 text-sm ${l.isCurrent ? 'border-brand-200 bg-brand-50/40' : 'border-gray-100'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Link href={`/rentals/${l.unitId}`} className="font-semibold text-brand-700 hover:underline">{l.unitName}</Link>

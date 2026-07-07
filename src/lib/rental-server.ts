@@ -71,6 +71,7 @@ interface UnitRow {
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
   automation_enabled: number; utility_billing_mode?: string | null;
+  address?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -121,6 +122,7 @@ function hydrateUnit(row: UnitRow): RentalUnit {
     utilityBillingMode: (row.utility_billing_mode === 'tenant_pays' || row.utility_billing_mode === 'company_proxy'
       ? row.utility_billing_mode
       : 'company_proxy') as RentalUnit['utilityBillingMode'],
+    address: row.address || '',
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -304,7 +306,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
-      utility_billing_mode = ?,
+      utility_billing_mode = ?, address = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
@@ -319,6 +321,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
     (input.utilityBillingMode ?? existing.utilityBillingMode) === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
+    (input.address ?? existing.address)?.trim() || null,
     id, userId
   );
   const updated = getRentalUnit(id, userId)!;

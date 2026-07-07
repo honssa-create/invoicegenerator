@@ -757,6 +757,9 @@ db.exec(`
       `);
     } catch { /* exists */ }
   }
+  if (!ruCols.includes('address')) {
+    try { db.exec('ALTER TABLE rental_units ADD COLUMN address TEXT'); } catch { /* exists */ }
+  }
 }
 
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.

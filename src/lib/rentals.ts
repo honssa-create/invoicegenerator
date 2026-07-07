@@ -39,6 +39,7 @@ export interface RentalUnit {
   autoSendReceiptEmail: boolean;
   automationEnabled: boolean;
   utilityBillingMode: UtilityBillingMode;
+  address: string;
   created_at: string;
   updated_at: string;
 }

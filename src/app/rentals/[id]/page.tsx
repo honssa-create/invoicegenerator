@@ -142,7 +142,6 @@ function RentalDetailInner() {
   const [suggestedPrevWaterReading, setSuggestedPrevWaterReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
   const [utilitySaveState, setUtilitySaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [utilityEditing, setUtilityEditing] = useState(false);
   const [utilityCanUndo, setUtilityCanUndo] = useState(false);
   const skipUtilityAutoSaveRef = useRef(true);
   const utilitySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -202,7 +201,6 @@ function RentalDetailInner() {
 
   const load = useCallback(() => {
     setLoading(true);
-    setUtilityEditing(false);
     setUtilityCanUndo(false);
     skipPeriodRecalcRef.current = true;
     skipUtilityAutoSaveRef.current = true;
@@ -252,6 +250,27 @@ function RentalDetailInner() {
             setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
             setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
+            lastCommittedUtilityRef.current = {
+              baseRentPeriodFrom: rec.baseRentPeriodFrom ? toFormDate(rec.baseRentPeriodFrom) : calc.periodFrom,
+              baseRentPeriodTo: rec.baseRentPeriodTo ? toFormDate(rec.baseRentPeriodTo) : calc.periodTo,
+              waterFee: String(rec.waterFee || 0),
+              waterPeriodFrom: toFormDate(rec.waterPeriodFrom),
+              waterPeriodTo: toFormDate(rec.waterPeriodTo),
+              electricityFee: String(rec.electricityFee || 0),
+              electricityPeriodFrom: toFormDate(rec.electricityPeriodFrom),
+              electricityPeriodTo: toFormDate(rec.electricityPeriodTo),
+              meterPrevReading: meter?.prevReading != null ? String(meter.prevReading) : (d.suggestedPrevElectricityReading != null ? String(d.suggestedPrevElectricityReading) : ''),
+              meterCurrReading: meter?.currReading != null ? String(meter.currReading) : '',
+              meter213B: meter?.meter213B != null ? String(meter.meter213B) : '',
+              meterStockRoom1: meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '',
+              meterStockRoom2: meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '',
+              meterRatePerUnit: meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '',
+              waterMeterPrev: waterMeter?.prevReading != null ? String(waterMeter.prevReading) : (d.suggestedPrevWaterReading != null ? String(d.suggestedPrevWaterReading) : ''),
+              waterMeterCurr: waterMeter?.currReading != null ? String(waterMeter.currReading) : '',
+              waterMeterRate: waterMeter?.ratePerUnit != null ? String(waterMeter.ratePerUnit) : '',
+              utilityNote: rec.customInvoiceNote || '',
+            };
+            undoUtilitySnapshotRef.current = null;
           }
         }
       })
@@ -292,7 +311,6 @@ function RentalDetailInner() {
   }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
-  const roInp = `${inp} bg-gray-100/80 cursor-default focus:ring-0 focus:bg-gray-100/80`;
 
   const captureUtilitySnapshot = useCallback((): UtilitySnapshot => ({
     baseRentPeriodFrom,
@@ -407,14 +425,7 @@ function RentalDetailInner() {
   }, [applyUtilitySnapshot, saveUtilities]);
 
   useEffect(() => {
-    if (loading || !data?.currentRecord) return;
-    lastCommittedUtilityRef.current = captureUtilitySnapshot();
-    setUtilityCanUndo(false);
-    undoUtilitySnapshotRef.current = null;
-  }, [data?.currentRecord?.id, period, loading, captureUtilitySnapshot]);
-
-  useEffect(() => {
-    if (skipUtilityAutoSaveRef.current || !data?.currentRecord || !utilityEditing) return;
+    if (skipUtilityAutoSaveRef.current || !data?.currentRecord) return;
     if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
     utilitySaveTimerRef.current = setTimeout(() => {
       void saveUtilities();
@@ -425,7 +436,6 @@ function RentalDetailInner() {
   }, [
     data?.currentRecord?.id,
     saveUtilities,
-    utilityEditing,
     baseRentPeriodFrom, baseRentPeriodTo,
     waterFee, waterPeriodFrom, waterPeriodTo,
     electricityFee, electricityPeriodFrom, electricityPeriodTo,
@@ -758,37 +768,9 @@ function RentalDetailInner() {
                 <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">水電費紀錄與帳單</p>
                 <h2 className="text-lg font-semibold text-gray-900">Utilities & Billing — {period}</h2>
               </div>
-              {rec && (
-                utilityEditing ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (utilitySaveTimerRef.current) {
-                        clearTimeout(utilitySaveTimerRef.current);
-                        utilitySaveTimerRef.current = null;
-                      }
-                      void saveUtilities();
-                      setUtilityEditing(false);
-                    }}
-                    className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700"
-                  >
-                    Done 完成
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setUtilityEditing(true)}
-                    className="text-xs px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Edit 編輯
-                  </button>
-                )
-              )}
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              {utilityEditing
-                ? 'Changes auto-save. Use Undo if you made a mistake.'
-                : 'Meter readings and billing periods are locked — click Edit 編輯 before changing.'}
+              Changes auto-save as you type. Use Undo 復原 if you made a mistake.
             </p>
             {rec ? (
               <>
@@ -802,11 +784,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
@@ -839,17 +821,16 @@ function RentalDetailInner() {
                         onMeterStockRoom2={setMeterStockRoom2}
                         onRatePerUnit={setMeterRatePerUnit}
                         suggestedPrevReading={suggestedPrevReading}
-                        inpClassName={utilityEditing ? inp : roInp}
-                        readOnly={!utilityEditing}
+                        inpClassName={inp}
                       />
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
                         </div>
                       </div>
                     </>
@@ -857,15 +838,15 @@ function RentalDetailInner() {
                     <div className="grid md:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} placeholder="0 → shows /" />
+                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
                       </div>
                     </div>
                   )}
@@ -885,17 +866,16 @@ function RentalDetailInner() {
                         onCurrReading={setWaterMeterCurr}
                         onRatePerUnit={setWaterMeterRate}
                         suggestedPrevReading={suggestedPrevWaterReading}
-                        inpClassName={utilityEditing ? inp : roInp}
-                        readOnly={!utilityEditing}
+                        inpClassName={inp}
                       />
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
                         </div>
                       </div>
                     </>
@@ -903,15 +883,15 @@ function RentalDetailInner() {
                     <div className="grid md:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} placeholder="0 → shows /" />
+                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
                       </div>
                     </div>
                   )}
@@ -919,7 +899,7 @@ function RentalDetailInner() {
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
                     <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Note (optional)</label>
-                    <input className={utilityEditing ? inp : roInp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} readOnly={!utilityEditing} placeholder="e.g. Water meter 1234" />
+                    <input className={inp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} placeholder="e.g. Water meter 1234" />
                   </div>
                   <div className="flex flex-col items-end gap-1 pb-2.5 min-w-[5.5rem]">
                     <p className="text-xs text-gray-500 whitespace-nowrap text-right">

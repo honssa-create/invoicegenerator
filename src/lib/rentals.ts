@@ -245,6 +245,18 @@ export function formatDisplayDate(iso: string | null | undefined): string {
   return formatDateToDDMMYYYY(iso);
 }
 
+/** Add calendar days to an ISO date (YYYY-MM-DD). */
+export function addDaysToIsoDate(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate.slice(0, 10)}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Formal debit note due date: 發單日期 + 7 days. */
+export function debitNoteDueDate(issuedDate: string): string {
+  return addDaysToIsoDate(issuedDate, 7);
+}
+
 /** @alias formatDateToDDMMYYYY */
 export function formatPeriodDate(iso: string): string {
   const f = formatDateToDDMMYYYY(iso);
@@ -875,6 +887,10 @@ export interface RentPaymentNoticeQuery {
   paymentTemplate?: DebitNotePaymentTemplateId;
   /** Extra manual text appended to payment instructions. */
   paymentRemark?: string;
+  /** Override generated payment-instruction block (e.g. user-edited on debit note page). */
+  paymentInstructionsText?: string;
+  /** Override generated footer remark. */
+  footerRemark?: string;
 }
 
 /** Billing company for debit notes. */

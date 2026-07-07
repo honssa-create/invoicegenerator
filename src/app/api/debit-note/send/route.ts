@@ -35,6 +35,8 @@ export async function POST(request: Request) {
     const unitIds = parseUnitIds(body.unitIds != null ? String(body.unitIds) : null);
     const paymentTemplate = body.paymentTemplate === 'elite' ? 'elite' : body.paymentTemplate === 'label' ? 'label' : undefined;
     const paymentRemark = body.paymentRemark || body.payment_remark || undefined;
+    const paymentInstructionsText = body.paymentInstructionsText || body.payment_instructions_text || undefined;
+    const footerRemark = body.footerRemark || body.footer_remark || undefined;
 
     if (mode === 'single' && !unitId) {
       return NextResponse.json({ error: 'unitId is required when mode is single' }, { status: 400 });
@@ -48,6 +50,8 @@ export async function POST(request: Request) {
       unitIds,
       paymentTemplate: paymentTemplate as DebitNotePaymentTemplateId | undefined,
       paymentRemark,
+      paymentInstructionsText,
+      footerRemark,
     });
 
     if (!doc) {

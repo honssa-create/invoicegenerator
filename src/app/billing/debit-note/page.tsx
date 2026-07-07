@@ -6,8 +6,8 @@ import { useSearchParams } from 'next/navigation';
 import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import FormalDebitNoteDocument from '@/components/FormalDebitNoteDocument';
 import {
-  buildDebitNotePaymentInstructionsText,
   currentBillingPeriod,
+  formatDueDateChinese,
   type DebitNoteMode,
   type DebitNotePaymentTemplateId,
   type FormalDebitNote,
@@ -27,13 +27,13 @@ function DebitNoteContent() {
   const paidLookback = searchParams.get('paid_lookback') || '2';
   const from = searchParams.get('from') || '';
   const initialTemplate = searchParams.get('paymentTemplate') || searchParams.get('payment_template');
-  const initialRemark = searchParams.get('paymentRemark') || searchParams.get('payment_remark') || '';
 
   const [doc, setDoc] = useState<FormalDebitNote | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [paymentTemplate, setPaymentTemplate] = useState<DebitNotePaymentTemplateId>('label');
-  const [paymentRemark, setPaymentRemark] = useState(initialRemark);
+  const [paymentInstructionsText, setPaymentInstructionsText] = useState('');
+  const [footerRemark, setFooterRemark] = useState('');
   const [sending, setSending] = useState(false);
   const [sendToast, setSendToast] = useState('');
 
@@ -74,42 +74,35 @@ function DebitNoteContent() {
           } else {
             setPaymentTemplate(d.paymentTemplateId || 'label');
           }
-          setPaymentRemark(initialRemark);
+          setPaymentInstructionsText(d.paymentInstructionsText || '');
+          setFooterRemark(d.footerRemark || '');
         } else {
           setError('Debit note not available');
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
-  }, [tenantId, unitId, unitIds, targetPeriod, mode, paidLookback, from, initialTemplate, initialRemark]);
+  }, [tenantId, unitId, unitIds, targetPeriod, mode, paidLookback, from, initialTemplate]);
 
   const dueDateChinese = useMemo(() => {
     if (!doc) return 'yyyy年mm月dd日';
-    const parts = doc.dueDateDisplay.split('/');
-    if (parts.length >= 3) {
-      return `${parts[2]}年${Number(parts[1])}月${Number(parts[0])}日`;
-    }
-    return doc.dueDateDisplay;
+    return formatDueDateChinese(doc.dueDateDisplay, doc.targetPeriod.split('-')[0]);
   }, [doc]);
 
   const displayDoc = useMemo(() => {
     if (!doc) return null;
-    const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
-      paymentTemplate,
-      doc.noteNo,
-      dueDateChinese,
-      paymentRemark,
-    );
+    const instructions = paymentInstructionsText || doc.paymentInstructionsText;
     return {
       ...doc,
       paymentTemplateId: paymentTemplate,
-      paymentInstructionsText,
-      paymentInstructions: paymentInstructionsText.split('\n').filter((l) => l !== ''),
+      paymentInstructionsText: instructions,
+      paymentInstructions: instructions.split('\n').filter((l) => l !== ''),
+      footerRemark: footerRemark || doc.footerRemark,
     };
-  }, [doc, paymentTemplate, paymentRemark, dueDateChinese]);
+  }, [doc, paymentTemplate, paymentInstructionsText, footerRemark]);
 
   const sendDebitNote = async () => {
-    if (!tenantId || !doc) return;
+    if (!tenantId || !doc || !displayDoc) return;
     setSending(true);
     setSendToast('');
     const res = await fetch('/api/debit-note/send', {
@@ -124,7 +117,8 @@ function DebitNoteContent() {
         fromPeriod: from || undefined,
         paidLookbackMonths: Number(paidLookback) || 2,
         paymentTemplate,
-        paymentRemark: paymentRemark || undefined,
+        paymentInstructionsText: displayDoc.paymentInstructionsText,
+        footerRemark: displayDoc.footerRemark,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -175,10 +169,12 @@ function DebitNoteContent() {
           <DebitNotePaymentOptions
             templateId={paymentTemplate}
             onTemplateId={setPaymentTemplate}
-            manualRemark={paymentRemark}
-            onManualRemark={setPaymentRemark}
             noteNo={doc.noteNo}
             dueDateChinese={dueDateChinese}
+            instructionsText={paymentInstructionsText}
+            onInstructionsText={setPaymentInstructionsText}
+            footerRemark={footerRemark}
+            onFooterRemark={setFooterRemark}
           />
         </div>
       </div>

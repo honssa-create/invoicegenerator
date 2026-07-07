@@ -608,148 +608,6 @@ function RentalDetailInner() {
         </div>
       </div>
 
-      {/* Tenant history + lease documents */}
-      <div className="grid lg:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="font-semibold text-gray-900">Tenant History 租客紀錄</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Current and past tenants for this unit</p>
-          </div>
-          <div className="p-4 space-y-5 max-h-[28rem] overflow-y-auto">
-            {currentLease && (
-              <div>
-                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-2">Current Tenant 現任租客</p>
-                <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    {currentLease.tenantId ? (
-                      <Link href={`/rentals/tenants/${currentLease.tenantId}`} className="font-semibold text-brand-700 hover:underline">
-                        {currentLease.tenantName}
-                      </Link>
-                    ) : (
-                      <p className="font-semibold text-gray-900">{currentLease.tenantName}</p>
-                    )}
-                    <LeaseStatusBadge status={computeLeaseDisplayStatus(currentLease)} />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {formatDisplayDate(currentLease.leaseStartDate)} → {formatDisplayDate(currentLease.leaseEndDate)}
-                  </p>
-                  {(currentLease.tenantPhone || currentLease.tenantEmail) && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      {currentLease.tenantPhone && <span>{currentLease.tenantPhone}</span>}
-                      {currentLease.tenantPhone && currentLease.tenantEmail && <span className="mx-1">·</span>}
-                      {currentLease.tenantEmail && <span>{currentLease.tenantEmail}</span>}
-                    </p>
-                  )}
-                  <p className="text-xs text-gray-500 mt-1">
-                    Rent {formatMoney(currentLease.baseRent)} · Deposit {formatMoney(currentLease.depositAmount)}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold mb-2">Previous Tenants 歷任租客</p>
-              {previousTenants.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200">
-                  No previous tenants recorded yet.
-                  {!currentLease && (leaseHistory || []).length === 0 && (
-                    <span className="block mt-1 text-xs">Use <strong>完約 End Contract</strong> when a tenant moves out to keep a full history.</span>
-                  )}
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {previousTenants.map((l) => (
-                    <div key={l.id} className="rounded-xl border border-gray-100 p-3 text-sm hover:border-gray-200 transition-colors">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        {l.tenantId ? (
-                          <Link href={`/rentals/tenants/${l.tenantId}`} className="font-semibold text-brand-700 hover:underline">
-                            {l.tenantName}
-                          </Link>
-                        ) : (
-                          <p className="font-semibold text-gray-900">{l.tenantName}</p>
-                        )}
-                        <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
-                      </p>
-                      {(l.tenantPhone || l.tenantEmail) && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {l.tenantPhone && <span>{l.tenantPhone}</span>}
-                          {l.tenantPhone && l.tenantEmail && <span className="mx-1">·</span>}
-                          {l.tenantEmail && <span>{l.tenantEmail}</span>}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-500 mt-1">
-                        Rent {formatMoney(l.baseRent)} · Deposit {formatMoney(l.depositAmount)}
-                        {l.depositRefund != null && (
-                          <span> · Refund {formatMoney(l.depositRefund)}</span>
-                        )}
-                      </p>
-                      {(l.endReason || l.endNotes) && (
-                        <p className="text-xs text-gray-400 mt-1">
-                          {l.endReason}
-                          {l.endReason && l.endNotes && ' — '}
-                          {l.endNotes}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {previousTenants.length > 0 && (
-                <p className="text-[11px] text-gray-400 mt-3">
-                  History is recorded when you use <strong>完約 End Contract</strong>. Older manual edits may not appear here.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <div>
-              <h2 className="font-semibold text-gray-900">Lease Documents 租約文件</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Agreement, handover, deposit receipt</p>
-            </div>
-            {currentLease && (
-              <>
-                <input ref={leaseDocInputRef} type="file" accept="image/*,.pdf" className="hidden"
-                  onChange={(e) => { if (e.target.files?.[0]) uploadLeaseDoc(e.target.files[0]); e.target.value = ''; }} />
-                <button
-                  type="button"
-                  disabled={leaseDocUploading}
-                  onClick={() => leaseDocInputRef.current?.click()}
-                  className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
-                >
-                  {leaseDocUploading ? 'Uploading…' : '+ Upload'}
-                </button>
-              </>
-            )}
-          </div>
-          <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
-            {!currentLease ? (
-              <p className="text-sm text-gray-400 text-center py-4">No active lease</p>
-            ) : (leaseDocuments || []).length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">No documents uploaded</p>
-            ) : (
-              (leaseDocuments || []).map((d) => (
-                <a
-                  key={d.id}
-                  href={`/api/rentals/leases/${currentLease.id}/documents?docId=${d.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"
-                >
-                  <span>{d.label || d.docType}</span>
-                  <span className="text-xs text-brand-600">View</span>
-                </a>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
       <div className="grid lg:grid-cols-[1fr_340px] gap-6 lg:items-start">
         {/* LEFT */}
         <div className="space-y-6">
@@ -1038,6 +896,148 @@ function RentalDetailInner() {
                     <p className="text-[10px] text-gray-300 mt-0.5">{a.created_at?.slice(0, 16)}</p>
                   </div>
                 </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Tenant history + lease documents — last row */}
+      <div className="grid lg:grid-cols-2 gap-6 mt-6">
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="font-semibold text-gray-900">Tenant History 租客紀錄</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Current and past tenants for this unit</p>
+          </div>
+          <div className="p-4 space-y-5 max-h-[28rem] overflow-y-auto">
+            {currentLease && (
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-2">Current Tenant 現任租客</p>
+                <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {currentLease.tenantId ? (
+                      <Link href={`/rentals/tenants/${currentLease.tenantId}`} className="font-semibold text-brand-700 hover:underline">
+                        {currentLease.tenantName}
+                      </Link>
+                    ) : (
+                      <p className="font-semibold text-gray-900">{currentLease.tenantName}</p>
+                    )}
+                    <LeaseStatusBadge status={computeLeaseDisplayStatus(currentLease)} />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formatDisplayDate(currentLease.leaseStartDate)} → {formatDisplayDate(currentLease.leaseEndDate)}
+                  </p>
+                  {(currentLease.tenantPhone || currentLease.tenantEmail) && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {currentLease.tenantPhone && <span>{currentLease.tenantPhone}</span>}
+                      {currentLease.tenantPhone && currentLease.tenantEmail && <span className="mx-1">·</span>}
+                      {currentLease.tenantEmail && <span>{currentLease.tenantEmail}</span>}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Rent {formatMoney(currentLease.baseRent)} · Deposit {formatMoney(currentLease.depositAmount)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold mb-2">Previous Tenants 歷任租客</p>
+              {previousTenants.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200">
+                  No previous tenants recorded yet.
+                  {!currentLease && (leaseHistory || []).length === 0 && (
+                    <span className="block mt-1 text-xs">Use <strong>完約 End Contract</strong> when a tenant moves out to keep a full history.</span>
+                  )}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {previousTenants.map((l) => (
+                    <div key={l.id} className="rounded-xl border border-gray-100 p-3 text-sm hover:border-gray-200 transition-colors">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {l.tenantId ? (
+                          <Link href={`/rentals/tenants/${l.tenantId}`} className="font-semibold text-brand-700 hover:underline">
+                            {l.tenantName}
+                          </Link>
+                        ) : (
+                          <p className="font-semibold text-gray-900">{l.tenantName}</p>
+                        )}
+                        <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
+                      </p>
+                      {(l.tenantPhone || l.tenantEmail) && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {l.tenantPhone && <span>{l.tenantPhone}</span>}
+                          {l.tenantPhone && l.tenantEmail && <span className="mx-1">·</span>}
+                          {l.tenantEmail && <span>{l.tenantEmail}</span>}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Rent {formatMoney(l.baseRent)} · Deposit {formatMoney(l.depositAmount)}
+                        {l.depositRefund != null && (
+                          <span> · Refund {formatMoney(l.depositRefund)}</span>
+                        )}
+                      </p>
+                      {(l.endReason || l.endNotes) && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {l.endReason}
+                          {l.endReason && l.endNotes && ' — '}
+                          {l.endNotes}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {previousTenants.length > 0 && (
+                <p className="text-[11px] text-gray-400 mt-3">
+                  History is recorded when you use <strong>完約 End Contract</strong>. Older manual edits may not appear here.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <div>
+              <h2 className="font-semibold text-gray-900">Lease Documents 租約文件</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Agreement, handover, deposit receipt</p>
+            </div>
+            {currentLease && (
+              <>
+                <input ref={leaseDocInputRef} type="file" accept="image/*,.pdf" className="hidden"
+                  onChange={(e) => { if (e.target.files?.[0]) uploadLeaseDoc(e.target.files[0]); e.target.value = ''; }} />
+                <button
+                  type="button"
+                  disabled={leaseDocUploading}
+                  onClick={() => leaseDocInputRef.current?.click()}
+                  className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {leaseDocUploading ? 'Uploading…' : '+ Upload'}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
+            {!currentLease ? (
+              <p className="text-sm text-gray-400 text-center py-4">No active lease</p>
+            ) : (leaseDocuments || []).length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">No documents uploaded</p>
+            ) : (
+              (leaseDocuments || []).map((d) => (
+                <a
+                  key={d.id}
+                  href={`/api/rentals/leases/${currentLease.id}/documents?docId=${d.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  <span>{d.label || d.docType}</span>
+                  <span className="text-xs text-brand-600">View</span>
+                </a>
               ))
             )}
           </div>

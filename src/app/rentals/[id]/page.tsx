@@ -120,7 +120,9 @@ function RentalDetailInner() {
   const [suggestedPrevReading, setSuggestedPrevReading] = useState<number | null>(null);
   const [suggestedPrevWaterReading, setSuggestedPrevWaterReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
-  const [utilitySaving, setUtilitySaving] = useState(false);
+  const [utilitySaveState, setUtilitySaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const skipUtilityAutoSaveRef = useRef(true);
+  const utilitySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // invoice modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -175,6 +177,7 @@ function RentalDetailInner() {
   const load = useCallback(() => {
     setLoading(true);
     skipPeriodRecalcRef.current = true;
+    skipUtilityAutoSaveRef.current = true;
     fetch(`/api/rentals/units/${id}?period=${period}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -227,6 +230,7 @@ function RentalDetailInner() {
       .finally(() => {
         skipPeriodRecalcRef.current = false;
         setLoading(false);
+        setTimeout(() => { skipUtilityAutoSaveRef.current = false; }, 200);
       });
   }, [id, period]);
 
@@ -289,7 +293,7 @@ function RentalDetailInner() {
     load();
   };
 
-  const utilityPayload = () => {
+  const utilityPayload = useCallback(() => {
     const payload: Record<string, unknown> = {
       baseRent: Number(baseRent),
       baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
@@ -312,19 +316,54 @@ function RentalDetailInner() {
       payload.waterMeter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
     }
     return payload;
-  };
+  }, [
+    baseRent, baseRentPeriodFrom, baseRentPeriodTo, waterFee, electricityFee,
+    waterPeriodFrom, waterPeriodTo, electricityPeriodFrom, electricityPeriodTo,
+    utilityNote, electricityFormula, meterPrevReading, meterCurrReading, meterRatePerUnit,
+    meter213B, meterStockRoom1, meterStockRoom2, waterMeterFormula,
+    waterMeterPrev, waterMeterCurr, waterMeterRate,
+  ]);
 
-  const saveUtilities = async () => {
-    if (!data?.currentRecord) return;
-    setUtilitySaving(true);
-    await fetch(`/api/rentals/records/${data.currentRecord.id}`, {
+  const saveUtilities = useCallback(async (opts?: { reload?: boolean }) => {
+    const recordId = data?.currentRecord?.id;
+    if (!recordId) return false;
+    setUtilitySaveState('saving');
+    const res = await fetch(`/api/rentals/records/${recordId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(utilityPayload()),
     });
-    setUtilitySaving(false);
-    load();
-  };
+    if (!res.ok) {
+      setUtilitySaveState('error');
+      return false;
+    }
+    const { record } = await res.json();
+    setData((prev) => (prev ? { ...prev, currentRecord: record } : prev));
+    setUtilitySaveState('saved');
+    if (opts?.reload) load();
+    else window.setTimeout(() => setUtilitySaveState('idle'), 2000);
+    return true;
+  }, [data?.currentRecord?.id, utilityPayload, load]);
+
+  useEffect(() => {
+    if (skipUtilityAutoSaveRef.current || !data?.currentRecord) return;
+    if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
+    utilitySaveTimerRef.current = setTimeout(() => {
+      void saveUtilities();
+    }, 600);
+    return () => {
+      if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
+    };
+  }, [
+    data?.currentRecord?.id,
+    saveUtilities,
+    baseRentPeriodFrom, baseRentPeriodTo,
+    waterFee, waterPeriodFrom, waterPeriodTo,
+    electricityFee, electricityPeriodFrom, electricityPeriodTo,
+    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    waterMeterPrev, waterMeterCurr, waterMeterRate,
+    utilityNote,
+  ]);
 
   const sendInvoice = async () => {
     if (!data?.currentRecord) return;
@@ -744,9 +783,11 @@ function RentalDetailInner() {
                     <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Note (optional)</label>
                     <input className={inp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} placeholder="e.g. Water meter 1234" />
                   </div>
-                  <button onClick={saveUtilities} disabled={utilitySaving} className="px-4 py-2.5 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50">
-                    {utilitySaving ? 'Saving…' : 'Save Utilities'}
-                  </button>
+                  <p className="text-xs text-gray-500 whitespace-nowrap pb-2.5 min-w-[5.5rem] text-right">
+                    {utilitySaveState === 'saving' && 'Saving… 儲存中'}
+                    {utilitySaveState === 'saved' && <span className="text-green-600">Saved ✓ 已儲存</span>}
+                    {utilitySaveState === 'error' && <span className="text-red-600">Save failed</span>}
+                  </p>
                 </div>
                 <div className="mt-4 rounded-xl border-2 border-brand-100 bg-brand-50 p-4 flex items-center justify-between flex-wrap gap-3">
                   <div>

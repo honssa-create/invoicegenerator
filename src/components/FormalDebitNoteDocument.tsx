@@ -135,11 +135,9 @@ export default function FormalDebitNoteDocument({ doc }: Props) {
       {/* Payment instructions */}
       <section className="border-t border-gray-300 pt-4 text-sm">
         <h3 className="font-bold mb-2">【底部：付款指示與備註 Payment Instructions & Remarks】</h3>
-        <ol className="list-decimal list-inside space-y-1 text-gray-800">
-          {doc.paymentInstructions.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ol>
+        <pre className="whitespace-pre-wrap font-sans text-gray-800 leading-relaxed">
+          {doc.paymentInstructionsText}
+        </pre>
         {doc.footerRemark && (
           <p className="mt-3 font-medium text-gray-900 border-t border-dashed border-gray-300 pt-3">
             {doc.footerRemark}

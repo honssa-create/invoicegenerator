@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import DebitNoteActions from '@/components/DebitNoteActions';
+import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
 import ElectricityMeterCalculator from '@/components/ElectricityMeterCalculator';
 import WaterMeterCalculator from '@/components/WaterMeterCalculator';
@@ -38,11 +39,13 @@ import {
   utilityLineLabel,
   calcElectricityFeeForFormula,
   calcWaterFeeFromMeter,
+  debitNoteCompanyForUnit,
   electricityFormulaForUnit,
   formatBillingPeriodLabel,
   meterDataFromInputs,
   unitHasWaterMeterFormula,
   waterMeterDataFromInputs,
+  type DebitNotePaymentTemplateId,
   type RentRecord,
   type RentalActivityLog,
   type RentalChargeItem,
@@ -153,6 +156,8 @@ function RentalDetailInner() {
   // invoice modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceNote, setInvoiceNote] = useState('');
+  const [invoicePaymentTemplate, setInvoicePaymentTemplate] = useState<DebitNotePaymentTemplateId>('label');
+  const [invoicePaymentRemark, setInvoicePaymentRemark] = useState('');
 
   // paid modal
   const [showPaidModal, setShowPaidModal] = useState(false);
@@ -482,7 +487,12 @@ function RentalDetailInner() {
     const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...buildUtilityPayload(), note: invoiceNote || null }),
+      body: JSON.stringify({
+        ...buildUtilityPayload(),
+        note: invoiceNote || null,
+        paymentTemplate: invoicePaymentTemplate,
+        paymentRemark: invoicePaymentRemark || null,
+      }),
     });
     setBusy(false);
     setToast(res.ok ? 'Invoice sent!' : 'Failed to send invoice');
@@ -979,7 +989,12 @@ function RentalDetailInner() {
             <div className="bg-white rounded-2xl border border-gray-200 p-5">
               <h2 className="font-semibold text-gray-900 mb-4">Actions</h2>
               <div className="flex flex-wrap gap-3">
-                <button onClick={() => { setInvoiceNote(rec.customInvoiceNote || ''); setShowInvoiceModal(true); }}
+                <button onClick={() => {
+                  setInvoiceNote(rec.customInvoiceNote || '');
+                  setInvoicePaymentTemplate(debitNoteCompanyForUnit(unit.unitName));
+                  setInvoicePaymentRemark('');
+                  setShowInvoiceModal(true);
+                }}
                   disabled={contractEnded}
                   className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
                   📄 Send Invoice
@@ -1276,8 +1291,25 @@ function RentalDetailInner() {
               <textarea className={inp} rows={3} value={invoiceNote} onChange={(e) => setInvoiceNote(e.target.value)} placeholder={`Dear ${unit.tenantName},…`} />
               <p className="text-xs text-gray-400 mt-1">Send to: {unit.tenantEmail || 'No email set — log only'}</p>
             </div>
-            <div className="flex justify-between gap-3">
-              <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Preview Print View</Link>
+            <DebitNotePaymentOptions
+              templateId={invoicePaymentTemplate}
+              onTemplateId={setInvoicePaymentTemplate}
+              manualRemark={invoicePaymentRemark}
+              onManualRemark={setInvoicePaymentRemark}
+              showPreview
+            />
+            <div className="flex justify-between gap-3 flex-wrap">
+              <div className="flex gap-2 flex-wrap">
+                <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Preview Print View</Link>
+                {unit.tenantId && (
+                  <Link
+                    href={`/billing/debit-note?tenantId=${unit.tenantId}&unitId=${unit.id}&targetPeriod=${period}&mode=single&paymentTemplate=${invoicePaymentTemplate}${invoicePaymentRemark ? `&paymentRemark=${encodeURIComponent(invoicePaymentRemark)}` : ''}`}
+                    className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
+                  >
+                    Formal Debit Note 繳費通知單
+                  </Link>
+                )}
+              </div>
               <button onClick={sendInvoice} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
                 {busy ? 'Sending…' : 'Send Invoice Now'}
               </button>

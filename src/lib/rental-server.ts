@@ -35,6 +35,8 @@ import {
   formatUtilityAmount,
   formatDisplayDate,
   baseRentLineLabel,
+  buildDebitNotePaymentInstructionsText,
+  debitNoteCompanyForUnit,
   utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
@@ -55,6 +57,7 @@ import {
   type PreviousYearRent,
   type RentalChargeItem,
   type RentalChargeType,
+  type DebitNotePaymentTemplateId,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -558,7 +561,12 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
 // Email HTML builders
 // ---------------------------------------------------------------------------
 
-function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null): string {
+function invoiceHtml(
+  unit: RentalUnit,
+  record: RentRecord,
+  note?: string | null,
+  paymentInstructionsText?: string | null,
+): string {
   const lineItems = [
     `<tr><td>${baseRentLineLabel(record)}</td><td align="right"><strong>${formatMoney(record.baseRent)}</strong></td></tr>`,
     `<tr><td>${utilityLineLabel('water', record)}</td><td align="right">${formatUtilityAmount(record.waterFee)}</td></tr>`,
@@ -570,6 +578,7 @@ function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null)
     <table style="width:100%;border-collapse:collapse">${lineItems}</table>
     <p>Due: ${formatDisplayDate(dueDateForPeriod(record.billingPeriod, unit.dueDateDay))}</p>
     ${note ? `<p>${note}</p>` : ''}
+    ${paymentInstructionsText ? `<hr/><pre style="font-family:sans-serif;white-space:pre-wrap;font-size:13px">${paymentInstructionsText}</pre>` : ''}
     <p>Thank you.</p>`;
 }
 
@@ -600,6 +609,8 @@ export async function sendRentInvoice(
     electricityPeriodFrom?: string | null;
     electricityPeriodTo?: string | null;
     note?: string | null;
+    paymentTemplate?: DebitNotePaymentTemplateId;
+    paymentRemark?: string | null;
   }
 ) {
   const record = getRentRecord(recordId, userId);
@@ -649,10 +660,24 @@ export async function sendRentInvoice(
   syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (unit.tenantEmail) {
+    const dueDate = dueDateForPeriod(record.billingPeriod, unit.dueDateDay);
+    const dueDisplay = formatDisplayDate(dueDate);
+    const dueParts = dueDisplay.split('/');
+    const dueDateChinese = dueParts.length >= 3
+      ? `${dueParts[2]}年${Number(dueParts[1])}月${Number(dueParts[0])}日`
+      : dueDisplay;
+    const templateId = input.paymentTemplate ?? debitNoteCompanyForUnit(unit.unitName);
+    const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
+    const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+      templateId,
+      noteNo,
+      dueDateChinese,
+      input.paymentRemark,
+    );
     email = await sendEmail(
       unit.tenantEmail,
       `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, input.note)
+      invoiceHtml(unit, fresh, input.note, paymentInstructionsText)
     );
   }
   logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);

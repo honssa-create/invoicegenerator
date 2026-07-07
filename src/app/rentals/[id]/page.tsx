@@ -11,8 +11,10 @@ import ElectricityMeterCalculator from '@/components/ElectricityMeterCalculator'
 import WaterMeterCalculator from '@/components/WaterMeterCalculator';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
+import RentalPaymentLedgerTable from '@/components/RentalPaymentLedgerTable';
 import ChargeAllocationGrid, {
-  chargeRowsFromRecord,
+  chargeRowsByType,
+  distributeByChargeType,
   fillOutstandingValues,
   fillRentOnlyValues,
   sumAllocationValues,
@@ -21,6 +23,9 @@ import { compressImage } from '@/lib/imageCompression';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
+  RENTAL_PAYMENT_METHODS,
+  RENTAL_PAYMENT_METHOD_LABELS,
+  addBillingMonths,
   calculateBasicRentPeriod,
   chargeOutstanding,
   computeLeaseDisplayStatus,
@@ -55,6 +60,7 @@ import {
   type RentalPaymentWithAllocations,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UnitLeasePaymentLedgerRow,
   type UtilityBillingMode,
 } from '@/lib/rentals';
 
@@ -63,6 +69,8 @@ interface DetailPayload {
   currentRecord: RentRecord | null;
   chargeItems?: RentalChargeItem[];
   history: RentRecord[];
+  paymentLedger?: UnitLeasePaymentLedgerRow[];
+  outstandingCharges?: RentalChargeItem[];
   activities: RentalActivityLog[];
   latestReceipt: RentalPaymentReceipt | null;
   paymentHistory?: RentalPaymentWithAllocations[];
@@ -162,9 +170,17 @@ function RentalDetailInner() {
 
   // paid modal
   const [showPaidModal, setShowPaidModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<'byPeriod' | 'byType'>('byPeriod');
+  const [payMonths, setPayMonths] = useState('1');
+  const [periodRows, setPeriodRows] = useState<{ billingPeriod: string; amount: string }[]>([]);
+  const [paymentForm, setPaymentForm] = useState({
+    paymentDate: todayFormDate(),
+    amount: '',
+    method: '',
+    reference: '',
+    notes: '',
+  });
   const [autoSendReceipt, setAutoSendReceipt] = useState(false);
-  const [paidDate, setPaidDate] = useState(todayFormDate());
-  const [paidAmount, setPaidAmount] = useState('');
   const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [paidNote, setPaidNote] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
@@ -258,7 +274,6 @@ function RentalDetailInner() {
             }
             setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
-            setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
             lastCommittedUtilityRef.current = {
               baseRentPeriodFrom: rec.baseRentPeriodFrom ? toFormDate(rec.baseRentPeriodFrom) : calc.periodFrom,
               baseRentPeriodTo: rec.baseRentPeriodTo ? toFormDate(rec.baseRentPeriodTo) : calc.periodTo,
@@ -513,56 +528,153 @@ function RentalDetailInner() {
     setOcrLoading(false);
     if (res.ok) {
       setOcrResult({ extracted: d.extracted, matched: d.matched });
-      if (d.extracted?.transfer_date) setPaidDate(toFormDate(d.extracted.transfer_date));
-      if (d.extracted?.amount) setPaidAmount(String(d.extracted.amount));
+      if (d.extracted?.transfer_date) {
+        setPaymentForm((f) => ({ ...f, paymentDate: toFormDate(d.extracted.transfer_date) }));
+      }
+      if (d.extracted?.amount) {
+        setPaymentForm((f) => ({ ...f, amount: String(d.extracted.amount) }));
+      }
     }
   };
 
   const openPaidModal = () => {
-    if (!data?.currentRecord) return;
-    const items = data.chargeItems?.length
-      ? data.chargeItems
-      : [
-          { chargeType: 'rent' as const, amountDue: data.currentRecord.baseRent, amountAllocated: 0 },
-          { chargeType: 'water' as const, amountDue: data.currentRecord.waterFee, amountAllocated: 0 },
-          { chargeType: 'electricity' as const, amountDue: data.currentRecord.electricityFee, amountAllocated: 0 },
-        ];
-    const rows = chargeRowsFromRecord(items);
+    if (!data?.unit.tenantId) return;
+    const outstanding = data.outstandingCharges || [];
+    const rows = chargeRowsByType(outstanding);
     const filled = fillOutstandingValues(rows);
     setChargeAllocValues(filled);
-    setPaidAmount(String(sumAllocationValues(filled) || outstandingBalance(data.currentRecord)));
+    setPaymentMode('byPeriod');
+    setPeriodRows([]);
+    setPayMonths('1');
+    setPaymentForm({
+      paymentDate: todayFormDate(),
+      amount: String(sumAllocationValues(filled) || ''),
+      method: '',
+      reference: '',
+      notes: '',
+    });
+    setPaidNote('');
     setShowPaidModal(true);
     setOcrResult(null);
     setReceiptFile(null);
-    setPaidDate(data.currentRecord.paidDate ? toFormDate(data.currentRecord.paidDate) : todayFormDate());
   };
 
+  const startPaymentPeriod = () => {
+    if (!data) return currentBillingPeriod();
+    const periods = (data.outstandingCharges || [])
+      .filter((c) => chargeOutstanding(c) > 0)
+      .map((c) => c.billingPeriod)
+      .sort();
+    return periods[0] || period;
+  };
+
+  const monthlyRentForUnit = () => {
+    if (data?.unit.currentYearRent) return data.unit.currentYearRent;
+    const hist = data?.paymentLedger?.find((h) => h.baseRent > 0);
+    return hist?.baseRent || Number(baseRent) || 0;
+  };
+
+  const fillOutstandingPeriodRows = () => {
+    if (!data) return;
+    const seen = new Set<string>();
+    const rows: { billingPeriod: string; amount: string }[] = [];
+    const charges = [...(data.outstandingCharges || [])]
+      .filter((c) => chargeOutstanding(c) > 0)
+      .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod));
+    for (const c of charges) {
+      if (seen.has(c.billingPeriod)) continue;
+      seen.add(c.billingPeriod);
+      const periodTotal = charges
+        .filter((x) => x.billingPeriod === c.billingPeriod)
+        .reduce((s, x) => s + chargeOutstanding(x), 0);
+      rows.push({ billingPeriod: c.billingPeriod, amount: String(periodTotal) });
+    }
+    setPeriodRows(rows);
+    setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+  };
+
+  const fillAdvanceMonths = (months: number) => {
+    if (!data) return;
+    const rows: { billingPeriod: string; amount: string }[] = [];
+    let p = startPaymentPeriod();
+    const rent = monthlyRentForUnit();
+    for (let i = 0; i < months; i += 1) {
+      rows.push({ billingPeriod: p, amount: rent ? String(rent) : '' });
+      p = addBillingMonths(p, 1);
+    }
+    setPeriodRows(rows);
+    setPayMonths(String(months));
+    setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+  };
+
+  const addPeriodRow = () => {
+    setPeriodRows((prev) => [...prev, { billingPeriod: startPaymentPeriod(), amount: '' }]);
+  };
+
+  const chargeTypeRows = data ? chargeRowsByType(data.outstandingCharges || []) : [];
+
   const confirmPaid = async () => {
-    if (!data?.currentRecord) return;
-    const chargeAllocations = (['rent', 'water', 'electricity'] as const)
-      .map((chargeType) => ({ chargeType, amount: Number(chargeAllocValues[chargeType] || 0) }))
-      .filter((a) => a.amount > 0);
-    const allocSum = chargeAllocations.reduce((s, a) => s + a.amount, 0);
-    if (allocSum <= 0) {
-      setToast('Allocate at least one charge type (rent / water / electricity)');
+    if (!data?.unit.tenantId) return;
+    const amount = Number(paymentForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setToast('Enter a valid payment amount 請輸入有效收款金額');
       return;
     }
+
+    let body: Record<string, unknown> = {
+      tenantId: data.unit.tenantId,
+      paymentDate: fromFormDate(paymentForm.paymentDate),
+      amount,
+      method: paymentForm.method || null,
+      reference: paymentForm.reference || null,
+      notes: paidNote || paymentForm.notes || null,
+      unitIds: [data.unit.id],
+    };
+
+    if (paymentMode === 'byPeriod') {
+      const periodAllocations = periodRows
+        .filter((r) => r.billingPeriod && Number(r.amount) > 0)
+        .map((r) => ({ unitId: data.unit.id, billingPeriod: r.billingPeriod, amount: Number(r.amount) }));
+      if (periodAllocations.length) {
+        body.periodAllocations = periodAllocations;
+      } else {
+        body.autoAllocate = true;
+      }
+    } else {
+      const allocSum = sumAllocationValues(chargeAllocValues);
+      if (allocSum > amount + 0.01) {
+        setToast('Allocated total exceeds payment amount 分配金額超過收款總額');
+        return;
+      }
+      const allocations = distributeByChargeType(data.outstandingCharges || [], chargeAllocValues);
+      if (allocations.length && Math.abs(allocSum - amount) < 0.02) {
+        body.allocations = allocations;
+      } else if (allocations.length && allocSum < amount) {
+        body.autoAllocate = true;
+      } else if (allocations.length) {
+        body.allocations = allocations;
+      } else {
+        body.autoAllocate = true;
+      }
+    }
+
     setBusy(true);
-    const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/paid`, {
+    const res = await fetch('/api/rentals/payments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        autoSendReceiptEmail: autoSendReceipt,
-        note: paidNote || null,
-        paidDate: fromFormDate(paidDate),
-        amount: allocSum,
-        chargeAllocations,
-      }),
+      body: JSON.stringify(body),
     });
     setBusy(false);
     const d = await res.json().catch(() => ({}));
-    setToast(res.ok ? (d.fullyPaid ? 'Marked paid!' : 'Partial payment recorded') : 'Failed to record payment');
+    if (!res.ok) {
+      setToast(d.error || 'Failed to record payment');
+      return;
+    }
+    setToast('Payment recorded — outstanding balance updated 收款已記錄');
     setShowPaidModal(false);
+    setChargeAllocValues({});
+    setPeriodRows([]);
+    setPaymentForm({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
     setOcrResult(null);
     setReceiptFile(null);
     load();
@@ -632,7 +744,7 @@ function RentalDetailInner() {
   if (loading) return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
   if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">Unit not found. <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">Back</button></div></AppLayout>;
 
-  const { unit, currentRecord, history, activities, currentLease, leaseHistory, leaseDocuments } = data;
+  const { unit, currentRecord, activities, currentLease, leaseHistory, leaseDocuments, paymentLedger } = data;
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
   const recStatus = rec ? displayRentalStatus(rec) : 'pending';
@@ -987,32 +1099,44 @@ function RentalDetailInner() {
           </div>
 
           {/* Action bar */}
-          {rec && (
+          {(rec || unit.tenantId) && (
             <div className="bg-white rounded-2xl border border-gray-200 p-5">
-              <h2 className="font-semibold text-gray-900 mb-4">Actions</h2>
+              <h2 className="font-semibold text-gray-900 mb-1">Actions 操作</h2>
+              <p className="text-xs text-gray-500 mb-4">Official rental actions for this unit 單位正式操作</p>
               <div className="flex flex-wrap gap-3">
-                <button onClick={() => {
-                  setInvoiceNote(rec.customInvoiceNote || '');
-                  setInvoicePaymentTemplate(debitNoteCompanyForUnit(unit.unitName));
-                  setInvoicePaymentRemark('');
-                  setShowInvoiceModal(true);
-                }}
-                  disabled={contractEnded}
-                  className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
-                  📄 Send Invoice
-                </button>
-                <button onClick={openPaidModal}
-                  disabled={recStatus === 'paid'}
-                  className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-40">
-                  {recStatus === 'partial' ? '💰 Record Payment' : '✓ Record Payment 記錄收款'}
-                </button>
-                {rec.receiptRef && (
+                {rec && (
+                  <button onClick={() => {
+                    setInvoiceNote(rec.customInvoiceNote || '');
+                    setInvoicePaymentTemplate(debitNoteCompanyForUnit(unit.unitName));
+                    setInvoicePaymentRemark('');
+                    setShowInvoiceModal(true);
+                  }}
+                    disabled={contractEnded}
+                    className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                    📄 Send Invoice
+                  </button>
+                )}
+                {unit.tenantId && (
+                  <>
+                    <DebitNoteActions
+                      tenantId={unit.tenantId}
+                      unitId={unit.id}
+                      unitName={unit.unitName}
+                      period={period}
+                    />
+                    <button onClick={openPaidModal}
+                      className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700">
+                      ✓ Record Payment 記錄收款
+                    </button>
+                  </>
+                )}
+                {rec?.receiptRef && (
                   <Link href={`/rentals/records/${rec.id}/receipt`}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
                     🧾 View Receipt
                   </Link>
                 )}
-                {rec.invoiceRef && (
+                {rec?.invoiceRef && (
                   <Link href={`/rentals/records/${rec.id}/invoice`}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
                     🖨 View Invoice
@@ -1036,61 +1160,23 @@ function RentalDetailInner() {
             </div>
           )}
 
-          {/* History */}
+          {/* Payment ledger */}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="font-semibold text-gray-900">以往租金紀錄 Payment History</h2>
+              <h2 className="font-semibold text-gray-900">租金紀錄 Payment History</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Lease period coverage — click a row for rent / water / electricity breakdown
+                {currentLease && (
+                  <span className="ml-1">
+                    · {formatDisplayDate(currentLease.leaseStartDate)} → {formatDisplayDate(currentLease.actualEndDate || currentLease.leaseEndDate)}
+                  </span>
+                )}
+              </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
-                <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Period</th>
-                    <th className="px-4 py-3 text-right">Base</th>
-                    <th className="px-4 py-3 text-right">Water</th>
-                    <th className="px-4 py-3 text-right">Electricity</th>
-                    <th className="px-4 py-3 text-right">Total</th>
-                    <th className="px-4 py-3 text-left">以往交租日</th>
-                    <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-right">Docs</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {history.map((r) => {
-                    const hStatus = displayRentalStatus(r);
-                    return (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{r.billingPeriod}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.baseRent)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatUtilityAmount(r.waterFee)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatUtilityAmount(r.electricityFee)}</td>
-                      <td className="px-4 py-3 text-right font-semibold">
-                        {formatMoney(r.actualAmount)}
-                        {r.amountPaid > 0 && r.amountPaid < r.actualAmount && (
-                          <p className="text-[10px] text-orange-600 font-normal">Paid {formatMoney(r.amountPaid)}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{formatDisplayDate(r.paidDate || r.paidAt?.slice(0, 10))}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${RENTAL_STATUS_BADGE[hStatus]}`}>
-                          {RENTAL_STATUS_LABELS[hStatus]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="space-x-2">
-                          {r.invoiceRef && <Link href={`/rentals/records/${r.id}/invoice`} className="text-brand-600 text-xs hover:underline">Invoice</Link>}
-                          {r.receiptRef && <Link href={`/rentals/records/${r.id}/receipt`} className="text-brand-600 text-xs hover:underline">Receipt</Link>}
-                        </span>
-                      </td>
-                    </tr>
-                    );
-                  })}
-                  {history.length === 0 && (
-                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No history yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <RentalPaymentLedgerTable
+              rows={paymentLedger || []}
+              leaseLabel={unit.unitName}
+            />
           </div>
         </div>
 
@@ -1321,136 +1407,265 @@ function RentalDetailInner() {
       )}
 
       {/* Record Payment Modal */}
-      {showPaidModal && rec && (
-        <Modal title="Record Payment 記錄收款" onClose={() => setShowPaidModal(false)}>
-          <div className="space-y-5">
-            <div className="rounded-xl bg-green-50 border border-green-200 p-4">
-              <p className="text-sm text-green-700">Total Due 應付總額</p>
-              <p className="text-3xl font-bold text-green-800">{formatMoney(rec.actualAmount)}</p>
-              <p className="text-xs text-green-600 mt-1">
-                Rent {formatMoney(rec.baseRent)} + Water {formatUtilityAmount(rec.waterFee)} + Elec {formatUtilityAmount(rec.electricityFee)}
-              </p>
-              {rec.amountPaid > 0 && (
-                <p className="text-sm text-orange-700 mt-2 font-semibold">
-                  Already paid {formatMoney(rec.amountPaid)} · Outstanding {formatMoney(balance)}
+      {showPaidModal && unit.tenantId && (
+        <div className="modal-overlay">
+          <div className="modal-panel sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold">Record Payment 記錄收款</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Multi-month allocation — arrears first, then future months for advance rent
                 </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Payment Amount 本次收款金額</label>
-              <input type="number" min={0} step="0.01" className={inp} value={paidAmount}
-                onChange={(e) => setPaidAmount(e.target.value)} />
-              <div className="flex gap-2 mt-2 flex-wrap">
-                <button type="button" onClick={() => {
-                  const items = data?.chargeItems || [];
-                  const rows = chargeRowsFromRecord(items.length ? items : [
-                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0 },
-                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0 },
-                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0 },
-                  ]);
-                  const filled = fillRentOnlyValues(rows);
-                  setChargeAllocValues(filled);
-                  setPaidAmount(String(sumAllocationValues(filled)));
-                }}
-                  className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Rent only 只交租金</button>
-                <button type="button" onClick={() => {
-                  const items = data?.chargeItems || [];
-                  const rows = chargeRowsFromRecord(items.length ? items : [
-                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0 },
-                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0 },
-                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0 },
-                  ]);
-                  const filled = fillOutstandingValues(rows);
-                  setChargeAllocValues(filled);
-                  setPaidAmount(String(sumAllocationValues(filled)));
-                }}
-                  className="px-3 py-1 text-xs border rounded-lg hover:bg-gray-50">Full balance 全數</button>
               </div>
+              <button onClick={() => setShowPaidModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-2">Split by charge type 分拆入帳</label>
-              <ChargeAllocationGrid
-                rows={chargeRowsFromRecord(
-                  (data?.chargeItems?.length ? data.chargeItems : [
-                    { chargeType: 'rent', amountDue: rec.baseRent, amountAllocated: 0, status: 'unpaid' as const },
-                    { chargeType: 'water', amountDue: rec.waterFee, amountAllocated: 0, status: 'unpaid' as const },
-                    { chargeType: 'electricity', amountDue: rec.electricityFee, amountAllocated: 0, status: 'unpaid' as const },
-                  ])
-                )}
-                values={chargeAllocValues}
-                onChange={(v) => {
-                  setChargeAllocValues(v);
-                  setPaidAmount(String(sumAllocationValues(v)));
-                }}
-                threeRow
-              />
+            <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
+              <p className="text-sm text-green-700">Outstanding for {unit.unitName} 未付總額</p>
+              <p className="text-2xl font-bold text-green-800">
+                {formatMoney((data.outstandingCharges || []).reduce((s, c) => s + chargeOutstanding(c), 0))}
+              </p>
+              <p className="text-xs text-green-600 mt-1">
+                {(data.outstandingCharges || []).length} open charge item(s) · FIFO: rent → water → electricity
+              </p>
             </div>
 
-            {/* AI Receipt Upload */}
-            <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Upload Bank Slip / 收款憑證 (AI Auto-Extract)</p>
-              <div
-                onClick={() => receiptInputRef.current?.click()}
-                onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleReceiptUpload(f); }}
-                onDragOver={(e) => e.preventDefault()}
-                className="border-2 border-dashed border-gray-300 rounded-xl p-5 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 min-h-[80px] flex flex-col items-center justify-center gap-1"
+            <div className="flex gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => setPaymentMode('byPeriod')}
+                className={`text-xs px-3 py-1.5 rounded-lg border ${paymentMode === 'byPeriod' ? 'bg-brand-600 text-white border-brand-600' : 'hover:bg-gray-50'}`}
               >
-                <input ref={receiptInputRef} type="file" accept="image/*" className="hidden"
-                  onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }} />
-                {ocrLoading ? (
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600" />
-                ) : receiptFile ? (
-                  <p className="text-sm text-green-700 font-medium">✅ {receiptFile.name}</p>
-                ) : (
-                  <>
-                    <p className="text-sm text-gray-500">Drop receipt image or click to upload</p>
-                    <p className="text-xs text-gray-400">AI extracts amount, method, date, account</p>
-                  </>
-                )}
+                按期數 By Period
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentMode('byType')}
+                className={`text-xs px-3 py-1.5 rounded-lg border ${paymentMode === 'byType' ? 'bg-brand-600 text-white border-brand-600' : 'hover:bg-gray-50'}`}
+              >
+                按類型 By Type
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500">Paid Date 交租日</label>
+                  <input className={inp} value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} placeholder="DD/MM/YYYY" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Total Amount 收款總額</label>
+                  <input
+                    type="number"
+                    className={inp}
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Method 方式</label>
+                  <select
+                    className={inp}
+                    value={paymentForm.method}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
+                  >
+                    <option value="">Select method 選擇方式</option>
+                    {RENTAL_PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>{RENTAL_PAYMENT_METHOD_LABELS[m]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Reference 參考</label>
+                  <input className={inp} value={paymentForm.reference} onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })} />
+                </div>
               </div>
-              {ocrResult && (
-                <div className={`mt-3 rounded-xl border p-4 text-sm ${ocrResult.matched ? 'border-green-200 bg-green-50' : 'border-yellow-200 bg-yellow-50'}`}>
-                  <p className="font-semibold mb-2">{ocrResult.matched ? '✅ Amount Matched' : '⚠ Review Required'}</p>
-                  <div className="grid grid-cols-2 gap-y-1">
-                    <span className="text-gray-500">Amount:</span>
-                    <span className={`font-semibold ${ocrResult.matched ? 'text-green-700' : 'text-yellow-700'}`}>
-                      {ocrResult.extracted.amount !== null ? formatMoney(ocrResult.extracted.amount) : '—'}
-                      {ocrResult.matched ? ' ✓' : ' (differs)'}
-                    </span>
-                    <span className="text-gray-500">Method:</span><span>{ocrResult.extracted.method || '—'}</span>
-                    <span className="text-gray-500">Date:</span><span>{formatDisplayDate(ocrResult.extracted.transfer_date)}</span>
-                    <span className="text-gray-500">Account:</span><span>{ocrResult.extracted.receiving_account || '—'}</span>
+
+              {paymentMode === 'byPeriod' ? (
+                <div>
+                  <div className="mb-4 p-4 rounded-xl border border-brand-100 bg-brand-50/40">
+                    <label className="text-xs font-semibold text-gray-700 uppercase">繳付月數 Months to pay</label>
+                    <p className="text-xs text-gray-500 mt-0.5 mb-2">e.g. 3 months at once — fills arrears then future months</p>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min={1}
+                        max={36}
+                        className={`${inp} w-24 text-center font-semibold`}
+                        value={payMonths}
+                        onChange={(e) => {
+                          const n = Math.max(1, Math.min(36, Number(e.target.value) || 1));
+                          setPayMonths(String(n));
+                          fillAdvanceMonths(n);
+                        }}
+                      />
+                      <span className="text-sm text-gray-600">個月 month(s)</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <label className="text-xs font-semibold text-gray-600 uppercase">Period breakdown 帳期明細</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={fillOutstandingPeriodRows}>
+                        填未付 Fill arrears
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(3)}>
+                        預付3個月
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
+                        預付6個月
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => { setPayMonths('12'); fillAdvanceMonths(12); }}>
+                        預付12個月
+                      </button>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={addPeriodRow}>
+                        + Row
+                      </button>
+                    </div>
+                  </div>
+                  {periodRows.length === 0 ? (
+                    <p className="text-sm text-gray-400 border border-dashed rounded-lg p-4 text-center">
+                      Add period rows, or enter total only — system auto-allocates FIFO (including future months)
+                    </p>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-xs text-gray-500">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Period 帳期</th>
+                            <th className="px-3 py-2 text-right">Amount 金額</th>
+                            <th className="w-8" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {periodRows.map((row, idx) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="month"
+                                  className="w-full text-xs border rounded px-2 py-1"
+                                  value={row.billingPeriod}
+                                  onChange={(e) => {
+                                    const billingPeriod = e.target.value;
+                                    setPeriodRows((prev) => prev.map((r, i) => i === idx ? { ...r, billingPeriod } : r));
+                                  }}
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="number"
+                                  className="w-full text-xs border rounded px-2 py-1 text-right"
+                                  value={row.amount}
+                                  onChange={(e) => {
+                                    const amount = e.target.value;
+                                    setPeriodRows((prev) => {
+                                      const next = prev.map((r, i) => i === idx ? { ...r, amount } : r);
+                                      setPaymentForm((f) => ({ ...f, amount: String(next.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              </td>
+                              <td className="px-1 py-2">
+                                <button
+                                  type="button"
+                                  className="text-gray-400 hover:text-red-600 text-xs"
+                                  onClick={() => setPeriodRows((prev) => prev.filter((_, i) => i !== idx))}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-2">
+                    Period total: {formatMoney(periodRows.reduce((s, r) => s + Number(r.amount || 0), 0))}
+                    {paymentForm.amount && ` · Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold text-gray-600 uppercase">Payment split 分拆收款</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                        onClick={() => {
+                          const filled = fillRentOnlyValues(chargeTypeRows);
+                          setChargeAllocValues(filled);
+                          setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
+                        }}
+                      >
+                        Rent only 只交租金
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                        onClick={() => {
+                          const filled = fillOutstandingValues(chargeTypeRows);
+                          setChargeAllocValues(filled);
+                          setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
+                        }}
+                      >
+                        Fill all 填滿未付
+                      </button>
+                    </div>
+                  </div>
+                  <ChargeAllocationGrid
+                    rows={chargeTypeRows}
+                    values={chargeAllocValues}
+                    onChange={(v) => {
+                      setChargeAllocValues(v);
+                      setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(v) || '') }));
+                    }}
+                    threeRow
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    Allocated: {formatMoney(sumAllocationValues(chargeAllocValues))}
+                    {paymentForm.amount && ` / Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
+                  </p>
+                </div>
+              )}
+
+              {data.currentRecord && (
+                <div>
+                  <p className="text-sm font-medium text-gray-700 mb-2">Upload Bank Slip / 收款憑證 (optional)</p>
+                  <div
+                    onClick={() => receiptInputRef.current?.click()}
+                    onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleReceiptUpload(f); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
+                  >
+                    <input ref={receiptInputRef} type="file" accept="image/*" className="hidden"
+                      onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }} />
+                    {ocrLoading ? (
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" />
+                    ) : receiptFile ? (
+                      <p className="text-sm text-green-700 font-medium">✅ {receiptFile.name}</p>
+                    ) : (
+                      <p className="text-sm text-gray-500">Drop receipt image for AI extract (current period)</p>
+                    )}
                   </div>
                 </div>
               )}
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
+                <textarea className={inp} rows={2} value={paidNote} onChange={(e) => setPaidNote(e.target.value)} />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Paid Date 交租日子</label>
-              <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
-            </div>
-
-            <label className="flex items-center gap-3 text-sm font-medium cursor-pointer">
-              <input type="checkbox" checked={autoSendReceipt} onChange={(e) => setAutoSendReceipt(e.target.checked)}
-                className="h-4 w-4 rounded" />
-              付款後自動發送收據 Email (Auto-send receipt email upon confirmation)
-            </label>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Receipt Note (optional)</label>
-              <textarea className={inp} rows={2} value={paidNote} onChange={(e) => setPaidNote(e.target.value)} />
-            </div>
-
-            <div className="flex justify-end gap-3">
+            <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button onClick={confirmPaid} disabled={busy || sumAllocationValues(chargeAllocValues) <= 0} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
-                {busy ? 'Saving…' : sumAllocationValues(chargeAllocValues) >= balance - 0.01 ? 'Confirm Full Payment 確認全數收款' : 'Record Partial Payment 記錄部分收款'}
+              <button onClick={confirmPaid} disabled={busy || !Number(paymentForm.amount)} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                {busy ? 'Saving…' : 'Save & Allocate 儲存並核銷'}
               </button>
             </div>
           </div>
-        </Modal>
+        </div>
       )}
 
       {/* End Contract modal */}

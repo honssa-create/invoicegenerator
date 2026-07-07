@@ -45,6 +45,12 @@ import {
   type PeriodPaymentAllocation,
   type TenantBillingHistoryRow,
   type UtilityBillingMode,
+  addBillingMonths,
+  derivePeriodPaymentStatus,
+  type PeriodChargeAllocationEntry,
+  type RentalLease,
+  type UnitLeasePaymentLedgerRow,
+  type UnitLeasePeriodChargeDetail,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
 } from './rentals';
@@ -969,6 +975,162 @@ export function getUnitPaymentHistory(unitId: number, userId: number): RentalPay
       ...p,
       allocations: p.allocations.filter((a) => a.unitId === unitId),
     }));
+}
+
+/** Outstanding charge items for a single unit (FIFO order). */
+export function getUnitOutstandingCharges(unitId: number, userId: number): RentalChargeItem[] {
+  return (db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE user_id = ? AND unit_id = ? AND amount_due > amount_allocated
+     ORDER BY billing_period ASC,
+       CASE charge_type WHEN 'rent' THEN 1 WHEN 'water' THEN 2 ELSE 3 END`
+  ).all(userId, unitId) as ChargeRow[]).map(hydrateCharge);
+}
+
+interface LedgerRecordRow {
+  id: number;
+  billing_period: string;
+  base_rent: number;
+  water_fee: number;
+  electricity_fee: number;
+  actual_amount: number;
+  amount_paid: number;
+  paid_date: string | null;
+  paid_at: string | null;
+  invoice_ref: string | null;
+  receipt_ref: string | null;
+}
+
+interface LedgerAllocationRow {
+  charge_item_id: number;
+  charge_type: RentalChargeType;
+  billing_period: string;
+  amount: number;
+  payment_id: number;
+  payment_date: string;
+  method: string | null;
+  reference: string | null;
+}
+
+/** Lease-period payment ledger for unit profile (every month in 租約期). */
+export function getUnitLeasePaymentLedger(
+  unitId: number,
+  userId: number,
+  lease: RentalLease | null,
+): UnitLeasePaymentLedgerRow[] {
+  if (!lease) return [];
+
+  const start = lease.leaseStartDate?.slice(0, 7);
+  const end = (lease.actualEndDate || lease.leaseEndDate)?.slice(0, 7);
+  if (!start || !end || start > end) return [];
+
+  const records = db.prepare(
+    `SELECT id, billing_period, base_rent, water_fee, electricity_fee, actual_amount,
+            amount_paid, paid_date, paid_at, invoice_ref, receipt_ref
+     FROM rental_records
+     WHERE user_id = ? AND unit_id = ? AND billing_period >= ? AND billing_period <= ?
+     ORDER BY billing_period ASC`
+  ).all(userId, unitId, start, end) as LedgerRecordRow[];
+
+  const chargeRows = db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE user_id = ? AND unit_id = ? AND billing_period >= ? AND billing_period <= ?`
+  ).all(userId, unitId, start, end) as ChargeRow[];
+
+  const chargeIds = chargeRows.map((c) => c.id);
+  const allocByChargeId = new Map<number, PeriodChargeAllocationEntry[]>();
+  if (chargeIds.length) {
+    const placeholders = chargeIds.map(() => '?').join(',');
+    const allocRows = db.prepare(
+      `SELECT a.charge_item_id, a.amount, p.id AS payment_id, p.payment_date, p.method, p.reference
+       FROM rental_payment_allocations a
+       JOIN rental_payments p ON p.id = a.payment_id
+       WHERE a.user_id = ? AND a.charge_item_id IN (${placeholders})
+       ORDER BY p.payment_date DESC, a.id DESC`
+    ).all(userId, ...chargeIds) as LedgerAllocationRow[];
+
+    for (const row of allocRows) {
+      const list = allocByChargeId.get(row.charge_item_id) || [];
+      list.push({
+        paymentId: row.payment_id,
+        paymentDate: row.payment_date,
+        amount: row.amount,
+        method: row.method,
+        reference: row.reference,
+      });
+      allocByChargeId.set(row.charge_item_id, list);
+    }
+  }
+
+  const recordByPeriod = Object.fromEntries(records.map((r) => [r.billing_period, r]));
+  const chargesByPeriod = new Map<string, ChargeRow[]>();
+  for (const c of chargeRows) {
+    const list = chargesByPeriod.get(c.billing_period) || [];
+    list.push(c);
+    chargesByPeriod.set(c.billing_period, list);
+  }
+
+  const months: string[] = [];
+  let period = start;
+  while (period <= end) {
+    months.push(period);
+    period = addBillingMonths(period, 1);
+  }
+
+  const chargeTypes: RentalChargeType[] = ['rent', 'water', 'electricity'];
+
+  const rows = months.map((billingPeriod) => {
+    const record = recordByPeriod[billingPeriod];
+    const periodChargeRows = chargesByPeriod.get(billingPeriod) || [];
+
+    const charges: UnitLeasePeriodChargeDetail[] = chargeTypes.map((chargeType) => {
+      const item = periodChargeRows.find((c) => c.charge_type === chargeType);
+      const fallbackDue = chargeType === 'rent'
+        ? (record?.base_rent ?? lease.baseRent ?? 0)
+        : chargeType === 'water'
+          ? (record?.water_fee ?? 0)
+          : (record?.electricity_fee ?? 0);
+      const amountDue = item?.amount_due ?? fallbackDue;
+      const amountAllocated = item?.amount_allocated ?? 0;
+      const status = deriveChargeItemStatus(amountDue, amountAllocated);
+      return {
+        chargeType,
+        amountDue,
+        amountAllocated,
+        outstanding: chargeOutstanding({ amountDue, amountAllocated }),
+        status,
+        allocations: item ? (allocByChargeId.get(item.id) || []) : [],
+      };
+    });
+
+    const baseRent = charges.find((c) => c.chargeType === 'rent')?.amountDue ?? 0;
+    const waterFee = charges.find((c) => c.chargeType === 'water')?.amountDue ?? 0;
+    const electricityFee = charges.find((c) => c.chargeType === 'electricity')?.amountDue ?? 0;
+    const total = record?.actual_amount ?? (baseRent + waterFee + electricityFee);
+    const amountReceived = charges.reduce((s, c) => s + c.amountAllocated, 0);
+
+    const allocDates = charges.flatMap((c) => c.allocations.map((a) => a.paymentDate)).filter(Boolean);
+    const receivedDate = allocDates.length
+      ? allocDates.sort().reverse()[0]
+      : (record?.paid_date || record?.paid_at?.slice(0, 10) || null);
+
+    return {
+      billingPeriod,
+      recordId: record?.id ?? null,
+      baseRent,
+      waterFee,
+      electricityFee,
+      total,
+      amountReceived,
+      receivedDate,
+      status: derivePeriodPaymentStatus(charges),
+      invoiceRef: record?.invoice_ref ?? null,
+      receiptRef: record?.receipt_ref ?? null,
+      charges,
+    };
+  });
+
+  return rows.reverse();
 }
 
 export function getRentalPaymentDetail(paymentId: number | string, userId: number) {

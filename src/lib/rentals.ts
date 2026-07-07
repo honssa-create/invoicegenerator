@@ -1154,6 +1154,73 @@ export interface TenantBillingHistoryRow {
   status: RentalDisplayStatus;
 }
 
+/** One allocation line applied to a charge item within a billing period. */
+export interface PeriodChargeAllocationEntry {
+  paymentId: number;
+  paymentDate: string;
+  amount: number;
+  method: string | null;
+  reference: string | null;
+}
+
+/** Per charge-type breakdown for a lease billing period. */
+export interface UnitLeasePeriodChargeDetail {
+  chargeType: RentalChargeType;
+  amountDue: number;
+  amountAllocated: number;
+  outstanding: number;
+  status: RentalChargeItemStatus;
+  allocations: PeriodChargeAllocationEntry[];
+}
+
+/** Lease-period payment ledger row (unit profile 租金紀錄). */
+export interface UnitLeasePaymentLedgerRow {
+  billingPeriod: string;
+  recordId: number | null;
+  baseRent: number;
+  waterFee: number;
+  electricityFee: number;
+  total: number;
+  amountReceived: number;
+  receivedDate: string | null;
+  status: RentalDisplayStatus;
+  invoiceRef: string | null;
+  receiptRef: string | null;
+  charges: UnitLeasePeriodChargeDetail[];
+}
+
+/** Official period status labels for the payment ledger. */
+export const PERIOD_LEDGER_STATUS_LABELS: Record<'paid' | 'partial' | 'unpaid', string> = {
+  paid: 'Paid 已付',
+  partial: 'Partially Paid 部分付款',
+  unpaid: 'Unpaid 未付',
+};
+
+export function periodLedgerStatusLabel(status: RentalDisplayStatus): string {
+  if (status === 'paid') return PERIOD_LEDGER_STATUS_LABELS.paid;
+  if (status === 'partial') return PERIOD_LEDGER_STATUS_LABELS.partial;
+  return PERIOD_LEDGER_STATUS_LABELS.unpaid;
+}
+
+export function periodLedgerStatusBadge(status: RentalDisplayStatus): string {
+  if (status === 'paid') return RENTAL_STATUS_BADGE.paid;
+  if (status === 'partial') return RENTAL_STATUS_BADGE.partial;
+  return RENTAL_STATUS_BADGE.pending;
+}
+
+/** Roll up charge-item rows into period Paid / Partially Paid / Unpaid. */
+export function derivePeriodPaymentStatus(
+  charges: Pick<UnitLeasePeriodChargeDetail, 'amountDue' | 'amountAllocated'>[],
+): RentalDisplayStatus {
+  const withDue = charges.filter((c) => (c.amountDue || 0) > 0);
+  if (!withDue.length) return 'paid';
+  const totalDue = withDue.reduce((s, c) => s + c.amountDue, 0);
+  const totalAlloc = withDue.reduce((s, c) => s + (c.amountAllocated || 0), 0);
+  if (totalAlloc <= 0.009) return 'pending';
+  if (totalAlloc >= totalDue - 0.009) return 'paid';
+  return 'partial';
+}
+
 /** YYYY-MM → 2026年6月份 for debit note line descriptions */
 export function formatDebitNotePeriodLong(period: string): string {
   const [y, m] = period.split('-');

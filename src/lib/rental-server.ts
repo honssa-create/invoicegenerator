@@ -10,6 +10,8 @@ import {
   getOutstandingChargeItemsForUnits,
   getRentalTenant,
   getTenantUnits,
+  getUnitLeasePaymentLedger,
+  getUnitOutstandingCharges,
   getUnitPaymentHistory,
   recordTenantPaymentWithAllocations,
   syncChargeItemsFromRecord,
@@ -70,6 +72,7 @@ import {
   type RentalStatus,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UnitLeasePaymentLedgerRow,
 } from './rentals';
 
 // ---------------------------------------------------------------------------
@@ -608,6 +611,8 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     unit, currentRecord, history, activities,
     chargeItems,
     paymentHistory: getUnitPaymentHistory(unit.id, userId),
+    paymentLedger: getUnitLeasePaymentLedger(unit.id, userId, currentLease),
+    outstandingCharges: getUnitOutstandingCharges(unit.id, userId),
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
     currentLease,
     leaseHistory: getLeaseHistory(unit.id, userId),

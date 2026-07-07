@@ -309,7 +309,8 @@ function RentalDetailInner() {
       meter213B, meterStockRoom1, meterStockRoom2,
     });
     const fee = calcElectricityFeeForFormula(electricityFormula, meter);
-    setElectricityFee(fee > 0 || meter.currReading != null ? String(fee) : '');
+    const hasInput = [meterPrevReading, meterCurrReading, meterRatePerUnit].some((v) => v.trim() !== '');
+    setElectricityFee(hasInput ? String(fee) : '');
   }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
@@ -637,6 +638,16 @@ function RentalDetailInner() {
     : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
   const contractEnded = leaseStatus === 'ended' || leaseStatus === 'terminated' || leaseStatus === 'vacant';
   const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
+  const liveElectricityMeter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
+    meter213B, meterStockRoom1, meterStockRoom2,
+  });
+  const liveElectricityFee = electricityFormula
+    ? calcElectricityFeeForFormula(electricityFormula, liveElectricityMeter)
+    : Number(electricityFee) || rec?.electricityFee || 0;
+  const liveWaterFee = waterMeterFormula
+    ? calcWaterFeeFromMeter(waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate))
+    : Number(waterFee) || rec?.waterFee || 0;
+  const liveMonthTotal = (Number(baseRent) || rec?.baseRent || 0) + liveWaterFee + liveElectricityFee;
 
   return (
     <AppLayout>
@@ -816,9 +827,17 @@ function RentalDetailInner() {
                     <>
                       <p className="text-xs text-yellow-700/80 mb-3">
                         {electricityFormula === '213a'
-                          ? '213A formula: net usage (after deducting other units) × rate'
-                          : 'Stock Room formula: (current − previous reading) × rate'}
+                          ? '213A formula: 實用電度數 = (今次 − 前次) − 其他單位；AMOUNT = 實用電度數 × 每度電費'
+                          : 'Stock Room formula: 用電度數 = 今次錶數 − 前次錶數；AMOUNT = 用電度數 × 每度電費'}
                       </p>
+                      <div className="grid md:grid-cols-3 gap-3 mb-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                          <div className="px-3 py-2.5 rounded-lg bg-white border border-yellow-200 text-sm font-semibold text-yellow-900">
+                            {formatMoney(liveElectricityFee)}
+                          </div>
+                        </div>
+                      </div>
                       <ElectricityMeterCalculator
                         formula={electricityFormula}
                         prevReading={meterPrevReading}
@@ -934,9 +953,9 @@ function RentalDetailInner() {
                 <div className="mt-4 rounded-xl border-2 border-brand-100 bg-brand-50 p-4 flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <p className="text-xs text-gray-500">Total this month</p>
-                    <p className="text-3xl font-bold text-brand-700">{formatMoney(rec.actualAmount)}</p>
+                    <p className="text-3xl font-bold text-brand-700">{formatMoney(liveMonthTotal)}</p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Rent {formatMoney(rec.baseRent)} + Water {formatUtilityAmount(rec.waterFee)} + Elec {formatUtilityAmount(rec.electricityFee)}
+                      Rent {formatMoney(Number(baseRent) || rec.baseRent)} + Water {formatUtilityAmount(liveWaterFee)} + Elec {formatUtilityAmount(liveElectricityFee)}
                     </p>
                     {rec.amountPaid > 0 && (
                       <p className="text-sm text-green-700 mt-2 font-medium">

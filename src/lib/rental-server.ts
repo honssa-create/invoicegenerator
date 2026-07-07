@@ -45,6 +45,10 @@ import {
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
+  electricityFormulaForUnit,
+  calcElectricityFeeForFormula,
+  unitHasWaterMeterFormula,
+  calcWaterFeeFromMeter,
   type ElectricityMeterData,
   type WaterMeterData,
   type PeriodPaymentAllocation,
@@ -408,8 +412,19 @@ export function updateRentRecordUtilities(
   const existing = getRentRecord(id, userId);
   if (!existing) return null;
   const base = Number(input.baseRent ?? existing.baseRent) || 0;
-  const water = Number(input.waterFee ?? existing.waterFee) || 0;
-  const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
+  let water = Number(input.waterFee ?? existing.waterFee) || 0;
+  let elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
+  const unit = getRentalUnit(existing.unitId, userId);
+  const elecFormula = unit ? electricityFormulaForUnit(unit.unitName) : null;
+  const waterFormula = unit ? unitHasWaterMeterFormula(unit.unitName) : false;
+  const meter = input.electricityMeter !== undefined ? input.electricityMeter : existing.electricityMeter;
+  const waterMeter = input.waterMeter !== undefined ? input.waterMeter : existing.waterMeter;
+  if (elecFormula && meter) {
+    elec = calcElectricityFeeForFormula(elecFormula, meter);
+  }
+  if (waterFormula && waterMeter) {
+    water = calcWaterFeeFromMeter(waterMeter);
+  }
   const meterJson = input.electricityMeter !== undefined
     ? (input.electricityMeter ? JSON.stringify(input.electricityMeter) : null)
     : (existing.electricityMeter ? JSON.stringify(existing.electricityMeter) : null);

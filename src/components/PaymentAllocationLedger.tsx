@@ -4,6 +4,7 @@ import {
   CHARGE_TYPE_LABELS,
   formatDisplayDate,
   formatMoney,
+  paymentMethodLabel,
   type RentalPaymentAllocationDetail,
 } from '@/lib/rentals';
 

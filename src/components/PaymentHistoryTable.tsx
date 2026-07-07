@@ -5,6 +5,7 @@ import {
   CHARGE_TYPE_LABELS,
   formatDisplayDate,
   formatMoney,
+  paymentMethodLabel,
   type RentalPaymentWithAllocations,
 } from '@/lib/rentals';
 
@@ -54,7 +55,7 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate }: 
                 </td>
                 <td className="px-4 py-3 font-medium">{formatDisplayDate(p.paymentDate)}</td>
                 <td className="px-4 py-3 text-gray-600">
-                  {p.method || '—'}
+                  {paymentMethodLabel(p.method)}
                   {p.reference && <span className="block text-xs text-gray-400">{p.reference}</span>}
                 </td>
                 <td className="px-4 py-3 text-right font-semibold">{formatMoney(p.amount)}</td>

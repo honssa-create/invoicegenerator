@@ -585,6 +585,24 @@ export interface RentalPayment {
   updated_at: string;
 }
 
+export const RENTAL_PAYMENT_METHODS = ['cheque', 'cash', 'bank_transfer', 'autopay'] as const;
+export type RentalPaymentMethod = (typeof RENTAL_PAYMENT_METHODS)[number];
+
+export const RENTAL_PAYMENT_METHOD_LABELS: Record<RentalPaymentMethod, string> = {
+  cheque: 'Cheque 支票',
+  cash: 'Cash 現金',
+  bank_transfer: 'Bank Transfer 銀行轉帳',
+  autopay: 'Autopay 自動轉帳',
+};
+
+export function paymentMethodLabel(method: string | null | undefined): string {
+  if (!method) return '—';
+  if (method in RENTAL_PAYMENT_METHOD_LABELS) {
+    return RENTAL_PAYMENT_METHOD_LABELS[method as RentalPaymentMethod];
+  }
+  return method;
+}
+
 export interface RentalPaymentAllocation {
   id: number;
   user_id: number;

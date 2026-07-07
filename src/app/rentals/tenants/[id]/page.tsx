@@ -29,6 +29,8 @@ import {
   formatMoney,
   formatUtilityAmount,
   todayFormDate,
+  RENTAL_PAYMENT_METHODS,
+  RENTAL_PAYMENT_METHOD_LABELS,
   type RentalChargeItem,
   type RentalPayment,
   type RentalPaymentAllocationDetail,
@@ -738,7 +740,16 @@ export default function TenantDetailPage() {
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Method 方式</label>
-                  <input className={inp} value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })} />
+                  <select
+                    className={inp}
+                    value={paymentForm.method}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
+                  >
+                    <option value="">Select method 選擇方式</option>
+                    {RENTAL_PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>{RENTAL_PAYMENT_METHOD_LABELS[m]}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Reference 參考</label>

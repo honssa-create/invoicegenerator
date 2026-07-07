@@ -518,6 +518,32 @@ export default function TenantDetailPage() {
         </div>
       </div>
 
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-gray-900">Payment Records 收款紀錄</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Every payment received from this tenant — expand rows for unit / period breakdown
+            </p>
+          </div>
+          {!readOnly && (
+            <button onClick={openPaymentModal} className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700">
+              + Record Payment
+            </button>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <PaymentHistoryTable
+            payments={paymentsWithAllocations || []}
+            readOnly={readOnly}
+            onAllocate={(paymentId) => {
+              const p = payments.find((x) => x.id === paymentId);
+              if (p) openAllocate(p);
+            }}
+          />
+        </div>
+      </div>
+
       <div className="grid lg:grid-cols-2 gap-6 mb-6">
         {/* Units selection */}
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -628,8 +654,8 @@ export default function TenantDetailPage() {
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold">Payment History 以往租金紀錄</h2>
-          <p className="text-xs text-gray-500 mt-0.5">All units under this tenant · includes paid date 交租日</p>
+          <h2 className="font-semibold text-gray-900">Billing History 帳單紀錄</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Monthly rent / water / electricity billed during this tenant&apos;s leases</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[720px]">
@@ -677,22 +703,7 @@ export default function TenantDetailPage() {
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold">Payments 收款紀錄</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Expand rows for itemized unit / period / charge-type breakdown</p>
-        </div>
-        <PaymentHistoryTable
-          payments={paymentsWithAllocations || []}
-          readOnly={readOnly}
-          onAllocate={(paymentId) => {
-            const p = payments.find((x) => x.id === paymentId);
-            if (p) openAllocate(p);
-          }}
-        />
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold">Payment Allocations 核銷對照表</h2>
+          <h2 className="font-semibold text-gray-900">Payment Allocations 核銷對照表</h2>
           <p className="text-xs text-gray-500 mt-0.5">N-to-N: payments ↔ billing items (rent / water / electricity per unit & month)</p>
         </div>
         <div className="p-4">

@@ -235,6 +235,20 @@ export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUni
   }));
 }
 
+/** Current units plus any unit ever linked via lease history (for former tenants). */
+export function getTenantUnitNameMap(tenantId: number, userId: number): Record<number, string> {
+  const rows = db.prepare(
+    `SELECT DISTINCT u.id, u.unit_name
+     FROM rental_units u
+     WHERE u.user_id = ?
+       AND (u.tenant_id = ? OR u.id IN (
+         SELECT unit_id FROM rental_leases WHERE tenant_id = ? AND user_id = ?
+       ))
+     ORDER BY u.unit_name COLLATE NOCASE`
+  ).all(userId, tenantId, tenantId, userId) as { id: number; unit_name: string }[];
+  return Object.fromEntries(rows.map((r) => [r.id, r.unit_name]));
+}
+
 /** Resolve tenant id from a rental unit (for notice links from unit context). */
 export function getTenantIdForUnit(unitId: number | string, userId: number): number | null {
   const row = db.prepare(
@@ -754,10 +768,9 @@ export function getTenantBillingHistory(
   tenantId: number | string,
   userId: number,
 ): TenantBillingHistoryRow[] {
-  const units = getTenantUnits(Number(tenantId), userId);
-  if (!units.length) return [];
-  const unitIds = units.map((u) => u.id);
-  const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
+  const unitNameMap = getTenantUnitNameMap(Number(tenantId), userId);
+  const unitIds = Object.keys(unitNameMap).map(Number);
+  if (!unitIds.length) return [];
   const placeholders = unitIds.map(() => '?').join(',');
 
   interface HistoryRow {
@@ -768,12 +781,24 @@ export function getTenantBillingHistory(
   }
 
   const rows = db.prepare(
-    `SELECT id, unit_id, billing_period, base_rent, water_fee, electricity_fee,
-            actual_amount, amount_paid, paid_date, paid_at, status
-     FROM rental_records
-     WHERE user_id = ? AND unit_id IN (${placeholders})
-     ORDER BY billing_period DESC, unit_id ASC`
-  ).all(userId, ...unitIds) as HistoryRow[];
+    `SELECT r.id, r.unit_id, r.billing_period, r.base_rent, r.water_fee, r.electricity_fee,
+            r.actual_amount, r.amount_paid, r.paid_date, r.paid_at, r.status
+     FROM rental_records r
+     WHERE r.user_id = ? AND r.unit_id IN (${placeholders})
+       AND (
+         EXISTS (
+           SELECT 1 FROM rental_charge_items c
+           WHERE c.legacy_record_id = r.id AND c.tenant_id = ? AND c.user_id = ?
+         )
+         OR EXISTS (
+           SELECT 1 FROM rental_leases l
+           WHERE l.unit_id = r.unit_id AND l.tenant_id = ? AND l.user_id = ?
+             AND r.billing_period >= substr(l.lease_start_date, 1, 7)
+             AND r.billing_period <= substr(COALESCE(l.actual_end_date, l.lease_end_date, '9999-12-31'), 1, 7)
+         )
+       )
+     ORDER BY r.billing_period DESC, r.unit_id ASC`
+  ).all(userId, ...unitIds, tenantId, userId, tenantId, userId) as HistoryRow[];
 
   return rows.map((r) => {
     const record: RentRecord = {
@@ -838,7 +863,7 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
   ).all(tenantId, userId) as PaymentRow[]).map(hydratePayment);
 
   const allocationLedger = getTenantAllocationLedger(tenant.id, userId);
-  const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
+  const unitNameMap = getTenantUnitNameMap(tenant.id, userId);
   const paymentsWithAllocations = payments.map((p) => hydratePaymentWithAllocations(p, userId, unitNameMap));
   const billingHistory = getTenantBillingHistory(tenant.id, userId);
   const leaseHistory = getTenantLeaseHistory(tenant.id, userId);

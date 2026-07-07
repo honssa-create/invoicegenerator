@@ -102,7 +102,9 @@ function RentalDetailInner() {
   const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
   const [meterPrevReading, setMeterPrevReading] = useState('');
   const [meterCurrReading, setMeterCurrReading] = useState('');
-  const [meterOtherUsage, setMeterOtherUsage] = useState('');
+  const [meter213B, setMeter213B] = useState('');
+  const [meterStockRoom1, setMeterStockRoom1] = useState('');
+  const [meterStockRoom2, setMeterStockRoom2] = useState('');
   const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
   const [suggestedPrevReading, setSuggestedPrevReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
@@ -186,7 +188,9 @@ function RentalDetailInner() {
             const meter = rec.electricityMeter;
             setMeterPrevReading(meter?.prevReading != null ? String(meter.prevReading) : '');
             setMeterCurrReading(meter?.currReading != null ? String(meter.currReading) : '');
-            setMeterOtherUsage(meter?.otherUnitsUsage != null ? String(meter.otherUnitsUsage) : '');
+            setMeter213B(meter?.meter213B != null ? String(meter.meter213B) : '');
+            setMeterStockRoom1(meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '');
+            setMeterStockRoom2(meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '');
             setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
             setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
             if (!meter?.prevReading && d.suggestedPrevElectricityReading != null) {
@@ -218,10 +222,12 @@ function RentalDetailInner() {
 
   useEffect(() => {
     if (!electricityFormula) return;
-    const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, meterOtherUsage);
+    const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
+      meter213B, meterStockRoom1, meterStockRoom2,
+    });
     const fee = calcElectricityFeeForFormula(electricityFormula, meter);
     setElectricityFee(fee > 0 || meter.currReading != null ? String(fee) : '');
-  }, [electricityFormula, meterPrevReading, meterCurrReading, meterOtherUsage, meterRatePerUnit]);
+  }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
@@ -266,7 +272,8 @@ function RentalDetailInner() {
     };
     if (electricityFormula) {
       payload.electricityMeter = meterDataFromInputs(
-        meterPrevReading, meterCurrReading, meterRatePerUnit, meterOtherUsage,
+        meterPrevReading, meterCurrReading, meterRatePerUnit,
+        { meter213B, meterStockRoom1, meterStockRoom2 },
       );
     }
     return payload;
@@ -689,11 +696,15 @@ function RentalDetailInner() {
                         formula={electricityFormula}
                         prevReading={meterPrevReading}
                         currReading={meterCurrReading}
-                        otherUnitsUsage={meterOtherUsage}
+                        meter213B={meter213B}
+                        meterStockRoom1={meterStockRoom1}
+                        meterStockRoom2={meterStockRoom2}
                         ratePerUnit={meterRatePerUnit}
                         onPrevReading={setMeterPrevReading}
                         onCurrReading={setMeterCurrReading}
-                        onOtherUnitsUsage={setMeterOtherUsage}
+                        onMeter213B={setMeter213B}
+                        onMeterStockRoom1={setMeterStockRoom1}
+                        onMeterStockRoom2={setMeterStockRoom2}
                         onRatePerUnit={setMeterRatePerUnit}
                         suggestedPrevReading={suggestedPrevReading}
                         inpClassName={inp}

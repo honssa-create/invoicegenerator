@@ -5,6 +5,7 @@ import {
   calcStockRoomElectricityFee,
   electricityUsageUnits,
   formatMoney,
+  otherUnitsUsageTotal,
   type ElectricityFormula,
 } from '@/lib/rentals';
 
@@ -12,38 +13,64 @@ interface Props {
   formula: ElectricityFormula;
   prevReading: string;
   currReading: string;
-  otherUnitsUsage: string;
+  meter213B: string;
+  meterStockRoom1: string;
+  meterStockRoom2: string;
   ratePerUnit: string;
   onPrevReading: (v: string) => void;
   onCurrReading: (v: string) => void;
-  onOtherUnitsUsage: (v: string) => void;
+  onMeter213B: (v: string) => void;
+  onMeterStockRoom1: (v: string) => void;
+  onMeterStockRoom2: (v: string) => void;
   onRatePerUnit: (v: string) => void;
   suggestedPrevReading?: number | null;
   inpClassName?: string;
+}
+
+function numOrNull(s: string): number | null {
+  return s.trim() === '' ? null : Number(s);
 }
 
 export default function ElectricityMeterCalculator({
   formula,
   prevReading,
   currReading,
-  otherUnitsUsage,
+  meter213B,
+  meterStockRoom1,
+  meterStockRoom2,
   ratePerUnit,
   onPrevReading,
   onCurrReading,
-  onOtherUnitsUsage,
+  onMeter213B,
+  onMeterStockRoom1,
+  onMeterStockRoom2,
   onRatePerUnit,
   suggestedPrevReading,
   inpClassName = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
 }: Props) {
-  const prev = prevReading.trim() === '' ? null : Number(prevReading);
-  const curr = currReading.trim() === '' ? null : Number(currReading);
-  const other = otherUnitsUsage.trim() === '' ? null : Number(otherUnitsUsage);
-  const rate = ratePerUnit.trim() === '' ? null : Number(ratePerUnit);
+  const prev = numOrNull(prevReading);
+  const curr = numOrNull(currReading);
+  const rate = numOrNull(ratePerUnit);
+
+  const meterPartial = {
+    meter213B: numOrNull(meter213B),
+    meterStockRoom1: numOrNull(meterStockRoom1),
+    meterStockRoom2: numOrNull(meterStockRoom2),
+    otherUnitsUsage: null as number | null,
+  };
+  const otherTotal = formula === '213a' ? otherUnitsUsageTotal(meterPartial) : 0;
 
   const usage = electricityUsageUnits(curr, prev);
-  const netUsage = formula === '213a' ? Math.max(0, usage - (other ?? 0)) : usage;
+  const netUsage = formula === '213a' ? Math.max(0, usage - otherTotal) : usage;
   const amount = formula === '213a'
-    ? calc213aElectricityFee({ prevReading: prev, currReading: curr, otherUnitsUsage: other, ratePerUnit: rate })
+    ? calc213aElectricityFee({
+      prevReading: prev,
+      currReading: curr,
+      meter213B: meterPartial.meter213B,
+      meterStockRoom1: meterPartial.meterStockRoom1,
+      meterStockRoom2: meterPartial.meterStockRoom2,
+      ratePerUnit: rate,
+    })
     : calcStockRoomElectricityFee({ prevReading: prev, currReading: curr, ratePerUnit: rate });
 
   return (
@@ -75,19 +102,6 @@ export default function ElectricityMeterCalculator({
             onChange={(e) => onCurrReading(e.target.value)}
           />
         </div>
-        {formula === '213a' && (
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">其他單位用電度數 Other units usage</label>
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              className={inpClassName}
-              value={otherUnitsUsage}
-              onChange={(e) => onOtherUnitsUsage(e.target.value)}
-            />
-          </div>
-        )}
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">每度電費 Rate per unit (HK$)</label>
           <input
@@ -100,6 +114,54 @@ export default function ElectricityMeterCalculator({
           />
         </div>
       </div>
+
+      {formula === '213a' && (
+        <div className="rounded-xl border border-orange-100 bg-orange-50/50 p-4">
+          <p className="text-xs font-semibold text-orange-900 mb-3">
+            其他單位用電度數 Other units usage
+            <span className="font-normal text-orange-700/80 ml-1">= 213B + Stock Room 1 + Stock Room 2</span>
+          </p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">213B電錶度數</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                className={inpClassName}
+                value={meter213B}
+                onChange={(e) => onMeter213B(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Stock Room 1電錶度數</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                className={inpClassName}
+                value={meterStockRoom1}
+                onChange={(e) => onMeterStockRoom1(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Stock Room 2電錶度數</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                className={inpClassName}
+                value={meterStockRoom2}
+                onChange={(e) => onMeterStockRoom2(e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-sm text-gray-700 mt-3 pt-3 border-t border-orange-100">
+            <span className="text-gray-500">其他單位用電度數 Total</span>{' '}
+            <span className="font-mono font-semibold">{otherTotal.toFixed(2)}</span>
+          </p>
+        </div>
+      )}
 
       <div className="rounded-lg border border-yellow-200 bg-yellow-50/60 p-3 text-sm space-y-1">
         <p className="text-gray-700">

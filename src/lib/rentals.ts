@@ -529,6 +529,13 @@ export type ElectricityFormula = '213a' | 'stock_room';
 export interface ElectricityMeterData {
   prevReading: number | null;
   currReading: number | null;
+  /** 213B meter usage (度數) for 213A other-units sum */
+  meter213B?: number | null;
+  /** Stock Room 1 meter usage (度數) */
+  meterStockRoom1?: number | null;
+  /** Stock Room 2 meter usage (度數) */
+  meterStockRoom2?: number | null;
+  /** Total other units usage — auto sum of breakdown fields when present */
   otherUnitsUsage?: number | null;
   ratePerUnit: number | null;
 }
@@ -545,15 +552,35 @@ export function parseElectricityMeterJson(raw: string | null | undefined): Elect
   try {
     const p = JSON.parse(raw) as Record<string, unknown>;
     if (!p || typeof p !== 'object') return null;
-    return {
+    const meter: ElectricityMeterData = {
       prevReading: p.prevReading != null ? Number(p.prevReading) : null,
       currReading: p.currReading != null ? Number(p.currReading) : null,
+      meter213B: p.meter213B != null ? Number(p.meter213B) : null,
+      meterStockRoom1: p.meterStockRoom1 != null ? Number(p.meterStockRoom1) : null,
+      meterStockRoom2: p.meterStockRoom2 != null ? Number(p.meterStockRoom2) : null,
       otherUnitsUsage: p.otherUnitsUsage != null ? Number(p.otherUnitsUsage) : null,
       ratePerUnit: p.ratePerUnit != null ? Number(p.ratePerUnit) : null,
     };
+    const total = otherUnitsUsageTotal(meter);
+    if (total > 0) meter.otherUnitsUsage = total;
+    return meter;
   } catch {
     return null;
   }
+}
+
+/** Sum 213B + Stock Room 1 + Stock Room 2 meter readings; falls back to stored otherUnitsUsage. */
+export function otherUnitsUsageTotal(meter: Pick<ElectricityMeterData, 'meter213B' | 'meterStockRoom1' | 'meterStockRoom2' | 'otherUnitsUsage'>): number {
+  const parts: (number | null | undefined)[] = [meter.meter213B, meter.meterStockRoom1, meter.meterStockRoom2];
+  const hasBreakdown = parts.some((v) => v != null && Number.isFinite(v));
+  if (hasBreakdown) {
+    let sum = 0;
+    for (const v of parts) {
+      if (v != null && Number.isFinite(v)) sum += v;
+    }
+    return sum;
+  }
+  return meter.otherUnitsUsage ?? 0;
 }
 
 export function electricityUsageUnits(curr: number | null, prev: number | null): number {
@@ -563,7 +590,7 @@ export function electricityUsageUnits(curr: number | null, prev: number | null):
 
 export function calc213aElectricityFee(meter: ElectricityMeterData): number {
   const usage = electricityUsageUnits(meter.currReading, meter.prevReading);
-  const net = Math.max(0, usage - (meter.otherUnitsUsage ?? 0));
+  const net = Math.max(0, usage - otherUnitsUsageTotal(meter));
   const rate = meter.ratePerUnit ?? 0;
   return Math.round(net * rate * 100) / 100;
 }
@@ -579,14 +606,23 @@ export function calcElectricityFeeForFormula(formula: ElectricityFormula, meter:
 }
 
 export function meterDataFromInputs(
-  prev: string, curr: string, rate: string, other?: string,
+  prev: string,
+  curr: string,
+  rate: string,
+  breakdown?: { meter213B?: string; meterStockRoom1?: string; meterStockRoom2?: string },
 ): ElectricityMeterData {
-  return {
+  const num = (s?: string) => (s !== undefined && s.trim() !== '' ? Number(s) : null);
+  const meter: ElectricityMeterData = {
     prevReading: prev.trim() === '' ? null : Number(prev),
     currReading: curr.trim() === '' ? null : Number(curr),
-    otherUnitsUsage: other !== undefined && other.trim() !== '' ? Number(other) : null,
+    meter213B: num(breakdown?.meter213B),
+    meterStockRoom1: num(breakdown?.meterStockRoom1),
+    meterStockRoom2: num(breakdown?.meterStockRoom2),
     ratePerUnit: rate.trim() === '' ? null : Number(rate),
   };
+  const total = otherUnitsUsageTotal(meter);
+  meter.otherUnitsUsage = total > 0 ? total : null;
+  return meter;
 }
 
 /** Charge types included on tenant bills / debit notes for this utility mode. */

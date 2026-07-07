@@ -54,22 +54,158 @@
   .modal-panel {
     @apply max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-w-xl sm:rounded-2xl sm:p-6;
   }
+
+  /* A4 paper preview (screen) — debit notes & formal documents */
+  .a4-page {
+    width: 210mm;
+    min-height: 297mm;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+    background: white;
+  }
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
   .no-print {
     display: none !important;
   }
   .print-only {
     display: block !important;
   }
-  body {
+
+  /* Scoped expense print styles only */
+  .expense-print-root {
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
     background: white !important;
   }
-  /* Ensure colored headers (e.g. the receipt-number banner) render in print. */
+
+  .expense-print-root .expense-print-stack {
+    max-width: none !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* One printed page per sheet — natural height, no viewport hacks */
+  .expense-print-root .expense-print-sheet {
+    display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .expense-print-root .expense-print-sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .expense-print-root .expense-print-body {
+    overflow: visible !important;
+    padding: 2mm 0 0 !important;
+  }
+
+  .expense-print-root .expense-print-figure {
+    display: block !important;
+    overflow: visible !important;
+    margin: 0 !important;
+  }
+
+  .expense-print-root .expense-print-receipt-img {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 22cm !important;
+    height: auto !important;
+    object-fit: contain !important;
+    object-position: top center !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-bottom: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .expense-print-root .expense-print-details {
+    font-size: 10pt !important;
+    line-height: 1.35 !important;
+  }
+
+  .expense-print-root .expense-print-notes {
+    font-size: 9pt !important;
+    line-height: 1.3 !important;
+  }
+
+  .expense-print-root .expense-print-banner,
+  .expense-print-root .expense-print-mini-header {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Rent payment notice print */
+  .rent-notice-print-root {
+    background: white !important;
+    padding: 0 !important;
+  }
+
+  .rent-notice-print-root table {
+    font-size: 8pt !important;
+    width: 100% !important;
+  }
+
+  .rent-notice-print-root th,
+  .rent-notice-print-root td {
+    padding: 2px 4px !important;
+  }
+
+  .rent-notice-print-root .sticky {
+    position: static !important;
+  }
+
+  /* Formal debit note — A4 page */
+  .a4-page {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    padding: 8mm !important;
+    box-shadow: none !important;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .a4-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .formal-debit-note {
+    font-size: 10pt !important;
+  }
+
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+  body {
+    background: white !important;
   }
   .prep-summary-table {
     font-size: 15px !important;

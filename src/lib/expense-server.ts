@@ -77,6 +77,16 @@ export function attachReceipts(expenses: Expense[]): Expense[] {
     if (!map.has(r.expense_id)) map.set(r.expense_id, []);
     map.get(r.expense_id)!.push({ id: r.id, path: r.path });
   }
-  for (const e of expenses) e.receipts = map.get(e.id) || [];
+  for (const e of expenses) {
+    const attached = map.get(e.id) || [];
+    if (attached.length > 0) {
+      e.receipts = attached;
+    } else if (e.receipt_path?.trim()) {
+      // Legacy single receipt_path — PrintView resolves id 0 to /api/expenses/[id]/receipt
+      e.receipts = [{ id: 0, path: e.receipt_path.trim() }];
+    } else {
+      e.receipts = [];
+    }
+  }
   return expenses;
 }

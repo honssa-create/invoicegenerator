@@ -567,6 +567,329 @@ db.exec(`
       try { db.exec(`ALTER TABLE rental_records ADD COLUMN ${col}`); } catch { /* exists */ }
     }
   }
+  if (!rrCols.includes('electricity_meter_json')) {
+    try { db.exec('ALTER TABLE rental_records ADD COLUMN electricity_meter_json TEXT'); } catch { /* exists */ }
+  }
+  if (!rrCols.includes('water_meter_json')) {
+    try { db.exec('ALTER TABLE rental_records ADD COLUMN water_meter_json TEXT'); } catch { /* exists */ }
+  }
+}
+
+// Rental ledger — tenants, charge line items, payments + manual allocations (parallel with rental_records).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rental_tenants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_charge_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    billing_period TEXT NOT NULL,
+    charge_type TEXT NOT NULL CHECK(charge_type IN ('rent', 'water', 'electricity')),
+    amount_due REAL NOT NULL DEFAULT 0,
+    amount_allocated REAL NOT NULL DEFAULT 0,
+    legacy_record_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, unit_id, billing_period, charge_type),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE,
+    FOREIGN KEY (legacy_record_id) REFERENCES rental_records(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    payment_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    receipt_image_path TEXT,
+    method TEXT,
+    reference TEXT,
+    notes TEXT,
+    legacy_receipt_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id) REFERENCES rental_tenants(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_payment_allocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    payment_id INTEGER NOT NULL,
+    charge_item_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (payment_id) REFERENCES rental_payments(id) ON DELETE CASCADE,
+    FOREIGN KEY (charge_item_id) REFERENCES rental_charge_items(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rental_tenants_user ON rental_tenants(user_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_charge_items_unit_period ON rental_charge_items(unit_id, billing_period);
+  CREATE INDEX IF NOT EXISTS idx_rental_charge_items_tenant_lookup ON rental_charge_items(user_id, unit_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_payments_tenant ON rental_payments(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_allocations_payment ON rental_payment_allocations(payment_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_allocations_charge ON rental_payment_allocations(charge_item_id);
+
+  CREATE TABLE IF NOT EXISTS rental_debit_note_seq (
+    user_id INTEGER NOT NULL,
+    note_month TEXT NOT NULL,
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, note_month),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_leases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    tenant_name TEXT NOT NULL,
+    tenant_phone TEXT,
+    tenant_email TEXT,
+    lease_start_date TEXT NOT NULL,
+    lease_end_date TEXT NOT NULL,
+    actual_end_date TEXT,
+    base_rent REAL NOT NULL DEFAULT 0,
+    due_date_day INTEGER NOT NULL DEFAULT 1,
+    deposit_amount REAL NOT NULL DEFAULT 0,
+    deposit_refund REAL,
+    deposit_deductions REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    end_reason TEXT,
+    end_notes TEXT,
+    auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
+    automation_enabled INTEGER NOT NULL DEFAULT 1,
+    is_current INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id) REFERENCES rental_tenants(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_lease_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    lease_id INTEGER NOT NULL,
+    doc_type TEXT NOT NULL DEFAULT 'agreement',
+    file_path TEXT NOT NULL,
+    label TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (lease_id) REFERENCES rental_leases(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rental_leases_unit ON rental_leases(unit_id);
+  CREATE INDEX IF NOT EXISTS idx_rental_leases_current ON rental_leases(unit_id, is_current);
+  CREATE INDEX IF NOT EXISTS idx_rental_lease_docs_lease ON rental_lease_documents(lease_id);
+`);
+
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('tenant_id')) {
+    try { db.exec('ALTER TABLE rental_units ADD COLUMN tenant_id INTEGER REFERENCES rental_tenants(id)'); } catch { /* exists */ }
+  }
+}
+
+// Billing-item status (unpaid / partially_paid / paid) on rental_charge_items.
+{
+  const ciCols = (db.prepare('PRAGMA table_info(rental_charge_items)').all() as { name: string }[]).map((c) => c.name);
+  if (!ciCols.includes('status')) {
+    try {
+      db.exec(`ALTER TABLE rental_charge_items ADD COLUMN status TEXT NOT NULL DEFAULT 'unpaid'`);
+      db.exec(`
+        UPDATE rental_charge_items SET status = CASE
+          WHEN amount_due <= 0 THEN 'empty'
+          WHEN amount_allocated >= amount_due - 0.009 THEN 'paid'
+          WHEN amount_allocated > 0 THEN 'partially_paid'
+          ELSE 'unpaid'
+        END
+      `);
+    } catch { /* exists */ }
+  }
+  if (!ciCols.includes('tenant_id')) {
+    try {
+      db.exec(`ALTER TABLE rental_charge_items ADD COLUMN tenant_id INTEGER REFERENCES rental_tenants(id)`);
+      db.exec(`
+        UPDATE rental_charge_items SET tenant_id = (
+          SELECT tenant_id FROM rental_units WHERE rental_units.id = rental_charge_items.unit_id
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rental_charge_items_tenant ON rental_charge_items(tenant_id)`);
+    } catch { /* exists */ }
+  }
+}
+
+// Per-tenant utility billing: tenant pays utilities directly vs company proxy-bills on debit note.
+{
+  const rtCols = (db.prepare('PRAGMA table_info(rental_tenants)').all() as { name: string }[]).map((c) => c.name);
+  if (!rtCols.includes('utility_billing_mode')) {
+    try {
+      db.exec(`ALTER TABLE rental_tenants ADD COLUMN utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'`);
+    } catch { /* exists */ }
+  }
+}
+
+// Per-unit utility billing (primary setting for debit notes / notices).
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('utility_billing_mode')) {
+    try {
+      db.exec(`ALTER TABLE rental_units ADD COLUMN utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'`);
+      db.exec(`
+        UPDATE rental_units SET utility_billing_mode = COALESCE(
+          (SELECT utility_billing_mode FROM rental_tenants WHERE rental_tenants.id = rental_units.tenant_id),
+          'company_proxy'
+        )
+        WHERE tenant_id IS NOT NULL
+      `);
+    } catch { /* exists */ }
+  }
+}
+
+// Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.
+{
+  const unitsNeedingTenant = db.prepare(
+    `SELECT id, user_id, tenant_name, tenant_phone, tenant_email
+     FROM rental_units WHERE tenant_id IS NULL AND tenant_name IS NOT NULL AND tenant_name <> ''`
+  ).all() as { id: number; user_id: number; tenant_name: string; tenant_phone: string | null; tenant_email: string | null }[];
+
+  const findTenant = db.prepare(
+    `SELECT id FROM rental_tenants WHERE user_id = ? AND name = ? COLLATE NOCASE LIMIT 1`
+  );
+  const insertTenant = db.prepare(
+    `INSERT INTO rental_tenants (user_id, name, phone, email) VALUES (?, ?, ?, ?)`
+  );
+  const linkUnit = db.prepare(`UPDATE rental_units SET tenant_id = ? WHERE id = ?`);
+
+  const backfillTenants = db.transaction(() => {
+    for (const u of unitsNeedingTenant) {
+      let tenantId = (findTenant.get(u.user_id, u.tenant_name) as { id: number } | undefined)?.id;
+      if (!tenantId) {
+        const res = insertTenant.run(u.user_id, u.tenant_name.trim(), u.tenant_phone || null, u.tenant_email || null);
+        tenantId = Number(res.lastInsertRowid);
+      }
+      linkUnit.run(tenantId, u.id);
+    }
+  });
+  if (unitsNeedingTenant.length) backfillTenants();
+
+  const records = db.prepare('SELECT * FROM rental_records').all() as {
+    id: number; user_id: number; unit_id: number; billing_period: string;
+    base_rent: number; water_fee: number; electricity_fee: number; amount_paid: number;
+  }[];
+
+  const upsertCharge = db.prepare(
+    `INSERT INTO rental_charge_items (user_id, unit_id, billing_period, charge_type, amount_due, amount_allocated, legacy_record_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, unit_id, billing_period, charge_type) DO UPDATE SET
+       amount_due = excluded.amount_due,
+       legacy_record_id = excluded.legacy_record_id,
+       updated_at = datetime('now')`
+  );
+  const setAllocated = db.prepare(
+    `UPDATE rental_charge_items SET amount_allocated = ?, updated_at = datetime('now') WHERE id = ?`
+  );
+
+  const syncRecords = db.transaction(() => {
+    for (const rec of records) {
+      const charges: [string, number][] = [
+        ['rent', rec.base_rent || 0],
+        ['water', rec.water_fee || 0],
+        ['electricity', rec.electricity_fee || 0],
+      ];
+      const itemIds: { type: string; id: number; due: number }[] = [];
+      for (const [type, due] of charges) {
+        upsertCharge.run(rec.user_id, rec.unit_id, rec.billing_period, type, due, 0, rec.id);
+        const row = db.prepare(
+          `SELECT id, amount_due FROM rental_charge_items
+           WHERE user_id = ? AND unit_id = ? AND billing_period = ? AND charge_type = ?`
+        ).get(rec.user_id, rec.unit_id, rec.billing_period, type) as { id: number; amount_due: number };
+        itemIds.push({ type, id: row.id, due: row.amount_due });
+      }
+      const manualAlloc = (db.prepare(
+        `SELECT COALESCE(SUM(a.amount), 0) AS total
+         FROM rental_payment_allocations a
+         JOIN rental_charge_items c ON c.id = a.charge_item_id
+         WHERE c.legacy_record_id = ?`
+      ).get(rec.id) as { total: number }).total;
+      if (manualAlloc > 0) {
+        const byItem = db.prepare(
+          `SELECT c.id, COALESCE(SUM(a.amount), 0) AS allocated
+           FROM rental_charge_items c
+           LEFT JOIN rental_payment_allocations a ON a.charge_item_id = c.id
+           WHERE c.legacy_record_id = ?
+           GROUP BY c.id`
+        ).all(rec.id) as { id: number; allocated: number }[];
+        for (const row of byItem) setAllocated.run(row.allocated, row.id);
+      } else {
+        let remaining = rec.amount_paid || 0;
+        for (const item of itemIds) {
+          const alloc = Math.min(remaining, item.due);
+          setAllocated.run(alloc, item.id);
+          remaining -= alloc;
+        }
+      }
+    }
+  });
+  if (records.length) syncRecords();
+}
+
+// Backfill rental_leases from existing units (one current lease per unit).
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('current_lease_id')) {
+    try { db.exec('ALTER TABLE rental_units ADD COLUMN current_lease_id INTEGER REFERENCES rental_leases(id)'); } catch { /* exists */ }
+  }
+
+  const unitsNeedingLease = db.prepare(
+    `SELECT u.* FROM rental_units u
+     WHERE NOT EXISTS (SELECT 1 FROM rental_leases l WHERE l.unit_id = u.id AND l.is_current = 1)`
+  ).all() as {
+    id: number; user_id: number; tenant_name: string; tenant_phone: string | null; tenant_email: string | null;
+    current_year_rent: number; lease_start_date: string | null; lease_end_date: string | null;
+    due_date_day: number; auto_send_receipt_email: number; automation_enabled: number; tenant_id: number | null;
+  }[];
+
+  const insertLease = db.prepare(
+    `INSERT INTO rental_leases
+      (user_id, unit_id, tenant_id, tenant_name, tenant_phone, tenant_email,
+       lease_start_date, lease_end_date, base_rent, due_date_day,
+       auto_send_receipt_email, automation_enabled, is_current, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active')`
+  );
+  const linkUnit = db.prepare(
+    `UPDATE rental_units SET current_lease_id = ?, updated_at = datetime('now') WHERE id = ?`
+  );
+
+  const backfillLeases = db.transaction(() => {
+    for (const u of unitsNeedingLease) {
+      const name = (u.tenant_name || '').trim();
+      if (!name) continue;
+      const start = u.lease_start_date || new Date().toISOString().slice(0, 10);
+      const end = u.lease_end_date || start;
+      const res = insertLease.run(
+        u.user_id, u.id, u.tenant_id ?? null, name,
+        u.tenant_phone || null, u.tenant_email || null,
+        start, end, u.current_year_rent || 0, u.due_date_day || 1,
+        u.auto_send_receipt_email ? 1 : 0, u.automation_enabled !== 0 ? 1 : 0,
+      );
+      linkUnit.run(Number(res.lastInsertRowid), u.id);
+    }
+  });
+  if (unitsNeedingLease.length) backfillLeases();
 }
 
 // Backfill: move any single receipt_path into the expense_receipts table once.

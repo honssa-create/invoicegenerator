@@ -2,10 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import LeaseStatusBadge from '@/components/LeaseStatusBadge';
+import UtilityBillingPicker from '@/components/UtilityBillingPicker';
+import { useAuth } from '@/components/AuthProvider';
+import { isSectionReadOnly } from '@/lib/permissions';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
+  computeLeaseDisplayStatus,
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
@@ -13,45 +19,116 @@ import {
   formatDueDayLabel,
   formatMoney,
   toFormDate,
+  type LeaseDisplayStatus,
   type PreviousYearRent,
+  type RentalDashboardAlert,
+  type RentalTenant,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UtilityBillingMode,
 } from '@/lib/rentals';
 
 interface DashboardData {
   units: RentalUnitWithRecord[];
   metrics: { totalRevenue: number; outstanding: number; paidCount: number; totalUnits: number };
   period: string;
+  alerts?: RentalDashboardAlert[];
 }
 
 const blankUnit: Partial<RentalUnit> = {
   unitName: '', tenantName: '', tenantPhone: '', tenantEmail: '',
   currentYearRent: 0, previousYearsRent: [], leaseStartDate: '', leaseEndDate: '',
   dueDateDay: 1, autoSendReceiptEmail: false, automationEnabled: true,
+  utilityBillingMode: 'company_proxy',
 };
 
 export default function RentalsPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [data, setData] = useState<DashboardData | null>(null);
+  const [tenants, setTenants] = useState<RentalTenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [unitModal, setUnitModal] = useState<Partial<RentalUnit> | null>(null);
   const [previousYearsText, setPreviousYearsText] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
+  const [leaseFilter, setLeaseFilter] = useState<LeaseDisplayStatus | 'all'>('all');
 
   const load = () => {
     setLoading(true);
-    fetch(`/api/rentals?period=${period}`)
-      .then((r) => r.json())
-      .then((d) => setData(d))
+    Promise.all([
+      fetch(`/api/rentals?period=${period}`).then((r) => r.json()),
+      fetch('/api/rentals/tenants').then((r) => r.json()),
+    ])
+      .then(([d, t]) => {
+        setData(d);
+        setTenants(t.tenants || []);
+      })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, [period]);
 
   const units = data?.units || [];
+  const alerts = data?.alerts || [];
   const metrics = data?.metrics || { totalRevenue: 0, outstanding: 0, paidCount: 0, totalUnits: 0 };
+
+  const filteredUnits = leaseFilter === 'all'
+    ? units
+    : units.filter((u) => (u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || { leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false })) === leaseFilter);
+
+  const tenantGroupKey = (u: Pick<RentalUnit, 'tenantId' | 'tenantName'>) => {
+    if (u.tenantId) return `id:${u.tenantId}`;
+    const name = u.tenantName?.trim();
+    return name ? `name:${name.toLowerCase()}` : '';
+  };
+
+  const selectedUnits = units.filter((u) => selectedUnitIds.includes(u.id));
+  const activeGroupKey = selectedUnits.length
+    ? tenantGroupKey(selectedUnits[0])
+    : null;
+
+  const canSelectUnit = (u: RentalUnitWithRecord) => {
+    const key = tenantGroupKey(u);
+    if (!key) return false;
+    if (!activeGroupKey) return true;
+    return key === activeGroupKey;
+  };
+
+  const toggleUnitSelection = (u: RentalUnitWithRecord) => {
+    if (!canSelectUnit(u) && !selectedUnitIds.includes(u.id)) return;
+    setSelectedUnitIds((prev) =>
+      prev.includes(u.id) ? prev.filter((id) => id !== u.id) : [...prev, u.id],
+    );
+  };
+
+  const resolveTenantIdForSelection = (): number | null => {
+    if (!selectedUnits.length) return null;
+    const withId = selectedUnits.find((u) => u.tenantId);
+    if (withId?.tenantId) return withId.tenantId;
+    const name = selectedUnits[0].tenantName?.trim();
+    if (!name) return null;
+    const tenant = tenants.find((t) => t.name.toLowerCase() === name.toLowerCase());
+    return tenant?.id ?? null;
+  };
+
+  const groupedDebitNoteHref = () => {
+    const tenantId = resolveTenantIdForSelection();
+    if (!tenantId || !selectedUnitIds.length) return null;
+    const qs = new URLSearchParams({
+      tenantId: String(tenantId),
+      targetPeriod: period,
+      mode: 'grouped',
+      unitIds: selectedUnitIds.join(','),
+    });
+    return `/billing/debit-note?${qs}`;
+  };
+
+  const debitNoteHref = groupedDebitNoteHref();
+  const groupedTenantLabel = selectedUnits[0]?.tenantName || '';
 
   const openUnitModal = (unit: Partial<RentalUnit>) => {
     setPreviousYearsText((unit.previousYearsRent || []).map((r) => `${r.year}, ${r.rent}`).join('\n'));
@@ -83,7 +160,12 @@ export default function RentalsPage() {
     const res = await fetch(`/api/cron/rental-invoices?period=${period}`, { method: 'POST' });
     const d = await res.json();
     setBusy(false);
-    setToast(res.ok ? `Dispatched ${d.processed} rental invoices` : d.error || 'Scheduler failed');
+    if (!res.ok) {
+      setToast(d.error || 'Scheduler failed');
+      return;
+    }
+    const skipMsg = d.skipped ? ` · ${d.skipped} skipped (after lease end / inactive)` : '';
+    setToast(`Dispatched ${d.processed} rental invoices${skipMsg}`);
     load();
   };
 
@@ -94,16 +176,35 @@ export default function RentalsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Rental Income 租金管理</h1>
-          <p className="text-gray-500 mt-0.5 text-sm">Row overview · click a unit to manage</p>
+          <p className="text-gray-500 mt-0.5 text-sm">
+            Row overview · click a unit to manage
+            {readOnly && <span className="text-amber-600 ml-2">(Read-only)</span>}
+          </p>
         </div>
         <div className="page-actions">
           <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
-          <button onClick={runScheduler} disabled={busy} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
-          <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ Add Unit</button>
+          <button onClick={runScheduler} disabled={busy || readOnly} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
+          {!readOnly && (
+            <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ Add Unit</button>
+          )}
         </div>
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 rounded-lg bg-brand-50 text-brand-700 text-sm cursor-pointer">{toast} ✕</div>}
+
+      {alerts.length > 0 && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <p className="text-sm font-semibold text-amber-900 mb-2">Contract Alerts 合約提醒 ({alerts.length})</p>
+          <ul className="space-y-1.5 text-sm text-amber-800">
+            {alerts.slice(0, 8).map((a, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-2">
+                <span className="flex-1 min-w-0">{a.message}</span>
+                <Link href={`/rentals/${a.unitId}?period=${period}`} className="text-xs font-medium text-brand-700 hover:underline shrink-0">View →</Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Metrics strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -121,21 +222,67 @@ export default function RentalsPage() {
 
       {/* Row-based master panel */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Lease Overview Master Panel 租約主控面板</p>
-          <p className="text-sm text-gray-500 mt-0.5">Period: {period} · Click a row to open the unit detail page</p>
+        <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Lease Overview Master Panel 租約主控面板</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Period: {period} · Tick units with the same tenant for grouped debit note
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={leaseFilter}
+              onChange={(e) => setLeaseFilter(e.target.value as LeaseDisplayStatus | 'all')}
+              className={`${inp} w-auto text-sm`}
+            >
+              <option value="all">All contract status</option>
+              <option value="active">生效中 Active</option>
+              <option value="ending_soon">即將到期 Ending soon</option>
+              <option value="ended">合約完結 Ended</option>
+              <option value="terminated">提早終止 Terminated</option>
+              <option value="vacant">空置 Vacant</option>
+            </select>
+          {selectedUnitIds.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-gray-600">
+                {selectedUnitIds.length} unit(s) · <span className="font-medium">{groupedTenantLabel}</span>
+              </span>
+              {debitNoteHref ? (
+                <Link
+                  href={debitNoteHref}
+                  className="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-xs font-semibold hover:bg-brand-700"
+                >
+                  繳費通知單 Grouped Debit Note
+                </Link>
+              ) : (
+                <span className="text-xs text-amber-600">Save tenant on unit lease to enable grouped notice</span>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectedUnitIds([])}
+                className="text-xs text-gray-500 hover:text-gray-800 underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           {loading ? (
             <div className="p-12 text-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" /></div>
           ) : units.length === 0 ? (
             <div className="p-12 text-center text-gray-400 text-sm">No rental units yet — add the first one.</div>
+          ) : filteredUnits.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 text-sm">No units match this contract filter.</div>
           ) : (
             <table className="w-full min-w-[900px] text-sm">
               <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="px-3 py-3 text-left w-10" title="Select units with same tenant for grouped debit note">☑</th>
                   <th className="px-4 py-3 text-left">單位 Unit</th>
                   <th className="px-4 py-3 text-left">租單位人士 Tenant</th>
+                  <th className="px-4 py-3 text-left">Contract 合約</th>
                   <th className="px-4 py-3 text-right">Base Rent</th>
                   <th className="px-4 py-3 text-left">起租日</th>
                   <th className="px-4 py-3 text-left">完租日</th>
@@ -146,20 +293,56 @@ export default function RentalsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {units.map((u) => {
+                {filteredUnits.map((u) => {
                   const remaining = daysRemaining(u.leaseEndDate);
                   const rec = u.currentRecord;
                   const recStatus = displayRentalStatus(rec);
+                  const leaseStatus = u.leaseStatus || (u.currentLease
+                    ? computeLeaseDisplayStatus(u.currentLease)
+                    : 'vacant');
+                  const selectable = canSelectUnit(u);
+                  const groupKey = tenantGroupKey(u);
+                  const sameTenantCount = groupKey
+                    ? units.filter((x) => tenantGroupKey(x) === groupKey).length
+                    : 0;
                   return (
                     <tr
                       key={u.id}
                       onClick={() => router.push(`/rentals/${u.id}?period=${period}`)}
-                      className="hover:bg-brand-50/40 cursor-pointer transition-colors"
+                      className={`hover:bg-brand-50/40 cursor-pointer transition-colors ${selectedUnitIds.includes(u.id) ? 'bg-brand-50/60' : ''}`}
                     >
+                      <td className="px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
+                        {groupKey && sameTenantCount > 0 ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedUnitIds.includes(u.id)}
+                            disabled={!selectable && !selectedUnitIds.includes(u.id)}
+                            onChange={() => toggleUnitSelection(u)}
+                            title={
+                              !groupKey
+                                ? 'Set tenant name first'
+                                : !selectable
+                                  ? `Only units for ${groupedTenantLabel || 'the same tenant'} can be selected together`
+                                  : sameTenantCount > 1
+                                    ? 'Include in grouped debit note'
+                                    : 'Single unit — grouped notice still available'
+                            }
+                            className="h-4 w-4 rounded border-gray-300 disabled:opacity-40"
+                          />
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3.5 font-semibold text-gray-900">{u.unitName}</td>
                       <td className="px-4 py-3.5">
                         <p className="font-medium text-gray-900">{u.tenantName}</p>
                         {u.tenantPhone && <p className="text-xs text-gray-400">{u.tenantPhone}</p>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <LeaseStatusBadge status={leaseStatus} />
+                        {remaining !== null && leaseStatus === 'ending_soon' && (
+                          <p className="text-[10px] text-amber-700 mt-1">{remaining} days left</p>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 text-right font-semibold">{formatMoney(u.currentYearRent)}</td>
                       <td className="px-4 py-3.5 text-gray-600">{formatDisplayDate(u.leaseStartDate)}</td>
@@ -180,12 +363,24 @@ export default function RentalsPage() {
                         ) : null}
                       </td>
                       <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => openUnitModal(u)}
-                          className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
-                        >
-                          Edit Lease
-                        </button>
+                        <div className="flex flex-col items-end gap-1">
+                          {u.tenantId ? (
+                            <Link
+                              href={`/rentals/units/${u.id}/rent-payment-notice?period=${period}`}
+                              className="text-brand-600 hover:text-brand-700 text-xs font-medium hover:underline"
+                            >
+                              通知單 Notice
+                            </Link>
+                          ) : null}
+                          {!readOnly && (
+                            <button
+                              onClick={() => openUnitModal(u)}
+                              className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
+                            >
+                              Edit Lease
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -195,6 +390,55 @@ export default function RentalsPage() {
           )}
         </div>
       </div>
+
+      {/* Tenant Profile — last panel on rentals dashboard */}
+      {tenants.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mt-6">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">租客檔案 Tenant Profile</p>
+            <p className="text-sm text-gray-500 mt-0.5">Multi-unit tenants · payment history · debit notes</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left">Tenant 租客</th>
+                  <th className="px-4 py-3 text-left">Contact</th>
+                  <th className="px-4 py-3 text-right">Units</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {tenants.map((t) => (
+                  <tr key={t.id} className="hover:bg-brand-50/40 cursor-pointer" onClick={() => router.push(`/rentals/tenants/${t.id}`)}>
+                    <td className="px-4 py-3 font-semibold">{t.name}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{t.phone || t.email || '—'}</td>
+                    <td className="px-4 py-3 text-right">{t.unitCount ?? 0}</td>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-col items-end gap-1">
+                        <Link href={`/rentals/tenants/${t.id}`} className="text-brand-600 text-xs font-medium hover:underline">
+                          Profile 檔案
+                        </Link>
+                        <Link href={`/rentals/tenants/${t.id}/rent-payment-notice?period=${period}`} className="text-brand-600 text-xs font-medium hover:underline">
+                          通知單 Notice
+                        </Link>
+                        {(t.unitCount ?? 0) > 1 && (
+                          <Link
+                            href={`/billing/debit-note?tenantId=${t.id}&targetPeriod=${period}&mode=grouped`}
+                            className="text-brand-600 text-xs font-medium hover:underline"
+                          >
+                            綜合繳費通知單 Debit Note
+                          </Link>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {unitModal && (
         <div className="modal-overlay">
@@ -247,6 +491,14 @@ export default function RentalsPage() {
                 <textarea className={inp} rows={3} value={previousYearsText}
                   onChange={(e) => setPreviousYearsText(e.target.value)}
                   placeholder="2025, 8000&#10;2024, 7500" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>
+                <UtilityBillingPicker
+                  compact
+                  value={(unitModal.utilityBillingMode || 'company_proxy') as UtilityBillingMode}
+                  onChange={(mode) => setUnitModal({ ...unitModal, utilityBillingMode: mode })}
+                />
               </div>
             </div>
             <div className="flex gap-4 mt-4 flex-wrap">

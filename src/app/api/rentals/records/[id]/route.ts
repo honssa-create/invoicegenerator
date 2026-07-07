@@ -25,6 +25,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       electricityPeriodFrom: body.electricityPeriodFrom,
       electricityPeriodTo: body.electricityPeriodTo,
       customInvoiceNote: body.customInvoiceNote,
+      electricityMeter: body.electricityMeter,
     });
     return NextResponse.json({ record });
   } catch (e) {

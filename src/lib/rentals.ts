@@ -69,6 +69,7 @@ export interface RentRecord {
   paidAt: string | null;
   customInvoiceNote: string | null;
   customReceiptNote: string | null;
+  electricityMeter: ElectricityMeterData | null;
   created_at: string;
   updated_at: string;
 }
@@ -506,6 +507,87 @@ export const UTILITY_BILLING_MODE_LABELS: Record<UtilityBillingMode, string> = {
   tenant_pays: '租客自行繳付水電費',
   company_proxy: '水電費由公司代交 再向租客收取',
 };
+
+/** Fixed portfolio units — seeded per user on first dashboard load. */
+export interface DefaultRentalUnitSeed {
+  unitName: string;
+  utilityBillingMode: UtilityBillingMode;
+  tenantName?: string;
+}
+
+export const DEFAULT_RENTAL_UNITS: DefaultRentalUnitSeed[] = [
+  { unitName: '205', utilityBillingMode: 'tenant_pays' },
+  { unitName: '213A', utilityBillingMode: 'company_proxy' },
+  { unitName: '213B', utilityBillingMode: 'tenant_pays' },
+  { unitName: '214', utilityBillingMode: 'tenant_pays' },
+  { unitName: 'Stock Room 1', utilityBillingMode: 'company_proxy' },
+  { unitName: 'Stock Room 2', utilityBillingMode: 'company_proxy' },
+];
+
+export type ElectricityFormula = '213a' | 'stock_room';
+
+export interface ElectricityMeterData {
+  prevReading: number | null;
+  currReading: number | null;
+  otherUnitsUsage?: number | null;
+  ratePerUnit: number | null;
+}
+
+export function electricityFormulaForUnit(unitName: string): ElectricityFormula | null {
+  const n = unitName.trim().toLowerCase();
+  if (n === '213a') return '213a';
+  if (n === 'stock room 1' || n === 'stock room 2') return 'stock_room';
+  return null;
+}
+
+export function parseElectricityMeterJson(raw: string | null | undefined): ElectricityMeterData | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    if (!p || typeof p !== 'object') return null;
+    return {
+      prevReading: p.prevReading != null ? Number(p.prevReading) : null,
+      currReading: p.currReading != null ? Number(p.currReading) : null,
+      otherUnitsUsage: p.otherUnitsUsage != null ? Number(p.otherUnitsUsage) : null,
+      ratePerUnit: p.ratePerUnit != null ? Number(p.ratePerUnit) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function electricityUsageUnits(curr: number | null, prev: number | null): number {
+  if (curr == null || prev == null || !Number.isFinite(curr) || !Number.isFinite(prev)) return 0;
+  return Math.max(0, curr - prev);
+}
+
+export function calc213aElectricityFee(meter: ElectricityMeterData): number {
+  const usage = electricityUsageUnits(meter.currReading, meter.prevReading);
+  const net = Math.max(0, usage - (meter.otherUnitsUsage ?? 0));
+  const rate = meter.ratePerUnit ?? 0;
+  return Math.round(net * rate * 100) / 100;
+}
+
+export function calcStockRoomElectricityFee(meter: ElectricityMeterData): number {
+  const usage = electricityUsageUnits(meter.currReading, meter.prevReading);
+  const rate = meter.ratePerUnit ?? 0;
+  return Math.round(usage * rate * 100) / 100;
+}
+
+export function calcElectricityFeeForFormula(formula: ElectricityFormula, meter: ElectricityMeterData): number {
+  return formula === '213a' ? calc213aElectricityFee(meter) : calcStockRoomElectricityFee(meter);
+}
+
+export function meterDataFromInputs(
+  prev: string, curr: string, rate: string, other?: string,
+): ElectricityMeterData {
+  return {
+    prevReading: prev.trim() === '' ? null : Number(prev),
+    currReading: curr.trim() === '' ? null : Number(curr),
+    otherUnitsUsage: other !== undefined && other.trim() !== '' ? Number(other) : null,
+    ratePerUnit: rate.trim() === '' ? null : Number(rate),
+  };
+}
 
 /** Charge types included on tenant bills / debit notes for this utility mode. */
 export function utilityChargeTypesForMode(mode: UtilityBillingMode): RentalChargeType[] {

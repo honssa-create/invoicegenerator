@@ -6,6 +6,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import DebitNoteActions from '@/components/DebitNoteActions';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
+import ElectricityMeterCalculator from '@/components/ElectricityMeterCalculator';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import ChargeAllocationGrid, {
@@ -34,6 +35,9 @@ import {
   toFormDate,
   todayFormDate,
   utilityLineLabel,
+  calcElectricityFeeForFormula,
+  electricityFormulaForUnit,
+  meterDataFromInputs,
   type RentRecord,
   type RentalActivityLog,
   type RentalChargeItem,
@@ -57,6 +61,7 @@ interface DetailPayload {
   currentLease?: RentalLease | null;
   leaseHistory?: RentalLease[];
   leaseDocuments?: RentalLeaseDocument[];
+  suggestedPrevElectricityReading?: number | null;
 }
 
 export default function RentalDetailPage() {
@@ -95,6 +100,11 @@ function RentalDetailInner() {
   const [electricityFee, setElectricityFee] = useState('');
   const [electricityPeriodFrom, setElectricityPeriodFrom] = useState('');
   const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
+  const [meterPrevReading, setMeterPrevReading] = useState('');
+  const [meterCurrReading, setMeterCurrReading] = useState('');
+  const [meterOtherUsage, setMeterOtherUsage] = useState('');
+  const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
+  const [suggestedPrevReading, setSuggestedPrevReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
   const [utilitySaving, setUtilitySaving] = useState(false);
 
@@ -173,6 +183,15 @@ function RentalDetailInner() {
             setElectricityFee(String(rec.electricityFee || 0));
             setElectricityPeriodFrom(toFormDate(rec.electricityPeriodFrom));
             setElectricityPeriodTo(toFormDate(rec.electricityPeriodTo));
+            const meter = rec.electricityMeter;
+            setMeterPrevReading(meter?.prevReading != null ? String(meter.prevReading) : '');
+            setMeterCurrReading(meter?.currReading != null ? String(meter.currReading) : '');
+            setMeterOtherUsage(meter?.otherUnitsUsage != null ? String(meter.otherUnitsUsage) : '');
+            setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
+            setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
+            if (!meter?.prevReading && d.suggestedPrevElectricityReading != null) {
+              setMeterPrevReading(String(d.suggestedPrevElectricityReading));
+            }
             setUtilityNote(rec.customInvoiceNote || '');
             setAutoSendReceipt(d.unit.autoSendReceiptEmail);
             setPaidAmount(String(outstandingBalance(rec) || rec.actualAmount || 0));
@@ -194,6 +213,15 @@ function RentalDetailInner() {
     setBaseRentPeriodFrom(calc.periodFrom);
     setBaseRentPeriodTo(calc.periodTo);
   }, [dueDateDay, period]);
+
+  const electricityFormula = data?.unit ? electricityFormulaForUnit(data.unit.unitName) : null;
+
+  useEffect(() => {
+    if (!electricityFormula) return;
+    const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, meterOtherUsage);
+    const fee = calcElectricityFeeForFormula(electricityFormula, meter);
+    setElectricityFee(fee > 0 || meter.currReading != null ? String(fee) : '');
+  }, [electricityFormula, meterPrevReading, meterCurrReading, meterOtherUsage, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
@@ -223,18 +251,26 @@ function RentalDetailInner() {
     load();
   };
 
-  const utilityPayload = () => ({
-    baseRent: Number(baseRent),
-    baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
-    baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
-    waterFee: Number(waterFee),
-    electricityFee: Number(electricityFee),
-    waterPeriodFrom: fromFormDate(waterPeriodFrom),
-    waterPeriodTo: fromFormDate(waterPeriodTo),
-    electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
-    electricityPeriodTo: fromFormDate(electricityPeriodTo),
-    customInvoiceNote: utilityNote || null,
-  });
+  const utilityPayload = () => {
+    const payload: Record<string, unknown> = {
+      baseRent: Number(baseRent),
+      baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
+      baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
+      waterFee: Number(waterFee),
+      electricityFee: Number(electricityFee),
+      waterPeriodFrom: fromFormDate(waterPeriodFrom),
+      waterPeriodTo: fromFormDate(waterPeriodTo),
+      electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
+      electricityPeriodTo: fromFormDate(electricityPeriodTo),
+      customInvoiceNote: utilityNote || null,
+    };
+    if (electricityFormula) {
+      payload.electricityMeter = meterDataFromInputs(
+        meterPrevReading, meterCurrReading, meterRatePerUnit, meterOtherUsage,
+      );
+    }
+    return payload;
+  };
 
   const saveUtilities = async () => {
     if (!data?.currentRecord) return;
@@ -642,20 +678,53 @@ function RentalDetailInner() {
                 {/* Electricity */}
                 <div className="rounded-xl border border-yellow-100 bg-yellow-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-yellow-800 mb-3">電費 Electricity Fee</p>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                      <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                  {electricityFormula ? (
+                    <>
+                      <p className="text-xs text-yellow-700/80 mb-3">
+                        {electricityFormula === '213a'
+                          ? '213A formula: net usage (after deducting other units) × rate'
+                          : 'Stock Room formula: (current − previous reading) × rate'}
+                      </p>
+                      <ElectricityMeterCalculator
+                        formula={electricityFormula}
+                        prevReading={meterPrevReading}
+                        currReading={meterCurrReading}
+                        otherUnitsUsage={meterOtherUsage}
+                        ratePerUnit={meterRatePerUnit}
+                        onPrevReading={setMeterPrevReading}
+                        onCurrReading={setMeterCurrReading}
+                        onOtherUnitsUsage={setMeterOtherUsage}
+                        onRatePerUnit={setMeterRatePerUnit}
+                        suggestedPrevReading={suggestedPrevReading}
+                        inpClassName={inp}
+                      />
+                      <div className="grid md:grid-cols-2 gap-3 mt-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
-                    </div>
-                  </div>
+                  )}
                 </div>
                 <div className="flex items-end gap-4">
                   <div className="flex-1">

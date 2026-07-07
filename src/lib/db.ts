@@ -567,6 +567,9 @@ db.exec(`
       try { db.exec(`ALTER TABLE rental_records ADD COLUMN ${col}`); } catch { /* exists */ }
     }
   }
+  if (!rrCols.includes('electricity_meter_json')) {
+    try { db.exec('ALTER TABLE rental_records ADD COLUMN electricity_meter_json TEXT'); } catch { /* exists */ }
+  }
 }
 
 // Rental ledger — tenants, charge line items, payments + manual allocations (parallel with rental_records).

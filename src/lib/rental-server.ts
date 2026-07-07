@@ -42,6 +42,9 @@ import {
   nextBillingPeriod,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
+  DEFAULT_RENTAL_UNITS,
+  parseElectricityMeterJson,
+  type ElectricityMeterData,
   type PeriodPaymentAllocation,
   type PreviousYearRent,
   type RentalChargeItem,
@@ -81,7 +84,8 @@ interface RecordRow {
   receipt_image_path: string | null;
   invoice_sent_at: string | null; receipt_sent_at: string | null;
   paid_at: string | null; custom_invoice_note: string | null;
-  custom_receipt_note: string | null; created_at: string; updated_at: string;
+  custom_receipt_note: string | null; electricity_meter_json?: string | null;
+  created_at: string; updated_at: string;
 }
 
 interface ReceiptRow {
@@ -141,6 +145,7 @@ function hydrateRecord(row: RecordRow): RentRecord {
     invoiceSentAt: row.invoice_sent_at, receiptSentAt: row.receipt_sent_at,
     paidAt: row.paid_at, customInvoiceNote: row.custom_invoice_note,
     customReceiptNote: row.custom_receipt_note,
+    electricityMeter: parseElectricityMeterJson(row.electricity_meter_json),
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -181,6 +186,44 @@ export function getRentalActivities(unitId: number, userId: number): RentalActiv
   return (db
     .prepare('SELECT * FROM rental_activity_logs WHERE unit_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50')
     .all(unitId, userId) as ActivityRow[]).map(hydrateActivity);
+}
+
+// ---------------------------------------------------------------------------
+// Default unit seed (fixed portfolio)
+// ---------------------------------------------------------------------------
+
+export function ensureDefaultRentalUnits(userId: number) {
+  for (const def of DEFAULT_RENTAL_UNITS) {
+    const existing = db.prepare(
+      'SELECT id FROM rental_units WHERE user_id = ? AND unit_name = ? COLLATE NOCASE'
+    ).get(userId, def.unitName) as { id: number } | undefined;
+    if (!existing) {
+      createRentalUnit(userId, {
+        unitName: def.unitName,
+        tenantName: def.tenantName || 'Vacant 空置',
+        utilityBillingMode: def.utilityBillingMode,
+        automationEnabled: true,
+      });
+    }
+  }
+}
+
+export function getSuggestedPrevElectricityReading(
+  userId: number, unitId: number, beforePeriod: string,
+): number | null {
+  const rows = db.prepare(
+    `SELECT electricity_meter_json FROM rental_records
+     WHERE user_id = ? AND unit_id = ? AND billing_period < ?
+       AND electricity_meter_json IS NOT NULL AND electricity_meter_json != ''
+     ORDER BY billing_period DESC`
+  ).all(userId, unitId, beforePeriod) as { electricity_meter_json: string }[];
+  for (const row of rows) {
+    const m = parseElectricityMeterJson(row.electricity_meter_json);
+    if (m?.currReading != null && Number.isFinite(m.currReading)) {
+      return m.currReading;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +376,7 @@ export function updateRentRecordUtilities(
     electricityPeriodFrom?: string | null;
     electricityPeriodTo?: string | null;
     customInvoiceNote?: string | null;
+    electricityMeter?: ElectricityMeterData | null;
   }
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
@@ -340,6 +384,9 @@ export function updateRentRecordUtilities(
   const base = Number(input.baseRent ?? existing.baseRent) || 0;
   const water = Number(input.waterFee ?? existing.waterFee) || 0;
   const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
+  const meterJson = input.electricityMeter !== undefined
+    ? (input.electricityMeter ? JSON.stringify(input.electricityMeter) : null)
+    : (existing.electricityMeter ? JSON.stringify(existing.electricityMeter) : null);
   const total = computeTotal(base, water, elec);
   const waterFrom = normalizeStoredDate(
     input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : existing.waterPeriodFrom,
@@ -364,9 +411,10 @@ export function updateRentRecordUtilities(
       water_fee = ?, electricity_fee = ?,
       water_period_from = ?, water_period_to = ?,
       electricity_period_from = ?, electricity_period_to = ?,
-      actual_amount = ?, custom_invoice_note = ?, updated_at = datetime('now')
+      actual_amount = ?, custom_invoice_note = ?, electricity_meter_json = ?,
+      updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, id, userId);
+  ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, meterJson, id, userId);
   const updated = getRentRecord(id, userId)!;
   syncChargeItemsFromRecord(updated);
   return updated;
@@ -392,6 +440,7 @@ function applyOverdueStatuses(userId: number, period: string) {
 // ---------------------------------------------------------------------------
 
 export function listRentalDashboard(userId: number, period = currentBillingPeriod()) {
+  ensureDefaultRentalUnits(userId);
   syncAllLeaseStatuses(userId);
   const unitRows = db.prepare(
     'SELECT * FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE ASC'
@@ -422,10 +471,12 @@ export function listRentalDashboard(userId: number, period = currentBillingPerio
 }
 
 export function getRentalUnitDetail(unitId: number | string, userId: number, period = currentBillingPeriod()) {
+  ensureDefaultRentalUnits(userId);
   const unit = getRentalUnit(unitId, userId);
   if (!unit) return null;
   ensureRentRecord(unit, period);
   applyOverdueStatuses(userId, period);
+  const suggestedPrevElectricityReading = getSuggestedPrevElectricityReading(userId, Number(unitId), period);
   const currentRecord = getRentRecord(
     (db.prepare('SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?')
       .get(userId, unit.id, period) as { id: number })?.id,
@@ -453,6 +504,7 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     currentLease,
     leaseHistory: getLeaseHistory(unit.id, userId),
     leaseDocuments: currentLease ? getLeaseDocuments(currentLease.id, userId) : [],
+    suggestedPrevElectricityReading,
   };
 }
 

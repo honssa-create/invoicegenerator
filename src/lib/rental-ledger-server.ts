@@ -787,6 +787,7 @@ export function getTenantBillingHistory(
       receiptImagePath: null, invoiceSentAt: null, receiptSentAt: null,
       paidAt: r.paid_at || null, customInvoiceNote: null, customReceiptNote: null,
       electricityMeter: null,
+      waterMeter: null,
       created_at: '', updated_at: '',
     };
     return {

@@ -44,7 +44,9 @@ import {
   utilityChargeTypesForMode,
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
+  parseWaterMeterJson,
   type ElectricityMeterData,
+  type WaterMeterData,
   type PeriodPaymentAllocation,
   type PreviousYearRent,
   type RentalChargeItem,
@@ -85,6 +87,7 @@ interface RecordRow {
   invoice_sent_at: string | null; receipt_sent_at: string | null;
   paid_at: string | null; custom_invoice_note: string | null;
   custom_receipt_note: string | null; electricity_meter_json?: string | null;
+  water_meter_json?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -146,6 +149,7 @@ function hydrateRecord(row: RecordRow): RentRecord {
     paidAt: row.paid_at, customInvoiceNote: row.custom_invoice_note,
     customReceiptNote: row.custom_receipt_note,
     electricityMeter: parseElectricityMeterJson(row.electricity_meter_json),
+    waterMeter: parseWaterMeterJson(row.water_meter_json),
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -186,6 +190,24 @@ export function getRentalActivities(unitId: number, userId: number): RentalActiv
   return (db
     .prepare('SELECT * FROM rental_activity_logs WHERE unit_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50')
     .all(unitId, userId) as ActivityRow[]).map(hydrateActivity);
+}
+
+export function getSuggestedPrevWaterReading(
+  userId: number, unitId: number, beforePeriod: string,
+): number | null {
+  const rows = db.prepare(
+    `SELECT water_meter_json FROM rental_records
+     WHERE user_id = ? AND unit_id = ? AND billing_period < ?
+       AND water_meter_json IS NOT NULL AND water_meter_json != ''
+     ORDER BY billing_period DESC`
+  ).all(userId, unitId, beforePeriod) as { water_meter_json: string }[];
+  for (const row of rows) {
+    const m = parseWaterMeterJson(row.water_meter_json);
+    if (m?.currReading != null && Number.isFinite(m.currReading)) {
+      return m.currReading;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +399,7 @@ export function updateRentRecordUtilities(
     electricityPeriodTo?: string | null;
     customInvoiceNote?: string | null;
     electricityMeter?: ElectricityMeterData | null;
+    waterMeter?: WaterMeterData | null;
   }
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
@@ -387,6 +410,9 @@ export function updateRentRecordUtilities(
   const meterJson = input.electricityMeter !== undefined
     ? (input.electricityMeter ? JSON.stringify(input.electricityMeter) : null)
     : (existing.electricityMeter ? JSON.stringify(existing.electricityMeter) : null);
+  const waterMeterJson = input.waterMeter !== undefined
+    ? (input.waterMeter ? JSON.stringify(input.waterMeter) : null)
+    : (existing.waterMeter ? JSON.stringify(existing.waterMeter) : null);
   const total = computeTotal(base, water, elec);
   const waterFrom = normalizeStoredDate(
     input.waterPeriodFrom !== undefined ? input.waterPeriodFrom : existing.waterPeriodFrom,
@@ -411,10 +437,10 @@ export function updateRentRecordUtilities(
       water_fee = ?, electricity_fee = ?,
       water_period_from = ?, water_period_to = ?,
       electricity_period_from = ?, electricity_period_to = ?,
-      actual_amount = ?, custom_invoice_note = ?, electricity_meter_json = ?,
+      actual_amount = ?, custom_invoice_note = ?, electricity_meter_json = ?, water_meter_json = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, meterJson, id, userId);
+  ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, meterJson, waterMeterJson, id, userId);
   const updated = getRentRecord(id, userId)!;
   syncChargeItemsFromRecord(updated);
   return updated;
@@ -477,6 +503,7 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
   ensureRentRecord(unit, period);
   applyOverdueStatuses(userId, period);
   const suggestedPrevElectricityReading = getSuggestedPrevElectricityReading(userId, Number(unitId), period);
+  const suggestedPrevWaterReading = getSuggestedPrevWaterReading(userId, Number(unitId), period);
   const currentRecord = getRentRecord(
     (db.prepare('SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?')
       .get(userId, unit.id, period) as { id: number })?.id,
@@ -505,6 +532,7 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     leaseHistory: getLeaseHistory(unit.id, userId),
     leaseDocuments: currentLease ? getLeaseDocuments(currentLease.id, userId) : [],
     suggestedPrevElectricityReading,
+    suggestedPrevWaterReading,
   };
 }
 

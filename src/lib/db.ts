@@ -570,6 +570,9 @@ db.exec(`
   if (!rrCols.includes('electricity_meter_json')) {
     try { db.exec('ALTER TABLE rental_records ADD COLUMN electricity_meter_json TEXT'); } catch { /* exists */ }
   }
+  if (!rrCols.includes('water_meter_json')) {
+    try { db.exec('ALTER TABLE rental_records ADD COLUMN water_meter_json TEXT'); } catch { /* exists */ }
+  }
 }
 
 // Rental ledger — tenants, charge line items, payments + manual allocations (parallel with rental_records).

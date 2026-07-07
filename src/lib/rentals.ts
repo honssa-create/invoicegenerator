@@ -70,6 +70,7 @@ export interface RentRecord {
   customInvoiceNote: string | null;
   customReceiptNote: string | null;
   electricityMeter: ElectricityMeterData | null;
+  waterMeter: WaterMeterData | null;
   created_at: string;
   updated_at: string;
 }
@@ -623,6 +624,50 @@ export function meterDataFromInputs(
   const total = otherUnitsUsageTotal(meter);
   meter.otherUnitsUsage = total > 0 ? total : null;
   return meter;
+}
+
+export interface WaterMeterData {
+  prevReading: number | null;
+  currReading: number | null;
+  ratePerUnit: number | null;
+}
+
+export function unitHasWaterMeterFormula(unitName: string): boolean {
+  return unitName.trim().toLowerCase() === '213a';
+}
+
+export function parseWaterMeterJson(raw: string | null | undefined): WaterMeterData | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    if (!p || typeof p !== 'object') return null;
+    return {
+      prevReading: p.prevReading != null ? Number(p.prevReading) : null,
+      currReading: p.currReading != null ? Number(p.currReading) : null,
+      ratePerUnit: p.ratePerUnit != null ? Number(p.ratePerUnit) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function waterUsageUnits(curr: number | null, prev: number | null): number {
+  if (curr == null || prev == null || !Number.isFinite(curr) || !Number.isFinite(prev)) return 0;
+  return Math.max(0, curr - prev);
+}
+
+export function calcWaterFeeFromMeter(meter: WaterMeterData): number {
+  const usage = waterUsageUnits(meter.currReading, meter.prevReading);
+  const rate = meter.ratePerUnit ?? 0;
+  return Math.round(usage * rate * 100) / 100;
+}
+
+export function waterMeterDataFromInputs(prev: string, curr: string, rate: string): WaterMeterData {
+  return {
+    prevReading: prev.trim() === '' ? null : Number(prev),
+    currReading: curr.trim() === '' ? null : Number(curr),
+    ratePerUnit: rate.trim() === '' ? null : Number(rate),
+  };
 }
 
 /** Charge types included on tenant bills / debit notes for this utility mode. */

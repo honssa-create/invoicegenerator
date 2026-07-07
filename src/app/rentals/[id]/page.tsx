@@ -7,6 +7,7 @@ import AppLayout from '@/components/AppLayout';
 import DebitNoteActions from '@/components/DebitNoteActions';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
 import ElectricityMeterCalculator from '@/components/ElectricityMeterCalculator';
+import WaterMeterCalculator from '@/components/WaterMeterCalculator';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import ChargeAllocationGrid, {
@@ -36,8 +37,12 @@ import {
   todayFormDate,
   utilityLineLabel,
   calcElectricityFeeForFormula,
+  calcWaterFeeFromMeter,
   electricityFormulaForUnit,
+  formatBillingPeriodLabel,
   meterDataFromInputs,
+  unitHasWaterMeterFormula,
+  waterMeterDataFromInputs,
   type RentRecord,
   type RentalActivityLog,
   type RentalChargeItem,
@@ -62,6 +67,7 @@ interface DetailPayload {
   leaseHistory?: RentalLease[];
   leaseDocuments?: RentalLeaseDocument[];
   suggestedPrevElectricityReading?: number | null;
+  suggestedPrevWaterReading?: number | null;
 }
 
 export default function RentalDetailPage() {
@@ -89,6 +95,8 @@ function RentalDetailInner() {
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
   const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
+  const [leaseStartDate, setLeaseStartDate] = useState('');
+  const [leaseEndDate, setLeaseEndDate] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
 
   // utility inputs
@@ -106,7 +114,11 @@ function RentalDetailInner() {
   const [meterStockRoom1, setMeterStockRoom1] = useState('');
   const [meterStockRoom2, setMeterStockRoom2] = useState('');
   const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
+  const [waterMeterPrev, setWaterMeterPrev] = useState('');
+  const [waterMeterCurr, setWaterMeterCurr] = useState('');
+  const [waterMeterRate, setWaterMeterRate] = useState('');
   const [suggestedPrevReading, setSuggestedPrevReading] = useState<number | null>(null);
+  const [suggestedPrevWaterReading, setSuggestedPrevWaterReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
   const [utilitySaving, setUtilitySaving] = useState(false);
 
@@ -174,6 +186,8 @@ function RentalDetailInner() {
           setDueDateDay(String(d.unit.dueDateDay || 1));
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
           setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
+          setLeaseStartDate(d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : '');
+          setLeaseEndDate(d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : '');
           const rec = d.currentRecord;
           if (rec) {
             const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
@@ -193,6 +207,14 @@ function RentalDetailInner() {
             setMeterStockRoom2(meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '');
             setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
             setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
+            setSuggestedPrevWaterReading(d.suggestedPrevWaterReading ?? null);
+            const waterMeter = rec.waterMeter;
+            setWaterMeterPrev(waterMeter?.prevReading != null ? String(waterMeter.prevReading) : '');
+            setWaterMeterCurr(waterMeter?.currReading != null ? String(waterMeter.currReading) : '');
+            setWaterMeterRate(waterMeter?.ratePerUnit != null ? String(waterMeter.ratePerUnit) : '');
+            if (!waterMeter?.prevReading && d.suggestedPrevWaterReading != null) {
+              setWaterMeterPrev(String(d.suggestedPrevWaterReading));
+            }
             if (!meter?.prevReading && d.suggestedPrevElectricityReading != null) {
               setMeterPrevReading(String(d.suggestedPrevElectricityReading));
             }
@@ -219,6 +241,14 @@ function RentalDetailInner() {
   }, [dueDateDay, period]);
 
   const electricityFormula = data?.unit ? electricityFormulaForUnit(data.unit.unitName) : null;
+  const waterMeterFormula = data?.unit ? unitHasWaterMeterFormula(data.unit.unitName) : false;
+
+  useEffect(() => {
+    if (!waterMeterFormula) return;
+    const meter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
+    const fee = calcWaterFeeFromMeter(meter);
+    setWaterFee(fee > 0 || meter.currReading != null ? String(fee) : '');
+  }, [waterMeterFormula, waterMeterPrev, waterMeterCurr, waterMeterRate]);
 
   useEffect(() => {
     if (!electricityFormula) return;
@@ -243,6 +273,8 @@ function RentalDetailInner() {
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
         utilityBillingMode,
+        leaseStartDate: fromFormDate(leaseStartDate),
+        leaseEndDate: fromFormDate(leaseEndDate),
       }),
     });
     if (data?.currentRecord) {
@@ -275,6 +307,9 @@ function RentalDetailInner() {
         meterPrevReading, meterCurrReading, meterRatePerUnit,
         { meter213B, meterStockRoom1, meterStockRoom2 },
       );
+    }
+    if (waterMeterFormula) {
+      payload.waterMeter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
     }
     return payload;
   };
@@ -468,16 +503,20 @@ function RentalDetailInner() {
           <div>
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
-            <p className="text-xs text-gray-400 mt-2">Lease {formatDisplayDate(unit.leaseStartDate)} → {formatDisplayDate(unit.leaseEndDate)}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-sm font-medium text-brand-800">
+                帳期 Billing: {formatBillingPeriodLabel(period)}
+              </span>
+              <LeaseStatusBadge status={leaseStatus} />
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              租期 Rental period: {formatDisplayDate(unit.leaseStartDate) || '—'} → {formatDisplayDate(unit.leaseEndDate) || '—'}
               {remaining !== null && (
                 <span className={`ml-2 font-semibold ${remaining < 60 ? 'text-red-600' : 'text-gray-600'}`}>
                   · {remaining} days remaining
                 </span>
               )}
             </p>
-            <div className="mt-2">
-              <LeaseStatusBadge status={leaseStatus} />
-            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             {!contractEnded && (
@@ -543,6 +582,14 @@ function RentalDetailInner() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
             <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start 租期</label>
+            <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End 租期</label>
+            <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} />
           </div>
         </div>
         <div className="mt-6 pt-5 border-t border-gray-100">
@@ -666,20 +713,46 @@ function RentalDetailInner() {
                 {/* Water */}
                 <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                      <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                  {waterMeterFormula ? (
+                    <>
+                      <p className="text-xs text-blue-700/80 mb-3">213A formula: 用水度數 = 今次錶數 − 前次錶數</p>
+                      <WaterMeterCalculator
+                        prevReading={waterMeterPrev}
+                        currReading={waterMeterCurr}
+                        ratePerUnit={waterMeterRate}
+                        onPrevReading={setWaterMeterPrev}
+                        onCurrReading={setWaterMeterCurr}
+                        onRatePerUnit={setWaterMeterRate}
+                        suggestedPrevReading={suggestedPrevWaterReading}
+                        inpClassName={inp}
+                      />
+                      <div className="grid md:grid-cols-2 gap-3 mt-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
+                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Electricity */}

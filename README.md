@@ -66,6 +66,13 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `REMINDER_FROM_EMAIL` | From address for reminder emails | `InvoiceFlow <onboarding@resend.dev>` |
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
 | `CRON_SECRET` | Bearer token that lets an external scheduler run reminders for all users via `/api/cron/payment-reminders` | _(unset)_ |
+| `DB_PATH` | SQLite file path (use `/data/invoices.db` on Railway with a volume) | `data/invoices.db` |
+| `RECEIPTS_DIR` | Local receipt image folder; defaults to `{dirname(DB_PATH)}/receipts` when `DB_PATH` is set | `data/receipts` |
+| `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
+| `R2_ACCESS_KEY_ID` | R2 access key | _(unset)_ |
+| `R2_SECRET_ACCESS_KEY` | R2 secret key | _(unset)_ |
+| `R2_BUCKET_NAME` | R2 bucket name | _(unset)_ |
+| `R2_PUBLIC_URL` | Public base URL for R2 objects (e.g. `https://pub-xxx.r2.dev`) | _(unset)_ |
 
 ## Production
 
@@ -83,14 +90,25 @@ Set `JWT_SECRET` to a strong random string in production.
    - Branch: **`main`** (must not be an empty feature branch)
    - Root Directory: leave **empty** (repo root contains `package.json`)
 
-2. **Add a Volume** (for SQLite persistence)
+2. **Add a Volume** (for SQLite + receipt images persistence)
    - Mount path: `/data`
    - Set env: `DB_PATH=/data/invoices.db`
+   - Receipt images are stored at `/data/receipts` automatically (same volume as the DB).
+   - Optional override: `RECEIPTS_DIR=/data/receipts`
 
-3. **Required environment variables**
+3. **Image storage (pick one — required for production)**
+
+   **Option A — Cloudflare R2 (recommended)**  
+   Survives redeploys even without a volume. New uploads store a public `https://…` URL in the database.
+   - `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL`
+
+   **Option B — Railway volume only**  
+   Works if `DB_PATH` points at the mounted volume (receipts co-locate under `/data/receipts`).  
+   ⚠️ If you only persisted the DB but receipts were saved to the container’s ephemeral disk, redeploy wipes images while DB rows remain — configure R2 or ensure both DB and receipts use `/data`.
+
+4. **Required environment variables**
    - `JWT_SECRET` — session signing secret
-   - `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` — image storage
 
-4. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
+5. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
 
 This repo includes `railpack.json` and `railway.json` so Railpack detects **Node.js / Next.js** and runs `npm run build` + `npm start` automatically.

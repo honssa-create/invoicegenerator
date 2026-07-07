@@ -26,6 +26,7 @@ import {
   type RentalUnit,
   type RentalUnitWithRecord,
   type UtilityBillingMode,
+  type PreviousLeaseRecord,
 } from '@/lib/rentals';
 
 interface DashboardData {
@@ -33,6 +34,7 @@ interface DashboardData {
   metrics: { totalRevenue: number; outstanding: number; paidCount: number; totalUnits: number };
   period: string;
   alerts?: RentalDashboardAlert[];
+  previousLeases?: PreviousLeaseRecord[];
 }
 
 const blankUnit: Partial<RentalUnit> = {
@@ -73,12 +75,21 @@ export default function RentalsPage() {
   useEffect(() => { load(); }, [period]);
 
   const units = data?.units || [];
+  const previousLeases = data?.previousLeases || [];
   const alerts = data?.alerts || [];
   const metrics = data?.metrics || { totalRevenue: 0, outstanding: 0, paidCount: 0, totalUnits: 0 };
 
   const filteredUnits = leaseFilter === 'all'
     ? units
     : units.filter((u) => (u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || { leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false })) === leaseFilter);
+
+  /** Master panel shows current occupancy only — ended tenancies live in history table. */
+  const activePanelUnits = filteredUnits.filter((u) => {
+    const status = u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || {
+      leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false,
+    });
+    return status !== 'ended' && status !== 'terminated';
+  });
 
   const tenantGroupKey = (u: Pick<RentalUnit, 'tenantId' | 'tenantName'>) => {
     if (u.tenantId) return `id:${u.tenantId}`;
@@ -274,8 +285,8 @@ export default function RentalsPage() {
             <div className="p-12 text-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" /></div>
           ) : units.length === 0 ? (
             <div className="p-12 text-center text-gray-400 text-sm">No rental units yet — add the first one.</div>
-          ) : filteredUnits.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 text-sm">No units match this contract filter.</div>
+          ) : activePanelUnits.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 text-sm">No active units match this filter — see history below for completed leases.</div>
           ) : (
             <table className="w-full min-w-[900px] text-sm">
               <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
@@ -294,7 +305,7 @@ export default function RentalsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredUnits.map((u) => {
+                {activePanelUnits.map((u) => {
                   const remaining = daysRemaining(u.leaseEndDate);
                   const rec = u.currentRecord;
                   const recStatus = displayRentalStatus(rec);
@@ -386,6 +397,58 @@ export default function RentalsPage() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Previous tenant records — completed leases */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mt-6">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">歷任租客紀錄 Previous Tenant Records</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Completed tenancies — click a row to view read-only records for that tenant &amp; unit
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          {previousLeases.length === 0 ? (
+            <p className="p-10 text-center text-gray-400 text-sm">
+              No previous tenants yet. Use <strong>完約 End Contract</strong> on a unit to archive the tenancy here.
+            </p>
+          ) : (
+            <table className="w-full min-w-[800px] text-sm">
+              <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left">單位 Unit</th>
+                  <th className="px-4 py-3 text-left">租單位人士 Tenant</th>
+                  <th className="px-4 py-3 text-left">Contract 合約</th>
+                  <th className="px-4 py-3 text-left">起租日</th>
+                  <th className="px-4 py-3 text-left">完租日</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {previousLeases.map((l) => (
+                  <tr
+                    key={l.leaseId}
+                    onClick={() => router.push(`/rentals/${l.unitId}?leaseId=${l.leaseId}`)}
+                    className="hover:bg-gray-50 cursor-pointer"
+                  >
+                    <td className="px-4 py-3 font-semibold text-gray-900">{l.unitName}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800">{l.tenantName}</td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">
+                      {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{formatDisplayDate(l.leaseStartDate)}</td>
+                    <td className="px-4 py-3 text-gray-600">{formatDisplayDate(l.actualEndDate || l.leaseEndDate)}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                        {l.statusLabel}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}

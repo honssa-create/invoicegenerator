@@ -10,7 +10,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const ownerId = rentalOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const period = searchParams.get('period') || currentBillingPeriod();
-  const detail = getRentalUnitDetail(params.id, ownerId, period);
+  const leaseId = searchParams.get('leaseId') || undefined;
+  const detail = getRentalUnitDetail(params.id, ownerId, period, leaseId ? { leaseId } : undefined);
   if (!detail) return NextResponse.json({ error: 'Unit not found' }, { status: 404 });
   return NextResponse.json(detail);
 }

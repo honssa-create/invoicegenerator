@@ -164,6 +164,26 @@ export interface RentalLease {
   updated_at: string;
 }
 
+/** Ended lease row for master-panel history table. */
+export interface PreviousLeaseRecord {
+  leaseId: number;
+  unitId: number;
+  unitName: string;
+  tenantId: number | null;
+  tenantName: string;
+  leaseStartDate: string;
+  leaseEndDate: string;
+  actualEndDate: string | null;
+  status: LeaseStoredStatus;
+  statusLabel: string;
+}
+
+/** Official label for completed past tenancies. */
+export function pastLeaseStatusLabel(status: LeaseStoredStatus): string {
+  if (status === 'terminated') return '提早終止 Terminated';
+  return '已完約 Completed';
+}
+
 export interface RentalLeaseDocument {
   id: number;
   user_id: number;

@@ -21,6 +21,8 @@ import {
   getCurrentLeaseForUnit,
   getLeaseDocuments,
   getLeaseHistory,
+  getLeaseById,
+  getPreviousLeasesForUser,
   getRentalDashboardAlerts,
   shouldAutoDispatchInvoice,
   syncAllLeaseStatuses,
@@ -73,6 +75,7 @@ import {
   type RentalUnit,
   type RentalUnitWithRecord,
   type UnitLeasePaymentLedgerRow,
+  type PreviousLeaseRecord,
 } from './rentals';
 
 // ---------------------------------------------------------------------------
@@ -577,15 +580,40 @@ export function listRentalDashboard(userId: number, period = currentBillingPerio
   const outstanding = records.reduce((s, r) => s + outstandingBalance(r), 0);
   const paidCount = records.filter((r) => displayRentalStatus(r) === 'paid').length;
   const alerts = getRentalDashboardAlerts(userId, period);
-  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts };
+  const previousLeases = getPreviousLeasesForUser(userId);
+  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts, previousLeases };
 }
 
-export function getRentalUnitDetail(unitId: number | string, userId: number, period = currentBillingPeriod()) {
+export function getRentalUnitDetail(
+  unitId: number | string,
+  userId: number,
+  period = currentBillingPeriod(),
+  options?: { leaseId?: number | string },
+) {
   ensureDefaultRentalUnits(userId);
   const unit = getRentalUnit(unitId, userId);
   if (!unit) return null;
-  ensureRentRecord(unit, period);
-  applyOverdueStatuses(userId, period);
+
+  const requestedLeaseId = options?.leaseId ? Number(options.leaseId) : null;
+  const requestedLease = requestedLeaseId ? getLeaseById(requestedLeaseId, userId) : null;
+  const isHistoricalView = Boolean(
+    requestedLease && requestedLease.unitId === unit.id && !requestedLease.isCurrent,
+  );
+  if (requestedLeaseId && !isHistoricalView) return null;
+
+  const activeLease = getCurrentLeaseForUnit(unit.id, userId);
+  const displayLease = isHistoricalView ? requestedLease! : activeLease;
+  const readOnlyLease = isHistoricalView || (
+    displayLease != null && (
+      computeLeaseDisplayStatus(displayLease) === 'ended'
+      || computeLeaseDisplayStatus(displayLease) === 'terminated'
+    )
+  );
+
+  if (!isHistoricalView) {
+    ensureRentRecord(unit, period);
+    applyOverdueStatuses(userId, period);
+  }
   const suggestedPrevElectricityReading = getSuggestedPrevElectricityReading(userId, Number(unitId), period);
   const suggestedPrevWaterReading = getSuggestedPrevWaterReading(userId, Number(unitId), period);
   const currentRecord = getRentRecord(
@@ -606,17 +634,25 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     ? (db.prepare('SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1')
         .get(currentRecord.id) as ReceiptRow | undefined)
     : undefined;
-  const currentLease = getCurrentLeaseForUnit(unit.id, userId);
+  const currentLease = activeLease;
+  let paymentHistory = getUnitPaymentHistory(unit.id, userId);
+  if (isHistoricalView && displayLease?.tenantId) {
+    paymentHistory = paymentHistory.filter((p) => p.tenantId === displayLease.tenantId);
+  }
   return {
     unit, currentRecord, history, activities,
     chargeItems,
-    paymentHistory: getUnitPaymentHistory(unit.id, userId),
-    paymentLedger: getUnitLeasePaymentLedger(unit.id, userId, currentLease),
-    outstandingCharges: getUnitOutstandingCharges(unit.id, userId),
+    paymentHistory,
+    paymentLedger: getUnitLeasePaymentLedger(unit.id, userId, displayLease),
+    outstandingCharges: isHistoricalView ? [] : getUnitOutstandingCharges(unit.id, userId),
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
     currentLease,
+    viewingLease: isHistoricalView ? displayLease : null,
+    displayLease,
+    readOnlyLease,
+    isHistoricalView,
     leaseHistory: getLeaseHistory(unit.id, userId),
-    leaseDocuments: currentLease ? getLeaseDocuments(currentLease.id, userId) : [],
+    leaseDocuments: displayLease ? getLeaseDocuments(displayLease.id, userId) : [],
     suggestedPrevElectricityReading,
     suggestedPrevWaterReading,
   };

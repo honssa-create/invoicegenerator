@@ -48,6 +48,7 @@ import {
   electricityFormulaForUnit,
   formatBillingPeriodLabel,
   meterDataFromInputs,
+  pastLeaseStatusLabel,
   unitHasWaterMeterFormula,
   waterMeterDataFromInputs,
   type DebitNotePaymentTemplateId,
@@ -75,6 +76,10 @@ interface DetailPayload {
   latestReceipt: RentalPaymentReceipt | null;
   paymentHistory?: RentalPaymentWithAllocations[];
   currentLease?: RentalLease | null;
+  viewingLease?: RentalLease | null;
+  displayLease?: RentalLease | null;
+  readOnlyLease?: boolean;
+  isHistoricalView?: boolean;
   leaseHistory?: RentalLease[];
   leaseDocuments?: RentalLeaseDocument[];
   suggestedPrevElectricityReading?: number | null;
@@ -115,6 +120,7 @@ function RentalDetailInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const id = params.id as string;
+  const viewLeaseId = sp.get('leaseId');
 
   const [period, setPeriod] = useState(sp.get('period') || currentBillingPeriod());
   const [data, setData] = useState<DetailPayload | null>(null);
@@ -227,20 +233,30 @@ function RentalDetailInner() {
     setUtilityCanUndo(false);
     skipPeriodRecalcRef.current = true;
     skipUtilityAutoSaveRef.current = true;
-    fetch(`/api/rentals/units/${id}?period=${period}`)
+    fetch(`/api/rentals/units/${id}?period=${period}${viewLeaseId ? `&leaseId=${viewLeaseId}` : ''}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d) {
           setData(d);
-          setTenantName(d.unit.tenantName || '');
-          setTenantPhone(d.unit.tenantPhone || '');
-          setTenantEmail(d.unit.tenantEmail || '');
-          setDueDateDay(String(d.unit.dueDateDay || 1));
-          setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
+          const profileLease = d.displayLease as RentalLease | null | undefined;
+          const useLease = d.isHistoricalView && profileLease;
+          setTenantName(useLease ? profileLease.tenantName : (d.unit.tenantName || ''));
+          setTenantPhone(useLease ? profileLease.tenantPhone : (d.unit.tenantPhone || ''));
+          setTenantEmail(useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''));
+          setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
+          setBaseRent(String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)));
           setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
-          setLeaseStartDate(d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : '');
-          setLeaseEndDate(d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : '');
-          setDepositAmount(d.currentLease?.depositAmount != null ? String(d.currentLease.depositAmount) : '');
+          setLeaseStartDate(useLease
+            ? toFormDate(profileLease.leaseStartDate)
+            : (d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : ''));
+          setLeaseEndDate(useLease
+            ? toFormDate(profileLease.actualEndDate || profileLease.leaseEndDate)
+            : (d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : ''));
+          setDepositAmount(
+            (useLease ? profileLease.depositAmount : d.currentLease?.depositAmount) != null
+              ? String(useLease ? profileLease.depositAmount : d.currentLease.depositAmount)
+              : '',
+          );
           setUnitAddress(d.unit.address || '');
           const rec = d.currentRecord;
           if (rec) {
@@ -303,7 +319,7 @@ function RentalDetailInner() {
         setLoading(false);
         setTimeout(() => { skipUtilityAutoSaveRef.current = false; }, 200);
       });
-  }, [id, period]);
+  }, [id, period, viewLeaseId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -449,7 +465,7 @@ function RentalDetailInner() {
   }, [applyUtilitySnapshot, saveUtilities]);
 
   useEffect(() => {
-    if (skipUtilityAutoSaveRef.current || !data?.currentRecord) return;
+    if (skipUtilityAutoSaveRef.current || !data?.currentRecord || data.readOnlyLease) return;
     if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
     utilitySaveTimerRef.current = setTimeout(() => {
       void saveUtilities();
@@ -469,6 +485,7 @@ function RentalDetailInner() {
   ]);
 
   const saveProfile = async () => {
+    if (data?.readOnlyLease) return;
     setProfileSaving(true);
     await fetch(`/api/rentals/units/${id}`, {
       method: 'PATCH',
@@ -538,7 +555,7 @@ function RentalDetailInner() {
   };
 
   const openPaidModal = () => {
-    if (!data?.unit.tenantId) return;
+    if (!data?.unit.tenantId || data.readOnlyLease || data.isHistoricalView) return;
     const outstanding = data.outstandingCharges || [];
     const rows = chargeRowsByType(outstanding);
     const filled = fillOutstandingValues(rows);
@@ -744,16 +761,22 @@ function RentalDetailInner() {
   if (loading) return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
   if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">Unit not found. <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">Back</button></div></AppLayout>;
 
-  const { unit, currentRecord, activities, currentLease, leaseHistory, leaseDocuments, paymentLedger } = data;
+  const { unit, currentRecord, activities, currentLease, leaseHistory, leaseDocuments, paymentLedger, viewingLease, readOnlyLease, isHistoricalView } = data;
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
   const recStatus = rec ? displayRentalStatus(rec) : 'pending';
   const balance = rec ? outstandingBalance(rec) : 0;
+  const readOnly = Boolean(readOnlyLease);
+  const fieldCls = readOnly
+    ? 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-100 text-gray-600 cursor-not-allowed'
+    : inp;
+  const leaseStatus = isHistoricalView && viewingLease
+    ? computeLeaseDisplayStatus(viewingLease)
+    : currentLease
+      ? computeLeaseDisplayStatus(currentLease)
+      : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
+  const contractEnded = readOnly || leaseStatus === 'ended' || leaseStatus === 'terminated';
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
-  const leaseStatus = currentLease
-    ? computeLeaseDisplayStatus(currentLease)
-    : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
-  const contractEnded = leaseStatus === 'ended' || leaseStatus === 'terminated' || leaseStatus === 'vacant';
   const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
   const liveElectricityMeter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
     meter213B, meterStockRoom1, meterStockRoom2,
@@ -775,17 +798,49 @@ function RentalDetailInner() {
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 bg-brand-50 text-brand-700 text-sm rounded-lg cursor-pointer">{toast} ✕</div>}
 
+      {isHistoricalView && viewingLease && (
+        <div className="mb-4 rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">歷任租客紀錄 · Read-only 只供查閱</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {viewingLease.tenantName} · {formatDisplayDate(viewingLease.leaseStartDate)} → {formatDisplayDate(viewingLease.actualEndDate || viewingLease.leaseEndDate)}
+            </p>
+          </div>
+          <Link
+            href={`/rentals/${unit.id}?period=${period}`}
+            className="text-sm text-brand-600 font-medium hover:underline"
+          >
+            ← Back to current unit 返回現任租約
+          </Link>
+        </div>
+      )}
+
+      {readOnly && !isHistoricalView && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Contract ended — profile is locked. Use <strong>完約 End Contract</strong> to archive and start a new tenancy.
+        </div>
+      )}
+
       {/* Header — editable profile */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
         <div className="flex items-start justify-between flex-wrap gap-4 mb-5">
           <div>
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Unit Profile 單位資料</p>
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">
+              {isHistoricalView ? 'Historical Tenant Record 歷任租客' : 'Unit Profile 單位資料'}
+            </p>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{unit.unitName}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-sm font-medium text-brand-800">
-                帳期 Billing: {formatBillingPeriodLabel(period)}
-              </span>
+              {!isHistoricalView && (
+                <span className="inline-flex items-center rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-sm font-medium text-brand-800">
+                  帳期 Billing: {formatBillingPeriodLabel(period)}
+                </span>
+              )}
               <LeaseStatusBadge status={leaseStatus} />
+              {readOnly && (
+                <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+                  只供查閱 View only
+                </span>
+              )}
             </div>
             <p className="text-xs text-gray-500 mt-2">
               租期 Rental period: {formatDisplayDate(unit.leaseStartDate) || '—'} → {formatDisplayDate(unit.leaseEndDate) || '—'}
@@ -797,7 +852,7 @@ function RentalDetailInner() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {!contractEnded && (
+            {!contractEnded && !isHistoricalView && (
               <button
                 type="button"
                 onClick={() => {
@@ -815,7 +870,7 @@ function RentalDetailInner() {
                 完約 End Contract
               </button>
             )}
-            {unit.tenantId ? (
+            {unit.tenantId && !isHistoricalView && !readOnly ? (
               <>
                 <Link
                   href={`/rentals/tenants/${unit.tenantId}`}
@@ -830,67 +885,70 @@ function RentalDetailInner() {
                   period={period}
                 />
               </>
-            ) : (
+            ) : !readOnly && !isHistoricalView ? (
               <p className="text-xs text-amber-600 self-center">Save tenant name to enable rent payment notice</p>
-            )}
+            ) : null}
           </div>
         </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className={`grid md:grid-cols-2 lg:grid-cols-3 gap-4 ${readOnly ? 'opacity-90' : ''}`}>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Tenant Name 租單位人士</label>
-            <input className={inp} value={tenantName} onChange={(e) => setTenantName(e.target.value)} />
+            <input className={fieldCls} value={tenantName} onChange={(e) => setTenantName(e.target.value)} disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Phone 電話</label>
-            <input type="tel" className={inp} value={tenantPhone} onChange={(e) => setTenantPhone(e.target.value)} placeholder="+852…" />
+            <input type="tel" className={fieldCls} value={tenantPhone} onChange={(e) => setTenantPhone(e.target.value)} placeholder="+852…" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
-            <input type="email" className={inp} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" />
+            <input type="email" className={fieldCls} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–31)</label>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500 whitespace-nowrap">每月</span>
-              <input type="number" min={1} max={31} className={`${inp} w-20 text-center`} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} />
+              <input type="number" min={1} max={31} className={`${fieldCls} w-20 text-center`} value={dueDateDay} onChange={(e) => setDueDateDay(e.target.value)} disabled={readOnly} readOnly={readOnly} />
               <span className="text-sm text-gray-500 whitespace-nowrap">日</span>
               <span className="text-sm font-medium text-brand-700 ml-1">{formatDueDayLabel(Number(dueDateDay) || 1)}</span>
             </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
-            <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
+            <input type="number" min={0} className={fieldCls} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} disabled={readOnly} readOnly={readOnly} />
             <p className="text-xs text-gray-400 mt-1">
               Fixed for lease period 起租日–完租日; applies to all months in the lease.
             </p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">已交按金 Deposit Paid</label>
-            <input type="number" min={0} className={inp} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0" />
+            <input type="number" min={0} className={fieldCls} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div className="md:col-span-2 lg:col-span-3">
             <label className="block text-xs font-medium text-gray-500 mb-1">地址 Address</label>
             <textarea
-              className={`${inp} min-h-[72px] resize-y`}
+              className={`${fieldCls} min-h-[72px] resize-y`}
               value={unitAddress}
               onChange={(e) => setUnitAddress(e.target.value)}
               placeholder="Unit / mailing address 單位地址"
               rows={2}
+              disabled={readOnly}
+              readOnly={readOnly}
             />
           </div>
           <div className="md:col-span-2 lg:col-span-2">
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start 租期</label>
-                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} />
+                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={fieldCls} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} disabled={readOnly} readOnly={readOnly} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End 租期</label>
-                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} />
+                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={fieldCls} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} disabled={readOnly} readOnly={readOnly} />
               </div>
             </div>
           </div>
         </div>
+        {!readOnly && (
         <div className="mt-6 pt-5 border-t border-gray-100">
           <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>
           <p className="text-xs text-gray-400 mb-3">Controls whether water &amp; electricity appear on debit notes for this unit</p>
@@ -899,18 +957,22 @@ function RentalDetailInner() {
             onChange={setUtilityBillingMode}
           />
         </div>
+        )}
+        {!readOnly && (
         <div className="mt-4 flex justify-end">
           <button onClick={saveProfile} disabled={profileSaving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
             {profileSaving ? 'Saving…' : 'Save Profile 儲存資料'}
           </button>
         </div>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-[1fr_340px] gap-6 lg:items-start">
         {/* LEFT */}
         <div className="space-y-6">
           {/* Utility / billing for current month */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          {!isHistoricalView && (
+          <div className={`bg-white rounded-2xl border border-gray-200 p-6 ${readOnly ? 'opacity-90' : ''}`}>
             <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
               <div>
                 <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">水電費紀錄與帳單</p>
@@ -918,7 +980,7 @@ function RentalDetailInner() {
               </div>
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              Changes auto-save as you type. Use Undo 復原 if you made a mistake.
+              {readOnly ? 'Contract ended — billing locked 合約已完結，不可編輯' : 'Changes auto-save as you type. Use Undo 復原 if you made a mistake.'}
             </p>
             {rec ? (
               <>
@@ -932,11 +994,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={fieldCls} disabled={readOnly} readOnly={readOnly} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={fieldCls} disabled={readOnly} readOnly={readOnly} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
@@ -977,7 +1039,8 @@ function RentalDetailInner() {
                         onMeterStockRoom2={setMeterStockRoom2}
                         onRatePerUnit={setMeterRatePerUnit}
                         suggestedPrevReading={suggestedPrevReading}
-                        inpClassName={inp}
+                        inpClassName={fieldCls}
+                        readOnly={readOnly}
                       />
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
@@ -1022,7 +1085,8 @@ function RentalDetailInner() {
                         onCurrReading={setWaterMeterCurr}
                         onRatePerUnit={setWaterMeterRate}
                         suggestedPrevReading={suggestedPrevWaterReading}
-                        inpClassName={inp}
+                        inpClassName={fieldCls}
+                        readOnly={readOnly}
                       />
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
@@ -1097,9 +1161,10 @@ function RentalDetailInner() {
               <p className="text-sm text-gray-400">No record for this period yet.</p>
             )}
           </div>
+          )}
 
           {/* Action bar */}
-          {(rec || unit.tenantId) && (
+          {!readOnly && !isHistoricalView && (rec || unit.tenantId) && (
             <div className="bg-white rounded-2xl border border-gray-200 p-5">
               <h2 className="font-semibold text-gray-900 mb-1">Actions 操作</h2>
               <p className="text-xs text-gray-500 mb-4">Official rental actions for this unit 單位正式操作</p>
@@ -1207,101 +1272,58 @@ function RentalDetailInner() {
         </div>
       </div>
 
-      {/* Tenant history + lease documents — last row */}
+      {/* Previous tenant records + lease documents */}
       <div className="grid lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="font-semibold text-gray-900">Tenant History 租客紀錄</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Current and past tenants for this unit</p>
+            <h2 className="font-semibold text-gray-900">歷任租客紀錄 Previous Tenant Records</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {isHistoricalView ? 'Viewing archived tenancy — select another row or return to current' : 'Click a completed tenancy to view read-only records'}
+            </p>
           </div>
-          <div className="p-4 space-y-5 max-h-[28rem] overflow-y-auto">
-            {currentLease && (
-              <div>
-                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-2">Current Tenant 現任租客</p>
-                <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    {currentLease.tenantId ? (
-                      <Link href={`/rentals/tenants/${currentLease.tenantId}`} className="font-semibold text-brand-700 hover:underline">
-                        {currentLease.tenantName}
-                      </Link>
-                    ) : (
-                      <p className="font-semibold text-gray-900">{currentLease.tenantName}</p>
-                    )}
-                    <LeaseStatusBadge status={computeLeaseDisplayStatus(currentLease)} />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {formatDisplayDate(currentLease.leaseStartDate)} → {formatDisplayDate(currentLease.leaseEndDate)}
-                  </p>
-                  {(currentLease.tenantPhone || currentLease.tenantEmail) && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      {currentLease.tenantPhone && <span>{currentLease.tenantPhone}</span>}
-                      {currentLease.tenantPhone && currentLease.tenantEmail && <span className="mx-1">·</span>}
-                      {currentLease.tenantEmail && <span>{currentLease.tenantEmail}</span>}
-                    </p>
-                  )}
-                  <p className="text-xs text-gray-500 mt-1">
-                    Rent {formatMoney(currentLease.baseRent)} · Deposit {formatMoney(currentLease.depositAmount)}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold mb-2">Previous Tenants 歷任租客</p>
-              {previousTenants.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4 rounded-xl border border-dashed border-gray-200">
-                  No previous tenants recorded yet.
-                  {!currentLease && (leaseHistory || []).length === 0 && (
-                    <span className="block mt-1 text-xs">Use <strong>完約 End Contract</strong> when a tenant moves out to keep a full history.</span>
-                  )}
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {previousTenants.map((l) => (
-                    <div key={l.id} className="rounded-xl border border-gray-100 p-3 text-sm hover:border-gray-200 transition-colors">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        {l.tenantId ? (
-                          <Link href={`/rentals/tenants/${l.tenantId}`} className="font-semibold text-brand-700 hover:underline">
-                            {l.tenantName}
-                          </Link>
-                        ) : (
-                          <p className="font-semibold text-gray-900">{l.tenantName}</p>
-                        )}
-                        <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
-                      </p>
-                      {(l.tenantPhone || l.tenantEmail) && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {l.tenantPhone && <span>{l.tenantPhone}</span>}
-                          {l.tenantPhone && l.tenantEmail && <span className="mx-1">·</span>}
-                          {l.tenantEmail && <span>{l.tenantEmail}</span>}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-500 mt-1">
-                        Rent {formatMoney(l.baseRent)} · Deposit {formatMoney(l.depositAmount)}
-                        {l.depositRefund != null && (
-                          <span> · Refund {formatMoney(l.depositRefund)}</span>
-                        )}
-                      </p>
-                      {(l.endReason || l.endNotes) && (
-                        <p className="text-xs text-gray-400 mt-1">
-                          {l.endReason}
-                          {l.endReason && l.endNotes && ' — '}
-                          {l.endNotes}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {previousTenants.length > 0 && (
-                <p className="text-[11px] text-gray-400 mt-3">
-                  History is recorded when you use <strong>完約 End Contract</strong>. Older manual edits may not appear here.
-                </p>
-              )}
-            </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left">單位 Unit</th>
+                  <th className="px-4 py-3 text-left">租單位人士 Tenant</th>
+                  <th className="px-4 py-3 text-left">Contract 合約</th>
+                  <th className="px-4 py-3 text-left">起租日</th>
+                  <th className="px-4 py-3 text-left">完租日</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {previousTenants.map((l) => (
+                  <tr
+                    key={l.id}
+                    onClick={() => router.push(`/rentals/${unit.id}?leaseId=${l.id}`)}
+                    className={`hover:bg-gray-50 cursor-pointer ${viewingLease?.id === l.id ? 'bg-brand-50/60' : ''}`}
+                  >
+                    <td className="px-4 py-3 font-semibold text-gray-900">{unit.unitName}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800">{l.tenantName}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{formatDisplayDate(l.leaseStartDate)}</td>
+                    <td className="px-4 py-3 text-gray-600">{formatDisplayDate(l.actualEndDate || l.leaseEndDate)}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                        {pastLeaseStatusLabel(l.status)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {previousTenants.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">
+                      No previous tenants for this unit yet.
+                      {!currentLease && <span className="block mt-1 text-xs">Use <strong>完約 End Contract</strong> when a tenant moves out.</span>}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1311,7 +1333,7 @@ function RentalDetailInner() {
               <h2 className="font-semibold text-gray-900">Lease Documents 租約文件</h2>
               <p className="text-xs text-gray-500 mt-0.5">Agreement, handover, deposit receipt</p>
             </div>
-            {currentLease && (
+            {currentLease && !readOnly && (
               <>
                 <input ref={leaseDocInputRef} type="file" accept="image/*,.pdf" className="hidden"
                   onChange={(e) => { if (e.target.files?.[0]) uploadLeaseDoc(e.target.files[0]); e.target.value = ''; }} />
@@ -1327,15 +1349,15 @@ function RentalDetailInner() {
             )}
           </div>
           <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
-            {!currentLease ? (
-              <p className="text-sm text-gray-400 text-center py-4">No active lease</p>
+            {!viewingLease && !currentLease ? (
+              <p className="text-sm text-gray-400 text-center py-4">No lease selected</p>
             ) : (leaseDocuments || []).length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-4">No documents uploaded</p>
             ) : (
               (leaseDocuments || []).map((d) => (
                 <a
                   key={d.id}
-                  href={`/api/rentals/leases/${currentLease.id}/documents?docId=${d.id}`}
+                  href={`/api/rentals/leases/${(viewingLease || currentLease)!.id}/documents?docId=${d.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"

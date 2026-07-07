@@ -316,7 +316,7 @@ export default function PrintView() {
               key={page.key}
               className={`expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none${pageIndex > 0 ? ' expense-print-sheet--continued' : ''}${isTall ? ' expense-print-sheet--tall' : ''}`}
             >
-              <div className="expense-print-page-unit print:block print:break-inside-avoid">
+              <div className="expense-print-keep-together">
               {page.showFullSummary ? (
                 <ExpenseSummary e={page.expense} />
               ) : (

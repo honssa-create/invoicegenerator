@@ -141,14 +141,20 @@
     break-before: page !important;
   }
 
-  .expense-print-root .expense-print-page-unit {
-    display: flex !important;
-    flex-direction: column !important;
+  /* Keep expense header + details + receipt image on one printed page */
+  .expense-print-root .expense-print-keep-together {
+    display: block !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
     flex: 1 1 auto !important;
     min-height: 0 !important;
     overflow: hidden !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
+  }
+
+  .expense-print-root .expense-print-sheet--tall .expense-print-keep-together {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    overflow: visible !important;
   }
 
   .expense-print-root .expense-print-summary,
@@ -201,7 +207,7 @@
     break-inside: auto !important;
   }
 
-  .expense-print-root .expense-print-sheet--tall .expense-print-page-unit,
+  .expense-print-root .expense-print-sheet--tall .expense-print-keep-together,
   .expense-print-root .expense-print-sheet--tall .expense-print-body,
   .expense-print-root .expense-print-sheet--tall .expense-print-figure {
     display: block !important;

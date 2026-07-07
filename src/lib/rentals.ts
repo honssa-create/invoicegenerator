@@ -518,6 +518,7 @@ export interface DefaultRentalUnitSeed {
 }
 
 export const DEFAULT_RENTAL_UNITS: DefaultRentalUnitSeed[] = [
+  { unitName: '204', utilityBillingMode: 'tenant_pays' },
   { unitName: '205', utilityBillingMode: 'tenant_pays' },
   { unitName: '213A', utilityBillingMode: 'company_proxy' },
   { unitName: '213B', utilityBillingMode: 'tenant_pays' },

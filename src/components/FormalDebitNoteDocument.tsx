@@ -14,7 +14,7 @@ export default function FormalDebitNoteDocument({ doc }: Props) {
   const { company } = doc;
 
   return (
-    <div className="formal-debit-note text-sm text-gray-900 leading-relaxed">
+    <div className="formal-debit-note a4-page-content text-sm text-gray-900 leading-relaxed">
       {/* Header */}
       <div className="text-center border-b-2 border-gray-800 pb-4 mb-6">
         <p className="font-bold text-base">{company.nameZh}</p>

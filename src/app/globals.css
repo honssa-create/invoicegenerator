@@ -54,6 +54,17 @@
   .modal-panel {
     @apply max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-w-xl sm:rounded-2xl sm:p-6;
   }
+
+  /* A4 paper preview (screen) — debit notes & formal documents */
+  .a4-page {
+    width: 210mm;
+    min-height: 297mm;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+    background: white;
+  }
 }
 
 @media print {
@@ -166,6 +177,27 @@
 
   .rent-notice-print-root .sticky {
     position: static !important;
+  }
+
+  /* Formal debit note — A4 page */
+  .a4-page {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    padding: 8mm !important;
+    box-shadow: none !important;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .a4-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .formal-debit-note {
+    font-size: 10pt !important;
   }
 
   * {

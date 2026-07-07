@@ -89,7 +89,7 @@ function DebitNoteContent() {
         </button>
       </div>
 
-      <main className="max-w-4xl mx-auto my-8 bg-white p-10 shadow print:shadow-none print:my-0 print:p-8">
+      <main className="a4-page my-8 p-10 shadow print:shadow-none print:my-0">
         <FormalDebitNoteDocument doc={doc} />
       </main>
     </div>

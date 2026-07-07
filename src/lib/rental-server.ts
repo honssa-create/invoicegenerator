@@ -40,6 +40,7 @@ import {
   normalizeStoredDate,
   billingPeriodAfterLeaseEnd,
   nextBillingPeriod,
+  resolveUtilityBillingMode,
   utilityChargeTypesForMode,
   type PeriodPaymentAllocation,
   type PreviousYearRent,
@@ -64,7 +65,8 @@ interface UnitRow {
   current_year_rent: number; previous_years_rent_json: string | null;
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
-  automation_enabled: number; created_at: string; updated_at: string;
+  automation_enabled: number; utility_billing_mode?: string | null;
+  created_at: string; updated_at: string;
 }
 
 interface RecordRow {
@@ -109,6 +111,9 @@ function hydrateUnit(row: UnitRow): RentalUnit {
     leaseStartDate: row.lease_start_date || '', leaseEndDate: row.lease_end_date || '',
     dueDateDay: row.due_date_day || 1, autoSendReceiptEmail: Boolean(row.auto_send_receipt_email),
     automationEnabled: Boolean(row.automation_enabled),
+    utilityBillingMode: (row.utility_billing_mode === 'tenant_pays' || row.utility_billing_mode === 'company_proxy'
+      ? row.utility_billing_mode
+      : 'company_proxy') as RentalUnit['utilityBillingMode'],
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -187,8 +192,8 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
     `INSERT INTO rental_units
       (user_id, unit_name, tenant_name, tenant_phone, tenant_email, current_year_rent,
        previous_years_rent_json, lease_start_date, lease_end_date, due_date_day,
-       auto_send_receipt_email, automation_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       auto_send_receipt_email, automation_enabled, utility_billing_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     userId, input.unitName?.trim() || 'New Unit', input.tenantName?.trim() || 'Tenant',
     input.tenantPhone?.trim() || null, input.tenantEmail?.trim() || null,
@@ -196,7 +201,8 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
     normalizeStoredDate(input.leaseStartDate) || null,
     normalizeStoredDate(input.leaseEndDate) || null,
     Number(input.dueDateDay) || 1, input.autoSendReceiptEmail ? 1 : 0,
-    input.automationEnabled === false ? 0 : 1
+    input.automationEnabled === false ? 0 : 1,
+    input.utilityBillingMode === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
   );
   const unit = getRentalUnit(Number(res.lastInsertRowid), userId)!;
   logRentalActivity(userId, unit.id, 'Unit created');
@@ -233,6 +239,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
+      utility_billing_mode = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
@@ -246,6 +253,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
     (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
+    (input.utilityBillingMode ?? existing.utilityBillingMode) === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
     id, userId
   );
   const updated = getRentalUnit(id, userId)!;
@@ -894,7 +902,6 @@ export function prepareAdvancePaymentAllocations(
   const tenant = getRentalTenant(tenantId, userId);
   if (!tenant) throw new Error('Tenant not found');
 
-  const billableTypes = utilityChargeTypesForMode(tenant.utilityBillingMode);
   let units = getTenantUnits(tenantId, userId);
   if (options.unitIds?.length) {
     const idSet = new Set(options.unitIds);
@@ -903,6 +910,11 @@ export function prepareAdvancePaymentAllocations(
   if (!units.length) throw new Error('No units linked to tenant');
 
   const unitIds = units.map((u) => u.id);
+  const billableTypesForUnit = (unitId: number) => {
+    const unit = units.find((u) => u.id === unitId);
+    const mode = resolveUtilityBillingMode(unit?.utilityBillingMode, tenant.utilityBillingMode);
+    return utilityChargeTypesForMode(mode);
+  };
   const result: { chargeItemId: number; amount: number }[] = [];
 
   if (options.periodAllocations?.length) {
@@ -912,6 +924,7 @@ export function prepareAdvancePaymentAllocations(
       }
       const unit = getRentalUnit(row.unitId, userId);
       if (!unit) throw new Error(`Unit ${row.unitId} not found`);
+      const billableTypes = billableTypesForUnit(row.unitId);
       const record = ensureRentRecord(unit, row.billingPeriod);
       const items = getChargeItemsForRecord(record.id, userId);
       const hasExplicit = row.rent !== undefined || row.water !== undefined || row.electricity !== undefined;
@@ -934,7 +947,9 @@ export function prepareAdvancePaymentAllocations(
   }
 
   let remaining = options.amount;
-  const existing = getOutstandingChargeItemsForUnits(userId, unitIds, billableTypes);
+  const existing = getOutstandingChargeItemsForUnits(userId, unitIds).filter(
+    (c) => billableTypesForUnit(c.unitId).includes(c.chargeType),
+  );
   for (const item of existing) {
     if (remaining <= 0.009) break;
     const out = chargeOutstanding(item);
@@ -961,6 +976,7 @@ export function prepareAdvancePaymentAllocations(
       const period = nextPeriodByUnit.get(uid)!;
       const record = ensureRentRecord(unit, period);
       const items = getChargeItemsForRecord(record.id, userId);
+      const billableTypes = billableTypesForUnit(uid);
       const { allocations, remaining: left } = allocateToPeriodItems(items, billableTypes, remaining);
       if (allocations.length) {
         result.push(...allocations);

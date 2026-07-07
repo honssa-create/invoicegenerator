@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import DebitNoteActions from '@/components/DebitNoteActions';
+import UtilityBillingPicker from '@/components/UtilityBillingPicker';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import ChargeAllocationGrid, {
@@ -42,6 +43,7 @@ import {
   type RentalPaymentWithAllocations,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UtilityBillingMode,
 } from '@/lib/rentals';
 
 interface DetailPayload {
@@ -81,6 +83,7 @@ function RentalDetailInner() {
   const [tenantEmail, setTenantEmail] = useState('');
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
+  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
   const [profileSaving, setProfileSaving] = useState(false);
 
   // utility inputs
@@ -158,6 +161,7 @@ function RentalDetailInner() {
           setTenantEmail(d.unit.tenantEmail || '');
           setDueDateDay(String(d.unit.dueDateDay || 1));
           setBaseRent(String(d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0));
+          setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
           const rec = d.currentRecord;
           if (rec) {
             const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
@@ -204,6 +208,7 @@ function RentalDetailInner() {
         tenantEmail: tenantEmail.trim(),
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
+        utilityBillingMode,
       }),
     });
     if (data?.currentRecord) {
@@ -496,6 +501,14 @@ function RentalDetailInner() {
             <label className="block text-xs font-medium text-gray-500 mb-1">基本租金 Base Rent / month</label>
             <input type="number" min={0} className={inp} value={baseRent} onChange={(e) => setBaseRent(e.target.value)} />
           </div>
+        </div>
+        <div className="mt-6 pt-5 border-t border-gray-100">
+          <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>
+          <p className="text-xs text-gray-400 mb-3">Controls whether water &amp; electricity appear on debit notes for this unit</p>
+          <UtilityBillingPicker
+            value={utilityBillingMode}
+            onChange={setUtilityBillingMode}
+          />
         </div>
         <div className="mt-4 flex justify-end">
           <button onClick={saveProfile} disabled={profileSaving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">

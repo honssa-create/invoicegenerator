@@ -736,6 +736,23 @@ db.exec(`
   }
 }
 
+// Per-unit utility billing (primary setting for debit notes / notices).
+{
+  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
+  if (!ruCols.includes('utility_billing_mode')) {
+    try {
+      db.exec(`ALTER TABLE rental_units ADD COLUMN utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'`);
+      db.exec(`
+        UPDATE rental_units SET utility_billing_mode = COALESCE(
+          (SELECT utility_billing_mode FROM rental_tenants WHERE rental_tenants.id = rental_units.tenant_id),
+          'company_proxy'
+        )
+        WHERE tenant_id IS NOT NULL
+      `);
+    } catch { /* exists */ }
+  }
+}
+
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.
 {
   const unitsNeedingTenant = db.prepare(

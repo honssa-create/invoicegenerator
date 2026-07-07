@@ -29,7 +29,6 @@ import {
   formatMoney,
   formatUtilityAmount,
   todayFormDate,
-  UTILITY_BILLING_MODE_LABELS,
   type RentalChargeItem,
   type RentalPayment,
   type RentalPaymentAllocationDetail,
@@ -39,7 +38,6 @@ import {
   type TenantBillingHistoryRow,
   type TenantLeaseHistoryRow,
   type TenantProfileSummary,
-  type UtilityBillingMode,
 } from '@/lib/rentals';
 import { isSectionReadOnly } from '@/lib/permissions';
 
@@ -75,11 +73,10 @@ export default function TenantDetailPage() {
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
   const [contactForm, setContactForm] = useState({ name: '', phone: '', email: '', notes: '' });
-  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
-  const [utilitySaving, setUtilitySaving] = useState(false);
   const [contactSaving, setContactSaving] = useState(false);
   const [contactEditing, setContactEditing] = useState(false);
   const [paymentMode, setPaymentMode] = useState<'byPeriod' | 'byType'>('byPeriod');
+  const [payMonths, setPayMonths] = useState('1');
   const [periodRows, setPeriodRows] = useState<{ unitId: number; billingPeriod: string; amount: string }[]>([]);
 
   const load = () => {
@@ -106,7 +103,6 @@ export default function TenantDetailPage() {
             email: d.tenant.email || '',
             notes: d.tenant.notes || '',
           });
-          setUtilityBillingMode(d.tenant.utilityBillingMode || 'company_proxy');
           setSelectedUnitIds((prev) => {
             if (prev.length && d.units?.every((u: { id: number }) => prev.includes(u.id))) return prev;
             return (d.units || []).map((u: { id: number }) => u.id);
@@ -139,25 +135,6 @@ export default function TenantDetailPage() {
     load();
   };
 
-  const saveUtilityBillingMode = async (mode: UtilityBillingMode) => {
-    if (readOnly || mode === utilityBillingMode) return;
-    setUtilitySaving(true);
-    const res = await fetch(`/api/rentals/tenants/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ utilityBillingMode: mode }),
-    });
-    setUtilitySaving(false);
-    if (!res.ok) {
-      const d = await res.json();
-      setToast(d.error || 'Failed to save utility billing setting');
-      return;
-    }
-    setUtilityBillingMode(mode);
-    setToast('水電費安排已更新');
-    load();
-  };
-
   const openPaymentModal = () => {
     if (!detail) return;
     const rows = chargeRowsByType(detail.outstandingCharges);
@@ -165,6 +142,7 @@ export default function TenantDetailPage() {
     setChargeAllocValues(filled);
     setPaymentMode('byPeriod');
     setPeriodRows([]);
+    setPayMonths('1');
     setPaymentForm((f) => ({
       ...f,
       amount: String(sumAllocationValues(filled) || ''),
@@ -222,6 +200,7 @@ export default function TenantDetailPage() {
       }
     }
     setPeriodRows(rows);
+    setPayMonths(String(months));
     setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
   };
 
@@ -518,49 +497,6 @@ export default function TenantDetailPage() {
         </div>
       </div>
 
-      {/* Utility billing arrangement */}
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">水電費安排 Utility Billing</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Controls whether water &amp; electricity appear on debit notes / payment notices for this tenant
-          </p>
-        </div>
-        <div className="p-6">
-          <div className="grid sm:grid-cols-2 gap-3">
-            {(['tenant_pays', 'company_proxy'] as UtilityBillingMode[]).map((mode) => {
-              const selected = utilityBillingMode === mode;
-              return (
-                <label
-                  key={mode}
-                  className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer transition-colors ${
-                    selected ? 'border-brand-400 bg-brand-50/50 ring-1 ring-brand-200' : 'border-gray-200 hover:border-gray-300'
-                  } ${readOnly || utilitySaving ? 'opacity-60 cursor-not-allowed' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="utilityBillingMode"
-                    value={mode}
-                    checked={selected}
-                    disabled={readOnly || utilitySaving}
-                    onChange={() => saveUtilityBillingMode(mode)}
-                    className="mt-1 h-4 w-4 border-gray-300 text-brand-600"
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-gray-900">{UTILITY_BILLING_MODE_LABELS[mode]}</span>
-                    <span className="block text-xs text-gray-500 mt-1">
-                      {mode === 'tenant_pays'
-                        ? 'Water & electricity are not billed on company debit notes — tenant settles directly with utility providers.'
-                        : 'Company pays utilities on behalf of tenant; amounts are calculated and shown on the debit note.'}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
       <div className="grid lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 uppercase">Units 單位</p>
@@ -812,6 +748,25 @@ export default function TenantDetailPage() {
 
               {paymentMode === 'byPeriod' ? (
                 <div>
+                  <div className="mb-4 p-4 rounded-xl border border-brand-100 bg-brand-50/40">
+                    <label className="text-xs font-semibold text-gray-700 uppercase">繳付月數 Months to pay</label>
+                    <p className="text-xs text-gray-500 mt-0.5 mb-2">Enter how many months the tenant is paying (1, 2, 3…)</p>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min={1}
+                        max={36}
+                        className={`${inp} w-24 text-center font-semibold`}
+                        value={payMonths}
+                        onChange={(e) => {
+                          const n = Math.max(1, Math.min(36, Number(e.target.value) || 1));
+                          setPayMonths(String(n));
+                          fillAdvanceMonths(n);
+                        }}
+                      />
+                      <span className="text-sm text-gray-600">個月 month(s)</span>
+                    </div>
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <label className="text-xs font-semibold text-gray-600 uppercase">Period breakdown 帳期明細</label>
                     <div className="flex flex-wrap gap-2">
@@ -821,7 +776,7 @@ export default function TenantDetailPage() {
                       <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
                         預付6個月
                       </button>
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(12)}>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => { setPayMonths('12'); fillAdvanceMonths(12); }}>
                         預付12個月
                       </button>
                       <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={addPeriodRow}>

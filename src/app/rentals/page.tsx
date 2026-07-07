@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
+import UtilityBillingPicker from '@/components/UtilityBillingPicker';
 import { useAuth } from '@/components/AuthProvider';
 import { isSectionReadOnly } from '@/lib/permissions';
 import {
@@ -24,6 +25,7 @@ import {
   type RentalTenant,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UtilityBillingMode,
 } from '@/lib/rentals';
 
 interface DashboardData {
@@ -37,6 +39,7 @@ const blankUnit: Partial<RentalUnit> = {
   unitName: '', tenantName: '', tenantPhone: '', tenantEmail: '',
   currentYearRent: 0, previousYearsRent: [], leaseStartDate: '', leaseEndDate: '',
   dueDateDay: 1, autoSendReceiptEmail: false, automationEnabled: true,
+  utilityBillingMode: 'company_proxy',
 };
 
 export default function RentalsPage() {
@@ -200,52 +203,6 @@ export default function RentalsPage() {
               </li>
             ))}
           </ul>
-        </div>
-      )}
-
-      {/* Tenants — multi-unit rent payment notice */}
-      {tenants.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Tenants 租客</p>
-            <p className="text-sm text-gray-500 mt-0.5">Multi-unit tenants · 繳付租金通知單 Rent Payment Notice</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b">
-                <tr>
-                  <th className="px-4 py-3 text-left">Tenant 租客</th>
-                  <th className="px-4 py-3 text-left">Contact</th>
-                  <th className="px-4 py-3 text-right">Units</th>
-                  <th className="px-4 py-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {tenants.map((t) => (
-                  <tr key={t.id} className="hover:bg-brand-50/40 cursor-pointer" onClick={() => router.push(`/rentals/tenants/${t.id}`)}>
-                    <td className="px-4 py-3 font-semibold">{t.name}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{t.phone || t.email || '—'}</td>
-                    <td className="px-4 py-3 text-right">{t.unitCount ?? 0}</td>
-                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex flex-col items-end gap-1">
-                        <Link href={`/rentals/tenants/${t.id}/rent-payment-notice?period=${period}`} className="text-brand-600 text-xs font-medium hover:underline">
-                          通知單 Notice
-                        </Link>
-                        {(t.unitCount ?? 0) > 1 && (
-                          <Link
-                            href={`/billing/debit-note?tenantId=${t.id}&targetPeriod=${period}&mode=grouped`}
-                            className="text-brand-600 text-xs font-medium hover:underline"
-                          >
-                            綜合繳費通知單 Debit Note
-                          </Link>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       )}
 
@@ -434,6 +391,55 @@ export default function RentalsPage() {
         </div>
       </div>
 
+      {/* Tenant Profile — last panel on rentals dashboard */}
+      {tenants.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mt-6">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">租客檔案 Tenant Profile</p>
+            <p className="text-sm text-gray-500 mt-0.5">Multi-unit tenants · payment history · debit notes</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left">Tenant 租客</th>
+                  <th className="px-4 py-3 text-left">Contact</th>
+                  <th className="px-4 py-3 text-right">Units</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {tenants.map((t) => (
+                  <tr key={t.id} className="hover:bg-brand-50/40 cursor-pointer" onClick={() => router.push(`/rentals/tenants/${t.id}`)}>
+                    <td className="px-4 py-3 font-semibold">{t.name}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{t.phone || t.email || '—'}</td>
+                    <td className="px-4 py-3 text-right">{t.unitCount ?? 0}</td>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-col items-end gap-1">
+                        <Link href={`/rentals/tenants/${t.id}`} className="text-brand-600 text-xs font-medium hover:underline">
+                          Profile 檔案
+                        </Link>
+                        <Link href={`/rentals/tenants/${t.id}/rent-payment-notice?period=${period}`} className="text-brand-600 text-xs font-medium hover:underline">
+                          通知單 Notice
+                        </Link>
+                        {(t.unitCount ?? 0) > 1 && (
+                          <Link
+                            href={`/billing/debit-note?tenantId=${t.id}&targetPeriod=${period}&mode=grouped`}
+                            className="text-brand-600 text-xs font-medium hover:underline"
+                          >
+                            綜合繳費通知單 Debit Note
+                          </Link>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {unitModal && (
         <div className="modal-overlay">
           <div className="modal-panel sm:max-w-2xl max-h-[92vh]">
@@ -485,6 +491,14 @@ export default function RentalsPage() {
                 <textarea className={inp} rows={3} value={previousYearsText}
                   onChange={(e) => setPreviousYearsText(e.target.value)}
                   placeholder="2025, 8000&#10;2024, 7500" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>
+                <UtilityBillingPicker
+                  compact
+                  value={(unitModal.utilityBillingMode || 'company_proxy') as UtilityBillingMode}
+                  onChange={(mode) => setUnitModal({ ...unitModal, utilityBillingMode: mode })}
+                />
               </div>
             </div>
             <div className="flex gap-4 mt-4 flex-wrap">

@@ -38,6 +38,7 @@ export interface RentalUnit {
   dueDateDay: number;
   autoSendReceiptEmail: boolean;
   automationEnabled: boolean;
+  utilityBillingMode: UtilityBillingMode;
   created_at: string;
   updated_at: string;
 }
@@ -515,6 +516,16 @@ export function tenantBillsUtilities(mode: UtilityBillingMode): boolean {
   return mode === 'company_proxy';
 }
 
+/** Unit-level setting with optional tenant fallback (legacy). */
+export function resolveUtilityBillingMode(
+  unitMode?: UtilityBillingMode | string | null,
+  tenantMode?: UtilityBillingMode | string | null,
+): UtilityBillingMode {
+  if (unitMode === 'tenant_pays' || unitMode === 'company_proxy') return unitMode;
+  if (tenantMode === 'tenant_pays' || tenantMode === 'company_proxy') return tenantMode;
+  return 'company_proxy';
+}
+
 export interface RentalTenant {
   id: number;
   user_id: number;
@@ -640,7 +651,7 @@ export type DebitNoteMode = 'grouped' | 'single';
 
 export interface RentPaymentNoticeMatrix {
   tenant: RentalTenant;
-  units: Pick<RentalUnit, 'id' | 'unitName'>[];
+  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode'>[];
   /** Target billing month (YYYY-MM). Alias: targetPeriod. */
   period: string;
   targetPeriod: string;
@@ -723,7 +734,7 @@ export interface FormalDebitNote {
   grandTotal: number;
   footerRemark: string;
   paymentInstructions: string[];
-  units: Pick<RentalUnit, 'id' | 'unitName'>[];
+  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode'>[];
 }
 
 /** Lease row on tenant profile — all units this tenant has occupied. */

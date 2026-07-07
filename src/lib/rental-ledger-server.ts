@@ -35,6 +35,7 @@ import {
   type PeriodPaymentAllocation,
   type TenantBillingHistoryRow,
   type UtilityBillingMode,
+  resolveUtilityBillingMode,
   utilityChargeTypesForMode,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
@@ -225,11 +226,12 @@ export function linkUnitToTenant(unitId: number, userId: number, tenantId: numbe
     .run(tenantId, unitId, userId);
 }
 
-export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUnit, 'id' | 'unitName' | 'tenantName' | 'currentYearRent'>[] {
+export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUnit, 'id' | 'unitName' | 'tenantName' | 'currentYearRent' | 'utilityBillingMode'>[] {
   return (db.prepare(
-    'SELECT id, unit_name, tenant_name, current_year_rent FROM rental_units WHERE tenant_id = ? AND user_id = ? ORDER BY unit_name COLLATE NOCASE'
-  ).all(tenantId, userId) as { id: number; unit_name: string; tenant_name: string; current_year_rent: number }[]).map((r) => ({
+    'SELECT id, unit_name, tenant_name, current_year_rent, utility_billing_mode FROM rental_units WHERE tenant_id = ? AND user_id = ? ORDER BY unit_name COLLATE NOCASE'
+  ).all(tenantId, userId) as { id: number; unit_name: string; tenant_name: string; current_year_rent: number; utility_billing_mode?: string | null }[]).map((r) => ({
     id: r.id, unitName: r.unit_name, tenantName: r.tenant_name, currentYearRent: r.current_year_rent || 0,
+    utilityBillingMode: normalizeUtilityBillingMode(r.utility_billing_mode),
   }));
 }
 
@@ -413,13 +415,15 @@ function resolveNoticePeriods(
 
 /** Dynamic columns: unit × charge_type only where billing items exist. */
 function buildNoticeColumns(
-  units: Pick<RentalUnit, 'id' | 'unitName'>[],
+  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode'>[],
   charges: RentalChargeItem[],
-  allowedChargeTypes: RentalChargeType[] = CHARGE_ORDER,
+  tenantMode?: UtilityBillingMode,
 ): RentPaymentNoticeMatrix['columns'] {
-  const chargeTypes = CHARGE_ORDER.filter((t) => allowedChargeTypes.includes(t));
   const cols: RentPaymentNoticeMatrix['columns'] = [];
   for (const unit of units) {
+    const chargeTypes = CHARGE_ORDER.filter((t) =>
+      utilityChargeTypesForMode(resolveUtilityBillingMode(unit.utilityBillingMode, tenantMode)).includes(t),
+    );
     for (const chargeType of chargeTypes) {
       const hasActivity = charges.some(
         (c) => c.unitId === unit.id && c.chargeType === chargeType &&
@@ -435,14 +439,17 @@ function buildNoticeColumns(
     }
   }
   if (!cols.length) {
-    return units.flatMap((unit) =>
-      chargeTypes.map((chargeType) => ({
+    return units.flatMap((unit) => {
+      const chargeTypes = CHARGE_ORDER.filter((t) =>
+        utilityChargeTypesForMode(resolveUtilityBillingMode(unit.utilityBillingMode, tenantMode)).includes(t),
+      );
+      return chargeTypes.map((chargeType) => ({
         unitId: unit.id,
         unitName: unit.unitName,
         chargeType,
         label: columnLabel(unit.unitName, chargeType),
-      })),
-    );
+      }));
+    });
   }
   return cols;
 }
@@ -514,8 +521,7 @@ export function buildRentPaymentNoticeMatrix(
   const dueDateDisplay = formatDisplayDate(dueDate);
 
   const { periods, fromPeriod } = resolveNoticePeriods(charges, targetPeriod, query);
-  const billableChargeTypes = utilityChargeTypesForMode(tenant.utilityBillingMode);
-  const columns = buildNoticeColumns(units, charges, billableChargeTypes);
+  const columns = buildNoticeColumns(units, charges, tenant.utilityBillingMode);
 
   const chargeMap = new Map<string, RentalChargeItem>();
   for (const c of charges) {
@@ -658,11 +664,15 @@ export function buildFormalDebitNote(
   const unitIds = matrix.units.map((u) => u.id);
   const charges = getTenantChargeItems(Number(tenantId), userId, unitIds);
   const unitNameMap = Object.fromEntries(matrix.units.map((u) => [u.id, u.unitName]));
-  const billableChargeTypes = utilityChargeTypesForMode(matrix.tenant.utilityBillingMode);
+  const unitModeMap = Object.fromEntries(
+    matrix.units.map((u) => [u.id, resolveUtilityBillingMode(u.utilityBillingMode, matrix.tenant.utilityBillingMode)]),
+  );
+  const isBillable = (unitId: number, chargeType: RentalChargeType) =>
+    utilityChargeTypesForMode(unitModeMap[unitId] ?? matrix.tenant.utilityBillingMode).includes(chargeType);
 
   const currentCharges: FormalDebitNoteLine[] = [];
   for (const col of matrix.columns) {
-    if (!billableChargeTypes.includes(col.chargeType)) continue;
+    if (!isBillable(col.unitId, col.chargeType)) continue;
     const item = charges.find(
       (c) => c.unitId === col.unitId && c.billingPeriod === targetPeriod && c.chargeType === col.chargeType,
     );
@@ -685,7 +695,7 @@ export function buildFormalDebitNote(
   const arrearRows: FormalDebitNoteArrearRow[] = [];
   for (const p of arrearPeriods) {
     const periodItems = charges.filter(
-      (c) => c.billingPeriod === p && chargeOutstanding(c) > 0 && billableChargeTypes.includes(c.chargeType),
+      (c) => c.billingPeriod === p && chargeOutstanding(c) > 0 && isBillable(c.unitId, c.chargeType),
     );
     if (!periodItems.length) continue;
     const amount = periodItems.reduce((s, c) => s + chargeOutstanding(c), 0);
@@ -803,6 +813,9 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
   if (!tenant) return null;
   const units = getTenantUnits(tenant.id, userId);
   const unitIds = units.map((u) => u.id);
+  const unitModeMap = Object.fromEntries(
+    units.map((u) => [u.id, resolveUtilityBillingMode(u.utilityBillingMode, tenant.utilityBillingMode)]),
+  );
 
   let outstandingCharges: RentalChargeItem[] = [];
   if (unitIds.length) {
@@ -813,8 +826,9 @@ export function getTenantLedgerDetail(tenantId: number | string, userId: number)
          AND amount_due > amount_allocated
        ORDER BY billing_period ASC, unit_id ASC, charge_type ASC`
     ).all(userId, ...unitIds) as ChargeRow[]).map(hydrateCharge);
-    const billableTypes = utilityChargeTypesForMode(tenant.utilityBillingMode);
-    outstandingCharges = outstandingCharges.filter((c) => billableTypes.includes(c.chargeType));
+    outstandingCharges = outstandingCharges.filter(
+      (c) => utilityChargeTypesForMode(unitModeMap[c.unitId] ?? tenant.utilityBillingMode).includes(c.chargeType),
+    );
   }
 
   const payments = (db.prepare(

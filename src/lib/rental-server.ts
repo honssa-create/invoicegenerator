@@ -35,6 +35,8 @@ import {
   formatUtilityAmount,
   formatDisplayDate,
   baseRentLineLabel,
+  buildDebitNotePaymentInstructionsText,
+  debitNoteCompanyForUnit,
   utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
@@ -45,12 +47,17 @@ import {
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
+  electricityFormulaForUnit,
+  calcElectricityFeeForFormula,
+  unitHasWaterMeterFormula,
+  calcWaterFeeFromMeter,
   type ElectricityMeterData,
   type WaterMeterData,
   type PeriodPaymentAllocation,
   type PreviousYearRent,
   type RentalChargeItem,
   type RentalChargeType,
+  type DebitNotePaymentTemplateId,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
@@ -71,6 +78,7 @@ interface UnitRow {
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
   automation_enabled: number; utility_billing_mode?: string | null;
+  address?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -121,6 +129,7 @@ function hydrateUnit(row: UnitRow): RentalUnit {
     utilityBillingMode: (row.utility_billing_mode === 'tenant_pays' || row.utility_billing_mode === 'company_proxy'
       ? row.utility_billing_mode
       : 'company_proxy') as RentalUnit['utilityBillingMode'],
+    address: row.address || '',
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -304,7 +313,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
-      utility_billing_mode = ?,
+      utility_billing_mode = ?, address = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
@@ -319,6 +328,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
     (input.utilityBillingMode ?? existing.utilityBillingMode) === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
+    (input.address ?? existing.address)?.trim() || null,
     id, userId
   );
   const updated = getRentalUnit(id, userId)!;
@@ -405,8 +415,19 @@ export function updateRentRecordUtilities(
   const existing = getRentRecord(id, userId);
   if (!existing) return null;
   const base = Number(input.baseRent ?? existing.baseRent) || 0;
-  const water = Number(input.waterFee ?? existing.waterFee) || 0;
-  const elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
+  let water = Number(input.waterFee ?? existing.waterFee) || 0;
+  let elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
+  const unit = getRentalUnit(existing.unitId, userId);
+  const elecFormula = unit ? electricityFormulaForUnit(unit.unitName) : null;
+  const waterFormula = unit ? unitHasWaterMeterFormula(unit.unitName) : false;
+  const meter = input.electricityMeter !== undefined ? input.electricityMeter : existing.electricityMeter;
+  const waterMeter = input.waterMeter !== undefined ? input.waterMeter : existing.waterMeter;
+  if (elecFormula && meter) {
+    elec = calcElectricityFeeForFormula(elecFormula, meter);
+  }
+  if (waterFormula && waterMeter) {
+    water = calcWaterFeeFromMeter(waterMeter);
+  }
   const meterJson = input.electricityMeter !== undefined
     ? (input.electricityMeter ? JSON.stringify(input.electricityMeter) : null)
     : (existing.electricityMeter ? JSON.stringify(existing.electricityMeter) : null);
@@ -540,7 +561,12 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
 // Email HTML builders
 // ---------------------------------------------------------------------------
 
-function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null): string {
+function invoiceHtml(
+  unit: RentalUnit,
+  record: RentRecord,
+  note?: string | null,
+  paymentInstructionsText?: string | null,
+): string {
   const lineItems = [
     `<tr><td>${baseRentLineLabel(record)}</td><td align="right"><strong>${formatMoney(record.baseRent)}</strong></td></tr>`,
     `<tr><td>${utilityLineLabel('water', record)}</td><td align="right">${formatUtilityAmount(record.waterFee)}</td></tr>`,
@@ -552,6 +578,7 @@ function invoiceHtml(unit: RentalUnit, record: RentRecord, note?: string | null)
     <table style="width:100%;border-collapse:collapse">${lineItems}</table>
     <p>Due: ${formatDisplayDate(dueDateForPeriod(record.billingPeriod, unit.dueDateDay))}</p>
     ${note ? `<p>${note}</p>` : ''}
+    ${paymentInstructionsText ? `<hr/><pre style="font-family:sans-serif;white-space:pre-wrap;font-size:13px">${paymentInstructionsText}</pre>` : ''}
     <p>Thank you.</p>`;
 }
 
@@ -582,6 +609,8 @@ export async function sendRentInvoice(
     electricityPeriodFrom?: string | null;
     electricityPeriodTo?: string | null;
     note?: string | null;
+    paymentTemplate?: DebitNotePaymentTemplateId;
+    paymentRemark?: string | null;
   }
 ) {
   const record = getRentRecord(recordId, userId);
@@ -631,10 +660,24 @@ export async function sendRentInvoice(
   syncChargeItemsFromRecord(fresh);
   let email: SendResult = { sent: false, provider: 'log' };
   if (unit.tenantEmail) {
+    const dueDate = dueDateForPeriod(record.billingPeriod, unit.dueDateDay);
+    const dueDisplay = formatDisplayDate(dueDate);
+    const dueParts = dueDisplay.split('/');
+    const dueDateChinese = dueParts.length >= 3
+      ? `${dueParts[2]}年${Number(dueParts[1])}月${Number(dueParts[0])}日`
+      : dueDisplay;
+    const templateId = input.paymentTemplate ?? debitNoteCompanyForUnit(unit.unitName);
+    const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
+    const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+      templateId,
+      noteNo,
+      dueDateChinese,
+      input.paymentRemark,
+    );
     email = await sendEmail(
       unit.tenantEmail,
       `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, input.note)
+      invoiceHtml(unit, fresh, input.note, paymentInstructionsText)
     );
   }
   logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);

@@ -15,6 +15,7 @@ interface Props {
   onRatePerUnit: (v: string) => void;
   suggestedPrevReading?: number | null;
   inpClassName?: string;
+  readOnly?: boolean;
 }
 
 function numOrNull(s: string): number | null {
@@ -30,6 +31,7 @@ export default function WaterMeterCalculator({
   onRatePerUnit,
   suggestedPrevReading,
   inpClassName = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+  readOnly = false,
 }: Props) {
   const prev = numOrNull(prevReading);
   const curr = numOrNull(currReading);
@@ -46,8 +48,9 @@ export default function WaterMeterCalculator({
             type="number"
             min={0}
             step="0.01"
-            className={inpClassName}
+            className={`${inpClassName}${readOnly ? ' bg-gray-100/80 cursor-default' : ''}`}
             value={prevReading}
+            readOnly={readOnly}
             onChange={(e) => onPrevReading(e.target.value)}
             placeholder={suggestedPrevReading != null ? String(suggestedPrevReading) : ''}
           />
@@ -61,8 +64,9 @@ export default function WaterMeterCalculator({
             type="number"
             min={0}
             step="0.01"
-            className={inpClassName}
+            className={`${inpClassName}${readOnly ? ' bg-gray-100/80 cursor-default' : ''}`}
             value={currReading}
+            readOnly={readOnly}
             onChange={(e) => onCurrReading(e.target.value)}
           />
         </div>
@@ -72,8 +76,9 @@ export default function WaterMeterCalculator({
             type="number"
             min={0}
             step="0.0001"
-            className={inpClassName}
+            className={`${inpClassName}${readOnly ? ' bg-gray-100/80 cursor-default' : ''}`}
             value={ratePerUnit}
+            readOnly={readOnly}
             onChange={(e) => onRatePerUnit(e.target.value)}
           />
         </div>

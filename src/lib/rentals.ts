@@ -39,6 +39,7 @@ export interface RentalUnit {
   autoSendReceiptEmail: boolean;
   automationEnabled: boolean;
   utilityBillingMode: UtilityBillingMode;
+  address: string;
   created_at: string;
   updated_at: string;
 }
@@ -517,6 +518,7 @@ export interface DefaultRentalUnitSeed {
 }
 
 export const DEFAULT_RENTAL_UNITS: DefaultRentalUnitSeed[] = [
+  { unitName: '204', utilityBillingMode: 'tenant_pays' },
   { unitName: '205', utilityBillingMode: 'tenant_pays' },
   { unitName: '213A', utilityBillingMode: 'company_proxy' },
   { unitName: '213B', utilityBillingMode: 'tenant_pays' },
@@ -860,6 +862,69 @@ export interface RentPaymentNoticeQuery {
   unitId?: number;
   /** Subset of units for grouped debit note (optional). */
   unitIds?: number[];
+  /** Payment instruction template (Honour Label vs Honour Elite). */
+  paymentTemplate?: DebitNotePaymentTemplateId;
+  /** Extra manual text appended to payment instructions. */
+  paymentRemark?: string;
+}
+
+/** Billing company for debit notes. */
+export type DebitNoteCompanyId = 'label' | 'elite';
+
+/** Payment instruction template — maps to billing company. */
+export type DebitNotePaymentTemplateId = DebitNoteCompanyId;
+
+export interface DebitNoteCompanyProfile {
+  id: DebitNoteCompanyId;
+  nameZh: string;
+  nameEn: string;
+  address: string;
+  phone: string;
+  taxId: string;
+  chequePayee: string;
+}
+
+export const DEBIT_NOTE_COMPANY_PROFILES: Record<DebitNoteCompanyId, DebitNoteCompanyProfile> = {
+  label: {
+    id: 'label',
+    nameZh: '鴻宇商標有限公司',
+    nameEn: 'HONOUR LABEL LIMITED',
+    address: '(公司地址)',
+    phone: '(電話)',
+    taxId: '(稅務編號)',
+    chequePayee: 'Honour Label Limited',
+  },
+  elite: {
+    id: 'elite',
+    nameZh: '鴻宇有限公司',
+    nameEn: 'HONOUR ELITE LIMITED',
+    address: '(公司地址)',
+    phone: '(電話)',
+    taxId: '(稅務編號)',
+    chequePayee: 'Honour Elite Limited',
+  },
+};
+
+/** Honour Label: 204, 205. Honour Elite: 213A, Stock Rooms, 214. */
+export function debitNoteCompanyForUnit(unitName: string): DebitNoteCompanyId {
+  const n = unitName.trim().toLowerCase();
+  if (n === '204' || n === '205') return 'label';
+  if (
+    n === '213a' || n === '213b' || n === '214' ||
+    n === 'stock room 1' || n === 'stock room 2'
+  ) return 'elite';
+  return 'label';
+}
+
+export function resolveDebitNoteCompanyIds(unitNames: string[]): DebitNoteCompanyId[] {
+  const ids = new Set(unitNames.map(debitNoteCompanyForUnit));
+  const order: DebitNoteCompanyId[] = ['label', 'elite'];
+  return order.filter((id) => ids.has(id));
+}
+
+export function defaultPaymentTemplateForUnits(unitNames: string[]): DebitNotePaymentTemplateId {
+  const ids = resolveDebitNoteCompanyIds(unitNames);
+  return ids.length === 1 ? ids[0] : 'label';
 }
 
 /** Company header block for formal debit notes. */
@@ -873,15 +938,85 @@ export interface DebitNoteCompanyInfo {
   bankAccount: string;
 }
 
-export const DEFAULT_DEBIT_NOTE_COMPANY: DebitNoteCompanyInfo = {
-  nameZh: '鴻宇商標有限公司 / 鴻宇有限公司',
-  nameEn: 'HONOUR LABEL LIMITED / HONOUR ELITE LIMITED',
-  address: '(公司地址)',
-  phone: '(電話)',
-  taxId: '(稅務編號)',
-  chequePayee: '鴻宇商標有限公司',
-  bankAccount: '匯豐銀行 004-xxx-xxxxxx',
+export function resolveDebitNoteCompanyHeader(companyIds: DebitNoteCompanyId[]): DebitNoteCompanyInfo {
+  if (companyIds.length === 1) {
+    const p = DEBIT_NOTE_COMPANY_PROFILES[companyIds[0]];
+    return {
+      nameZh: p.nameZh,
+      nameEn: p.nameEn,
+      address: p.address,
+      phone: p.phone,
+      taxId: p.taxId,
+      chequePayee: p.chequePayee,
+      bankAccount: companyIds[0] === 'label'
+        ? '374-279610-001 · HONOUR LABEL LIMITED · HANG SENG BANK (024)'
+        : '(bank transfer details — see payment template)',
+    };
+  }
+  const label = DEBIT_NOTE_COMPANY_PROFILES.label;
+  const elite = DEBIT_NOTE_COMPANY_PROFILES.elite;
+  return {
+    nameZh: `${label.nameZh} / ${elite.nameZh}`,
+    nameEn: `${label.nameEn} / ${elite.nameEn}`,
+    address: label.address,
+    phone: label.phone,
+    taxId: label.taxId,
+    chequePayee: `${label.chequePayee} / ${elite.chequePayee}`,
+    bankAccount: 'See payment instructions below',
+  };
+}
+
+export const DEFAULT_DEBIT_NOTE_COMPANY: DebitNoteCompanyInfo = resolveDebitNoteCompanyHeader(['label', 'elite']);
+
+/** RM prefix for debit note line items e.g. RM 204 */
+export function formatDebitNoteUnitLabel(unitName: string): string {
+  const trimmed = unitName.trim();
+  if (/^RM\s/i.test(trimmed)) return trimmed;
+  return `RM ${trimmed}`;
+}
+
+export const DEBIT_NOTE_PAYMENT_TEMPLATE_LABELS: Record<DebitNotePaymentTemplateId, string> = {
+  label: 'Template 1 — Honour Label Limited 鴻宇商標',
+  elite: 'Template 2 — Honour Elite Limited 鴻宇',
 };
+
+/** Build payment-instruction block for debit note footer. */
+export function buildDebitNotePaymentInstructionsText(
+  templateId: DebitNotePaymentTemplateId,
+  noteNo: string,
+  dueDateChinese: string,
+  manualRemark?: string | null,
+): string {
+  const profile = DEBIT_NOTE_COMPANY_PROFILES[templateId];
+  const lines: string[] = [
+    `1. 敬請於到期日 (發單日7日內, ${dueDateChinese}) 或之前繳清上述款項。`,
+    '2.',
+    'We accept both cheque payment and bank transfer',
+    `(Please remark the Note no. ${noteNo} on the cheque or in the bank transfer note.)`,
+    '',
+    '-',
+    '',
+    `Crossed cheque made payable to "${profile.chequePayee}"`,
+    '',
+    '-',
+    '',
+    'Bank transfer detail:',
+    '',
+  ];
+  if (templateId === 'label') {
+    lines.push(
+      '374-279610-001',
+      'HONOUR LABEL LIMITED',
+      'HANG SENG BANK (bank code : 024)',
+    );
+  } else {
+    lines.push('-', '', '-');
+  }
+  if (manualRemark?.trim()) {
+    lines.push('', manualRemark.trim());
+  }
+  return lines.join('\n');
+}
 
 export interface FormalDebitNoteLine {
   unitName: string;
@@ -915,6 +1050,10 @@ export interface FormalDebitNote {
   grandTotal: number;
   footerRemark: string;
   paymentInstructions: string[];
+  /** Full payment-instruction block (template + optional manual remark). */
+  paymentInstructionsText: string;
+  paymentTemplateId: DebitNotePaymentTemplateId;
+  companyIds: DebitNoteCompanyId[];
   units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode'>[];
 }
 

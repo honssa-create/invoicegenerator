@@ -11,9 +11,14 @@ import {
   formatDisplayDate,
   formatPeriodRangeShort,
   buildDebitNoteFooterRemark,
-  DEFAULT_DEBIT_NOTE_COMPANY,
+  buildDebitNotePaymentInstructionsText,
+  defaultPaymentTemplateForUnits,
+  formatDebitNoteUnitLabel,
+  resolveDebitNoteCompanyHeader,
+  resolveDebitNoteCompanyIds,
   displayRentalStatus,
   type DebitNoteCompanyInfo,
+  type DebitNotePaymentTemplateId,
   type FormalDebitNote,
   type FormalDebitNoteArrearRow,
   type FormalDebitNoteLine,
@@ -694,7 +699,7 @@ export function buildFormalDebitNote(
     const outstanding = chargeOutstanding(item);
     if (outstanding <= 0) continue;
     currentCharges.push({
-      unitName: col.unitName,
+      unitName: formatDebitNoteUnitLabel(col.unitName),
       description: formatDebitNoteChargeDescription(targetPeriod, col.chargeType),
       amount: outstanding,
     });
@@ -717,7 +722,7 @@ export function buildFormalDebitNote(
       period: p,
       periodLabel: formatBillingPeriodLabel(p),
       details: buildArrearDetails(periodItems.map((c) => ({
-        unitName: unitNameMap[c.unitId] || `Unit ${c.unitId}`,
+        unitName: formatDebitNoteUnitLabel(unitNameMap[c.unitId] || `Unit ${c.unitId}`),
         chargeType: c.chargeType,
       }))),
       amount,
@@ -728,21 +733,35 @@ export function buildFormalDebitNote(
   const totalArrears = arrearRows.reduce((s, r) => s + r.amount, 0);
   const grandTotal = currentSubtotal + totalArrears;
 
-  const company: DebitNoteCompanyInfo = { ...DEFAULT_DEBIT_NOTE_COMPANY, ...options?.company };
+  const companyIds = resolveDebitNoteCompanyIds(matrix.units.map((u) => u.unitName));
+  const company: DebitNoteCompanyInfo = { ...resolveDebitNoteCompanyHeader(companyIds), ...options?.company };
   const issuedDate = new Date().toISOString().slice(0, 10);
-  const premises = matrix.units.map((u) => u.unitName).join(', ');
+
+  const addressRows = db.prepare(
+    `SELECT id, address FROM rental_units WHERE user_id = ? AND id IN (${unitIds.map(() => '?').join(',')})`
+  ).all(userId, ...unitIds) as { id: number; address: string | null }[];
+  const addressMap = Object.fromEntries(addressRows.map((r) => [r.id, r.address]));
+  const premises = matrix.units
+    .map((u) => addressMap[u.id]?.trim() || u.unitName)
+    .join(' · ');
 
   const dueDateChinese = matrix.summary.dueDateDisplay.split('/').length >= 2
     ? `${matrix.summary.dueDateDisplay.split('/')[2] || targetPeriod.split('-')[0]}年${Number(matrix.summary.dueDateDisplay.split('/')[1])}月${Number(matrix.summary.dueDateDisplay.split('/')[0])}日`
     : matrix.summary.dueDateDisplay;
 
-  const paymentInstructions = [
-    `敬請於到期日 (${dueDateChinese}) 或之前繳清上述款項。`,
-    `支票抬頭請寫：「${company.chequePayee}」 / 轉帳銀行戶口：${company.bankAccount}。`,
-  ];
+  const noteNo = peekDebitNoteNumber(userId, targetPeriod);
+  const paymentTemplateId: DebitNotePaymentTemplateId =
+    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
+  const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+    paymentTemplateId,
+    noteNo,
+    dueDateChinese,
+    options?.paymentRemark,
+  );
+  const paymentInstructions = paymentInstructionsText.split('\n').filter((l) => l !== '');
 
   return {
-    noteNo: peekDebitNoteNumber(userId, targetPeriod),
+    noteNo,
     issuedDate,
     issuedDateDisplay: formatDisplayDate(issuedDate),
     dueDate: matrix.summary.dueDate,
@@ -760,6 +779,9 @@ export function buildFormalDebitNote(
     grandTotal,
     footerRemark: matrix.summary.reminderText,
     paymentInstructions,
+    paymentInstructionsText,
+    paymentTemplateId,
+    companyIds,
     units: matrix.units,
   };
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireApiAccess } from '@/lib/api-guard';
 import { rentalOwnerId } from '@/lib/org-server';
 import { buildFormalDebitNote, buildRentPaymentNoticeMatrix } from '@/lib/rental-ledger-server';
-import { currentBillingPeriod, type DebitNoteMode } from '@/lib/rentals';
+import { currentBillingPeriod, type DebitNoteMode, type DebitNotePaymentTemplateId } from '@/lib/rentals';
 
 function parseUnitIds(searchParams: URLSearchParams): number[] | undefined {
   const raw = searchParams.get('unit_ids') || searchParams.get('unitIds');
@@ -48,12 +48,19 @@ export async function GET(request: Request) {
     ? Number(paidLookbackRaw)
     : undefined;
 
+  const paymentTemplateRaw = searchParams.get('paymentTemplate') || searchParams.get('payment_template');
+  const paymentTemplate: DebitNotePaymentTemplateId | undefined =
+    paymentTemplateRaw === 'label' || paymentTemplateRaw === 'elite' ? paymentTemplateRaw : undefined;
+  const paymentRemark = searchParams.get('paymentRemark') || searchParams.get('payment_remark') || undefined;
+
   const query = {
     fromPeriod,
     paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
     mode,
     unitId,
     unitIds,
+    paymentTemplate,
+    paymentRemark,
   };
 
   try {

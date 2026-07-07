@@ -21,6 +21,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
       electricityPeriodFrom: body.electricityPeriodFrom,
       electricityPeriodTo: body.electricityPeriodTo,
       note: body.note || null,
+      paymentTemplate: body.paymentTemplate === 'elite' ? 'elite' : body.paymentTemplate === 'label' ? 'label' : undefined,
+      paymentRemark: body.paymentRemark || null,
     });
     return NextResponse.json(result);
   } catch (e) {

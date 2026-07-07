@@ -25,6 +25,7 @@ interface Props {
   onRatePerUnit: (v: string) => void;
   suggestedPrevReading?: number | null;
   inpClassName?: string;
+  readOnly?: boolean;
 }
 
 function numOrNull(s: string): number | null {
@@ -47,6 +48,7 @@ export default function ElectricityMeterCalculator({
   onRatePerUnit,
   suggestedPrevReading,
   inpClassName = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+  readOnly = false,
 }: Props) {
   const prev = numOrNull(prevReading);
   const curr = numOrNull(currReading);
@@ -73,6 +75,9 @@ export default function ElectricityMeterCalculator({
     })
     : calcStockRoomElectricityFee({ prevReading: prev, currReading: curr, ratePerUnit: rate });
 
+  const inputCls = `${inpClassName}${readOnly ? ' bg-gray-100/80 cursor-default' : ''}`;
+  const inputProps = readOnly ? { readOnly: true as const } : {};
+
   return (
     <div className="space-y-4">
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -82,8 +87,9 @@ export default function ElectricityMeterCalculator({
             type="number"
             min={0}
             step="0.01"
-            className={inpClassName}
+            className={inputCls}
             value={prevReading}
+            {...inputProps}
             onChange={(e) => onPrevReading(e.target.value)}
             placeholder={suggestedPrevReading != null ? String(suggestedPrevReading) : ''}
           />
@@ -97,8 +103,9 @@ export default function ElectricityMeterCalculator({
             type="number"
             min={0}
             step="0.01"
-            className={inpClassName}
+            className={inputCls}
             value={currReading}
+            {...inputProps}
             onChange={(e) => onCurrReading(e.target.value)}
           />
         </div>
@@ -108,8 +115,9 @@ export default function ElectricityMeterCalculator({
             type="number"
             min={0}
             step="0.0001"
-            className={inpClassName}
+            className={inputCls}
             value={ratePerUnit}
+            {...inputProps}
             onChange={(e) => onRatePerUnit(e.target.value)}
           />
         </div>
@@ -128,8 +136,9 @@ export default function ElectricityMeterCalculator({
                 type="number"
                 min={0}
                 step="0.01"
-                className={inpClassName}
+                className={inputCls}
                 value={meter213B}
+                {...inputProps}
                 onChange={(e) => onMeter213B(e.target.value)}
               />
             </div>
@@ -139,8 +148,9 @@ export default function ElectricityMeterCalculator({
                 type="number"
                 min={0}
                 step="0.01"
-                className={inpClassName}
+                className={inputCls}
                 value={meterStockRoom1}
+                {...inputProps}
                 onChange={(e) => onMeterStockRoom1(e.target.value)}
               />
             </div>
@@ -150,8 +160,9 @@ export default function ElectricityMeterCalculator({
                 type="number"
                 min={0}
                 step="0.01"
-                className={inpClassName}
+                className={inputCls}
                 value={meterStockRoom2}
+                {...inputProps}
                 onChange={(e) => onMeterStockRoom2(e.target.value)}
               />
             </div>

@@ -70,6 +70,27 @@ interface DetailPayload {
   suggestedPrevWaterReading?: number | null;
 }
 
+interface UtilitySnapshot {
+  baseRentPeriodFrom: string;
+  baseRentPeriodTo: string;
+  waterFee: string;
+  waterPeriodFrom: string;
+  waterPeriodTo: string;
+  electricityFee: string;
+  electricityPeriodFrom: string;
+  electricityPeriodTo: string;
+  meterPrevReading: string;
+  meterCurrReading: string;
+  meter213B: string;
+  meterStockRoom1: string;
+  meterStockRoom2: string;
+  meterRatePerUnit: string;
+  waterMeterPrev: string;
+  waterMeterCurr: string;
+  waterMeterRate: string;
+  utilityNote: string;
+}
+
 export default function RentalDetailPage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>}>
@@ -121,8 +142,13 @@ function RentalDetailInner() {
   const [suggestedPrevWaterReading, setSuggestedPrevWaterReading] = useState<number | null>(null);
   const [utilityNote, setUtilityNote] = useState('');
   const [utilitySaveState, setUtilitySaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [utilityEditing, setUtilityEditing] = useState(false);
+  const [utilityCanUndo, setUtilityCanUndo] = useState(false);
   const skipUtilityAutoSaveRef = useRef(true);
   const utilitySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCommittedUtilityRef = useRef<UtilitySnapshot | null>(null);
+  const undoUtilitySnapshotRef = useRef<UtilitySnapshot | null>(null);
+  const skipUndoCaptureRef = useRef(false);
 
   // invoice modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -176,6 +202,8 @@ function RentalDetailInner() {
 
   const load = useCallback(() => {
     setLoading(true);
+    setUtilityEditing(false);
+    setUtilityCanUndo(false);
     skipPeriodRecalcRef.current = true;
     skipUtilityAutoSaveRef.current = true;
     fetch(`/api/rentals/units/${id}?period=${period}`)
@@ -264,6 +292,147 @@ function RentalDetailInner() {
   }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
+  const roInp = `${inp} bg-gray-100/80 cursor-default focus:ring-0 focus:bg-gray-100/80`;
+
+  const captureUtilitySnapshot = useCallback((): UtilitySnapshot => ({
+    baseRentPeriodFrom,
+    baseRentPeriodTo,
+    waterFee,
+    waterPeriodFrom,
+    waterPeriodTo,
+    electricityFee,
+    electricityPeriodFrom,
+    electricityPeriodTo,
+    meterPrevReading,
+    meterCurrReading,
+    meter213B,
+    meterStockRoom1,
+    meterStockRoom2,
+    meterRatePerUnit,
+    waterMeterPrev,
+    waterMeterCurr,
+    waterMeterRate,
+    utilityNote,
+  }), [
+    baseRentPeriodFrom, baseRentPeriodTo, waterFee, waterPeriodFrom, waterPeriodTo,
+    electricityFee, electricityPeriodFrom, electricityPeriodTo,
+    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    waterMeterPrev, waterMeterCurr, waterMeterRate, utilityNote,
+  ]);
+
+  const applyUtilitySnapshot = useCallback((snap: UtilitySnapshot) => {
+    setBaseRentPeriodFrom(snap.baseRentPeriodFrom);
+    setBaseRentPeriodTo(snap.baseRentPeriodTo);
+    setWaterFee(snap.waterFee);
+    setWaterPeriodFrom(snap.waterPeriodFrom);
+    setWaterPeriodTo(snap.waterPeriodTo);
+    setElectricityFee(snap.electricityFee);
+    setElectricityPeriodFrom(snap.electricityPeriodFrom);
+    setElectricityPeriodTo(snap.electricityPeriodTo);
+    setMeterPrevReading(snap.meterPrevReading);
+    setMeterCurrReading(snap.meterCurrReading);
+    setMeter213B(snap.meter213B);
+    setMeterStockRoom1(snap.meterStockRoom1);
+    setMeterStockRoom2(snap.meterStockRoom2);
+    setMeterRatePerUnit(snap.meterRatePerUnit);
+    setWaterMeterPrev(snap.waterMeterPrev);
+    setWaterMeterCurr(snap.waterMeterCurr);
+    setWaterMeterRate(snap.waterMeterRate);
+    setUtilityNote(snap.utilityNote);
+  }, []);
+
+  const buildUtilityPayload = useCallback((snap?: UtilitySnapshot) => {
+    const s = snap ?? captureUtilitySnapshot();
+    const payload: Record<string, unknown> = {
+      baseRent: Number(baseRent),
+      baseRentPeriodFrom: fromFormDate(s.baseRentPeriodFrom),
+      baseRentPeriodTo: fromFormDate(s.baseRentPeriodTo),
+      waterFee: Number(s.waterFee),
+      electricityFee: Number(s.electricityFee),
+      waterPeriodFrom: fromFormDate(s.waterPeriodFrom),
+      waterPeriodTo: fromFormDate(s.waterPeriodTo),
+      electricityPeriodFrom: fromFormDate(s.electricityPeriodFrom),
+      electricityPeriodTo: fromFormDate(s.electricityPeriodTo),
+      customInvoiceNote: s.utilityNote || null,
+    };
+    if (electricityFormula) {
+      payload.electricityMeter = meterDataFromInputs(
+        s.meterPrevReading, s.meterCurrReading, s.meterRatePerUnit,
+        { meter213B: s.meter213B, meterStockRoom1: s.meterStockRoom1, meterStockRoom2: s.meterStockRoom2 },
+      );
+    }
+    if (waterMeterFormula) {
+      payload.waterMeter = waterMeterDataFromInputs(s.waterMeterPrev, s.waterMeterCurr, s.waterMeterRate);
+    }
+    return payload;
+  }, [baseRent, captureUtilitySnapshot, electricityFormula, waterMeterFormula]);
+
+  const saveUtilities = useCallback(async (opts?: { reload?: boolean; snapshot?: UtilitySnapshot; skipUndo?: boolean }) => {
+    const recordId = data?.currentRecord?.id;
+    if (!recordId) return false;
+    if (!opts?.skipUndo && !skipUndoCaptureRef.current && lastCommittedUtilityRef.current) {
+      undoUtilitySnapshotRef.current = lastCommittedUtilityRef.current;
+      setUtilityCanUndo(true);
+    }
+    setUtilitySaveState('saving');
+    const res = await fetch(`/api/rentals/records/${recordId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildUtilityPayload(opts?.snapshot)),
+    });
+    skipUndoCaptureRef.current = false;
+    if (!res.ok) {
+      setUtilitySaveState('error');
+      return false;
+    }
+    const { record } = await res.json();
+    setData((prev) => (prev ? { ...prev, currentRecord: record } : prev));
+    lastCommittedUtilityRef.current = opts?.snapshot ?? captureUtilitySnapshot();
+    setUtilitySaveState('saved');
+    if (opts?.reload) load();
+    else window.setTimeout(() => setUtilitySaveState('idle'), 2000);
+    return true;
+  }, [data?.currentRecord?.id, buildUtilityPayload, captureUtilitySnapshot, load]);
+
+  const undoUtilitySave = useCallback(async () => {
+    const snap = undoUtilitySnapshotRef.current;
+    if (!snap) return;
+    setUtilityCanUndo(false);
+    undoUtilitySnapshotRef.current = null;
+    skipUndoCaptureRef.current = true;
+    skipUtilityAutoSaveRef.current = true;
+    applyUtilitySnapshot(snap);
+    await saveUtilities({ snapshot: snap, skipUndo: true });
+    window.setTimeout(() => { skipUtilityAutoSaveRef.current = false; }, 200);
+  }, [applyUtilitySnapshot, saveUtilities]);
+
+  useEffect(() => {
+    if (loading || !data?.currentRecord) return;
+    lastCommittedUtilityRef.current = captureUtilitySnapshot();
+    setUtilityCanUndo(false);
+    undoUtilitySnapshotRef.current = null;
+  }, [data?.currentRecord?.id, period, loading, captureUtilitySnapshot]);
+
+  useEffect(() => {
+    if (skipUtilityAutoSaveRef.current || !data?.currentRecord || !utilityEditing) return;
+    if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
+    utilitySaveTimerRef.current = setTimeout(() => {
+      void saveUtilities();
+    }, 600);
+    return () => {
+      if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
+    };
+  }, [
+    data?.currentRecord?.id,
+    saveUtilities,
+    utilityEditing,
+    baseRentPeriodFrom, baseRentPeriodTo,
+    waterFee, waterPeriodFrom, waterPeriodTo,
+    electricityFee, electricityPeriodFrom, electricityPeriodTo,
+    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    waterMeterPrev, waterMeterCurr, waterMeterRate,
+    utilityNote,
+  ]);
 
   const saveProfile = async () => {
     setProfileSaving(true);
@@ -293,85 +462,13 @@ function RentalDetailInner() {
     load();
   };
 
-  const utilityPayload = useCallback(() => {
-    const payload: Record<string, unknown> = {
-      baseRent: Number(baseRent),
-      baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
-      baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
-      waterFee: Number(waterFee),
-      electricityFee: Number(electricityFee),
-      waterPeriodFrom: fromFormDate(waterPeriodFrom),
-      waterPeriodTo: fromFormDate(waterPeriodTo),
-      electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
-      electricityPeriodTo: fromFormDate(electricityPeriodTo),
-      customInvoiceNote: utilityNote || null,
-    };
-    if (electricityFormula) {
-      payload.electricityMeter = meterDataFromInputs(
-        meterPrevReading, meterCurrReading, meterRatePerUnit,
-        { meter213B, meterStockRoom1, meterStockRoom2 },
-      );
-    }
-    if (waterMeterFormula) {
-      payload.waterMeter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
-    }
-    return payload;
-  }, [
-    baseRent, baseRentPeriodFrom, baseRentPeriodTo, waterFee, electricityFee,
-    waterPeriodFrom, waterPeriodTo, electricityPeriodFrom, electricityPeriodTo,
-    utilityNote, electricityFormula, meterPrevReading, meterCurrReading, meterRatePerUnit,
-    meter213B, meterStockRoom1, meterStockRoom2, waterMeterFormula,
-    waterMeterPrev, waterMeterCurr, waterMeterRate,
-  ]);
-
-  const saveUtilities = useCallback(async (opts?: { reload?: boolean }) => {
-    const recordId = data?.currentRecord?.id;
-    if (!recordId) return false;
-    setUtilitySaveState('saving');
-    const res = await fetch(`/api/rentals/records/${recordId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(utilityPayload()),
-    });
-    if (!res.ok) {
-      setUtilitySaveState('error');
-      return false;
-    }
-    const { record } = await res.json();
-    setData((prev) => (prev ? { ...prev, currentRecord: record } : prev));
-    setUtilitySaveState('saved');
-    if (opts?.reload) load();
-    else window.setTimeout(() => setUtilitySaveState('idle'), 2000);
-    return true;
-  }, [data?.currentRecord?.id, utilityPayload, load]);
-
-  useEffect(() => {
-    if (skipUtilityAutoSaveRef.current || !data?.currentRecord) return;
-    if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
-    utilitySaveTimerRef.current = setTimeout(() => {
-      void saveUtilities();
-    }, 600);
-    return () => {
-      if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
-    };
-  }, [
-    data?.currentRecord?.id,
-    saveUtilities,
-    baseRentPeriodFrom, baseRentPeriodTo,
-    waterFee, waterPeriodFrom, waterPeriodTo,
-    electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
-    waterMeterPrev, waterMeterCurr, waterMeterRate,
-    utilityNote,
-  ]);
-
   const sendInvoice = async () => {
     if (!data?.currentRecord) return;
     setBusy(true);
     const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...utilityPayload(), note: invoiceNote || null }),
+      body: JSON.stringify({ ...buildUtilityPayload(), note: invoiceNote || null }),
     });
     setBusy(false);
     setToast(res.ok ? 'Invoice sent!' : 'Failed to send invoice');
@@ -652,8 +749,43 @@ function RentalDetailInner() {
         <div className="space-y-6">
           {/* Utility / billing for current month */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">水電費紀錄與帳單</p>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Utilities & Billing — {period}</h2>
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">水電費紀錄與帳單</p>
+                <h2 className="text-lg font-semibold text-gray-900">Utilities & Billing — {period}</h2>
+              </div>
+              {rec && (
+                utilityEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (utilitySaveTimerRef.current) {
+                        clearTimeout(utilitySaveTimerRef.current);
+                        utilitySaveTimerRef.current = null;
+                      }
+                      void saveUtilities();
+                      setUtilityEditing(false);
+                    }}
+                    className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700"
+                  >
+                    Done 完成
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setUtilityEditing(true)}
+                    className="text-xs px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Edit 編輯
+                  </button>
+                )
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              {utilityEditing
+                ? 'Changes auto-save. Use Undo if you made a mistake.'
+                : 'Meter readings and billing periods are locked — click Edit 編輯 before changing.'}
+            </p>
             {rec ? (
               <>
                 {/* Base Rent */}
@@ -666,11 +798,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={inp} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={inp} />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
@@ -692,16 +824,17 @@ function RentalDetailInner() {
                         onCurrReading={setWaterMeterCurr}
                         onRatePerUnit={setWaterMeterRate}
                         suggestedPrevReading={suggestedPrevWaterReading}
-                        inpClassName={inp}
+                        inpClassName={utilityEditing ? inp : roInp}
+                        readOnly={!utilityEditing}
                       />
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                         </div>
                       </div>
                     </>
@@ -709,15 +842,15 @@ function RentalDetailInner() {
                     <div className="grid md:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} placeholder="0 → shows /" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                       </div>
                     </div>
                   )}
@@ -748,16 +881,17 @@ function RentalDetailInner() {
                         onMeterStockRoom2={setMeterStockRoom2}
                         onRatePerUnit={setMeterRatePerUnit}
                         suggestedPrevReading={suggestedPrevReading}
-                        inpClassName={inp}
+                        inpClassName={utilityEditing ? inp : roInp}
+                        readOnly={!utilityEditing}
                       />
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                         </div>
                       </div>
                     </>
@@ -765,15 +899,15 @@ function RentalDetailInner() {
                     <div className="grid md:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
+                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} placeholder="0 → shows /" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} readOnly={!utilityEditing} className={utilityEditing ? inp : roInp} />
                       </div>
                     </div>
                   )}
@@ -781,13 +915,24 @@ function RentalDetailInner() {
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
                     <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Note (optional)</label>
-                    <input className={inp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} placeholder="e.g. Water meter 1234" />
+                    <input className={utilityEditing ? inp : roInp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} readOnly={!utilityEditing} placeholder="e.g. Water meter 1234" />
                   </div>
-                  <p className="text-xs text-gray-500 whitespace-nowrap pb-2.5 min-w-[5.5rem] text-right">
-                    {utilitySaveState === 'saving' && 'Saving… 儲存中'}
-                    {utilitySaveState === 'saved' && <span className="text-green-600">Saved ✓ 已儲存</span>}
-                    {utilitySaveState === 'error' && <span className="text-red-600">Save failed</span>}
-                  </p>
+                  <div className="flex flex-col items-end gap-1 pb-2.5 min-w-[5.5rem]">
+                    <p className="text-xs text-gray-500 whitespace-nowrap text-right">
+                      {utilitySaveState === 'saving' && 'Saving… 儲存中'}
+                      {utilitySaveState === 'saved' && <span className="text-green-600">Saved ✓ 已儲存</span>}
+                      {utilitySaveState === 'error' && <span className="text-red-600">Save failed</span>}
+                    </p>
+                    {utilityCanUndo && (
+                      <button
+                        type="button"
+                        onClick={() => void undoUtilitySave()}
+                        className="text-xs text-brand-600 font-medium hover:underline"
+                      >
+                        Undo 復原
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-4 rounded-xl border-2 border-brand-100 bg-brand-50 p-4 flex items-center justify-between flex-wrap gap-3">
                   <div>

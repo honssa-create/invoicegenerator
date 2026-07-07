@@ -105,12 +105,18 @@
     column-count: 1 !important;
   }
 
-  /* One receipt block per sheet; allow tall content to flow across pages */
+  /*
+   * Default sheet: one printed page, summary + image fitted together (no gap).
+   * Tall sheets (--tall): long table images may continue on following pages.
+   */
   .expense-print-root .expense-print-sheet {
-    display: block !important;
+    display: flex !important;
+    flex-direction: column !important;
     box-sizing: border-box !important;
     width: 100% !important;
-    overflow: visible !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
@@ -121,8 +127,8 @@
     position: static !important;
     page-break-after: always !important;
     break-after: page !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .expense-print-root .expense-print-sheet:last-child {
@@ -135,38 +141,82 @@
     break-before: page !important;
   }
 
+  .expense-print-root .expense-print-page-unit {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   .expense-print-root .expense-print-summary,
   .expense-print-root .expense-print-mini-header,
   .expense-print-root .expense-print-banner {
+    flex: 0 0 auto !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
 
   .expense-print-root .expense-print-body {
-    display: block !important;
-    overflow: visible !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
     padding: 2mm 0 0 !important;
   }
 
   .expense-print-root .expense-print-figure {
-    display: block !important;
-    overflow: visible !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
     margin: 0 !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-receipt-img {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    max-height: none !important;
+    max-height: 100% !important;
     height: auto !important;
     object-fit: contain !important;
     object-position: top center !important;
     border-left: none !important;
     border-right: none !important;
     border-bottom: none !important;
+  }
+
+  .expense-print-root .expense-print-sheet--tall {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  .expense-print-root .expense-print-sheet--tall .expense-print-page-unit,
+  .expense-print-root .expense-print-sheet--tall .expense-print-body,
+  .expense-print-root .expense-print-sheet--tall .expense-print-figure {
+    display: block !important;
+    flex: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  .expense-print-root .expense-print-sheet--tall .expense-print-receipt-img {
+    flex: none !important;
+    max-height: none !important;
+    width: 100% !important;
+    height: auto !important;
     page-break-inside: auto !important;
     break-inside: auto !important;
   }

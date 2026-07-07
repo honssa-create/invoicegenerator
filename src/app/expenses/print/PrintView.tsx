@@ -93,13 +93,17 @@ function ReceiptImage({
   receipt,
   index,
   imageKey,
+  sheetKey,
   onReady,
+  onMeasure,
 }: {
   e: Expense;
   receipt: { id: number; path: string };
   index: number;
   imageKey: string;
+  sheetKey: string;
   onReady: (key: string) => void;
+  onMeasure: (sheetKey: string, img: HTMLImageElement) => void;
 }) {
   const src = receiptSrc(e, receipt);
   return (
@@ -115,7 +119,10 @@ function ReceiptImage({
         loading="eager"
         decoding="sync"
         className="expense-print-receipt-img block w-full border border-gray-200 object-contain object-top bg-white"
-        onLoad={() => onReady(imageKey)}
+        onLoad={(ev) => {
+          onMeasure(sheetKey, ev.currentTarget);
+          onReady(imageKey);
+        }}
         onError={() => onReady(imageKey)}
       />
     </figure>
@@ -160,6 +167,20 @@ export default function PrintView() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [imagesReady, setImagesReady] = useState<Set<string>>(new Set());
+  const [tallSheets, setTallSheets] = useState<Set<string>>(new Set());
+
+  const markTallIfNeeded = useCallback((sheetKey: string, img: HTMLImageElement) => {
+    const ratio = img.naturalWidth > 0 ? img.clientWidth / img.naturalWidth : 1;
+    const renderedHeight = img.naturalHeight * ratio;
+    if (renderedHeight > 920 || img.naturalHeight > 1500) {
+      setTallSheets((prev) => {
+        if (prev.has(sheetKey)) return prev;
+        const next = new Set(prev);
+        next.add(sheetKey);
+        return next;
+      });
+    }
+  }, []);
 
   const idsParam = searchParams.get('ids') || '';
   const ids = idsParam
@@ -190,7 +211,14 @@ export default function PrintView() {
     if (!expectedImageKeys.length) return;
     const markCached = () => {
       document.querySelectorAll<HTMLImageElement>('img[data-image-key]').forEach((img) => {
-        if (img.complete && img.dataset.imageKey) markImageReady(img.dataset.imageKey);
+        if (img.complete && img.dataset.imageKey) {
+          const sheet = img.closest<HTMLElement>('.expense-print-sheet');
+          const sheetKey = sheet?.querySelector('[data-image-key]') === img
+            ? printPages.find((p) => p.imageKey === img.dataset.imageKey)?.key
+            : undefined;
+          if (sheetKey) markTallIfNeeded(sheetKey, img);
+          markImageReady(img.dataset.imageKey);
+        }
       });
     };
     markCached();
@@ -229,6 +257,7 @@ export default function PrintView() {
         if (!ordered.length) setLoadError('No matching expenses found for the selected IDs.');
         setExpenses(ordered);
         setImagesReady(new Set());
+        setTallSheets(new Set());
       })
       .catch(() => setLoadError('Could not load expenses for printing.'))
       .finally(() => setLoading(false));
@@ -280,11 +309,14 @@ export default function PrintView() {
         <div className="p-12 text-center text-gray-500">No receipts selected.</div>
       ) : (
         <div className="expense-print-stack max-w-3xl mx-auto p-4 sm:p-6 print:p-0 print:max-w-none print:block">
-          {printPages.map((page, pageIndex) => (
+          {printPages.map((page, pageIndex) => {
+            const isTall = tallSheets.has(page.key) || !page.showFullSummary;
+            return (
             <article
               key={page.key}
-              className={`expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none${pageIndex > 0 ? ' expense-print-sheet--continued' : ''}`}
+              className={`expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none${pageIndex > 0 ? ' expense-print-sheet--continued' : ''}${isTall ? ' expense-print-sheet--tall' : ''}`}
             >
+              <div className="expense-print-page-unit">
               {page.showFullSummary ? (
                 <ExpenseSummary e={page.expense} />
               ) : (
@@ -302,7 +334,9 @@ export default function PrintView() {
                     receipt={page.receipt}
                     index={page.receiptIndex}
                     imageKey={page.imageKey}
+                    sheetKey={page.key}
                     onReady={markImageReady}
+                    onMeasure={markTallIfNeeded}
                   />
                 ) : (
                   <div className="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 text-sm">
@@ -310,8 +344,10 @@ export default function PrintView() {
                   </div>
                 )}
               </div>
+              </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </>

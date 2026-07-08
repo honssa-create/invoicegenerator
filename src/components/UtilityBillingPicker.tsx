@@ -1,6 +1,10 @@
 'use client';
 
-import { UTILITY_BILLING_MODE_LABELS, type UtilityBillingMode } from '@/lib/rentals';
+import {
+  UTILITY_BILLING_MODE_LABELS,
+  UTILITY_BILLING_MODE_ORDER,
+  type UtilityBillingMode,
+} from '@/lib/rentals';
 
 interface Props {
   value: UtilityBillingMode;
@@ -9,10 +13,16 @@ interface Props {
   compact?: boolean;
 }
 
+const MODE_HINTS: Record<UtilityBillingMode, string> = {
+  tenant_pays: 'Water & electricity excluded from company debit notes.',
+  company_sub_meter: 'Simple meter: (current − previous) × rate per unit.',
+  company_shared_meter: 'Shared meter split (213A): net usage after other units.',
+};
+
 export default function UtilityBillingPicker({ value, onChange, disabled, compact }: Props) {
   return (
-    <div className={`grid ${compact ? 'grid-cols-1' : 'sm:grid-cols-2'} gap-3`}>
-      {(['tenant_pays', 'company_proxy'] as UtilityBillingMode[]).map((mode) => {
+    <div className={`grid ${compact ? 'grid-cols-1' : 'sm:grid-cols-2 lg:grid-cols-3'} gap-3`}>
+      {UTILITY_BILLING_MODE_ORDER.map((mode) => {
         const selected = value === mode;
         return (
           <label
@@ -28,16 +38,14 @@ export default function UtilityBillingPicker({ value, onChange, disabled, compac
               checked={selected}
               disabled={disabled}
               onChange={() => onChange(mode)}
-              className="mt-1 h-4 w-4 border-gray-300 text-brand-600"
+              className="mt-1 h-4 w-4 border-gray-300 text-brand-600 shrink-0"
             />
             <span>
-              <span className="block text-sm font-semibold text-gray-900">{UTILITY_BILLING_MODE_LABELS[mode]}</span>
+              <span className="block text-sm font-semibold text-gray-900 leading-snug">
+                {UTILITY_BILLING_MODE_LABELS[mode]}
+              </span>
               {!compact && (
-                <span className="block text-xs text-gray-500 mt-1">
-                  {mode === 'tenant_pays'
-                    ? 'Water & electricity excluded from company debit notes.'
-                    : 'Company bills utilities on the debit note.'}
-                </span>
+                <span className="block text-xs text-gray-500 mt-1">{MODE_HINTS[mode]}</span>
               )}
             </span>
           </label>

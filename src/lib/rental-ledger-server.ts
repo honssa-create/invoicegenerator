@@ -19,7 +19,7 @@ import {
   formatDebitNoteUnitLabel,
   renderDebitNoteFooterRemark,
   resolveDebitNoteCompanyHeader,
-  resolveDebitNoteCompanyIds,
+  resolveDebitNoteCompanyIdsFromUnits,
   displayRentalStatus,
   type DebitNoteCompanyInfo,
   type DebitNotePaymentTemplateId,
@@ -244,12 +244,13 @@ export function linkUnitToTenant(unitId: number, userId: number, tenantId: numbe
     .run(tenantId, unitId, userId);
 }
 
-export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUnit, 'id' | 'unitName' | 'tenantName' | 'currentYearRent' | 'utilityBillingMode'>[] {
+export function getTenantUnits(tenantId: number, userId: number): Pick<RentalUnit, 'id' | 'unitName' | 'tenantName' | 'currentYearRent' | 'utilityBillingMode' | 'billingCompany'>[] {
   return (db.prepare(
-    'SELECT id, unit_name, tenant_name, current_year_rent, utility_billing_mode FROM rental_units WHERE tenant_id = ? AND user_id = ? ORDER BY unit_name COLLATE NOCASE'
-  ).all(tenantId, userId) as { id: number; unit_name: string; tenant_name: string; current_year_rent: number; utility_billing_mode?: string | null }[]).map((r) => ({
+    'SELECT id, unit_name, tenant_name, current_year_rent, utility_billing_mode, billing_company FROM rental_units WHERE tenant_id = ? AND user_id = ? ORDER BY unit_name COLLATE NOCASE'
+  ).all(tenantId, userId) as { id: number; unit_name: string; tenant_name: string; current_year_rent: number; utility_billing_mode?: string | null; billing_company?: string | null }[]).map((r) => ({
     id: r.id, unitName: r.unit_name, tenantName: r.tenant_name, currentYearRent: r.current_year_rent || 0,
     utilityBillingMode: normalizeUtilityBillingMode(r.utility_billing_mode),
+    billingCompany: r.billing_company === 'label' || r.billing_company === 'elite' ? r.billing_company : null,
   }));
 }
 
@@ -810,9 +811,9 @@ export function buildFormalDebitNote(
   const totalArrears = arrearRows.reduce((s, r) => s + r.amount, 0);
   const grandTotal = currentSubtotal + totalArrears;
 
-  const companyIds = resolveDebitNoteCompanyIds(matrix.units.map((u) => u.unitName));
+  const companyIds = resolveDebitNoteCompanyIdsFromUnits(matrix.units);
   const paymentTemplateId: DebitNotePaymentTemplateId =
-    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
+    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units);
   const savedTemplate = getRentalTemplate(userId, paymentTemplateId);
   const companyOverride = resolveCompanyFromTemplate(paymentTemplateId, savedTemplate);
   const company: DebitNoteCompanyInfo = {

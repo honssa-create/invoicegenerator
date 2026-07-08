@@ -42,6 +42,8 @@ import {
   baseRentLineLabel,
   buildDebitNotePaymentInstructionsText,
   debitNoteCompanyForUnit,
+  resolveUnitBillingCompany,
+  type DebitNoteCompanyId,
   debitNoteDueDate,
   formatDueDateChinese,
   utilityLineLabel,
@@ -89,8 +91,9 @@ interface UnitRow {
   current_year_rent: number; previous_years_rent_json: string | null;
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
-  automation_enabled: number; utility_billing_mode?: string | null;
+  automation_enabled: number;   utility_billing_mode?: string | null;
   address?: string | null;
+  billing_company?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -141,6 +144,9 @@ function hydrateUnit(row: UnitRow): RentalUnit {
     utilityBillingMode: (row.utility_billing_mode === 'tenant_pays' || row.utility_billing_mode === 'company_proxy'
       ? row.utility_billing_mode
       : 'company_proxy') as RentalUnit['utilityBillingMode'],
+    billingCompany: row.billing_company === 'label' || row.billing_company === 'elite'
+      ? row.billing_company
+      : null,
     address: row.address || '',
     created_at: row.created_at, updated_at: row.updated_at,
   };
@@ -325,7 +331,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
-      utility_billing_mode = ?, address = ?,
+      utility_billing_mode = ?, address = ?, billing_company = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
@@ -341,6 +347,9 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
     (input.utilityBillingMode ?? existing.utilityBillingMode) === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
     (input.address ?? existing.address)?.trim() || null,
+    input.billingCompany !== undefined
+      ? (input.billingCompany === 'label' || input.billingCompany === 'elite' ? input.billingCompany : null)
+      : existing.billingCompany,
     id, userId
   );
   const updated = getRentalUnit(id, userId)!;
@@ -765,7 +774,7 @@ export async function sendRentInvoice(
     const dueDate = debitNoteDueDate(issuedDate);
     const dueDisplay = formatDisplayDate(dueDate);
     const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
-    const templateId = input.paymentTemplate ?? debitNoteCompanyForUnit(unit.unitName);
+    const templateId = input.paymentTemplate ?? resolveUnitBillingCompany(unit);
     const savedTpl = getRentalTemplate(userId, templateId);
     const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
     const paymentInstructionsText = buildDebitNotePaymentInstructionsText(

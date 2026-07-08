@@ -7,8 +7,11 @@ import {
   normalizeDebitNoteStyle,
   type DebitNoteStyleTemplate,
 } from '@/lib/debit-note-style';
+import { downloadDebitNoteStyleTemplate } from '@/lib/debit-note-style-document';
+import { DEBIT_NOTE_COMPANY_CHOICES, type DebitNoteCompanyId } from '@/lib/rentals';
 
 interface Props {
+  companyKey: DebitNoteCompanyId;
   style: DebitNoteStyleTemplate;
   onChange: (style: DebitNoteStyleTemplate) => void;
   onSave?: () => Promise<void>;
@@ -19,6 +22,7 @@ interface Props {
 }
 
 export default function DebitNoteTemplateEditor({
+  companyKey,
   style,
   onChange,
   onSave,
@@ -28,6 +32,7 @@ export default function DebitNoteTemplateEditor({
   className = '',
 }: Props) {
   const [open, setOpen] = useState(true);
+  const companyLabel = DEBIT_NOTE_COMPANY_CHOICES.find((c) => c.id === companyKey)?.label ?? companyKey;
 
   const setField = useCallback(
     (key: keyof DebitNoteStyleTemplate, value: string) => {
@@ -45,15 +50,15 @@ export default function DebitNoteTemplateEditor({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-3 text-left bg-gray-50 hover:bg-gray-100/80"
       >
-        <span className="font-semibold text-gray-900">Template 樣式範本</span>
+        <span className="font-semibold text-gray-900">Layout 樣式 — {companyLabel}</span>
         <span className="text-gray-400 text-sm">{open ? '▼' : '▶'}</span>
       </button>
 
       {open && (
         <div className="p-4 space-y-4 border-t border-gray-100">
           <p className="text-xs text-gray-500">
-            Edit colours, fonts, and spacing — preview updates instantly. Save to apply on all future debit notes.
-            編輯字體與顏色，即時預覽；儲存後套用至所有繳費通知單。
+            Edit colours, fonts, and spacing — preview updates instantly. Save applies to debit notes for this company.
+            編輯字體與顏色，即時預覽；儲存後套用至該公司的繳費通知單。
           </p>
 
           <div className="grid sm:grid-cols-2 gap-3">
@@ -96,52 +101,70 @@ export default function DebitNoteTemplateEditor({
             })}
           </div>
 
-          {!readOnly && (
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {onSave && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => downloadDebitNoteStyleTemplate(style, companyKey, 'doc')}
+              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+            >
+              Download doc 下載範本
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadDebitNoteStyleTemplate(style, companyKey, 'html')}
+              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+            >
+              Download HTML
+            </button>
+            {!readOnly && (
+              <>
+                {onSave && (
+                  <button
+                    type="button"
+                    onClick={() => void onSave()}
+                    disabled={saving}
+                    className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : 'Save template 儲存範本'}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => void onSave()}
-                  disabled={saving}
-                  className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
+                  onClick={reset}
+                  className="px-4 py-2 border border-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
                 >
-                  {saving ? 'Saving…' : 'Save template 儲存範本'}
+                  Reset to default 重設
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={reset}
-                className="px-4 py-2 border border-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
-              >
-                Reset to default 重設
-              </button>
-              {saveMessage && <span className="text-sm text-brand-700">{saveMessage}</span>}
-            </div>
-          )}
+                {saveMessage && <span className="text-sm text-brand-700">{saveMessage}</span>}
+              </>
+            )}
+          </div>
         </div>
       )}
     </section>
   );
 }
 
-/** Load saved debit note style template for the current user. */
-export function useDebitNoteStyleTemplate(readOnly?: boolean) {
+/** Load saved debit note style template for one billing company. */
+export function useDebitNoteStyleTemplate(companyKey: DebitNoteCompanyId, readOnly?: boolean) {
   const [style, setStyle] = useState<DebitNoteStyleTemplate>({ ...DEFAULT_DEBIT_NOTE_STYLE });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
 
   useEffect(() => {
-    fetch('/api/debit-note/template')
+    setLoading(true);
+    fetch(`/api/debit-note/template?company=${companyKey}`)
       .then(async (r) => {
         if (!r.ok) return null;
         return r.json();
       })
       .then((d) => {
         if (d?.style) setStyle(normalizeDebitNoteStyle(d.style));
+        else setStyle({ ...DEFAULT_DEBIT_NOTE_STYLE });
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [companyKey]);
 
   const save = useCallback(async () => {
     if (readOnly) return;
@@ -150,7 +173,7 @@ export function useDebitNoteStyleTemplate(readOnly?: boolean) {
     const res = await fetch('/api/debit-note/template', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ style }),
+      body: JSON.stringify({ company: companyKey, style }),
     });
     const data = await res.json().catch(() => ({}));
     setSaving(false);
@@ -161,7 +184,7 @@ export function useDebitNoteStyleTemplate(readOnly?: boolean) {
     if (data.style) setStyle(normalizeDebitNoteStyle(data.style));
     setSaveMessage('Template saved ✓');
     setTimeout(() => setSaveMessage(''), 3000);
-  }, [readOnly, style]);
+  }, [readOnly, style, companyKey]);
 
   return { style, setStyle, loading, saving, saveMessage, save };
 }

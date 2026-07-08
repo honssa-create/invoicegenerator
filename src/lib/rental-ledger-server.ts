@@ -645,25 +645,30 @@ function buildArrearDetails(
   return `${unitStr} (${typeLabels})`;
 }
 
-type RecordUtilityPeriods = {
+type RecordBillingPeriods = {
+  rentFrom: string | null;
+  rentTo: string | null;
   waterFrom: string | null;
   waterTo: string | null;
   elecFrom: string | null;
   elecTo: string | null;
 };
 
-function loadRecordUtilityPeriods(
+function loadRecordBillingPeriods(
   userId: number,
   legacyRecordIds: number[],
-): Map<number, RecordUtilityPeriods> {
-  const map = new Map<number, RecordUtilityPeriods>();
+): Map<number, RecordBillingPeriods> {
+  const map = new Map<number, RecordBillingPeriods>();
   if (!legacyRecordIds.length) return map;
   const placeholders = legacyRecordIds.map(() => '?').join(',');
   const rows = db.prepare(
-    `SELECT id, water_period_from, water_period_to, electricity_period_from, electricity_period_to
+    `SELECT id, base_rent_period_from, base_rent_period_to,
+            water_period_from, water_period_to, electricity_period_from, electricity_period_to
      FROM rental_records WHERE user_id = ? AND id IN (${placeholders})`
   ).all(userId, ...legacyRecordIds) as {
     id: number;
+    base_rent_period_from: string | null;
+    base_rent_period_to: string | null;
     water_period_from: string | null;
     water_period_to: string | null;
     electricity_period_from: string | null;
@@ -671,6 +676,8 @@ function loadRecordUtilityPeriods(
   }[];
   for (const r of rows) {
     map.set(r.id, {
+      rentFrom: r.base_rent_period_from,
+      rentTo: r.base_rent_period_to,
       waterFrom: r.water_period_from,
       waterTo: r.water_period_to,
       elecFrom: r.electricity_period_from,
@@ -680,16 +687,18 @@ function loadRecordUtilityPeriods(
   return map;
 }
 
-function utilityBillingRange(
+function recordBillingRange(
   chargeType: RentalChargeType,
   legacyRecordId: number | null | undefined,
-  recordPeriods: Map<number, RecordUtilityPeriods>,
+  recordPeriods: Map<number, RecordBillingPeriods>,
 ): { from: string | null; to: string | null } | undefined {
-  if (!legacyRecordId || (chargeType !== 'water' && chargeType !== 'electricity')) return undefined;
+  if (!legacyRecordId) return undefined;
   const rec = recordPeriods.get(legacyRecordId);
   if (!rec) return undefined;
+  if (chargeType === 'rent') return { from: rec.rentFrom, to: rec.rentTo };
   if (chargeType === 'water') return { from: rec.waterFrom, to: rec.waterTo };
-  return { from: rec.elecFrom, to: rec.elecTo };
+  if (chargeType === 'electricity') return { from: rec.elecFrom, to: rec.elecTo };
+  return undefined;
 }
 
 function buildSettledPeriodsNote(
@@ -750,7 +759,7 @@ export function buildFormalDebitNote(
   const legacyIds = Array.from(
     new Set(charges.map((c) => c.legacyRecordId).filter((id): id is number => Boolean(id))),
   );
-  const recordPeriods = loadRecordUtilityPeriods(userId, legacyIds);
+  const recordPeriods = loadRecordBillingPeriods(userId, legacyIds);
 
   const currentCharges: FormalDebitNoteLine[] = [];
   for (const col of matrix.columns) {
@@ -766,7 +775,7 @@ export function buildFormalDebitNote(
       description: formatDebitNoteChargeDescription(
         targetPeriod,
         col.chargeType,
-        utilityBillingRange(col.chargeType, item.legacyRecordId, recordPeriods),
+        recordBillingRange(col.chargeType, item.legacyRecordId, recordPeriods),
       ),
       amount: outstanding,
       chargeType: col.chargeType,

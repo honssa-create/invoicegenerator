@@ -272,6 +272,7 @@ function RentalDetailInner() {
   const leaseDocInputRef = useRef<HTMLInputElement>(null);
 
   const [busy, setBusy] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<number | null>(null);
   const [toast, setToast] = useState('');
 
   const load = useCallback(() => {
@@ -760,6 +761,25 @@ function RentalDetailInner() {
     setOcrResult(null);
     setReceiptFile(null);
     load();
+  };
+
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!confirm('Delete this payment? Allocations will be reversed and billing records updated.\n刪除此收款紀錄？已核銷金額將還原至帳單。')) return;
+    setDeletingPaymentId(paymentId);
+    try {
+      const res = await fetch(`/api/rentals/payments/${paymentId}`, { method: 'DELETE' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(d.error || 'Failed to delete payment');
+        return;
+      }
+      setToast('Payment deleted — records updated 收款已刪除');
+      load();
+    } catch {
+      setToast('Failed to delete payment');
+    } finally {
+      setDeletingPaymentId(null);
+    }
   };
 
   const logNote = async () => {
@@ -1286,7 +1306,12 @@ function RentalDetailInner() {
                 <h2 className="font-semibold text-gray-900">收款紀錄 Payment Receipts</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Allocations for {unit.unitName} only</p>
               </div>
-              <PaymentHistoryTable payments={data.paymentHistory || []} readOnly />
+              <PaymentHistoryTable
+                payments={data.paymentHistory || []}
+                readOnly={readOnly || isHistoricalView}
+                onDelete={readOnly || isHistoricalView ? undefined : handleDeletePayment}
+                deletingId={deletingPaymentId}
+              />
             </div>
           )}
 

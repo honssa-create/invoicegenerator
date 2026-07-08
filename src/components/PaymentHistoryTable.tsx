@@ -13,9 +13,11 @@ interface Props {
   payments: RentalPaymentWithAllocations[];
   readOnly?: boolean;
   onAllocate?: (paymentId: number) => void;
+  onDelete?: (paymentId: number) => void;
+  deletingId?: number | null;
 }
 
-export default function PaymentHistoryTable({ payments, readOnly, onAllocate }: Props) {
+export default function PaymentHistoryTable({ payments, readOnly, onAllocate, onDelete, deletingId }: Props) {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   if (!payments.length) {
@@ -62,10 +64,20 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate }: 
                 <td className="px-4 py-3 text-right text-green-700">{formatMoney(p.amountAllocated)}</td>
                 <td className="px-4 py-3 text-right text-orange-600">{formatMoney(p.amountUnallocated)}</td>
                 {!readOnly && (
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                     {p.amountUnallocated > 0 && onAllocate && (
                       <button onClick={() => onAllocate(p.id)} className="text-brand-600 text-xs font-medium hover:underline">
                         Allocate
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(p.id)}
+                        disabled={deletingId === p.id}
+                        className="text-red-600 text-xs font-medium hover:underline disabled:opacity-50"
+                      >
+                        {deletingId === p.id ? 'Deleting…' : 'Delete'}
                       </button>
                     )}
                   </td>

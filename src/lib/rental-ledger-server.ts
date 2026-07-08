@@ -11,6 +11,7 @@ import {
   formatDebitNoteChargeDescription,
   formatDebitNotePeriodLong,
   formatDisplayDate,
+  formatMoney,
   formatPeriodRangeShort,
   buildDebitNoteFooterRemark,
   buildDebitNotePaymentInstructionsText,
@@ -1441,8 +1442,11 @@ function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number, pa
       ).run(totalPaid, fullyPaid ? 'paid' : 'pending', fullyPaid ? 1 : 0, paymentDate, fullyPaid ? 1 : 0, recordId, userId);
     } else {
       db.prepare(
-        `UPDATE rental_records SET amount_paid = ?, status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
-      ).run(totalPaid, fullyPaid ? 'paid' : 'pending', recordId, userId);
+        `UPDATE rental_records SET amount_paid = ?, status = ?,
+          paid_date = CASE WHEN ? THEN paid_date ELSE NULL END,
+          paid_at = CASE WHEN ? THEN paid_at ELSE NULL END,
+          updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+      ).run(totalPaid, fullyPaid ? 'paid' : 'pending', fullyPaid ? 1 : 0, fullyPaid ? 1 : 0, recordId, userId);
     }
   }
 }
@@ -1458,4 +1462,50 @@ export function getPaymentAllocations(paymentId: number, userId: number): (Renta
     ...hydrateAllocation(r),
     charge: hydrateCharge(r),
   }));
+}
+
+/** Delete a tenant payment and reverse all allocations on billing items + legacy records. */
+export function deleteRentalPayment(paymentId: number | string, userId: number): boolean {
+  const paymentRow = db.prepare(
+    'SELECT * FROM rental_payments WHERE id = ? AND user_id = ?'
+  ).get(paymentId, userId) as PaymentRow | undefined;
+  if (!paymentRow) return false;
+
+  const allocations = db.prepare(
+    'SELECT charge_item_id, amount FROM rental_payment_allocations WHERE payment_id = ? AND user_id = ?'
+  ).all(paymentId, userId) as { charge_item_id: number; amount: number }[];
+
+  const chargeIds: number[] = [];
+  const unitIds = new Set<number>();
+
+  const run = db.transaction(() => {
+    const getCharge = db.prepare(
+      'SELECT amount_allocated, unit_id FROM rental_charge_items WHERE id = ? AND user_id = ?'
+    );
+    const updateCharge = db.prepare(
+      `UPDATE rental_charge_items SET amount_allocated = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+    );
+    for (const a of allocations) {
+      const charge = getCharge.get(a.charge_item_id, userId) as { amount_allocated: number; unit_id: number } | undefined;
+      if (!charge) continue;
+      const next = Math.max(0, (charge.amount_allocated || 0) - a.amount);
+      updateCharge.run(next, a.charge_item_id, userId);
+      chargeIds.push(a.charge_item_id);
+      unitIds.add(charge.unit_id);
+    }
+    db.prepare('DELETE FROM rental_payments WHERE id = ? AND user_id = ?').run(paymentId, userId);
+    for (const id of chargeIds) refreshChargeItemStatus(id);
+  });
+  run();
+
+  syncLegacyRecordFromCharges(chargeIds, userId);
+
+  const note = `Payment #${paymentId} · ${formatMoney(paymentRow.amount)} · ${paymentRow.payment_date}`;
+  if (unitIds.size) {
+    for (const uid of Array.from(unitIds)) logRentalActivity(userId, uid, 'Payment Deleted 收款已刪除', note);
+  } else {
+    const units = getTenantUnits(paymentRow.tenant_id, userId);
+    if (units[0]) logRentalActivity(userId, units[0].id, 'Payment Deleted 收款已刪除', note);
+  }
+  return true;
 }

@@ -103,6 +103,7 @@ export default function TenantDetailPage() {
   const [loadError, setLoadError] = useState('');
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<number | null>(null);
   const [paymentModal, setPaymentModal] = useState(false);
   const [allocateModal, setAllocateModal] = useState<RentalPayment | null>(null);
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
@@ -343,6 +344,25 @@ export default function TenantDetailPage() {
     setPaymentForm({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
     setToast('Payment recorded — outstanding balance updated');
     load();
+  };
+
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!confirm('Delete this payment? Allocations will be reversed and billing records updated.\n刪除此收款紀錄？已核銷金額將還原至帳單。')) return;
+    setDeletingPaymentId(paymentId);
+    try {
+      const res = await fetch(`/api/rentals/payments/${paymentId}`, { method: 'DELETE' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(d.error || 'Failed to delete payment');
+        return;
+      }
+      setToast('Payment deleted — records updated');
+      load();
+    } catch {
+      setToast('Failed to delete payment');
+    } finally {
+      setDeletingPaymentId(null);
+    }
   };
 
   const inp = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm';
@@ -642,6 +662,8 @@ export default function TenantDetailPage() {
               const p = payments.find((x) => x.id === paymentId);
               if (p) openAllocate(p);
             }}
+            onDelete={readOnly ? undefined : handleDeletePayment}
+            deletingId={deletingPaymentId}
           />
         </div>
       </div>

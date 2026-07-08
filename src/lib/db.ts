@@ -191,8 +191,7 @@ if (needsNumber.length) {
     const rm = RECEIPT_RE.exec(r.receipt_no || '');
     if (rm) {
       const batchId = r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
-      const code = rm[1];
-      const receiptKey = `${r.user_id}-${batchId}-${code}`;
+      const receiptKey = `${r.user_id}-${batchId}`;
       receiptCounters.set(
         receiptKey,
         Math.max(receiptCounters.get(receiptKey) || 0, parseInt(r.receipt_no!.slice(-3), 10))
@@ -219,7 +218,7 @@ if (needsNumber.length) {
       const batchId = `EXP-${ym}-${String(batchNext).padStart(3, '0')}`;
 
       const code = migratePaymentCode(row.payment_method);
-      const receiptKey = `${row.user_id}-${batchId}-${code}`;
+      const receiptKey = `${row.user_id}-${batchId}`;
       const receiptNext = (receiptCounters.get(receiptKey) || 0) + 1;
       receiptCounters.set(receiptKey, receiptNext);
       const receiptNo = `${batchId}-${code}${String(receiptNext).padStart(3, '0')}`;

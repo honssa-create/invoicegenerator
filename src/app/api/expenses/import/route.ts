@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { generateReceiptNumber, syncOption } from '@/lib/expense-server';
+import { assignExpenseNumbers, syncOption } from '@/lib/expense-server';
 import {
   findReceiptColumnIndex,
   hyperlinkUrlsByDataRow,
@@ -231,8 +231,8 @@ export async function POST(request: Request) {
 
   const insertExpense = db.prepare(
     `INSERT INTO expenses
-       (user_id, created_by_user_id, receipt_no, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertReceipt = db.prepare(
     'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
@@ -245,12 +245,13 @@ export async function POST(request: Request) {
       if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
       if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
-      const receiptNo = generateReceiptNumber(ownerId, row.date);
+      const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod);
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(
         ownerId,
         session.userId,
         receiptNo,
+        batchId,
         row.reason || 'other',
         row.merchant,
         row.supplierInput,

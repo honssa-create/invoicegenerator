@@ -4,7 +4,10 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
+import DebitNoteTemplateEditor, { useDebitNoteStyleTemplate } from '@/components/DebitNoteTemplateEditor';
 import FormalDebitNoteDocument from '@/components/FormalDebitNoteDocument';
+import { useAuth } from '@/components/AuthProvider';
+import { isSectionReadOnly } from '@/lib/permissions';
 import {
   currentBillingPeriod,
   formatDueDateChinese,
@@ -15,6 +18,9 @@ import {
 
 function DebitNoteContent() {
   const searchParams = useSearchParams();
+  const { user } = useAuth();
+  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { style, setStyle, saving: savingStyle, saveMessage, save: saveStyle } = useDebitNoteStyleTemplate(readOnly);
   const tenantId = searchParams.get('tenantId') || searchParams.get('tenant_id');
   const unitId = searchParams.get('unitId') || searchParams.get('unit_id');
   const unitIds = searchParams.get('unitIds') || searchParams.get('unit_ids');
@@ -196,7 +202,7 @@ function DebitNoteContent() {
           </div>
         </div>
         {sendToast && <p className="max-w-5xl mx-auto mt-2 text-sm text-brand-700">{sendToast}</p>}
-        <div className="max-w-5xl mx-auto mt-4">
+        <div className="max-w-5xl mx-auto mt-4 space-y-4">
           <DebitNotePaymentOptions
             templateId={paymentTemplate}
             onTemplateId={setPaymentTemplate}
@@ -207,11 +213,22 @@ function DebitNoteContent() {
             footerRemark={footerRemark}
             onFooterRemark={setFooterRemark}
           />
+          <DebitNoteTemplateEditor
+            style={style}
+            onChange={setStyle}
+            onSave={saveStyle}
+            readOnly={readOnly}
+            saving={savingStyle}
+            saveMessage={saveMessage}
+          />
         </div>
       </div>
 
-      <main className="a4-page my-8 p-10 shadow print:shadow-none print:my-0">
-        <FormalDebitNoteDocument doc={displayDoc} />
+      <main
+        className="a4-page my-8 shadow print:shadow-none print:my-0"
+        style={{ padding: style.pagePadding }}
+      >
+        <FormalDebitNoteDocument doc={displayDoc} styleTemplate={style} />
       </main>
     </div>
   );

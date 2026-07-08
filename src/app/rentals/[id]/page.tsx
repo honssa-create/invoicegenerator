@@ -38,6 +38,7 @@ import {
   formatUtilityAmount,
   baseRentLineLabel,
   fromFormDate,
+  isoFromDisplayDate,
   outstandingBalance,
   toFormDate,
   todayFormDate,
@@ -55,6 +56,7 @@ import {
   type RentRecord,
   type RentalActivityLog,
   type RentalChargeItem,
+  type RentalChargeType,
   type RentalLease,
   type RentalLeaseDocument,
   type RentalPaymentReceipt,
@@ -105,6 +107,51 @@ interface UtilitySnapshot {
   waterMeterCurr: string;
   waterMeterRate: string;
   utilityNote: string;
+}
+
+type PeriodBreakdownRow = {
+  billingPeriod: string;
+  rent: string;
+  electricity: string;
+  water: string;
+};
+
+function sumPeriodBreakdownRow(row: PeriodBreakdownRow): number {
+  return Number(row.rent || 0) + Number(row.electricity || 0) + Number(row.water || 0);
+}
+
+function sumPeriodBreakdownRows(rows: PeriodBreakdownRow[]): number {
+  return rows.reduce((s, r) => s + sumPeriodBreakdownRow(r), 0);
+}
+
+function chargeTypeTotal(
+  charges: RentalChargeItem[],
+  billingPeriod: string,
+  chargeType: RentalChargeType,
+): number {
+  return charges
+    .filter((c) => c.billingPeriod === billingPeriod && c.chargeType === chargeType)
+    .reduce((s, c) => s + chargeOutstanding(c), 0);
+}
+
+function formatBreakdownAmount(amount: number): string {
+  return amount > 0 ? String(amount) : '';
+}
+
+function periodDateInputProps(
+  value: string,
+  onChange: (v: string) => void,
+  className: string,
+  readOnly?: boolean,
+) {
+  return {
+    type: 'date' as const,
+    value: isoFromDisplayDate(value) || '',
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(toFormDate(e.target.value)),
+    className,
+    disabled: readOnly,
+    readOnly,
+  };
 }
 
 export default function RentalDetailPage() {
@@ -177,8 +224,7 @@ function RentalDetailInner() {
   // paid modal
   const [showPaidModal, setShowPaidModal] = useState(false);
   const [paymentMode, setPaymentMode] = useState<'byPeriod' | 'byType'>('byPeriod');
-  const [payMonths, setPayMonths] = useState('1');
-  const [periodRows, setPeriodRows] = useState<{ billingPeriod: string; amount: string }[]>([]);
+  const [periodRows, setPeriodRows] = useState<PeriodBreakdownRow[]>([]);
   const [paymentForm, setPaymentForm] = useState({
     paymentDate: todayFormDate(),
     amount: '',
@@ -226,6 +272,7 @@ function RentalDetailInner() {
   const leaseDocInputRef = useRef<HTMLInputElement>(null);
 
   const [busy, setBusy] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<number | null>(null);
   const [toast, setToast] = useState('');
 
   const load = useCallback(() => {
@@ -562,7 +609,6 @@ function RentalDetailInner() {
     setChargeAllocValues(filled);
     setPaymentMode('byPeriod');
     setPeriodRows([]);
-    setPayMonths('1');
     setPaymentForm({
       paymentDate: todayFormDate(),
       amount: String(sumAllocationValues(filled) || ''),
@@ -594,38 +640,52 @@ function RentalDetailInner() {
   const fillOutstandingPeriodRows = () => {
     if (!data) return;
     const seen = new Set<string>();
-    const rows: { billingPeriod: string; amount: string }[] = [];
+    const rows: PeriodBreakdownRow[] = [];
     const charges = [...(data.outstandingCharges || [])]
       .filter((c) => chargeOutstanding(c) > 0)
       .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod));
     for (const c of charges) {
       if (seen.has(c.billingPeriod)) continue;
       seen.add(c.billingPeriod);
-      const periodTotal = charges
-        .filter((x) => x.billingPeriod === c.billingPeriod)
-        .reduce((s, x) => s + chargeOutstanding(x), 0);
-      rows.push({ billingPeriod: c.billingPeriod, amount: String(periodTotal) });
+      rows.push({
+        billingPeriod: c.billingPeriod,
+        rent: formatBreakdownAmount(chargeTypeTotal(charges, c.billingPeriod, 'rent')),
+        electricity: formatBreakdownAmount(chargeTypeTotal(charges, c.billingPeriod, 'electricity')),
+        water: formatBreakdownAmount(chargeTypeTotal(charges, c.billingPeriod, 'water')),
+      });
     }
     setPeriodRows(rows);
-    setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+    setPaymentForm((f) => ({ ...f, amount: String(sumPeriodBreakdownRows(rows)) }));
   };
 
   const fillAdvanceMonths = (months: number) => {
     if (!data) return;
-    const rows: { billingPeriod: string; amount: string }[] = [];
+    const rows: PeriodBreakdownRow[] = [];
     let p = startPaymentPeriod();
     const rent = monthlyRentForUnit();
     for (let i = 0; i < months; i += 1) {
-      rows.push({ billingPeriod: p, amount: rent ? String(rent) : '' });
+      rows.push({
+        billingPeriod: p,
+        rent: rent ? String(rent) : '',
+        electricity: '',
+        water: '',
+      });
       p = addBillingMonths(p, 1);
     }
     setPeriodRows(rows);
-    setPayMonths(String(months));
-    setPaymentForm((f) => ({ ...f, amount: String(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
+    setPaymentForm((f) => ({ ...f, amount: String(sumPeriodBreakdownRows(rows)) }));
   };
 
   const addPeriodRow = () => {
-    setPeriodRows((prev) => [...prev, { billingPeriod: startPaymentPeriod(), amount: '' }]);
+    setPeriodRows((prev) => [...prev, { billingPeriod: startPaymentPeriod(), rent: '', electricity: '', water: '' }]);
+  };
+
+  const updatePeriodRow = (idx: number, patch: Partial<PeriodBreakdownRow>) => {
+    setPeriodRows((prev) => {
+      const next = prev.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+      setPaymentForm((f) => ({ ...f, amount: String(sumPeriodBreakdownRows(next)) }));
+      return next;
+    });
   };
 
   const chargeTypeRows = data ? chargeRowsByType(data.outstandingCharges || []) : [];
@@ -650,8 +710,14 @@ function RentalDetailInner() {
 
     if (paymentMode === 'byPeriod') {
       const periodAllocations = periodRows
-        .filter((r) => r.billingPeriod && Number(r.amount) > 0)
-        .map((r) => ({ unitId: data.unit.id, billingPeriod: r.billingPeriod, amount: Number(r.amount) }));
+        .filter((r) => r.billingPeriod && sumPeriodBreakdownRow(r) > 0)
+        .map((r) => ({
+          unitId: data.unit.id,
+          billingPeriod: r.billingPeriod,
+          rent: Number(r.rent) || undefined,
+          electricity: Number(r.electricity) || undefined,
+          water: Number(r.water) || undefined,
+        }));
       if (periodAllocations.length) {
         body.periodAllocations = periodAllocations;
       } else {
@@ -695,6 +761,25 @@ function RentalDetailInner() {
     setOcrResult(null);
     setReceiptFile(null);
     load();
+  };
+
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!confirm('Delete this payment? Allocations will be reversed and billing records updated.\n刪除此收款紀錄？已核銷金額將還原至帳單。')) return;
+    setDeletingPaymentId(paymentId);
+    try {
+      const res = await fetch(`/api/rentals/payments/${paymentId}`, { method: 'DELETE' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(d.error || 'Failed to delete payment');
+        return;
+      }
+      setToast('Payment deleted — records updated 收款已刪除');
+      load();
+    } catch {
+      setToast('Failed to delete payment');
+    } finally {
+      setDeletingPaymentId(null);
+    }
   };
 
   const logNote = async () => {
@@ -994,11 +1079,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={fieldCls} disabled={readOnly} readOnly={readOnly} />
+                      <input {...periodDateInputProps(baseRentPeriodFrom, setBaseRentPeriodFrom, fieldCls, readOnly)} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={fieldCls} disabled={readOnly} readOnly={readOnly} />
+                      <input {...periodDateInputProps(baseRentPeriodTo, setBaseRentPeriodTo, fieldCls, readOnly)} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
@@ -1045,11 +1130,11 @@ function RentalDetailInner() {
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(electricityPeriodFrom, setElectricityPeriodFrom, inp, readOnly)} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(electricityPeriodTo, setElectricityPeriodTo, inp, readOnly)} />
                         </div>
                       </div>
                     </>
@@ -1061,11 +1146,11 @@ function RentalDetailInner() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(electricityPeriodFrom, setElectricityPeriodFrom, inp, readOnly)} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(electricityPeriodTo, setElectricityPeriodTo, inp, readOnly)} />
                       </div>
                     </div>
                   )}
@@ -1091,11 +1176,11 @@ function RentalDetailInner() {
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(waterPeriodFrom, setWaterPeriodFrom, inp, readOnly)} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(waterPeriodTo, setWaterPeriodTo, inp, readOnly)} />
                         </div>
                       </div>
                     </>
@@ -1107,11 +1192,11 @@ function RentalDetailInner() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(waterPeriodFrom, setWaterPeriodFrom, inp, readOnly)} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(waterPeriodTo, setWaterPeriodTo, inp, readOnly)} />
                       </div>
                     </div>
                   )}
@@ -1221,7 +1306,12 @@ function RentalDetailInner() {
                 <h2 className="font-semibold text-gray-900">收款紀錄 Payment Receipts</h2>
                 <p className="text-xs text-gray-500 mt-0.5">Allocations for {unit.unitName} only</p>
               </div>
-              <PaymentHistoryTable payments={data.paymentHistory || []} readOnly />
+              <PaymentHistoryTable
+                payments={data.paymentHistory || []}
+                readOnly={readOnly || isHistoricalView}
+                onDelete={readOnly || isHistoricalView ? undefined : handleDeletePayment}
+                deletingId={deletingPaymentId}
+              />
             </div>
           )}
 
@@ -1505,25 +1595,6 @@ function RentalDetailInner() {
 
               {paymentMode === 'byPeriod' ? (
                 <div>
-                  <div className="mb-4 p-4 rounded-xl border border-brand-100 bg-brand-50/40">
-                    <label className="text-xs font-semibold text-gray-700 uppercase">繳付月數 Months to pay</label>
-                    <p className="text-xs text-gray-500 mt-0.5 mb-2">e.g. 3 months at once — fills arrears then future months</p>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min={1}
-                        max={36}
-                        className={`${inp} w-24 text-center font-semibold`}
-                        value={payMonths}
-                        onChange={(e) => {
-                          const n = Math.max(1, Math.min(36, Number(e.target.value) || 1));
-                          setPayMonths(String(n));
-                          fillAdvanceMonths(n);
-                        }}
-                      />
-                      <span className="text-sm text-gray-600">個月 month(s)</span>
-                    </div>
-                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <label className="text-xs font-semibold text-gray-600 uppercase">Period breakdown 帳期明細</label>
                     <div className="flex flex-wrap gap-2">
@@ -1536,7 +1607,7 @@ function RentalDetailInner() {
                       <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
                         預付6個月
                       </button>
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => { setPayMonths('12'); fillAdvanceMonths(12); }}>
+                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(12)}>
                         預付12個月
                       </button>
                       <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={addPeriodRow}>
@@ -1549,12 +1620,14 @@ function RentalDetailInner() {
                       Add period rows, or enter total only — system auto-allocates FIFO (including future months)
                     </p>
                   ) : (
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
+                    <div className="border rounded-lg overflow-x-auto">
+                      <table className="w-full text-sm min-w-[36rem]">
                         <thead className="bg-gray-50 text-xs text-gray-500">
                           <tr>
                             <th className="px-3 py-2 text-left">Period 帳期</th>
-                            <th className="px-3 py-2 text-right">Amount 金額</th>
+                            <th className="px-3 py-2 text-right">Rent 租金</th>
+                            <th className="px-3 py-2 text-right">Electricity 電費</th>
+                            <th className="px-3 py-2 text-right">Water 水費</th>
                             <th className="w-8" />
                           </tr>
                         </thead>
@@ -1566,32 +1639,44 @@ function RentalDetailInner() {
                                   type="month"
                                   className="w-full text-xs border rounded px-2 py-1"
                                   value={row.billingPeriod}
-                                  onChange={(e) => {
-                                    const billingPeriod = e.target.value;
-                                    setPeriodRows((prev) => prev.map((r, i) => i === idx ? { ...r, billingPeriod } : r));
-                                  }}
+                                  onChange={(e) => updatePeriodRow(idx, { billingPeriod: e.target.value })}
                                 />
                               </td>
                               <td className="px-3 py-2">
                                 <input
                                   type="number"
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
-                                  value={row.amount}
-                                  onChange={(e) => {
-                                    const amount = e.target.value;
-                                    setPeriodRows((prev) => {
-                                      const next = prev.map((r, i) => i === idx ? { ...r, amount } : r);
-                                      setPaymentForm((f) => ({ ...f, amount: String(next.reduce((s, r) => s + Number(r.amount || 0), 0)) }));
-                                      return next;
-                                    });
-                                  }}
+                                  value={row.rent}
+                                  onChange={(e) => updatePeriodRow(idx, { rent: e.target.value })}
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="number"
+                                  className="w-full text-xs border rounded px-2 py-1 text-right"
+                                  value={row.electricity}
+                                  onChange={(e) => updatePeriodRow(idx, { electricity: e.target.value })}
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="number"
+                                  className="w-full text-xs border rounded px-2 py-1 text-right"
+                                  value={row.water}
+                                  onChange={(e) => updatePeriodRow(idx, { water: e.target.value })}
                                 />
                               </td>
                               <td className="px-1 py-2">
                                 <button
                                   type="button"
                                   className="text-gray-400 hover:text-red-600 text-xs"
-                                  onClick={() => setPeriodRows((prev) => prev.filter((_, i) => i !== idx))}
+                                  onClick={() => {
+                                    setPeriodRows((prev) => {
+                                      const next = prev.filter((_, i) => i !== idx);
+                                      setPaymentForm((f) => ({ ...f, amount: String(sumPeriodBreakdownRows(next)) }));
+                                      return next;
+                                    });
+                                  }}
                                 >
                                   ✕
                                 </button>
@@ -1603,7 +1688,7 @@ function RentalDetailInner() {
                     </div>
                   )}
                   <p className="text-xs text-gray-500 mt-2">
-                    Period total: {formatMoney(periodRows.reduce((s, r) => s + Number(r.amount || 0), 0))}
+                    Period total: {formatMoney(sumPeriodBreakdownRows(periodRows))}
                     {paymentForm.amount && ` · Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
                   </p>
                 </div>

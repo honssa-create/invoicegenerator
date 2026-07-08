@@ -2,30 +2,86 @@ import db from './db';
 import type { Expense } from './types';
 import { DEFAULT_SUPPLIERS } from './expense-suppliers';
 
+export type ExpensePaymentCode = 'CC' | 'CS' | 'BT' | 'OT';
+
+export const EXPENSE_BATCH_RE = /^EXP-\d{6}-\d{3}$/;
+export const EXPENSE_RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
+
 export function normalizeNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-// Build EXP-YYYYMM-XXX. YYYYMM comes from the expense date (not today), and XXX is
-// the next serial after the current maximum for that month — so delayed/backfilled
-// entries slot into their real month rather than the upload month.
-export function generateReceiptNumber(userId: number, expenseDate?: string | null): string {
+function expenseYm(expenseDate?: string | null): string {
   const src = expenseDate && /^\d{4}-\d{2}/.test(expenseDate) ? expenseDate : new Date().toISOString();
-  const ym = src.slice(0, 7).replace('-', '');
-  const rows = db
-    .prepare(`SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?`)
-    .all(userId, `EXP-${ym}-%`) as { receipt_no: string }[];
+  return src.slice(0, 7).replace('-', '');
+}
+
+/** Map payment method label → CC / CS / BT / OT. */
+export function paymentMethodCode(method: string | null | undefined): ExpensePaymentCode {
+  const m = (method || '').toLowerCase();
+  if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
+  if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
+  if (/bank|transfer|轉帳|转账|fps|payme|wire|cheque|check/.test(m)) return 'BT';
+  return 'OT';
+}
+
+function maxBatchSerial(userId: number, ym: string): number {
+  const prefix = `EXP-${ym}-`;
   let max = 0;
+  const bump = (value: string | null | undefined) => {
+    if (!value?.startsWith(prefix)) return;
+    const m = /^EXP-\d{6}-(\d{3})(?:-|$)/.exec(value);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  };
+  const batchRows = db
+    .prepare('SELECT batch_id FROM expenses WHERE user_id = ? AND batch_id LIKE ?')
+    .all(userId, `${prefix}%`) as { batch_id: string | null }[];
+  for (const r of batchRows) bump(r.batch_id);
+  const receiptRows = db
+    .prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?')
+    .all(userId, `${prefix}%`) as { receipt_no: string | null }[];
+  for (const r of receiptRows) bump(r.receipt_no);
+  return max;
+}
+
+/** Batch ID: EXP-YYYYMM-XXX (month from expense date, serial per user+month). */
+export function generateBatchId(userId: number, expenseDate?: string | null): string {
+  const ym = expenseYm(expenseDate);
+  const next = maxBatchSerial(userId, ym) + 1;
+  return `EXP-${ym}-${String(next).padStart(3, '0')}`;
+}
+
+/** Receipt no: {batchId}-{CC|CS|BT|OT}NNN — serial per batch + payment code. */
+export function generateReceiptNumber(
+  userId: number,
+  batchId: string,
+  paymentMethod: string | null | undefined,
+): string {
+  const code = paymentMethodCode(paymentMethod);
+  const prefix = `${batchId}-${code}`;
+  const rows = db
+    .prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?')
+    .all(userId, `${prefix}%`) as { receipt_no: string | null }[];
+  let max = 0;
+  const re = new RegExp(`^${batchId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-${code}(\\d{3})$`);
   for (const r of rows) {
-    const m = /^EXP-\d{6}-(\d{3,})$/.exec(r.receipt_no || '');
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (n > max) max = n;
-    }
+    const m = re.exec(r.receipt_no || '');
+    if (m) max = Math.max(max, parseInt(m[1], 10));
   }
-  return `EXP-${ym}-${String(max + 1).padStart(3, '0')}`;
+  return `${batchId}-${code}${String(max + 1).padStart(3, '0')}`;
+}
+
+/** Assign batch + receipt numbers on create (upload / manual save). */
+export function assignExpenseNumbers(
+  userId: number,
+  expenseDate: string | null | undefined,
+  paymentMethod: string | null | undefined,
+): { batchId: string; receiptNo: string } {
+  const batchId = generateBatchId(userId, expenseDate);
+  const receiptNo = generateReceiptNumber(userId, batchId, paymentMethod);
+  return { batchId, receiptNo };
 }
 
 // Insert a custom dropdown option if it is not already a default or existing value.

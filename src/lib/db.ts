@@ -111,6 +111,9 @@ if (!expenseColumns.some((c) => c.name === 'receipt_no')) {
 if (!expenseColumns.some((c) => c.name === 'batch_id')) {
   db.exec('ALTER TABLE expenses ADD COLUMN batch_id TEXT');
 }
+if (!expenseColumns.some((c) => c.name === 'payment_method')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
+}
 
 function migratePaymentCode(method: string | null | undefined): 'CC' | 'CS' | 'BT' | 'OT' {
   const m = (method || '').toLowerCase();
@@ -494,11 +497,6 @@ try {
   );
 } catch (err) {
   console.error('Could not create unique receipt_no index:', err);
-}
-
-// Migration: add payment_method column to expenses.
-if (!db.prepare('PRAGMA table_info(expenses)').all().some((c) => (c as { name: string }).name === 'payment_method')) {
-  db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
 }
 
 // Tables for multiple receipt images per expense and user-managed dropdown options.

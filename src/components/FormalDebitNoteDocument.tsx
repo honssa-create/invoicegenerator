@@ -1,7 +1,6 @@
 'use client';
 
 import '@/styles/formal-debit-note.css';
-import { debitNoteStyleToCssVars, type DebitNoteStyleTemplate } from '@/lib/debit-note-style';
 import { formatMoney, type FormalDebitNote } from '@/lib/rentals';
 
 interface Props {
@@ -18,7 +17,7 @@ export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
   const styleVars = styleTemplate ? debitNoteStyleToCssVars(styleTemplate) : undefined;
 
   return (
-    <div className="formal-debit-note a4-page-content" style={styleVars}>
+    <div className="formal-debit-note a4-page-content">
       <header className="dn-header">
         <p className="dn-company-zh">{company.nameZh}</p>
         <p className="dn-company-en">{company.nameEn}</p>

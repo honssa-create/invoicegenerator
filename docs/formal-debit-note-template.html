@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Debit Note Template — 繳費通知單</title>
+  <!-- Edit styles in ../src/styles/formal-debit-note.css -->
+  <link rel="stylesheet" href="../src/styles/formal-debit-note.css" />
+  <style>
+    /* Page wrapper for browser preview only — not used in the app */
+    body {
+      margin: 0;
+      background: #f3f4f6;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    .preview-page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 2rem auto;
+      padding: var(--dn-page-padding, 2.5rem);
+      background: white;
+      box-shadow: 0 4px 24px rgb(0 0 0 / 0.12);
+      box-sizing: border-box;
+    }
+    @media print {
+      body { background: white; }
+      .preview-page { margin: 0; box-shadow: none; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <!--
+    Standalone debit note document template.
+    Open this file in a browser (or Print → Save as PDF) to preview style changes.
+    Edit layout colours/fonts in: src/styles/formal-debit-note.css
+  -->
+  <main class="preview-page">
+    <div class="formal-debit-note">
+
+      <header class="dn-header">
+        <p class="dn-company-zh">鴻宇有限公司</p>
+        <p class="dn-company-en">HONOUR ELITE LIMITED</p>
+        <p class="dn-company-meta">(公司地址) · (電話) · (稅務編號)</p>
+        <h1 class="dn-title">繳 費 通 知 單</h1>
+        <p class="dn-subtitle">DEBIT NOTE</p>
+      </header>
+
+      <div class="dn-meta">
+        <div>
+          <p><span class="dn-label">致 (To):</span> <span class="dn-value-strong">Tenant</span></p>
+          <p style="margin-top:0.25rem"><span class="dn-label">物業 (Premises):</span> 213A</p>
+        </div>
+        <div class="dn-meta-right">
+          <p><span class="dn-label">單據編號 (Note No.):</span> <span class="dn-value-strong">DN-202607-0001</span></p>
+          <p><span class="dn-label">發單日期 (Date):</span> 08/07/2026</p>
+          <p><span class="dn-label">到期繳款日 (Due Date):</span> <span class="dn-value-strong">15/07/2026</span></p>
+        </div>
+      </div>
+
+      <section class="dn-section">
+        <h2 class="dn-section-title">【第一部份：本期新增費用 (Current Period Charges: 07/2026)】</h2>
+        <table class="dn-table">
+          <thead>
+            <tr>
+              <th>項目 / 單位 (Premises)</th>
+              <th>費用類別 (Description)</th>
+              <th class="dn-th-right">金額 (Amount HK$)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="3" class="dn-empty">本期無未付費用</td>
+            </tr>
+            <tr class="dn-subtotal-row">
+              <td colspan="2">本期小計 (Current Subtotal):</td>
+              <td class="dn-td-right">$0.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Uncomment to preview arrears section
+      <section class="dn-section">
+        <h2 class="dn-section-title">【第二部份：前期逾期欠款 (Overdue Arrears Summary)】</h2>
+        <p class="dn-settled-note">*註：以下為截至發單日之未結清結餘*</p>
+        <table class="dn-table">
+          <thead>
+            <tr>
+              <th>帳期 (Period)</th>
+              <th>欠款單位及項目 (Unpaid Details)</th>
+              <th class="dn-th-right">欠款金額 (Arrears HK$)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="dn-td-medium">06/2026</td>
+              <td>213A 租金</td>
+              <td class="dn-td-right dn-td-medium">8,000.00</td>
+            </tr>
+            <tr class="dn-subtotal-row">
+              <td colspan="2">前期欠款總計 (Total Arrears):</td>
+              <td class="dn-td-right">$8,000.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      -->
+
+      <div class="dn-total-box">
+        <table>
+          <tbody>
+            <tr>
+              <td>本期應繳費用 (Current Month Charges):</td>
+              <td class="dn-amount">HK$ 0.00</td>
+            </tr>
+            <tr class="dn-total-row">
+              <td class="dn-total-label">本期應繳總額 (TOTAL AMOUNT DUE):</td>
+              <td class="dn-total-amount">HK$ 0.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <footer class="dn-footer">
+        <h3 class="dn-footer-title">【底部：付款指示與備註 Payment Instructions & Remarks】</h3>
+        <pre class="dn-footer-instructions">1. 敬請於到期日 (發單日7日內, 2026年7月15日) 或之前繳清上述款項。
+2.
+We accept both cheque payment and bank transfer
+(Please remark the Note no. DN-202607-0001 on the cheque or in the bank transfer note.)
+
+-
+
+Crossed cheque made payable to "Honour Elite Limited"
+
+-
+
+Bank transfer detail:
+
+-
+
+-</pre>
+      </footer>
+
+    </div>
+  </main>
+</body>
+</html>

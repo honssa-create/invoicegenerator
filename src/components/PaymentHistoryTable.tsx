@@ -40,11 +40,12 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
       <tbody className="divide-y divide-gray-100">
         {payments.map((p) => {
           const isOpen = expanded === p.id;
+          const hasBreakdown = p.allocations.length > 0 || Boolean(p.notes?.trim());
           return (
             <Fragment key={p.id}>
               <tr className="hover:bg-gray-50/80">
                 <td className="px-4 py-3">
-                  {p.allocations.length > 0 && (
+                  {hasBreakdown && (
                     <button
                       type="button"
                       onClick={() => setExpanded(isOpen ? null : p.id)}
@@ -83,20 +84,28 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
                   </td>
                 )}
               </tr>
-              {isOpen && p.allocations.length > 0 && (
+              {isOpen && hasBreakdown && (
                 <tr className="bg-brand-50/30">
                   <td colSpan={readOnly ? 6 : 7} className="px-6 py-3">
                     <p className="text-xs font-semibold text-gray-600 uppercase mb-2">Itemized Allocation 分拆明細</p>
-                    <ul className="space-y-1">
-                      {p.allocations.map((a) => (
-                        <li key={a.id} className="flex flex-wrap items-center gap-x-3 text-sm">
-                          <span className="font-medium">{a.unitName}</span>
-                          <span className="text-gray-500">{a.billingPeriod}</span>
-                          <span className="text-gray-600">{CHARGE_TYPE_LABELS[a.chargeType]}</span>
-                          <span className="font-semibold text-green-700 ml-auto">{formatMoney(a.amount)}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {p.notes?.trim() && (
+                      <p className="text-sm text-gray-700 mb-2 whitespace-pre-wrap">
+                        <span className="text-xs font-semibold text-gray-500 uppercase">Note 備註：</span>
+                        {p.notes.trim()}
+                      </p>
+                    )}
+                    {p.allocations.length > 0 && (
+                      <ul className="space-y-1">
+                        {p.allocations.map((a) => (
+                          <li key={a.id} className="flex flex-wrap items-center gap-x-3 text-sm">
+                            <span className="font-medium">{a.unitName}</span>
+                            <span className="text-gray-500">{a.billingPeriod}</span>
+                            <span className="text-gray-600">{CHARGE_TYPE_LABELS[a.chargeType]}</span>
+                            <span className="font-semibold text-green-700 ml-auto">{formatMoney(a.amount)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </td>
                 </tr>
               )}

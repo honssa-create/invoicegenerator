@@ -269,10 +269,6 @@
     break-after: auto;
   }
 
-  .formal-debit-note {
-    font-size: 10pt !important;
-  }
-
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;

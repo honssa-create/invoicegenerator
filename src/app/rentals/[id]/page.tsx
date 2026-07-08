@@ -38,6 +38,7 @@ import {
   formatUtilityAmount,
   baseRentLineLabel,
   fromFormDate,
+  isoFromDisplayDate,
   outstandingBalance,
   toFormDate,
   todayFormDate,
@@ -135,6 +136,22 @@ function chargeTypeTotal(
 
 function formatBreakdownAmount(amount: number): string {
   return amount > 0 ? String(amount) : '';
+}
+
+function periodDateInputProps(
+  value: string,
+  onChange: (v: string) => void,
+  className: string,
+  readOnly?: boolean,
+) {
+  return {
+    type: 'date' as const,
+    value: isoFromDisplayDate(value) || '',
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(toFormDate(e.target.value)),
+    className,
+    disabled: readOnly,
+    readOnly,
+  };
 }
 
 export default function RentalDetailPage() {
@@ -1042,11 +1059,11 @@ function RentalDetailInner() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodFrom} onChange={(e) => setBaseRentPeriodFrom(e.target.value)} className={fieldCls} disabled={readOnly} readOnly={readOnly} />
+                      <input {...periodDateInputProps(baseRentPeriodFrom, setBaseRentPeriodFrom, fieldCls, readOnly)} />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={baseRentPeriodTo} onChange={(e) => setBaseRentPeriodTo(e.target.value)} className={fieldCls} disabled={readOnly} readOnly={readOnly} />
+                      <input {...periodDateInputProps(baseRentPeriodTo, setBaseRentPeriodTo, fieldCls, readOnly)} />
                     </div>
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
@@ -1093,11 +1110,11 @@ function RentalDetailInner() {
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(electricityPeriodFrom, setElectricityPeriodFrom, inp, readOnly)} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(electricityPeriodTo, setElectricityPeriodTo, inp, readOnly)} />
                         </div>
                       </div>
                     </>
@@ -1109,11 +1126,11 @@ function RentalDetailInner() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodFrom} onChange={(e) => setElectricityPeriodFrom(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(electricityPeriodFrom, setElectricityPeriodFrom, inp, readOnly)} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={electricityPeriodTo} onChange={(e) => setElectricityPeriodTo(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(electricityPeriodTo, setElectricityPeriodTo, inp, readOnly)} />
                       </div>
                     </div>
                   )}
@@ -1139,11 +1156,11 @@ function RentalDetailInner() {
                       <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(waterPeriodFrom, setWaterPeriodFrom, inp, readOnly)} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                          <input {...periodDateInputProps(waterPeriodTo, setWaterPeriodTo, inp, readOnly)} />
                         </div>
                       </div>
                     </>
@@ -1155,11 +1172,11 @@ function RentalDetailInner() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodFrom} onChange={(e) => setWaterPeriodFrom(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(waterPeriodFrom, setWaterPeriodFrom, inp, readOnly)} />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={waterPeriodTo} onChange={(e) => setWaterPeriodTo(e.target.value)} className={inp} />
+                        <input {...periodDateInputProps(waterPeriodTo, setWaterPeriodTo, inp, readOnly)} />
                       </div>
                     </div>
                   )}

@@ -1248,12 +1248,18 @@ export function formatDebitNotePeriodLong(period: string): string {
   return `${y}年${Number(m)}月份`;
 }
 
-/** Charge line description e.g. 2026年6月份 租金 (Rent) */
-export function formatDebitNoteChargeDescription(period: string, chargeType: RentalChargeType): string {
+/** Charge line description e.g. 2026年6月份 租金 (Rent) or 2026年6月份 電費 (Utilities) (01/06/2026 - 30/06/2026) */
+export function formatDebitNoteChargeDescription(
+  period: string,
+  chargeType: RentalChargeType,
+  billingPeriodRange?: { from: string | null; to: string | null },
+): string {
   const p = formatDebitNotePeriodLong(period);
   if (chargeType === 'rent') return `${p} 租金 (Rent)`;
-  if (chargeType === 'water') return `${p} 水費 (Utilities)`;
-  return `${p} 電費 (Utilities)`;
+  const kind = chargeType === 'water' ? '水費 (Utilities)' : '電費 (Utilities)';
+  const base = `${p} ${kind}`;
+  const range = billingPeriodRange ? formatUtilityPeriod(billingPeriodRange.from, billingPeriodRange.to) : '';
+  return range ? `${base} (${range})` : base;
 }
 
 /** YYYY-MM → MM/YYYY for matrix row labels */

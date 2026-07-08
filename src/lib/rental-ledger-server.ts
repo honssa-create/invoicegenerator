@@ -645,6 +645,53 @@ function buildArrearDetails(
   return `${unitStr} (${typeLabels})`;
 }
 
+type RecordUtilityPeriods = {
+  waterFrom: string | null;
+  waterTo: string | null;
+  elecFrom: string | null;
+  elecTo: string | null;
+};
+
+function loadRecordUtilityPeriods(
+  userId: number,
+  legacyRecordIds: number[],
+): Map<number, RecordUtilityPeriods> {
+  const map = new Map<number, RecordUtilityPeriods>();
+  if (!legacyRecordIds.length) return map;
+  const placeholders = legacyRecordIds.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT id, water_period_from, water_period_to, electricity_period_from, electricity_period_to
+     FROM rental_records WHERE user_id = ? AND id IN (${placeholders})`
+  ).all(userId, ...legacyRecordIds) as {
+    id: number;
+    water_period_from: string | null;
+    water_period_to: string | null;
+    electricity_period_from: string | null;
+    electricity_period_to: string | null;
+  }[];
+  for (const r of rows) {
+    map.set(r.id, {
+      waterFrom: r.water_period_from,
+      waterTo: r.water_period_to,
+      elecFrom: r.electricity_period_from,
+      elecTo: r.electricity_period_to,
+    });
+  }
+  return map;
+}
+
+function utilityBillingRange(
+  chargeType: RentalChargeType,
+  legacyRecordId: number | null | undefined,
+  recordPeriods: Map<number, RecordUtilityPeriods>,
+): { from: string | null; to: string | null } | undefined {
+  if (!legacyRecordId || (chargeType !== 'water' && chargeType !== 'electricity')) return undefined;
+  const rec = recordPeriods.get(legacyRecordId);
+  if (!rec) return undefined;
+  if (chargeType === 'water') return { from: rec.waterFrom, to: rec.waterTo };
+  return { from: rec.elecFrom, to: rec.elecTo };
+}
+
 function buildSettledPeriodsNote(
   charges: RentalChargeItem[],
   arrearPeriods: string[],
@@ -700,6 +747,11 @@ export function buildFormalDebitNote(
   const isBillable = (unitId: number, chargeType: RentalChargeType) =>
     utilityChargeTypesForMode(unitModeMap[unitId] ?? matrix.tenant.utilityBillingMode).includes(chargeType);
 
+  const legacyIds = Array.from(
+    new Set(charges.map((c) => c.legacyRecordId).filter((id): id is number => Boolean(id))),
+  );
+  const recordPeriods = loadRecordUtilityPeriods(userId, legacyIds);
+
   const currentCharges: FormalDebitNoteLine[] = [];
   for (const col of matrix.columns) {
     if (!isBillable(col.unitId, col.chargeType)) continue;
@@ -711,7 +763,11 @@ export function buildFormalDebitNote(
     if (outstanding <= 0) continue;
     currentCharges.push({
       unitName: formatDebitNoteUnitLabel(col.unitName),
-      description: formatDebitNoteChargeDescription(targetPeriod, col.chargeType),
+      description: formatDebitNoteChargeDescription(
+        targetPeriod,
+        col.chargeType,
+        utilityBillingRange(col.chargeType, item.legacyRecordId, recordPeriods),
+      ),
       amount: outstanding,
       chargeType: col.chargeType,
     });

@@ -952,7 +952,7 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Receipt No. assigned on save — serial increments per upload (EXP-YYYYMM-026-CC001 → CC002…)
+                    Receipt No. assigned on save — last 3 digits serial per batch (…-CC001 → …-CC002 → …-CS003)
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">

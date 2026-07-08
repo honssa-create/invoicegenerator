@@ -192,6 +192,7 @@ export default function RentalTemplatesPage() {
               <p className="text-sm text-gray-500 mt-1">
                 Separate layout and payment-notes templates for Honour Label and Honour Elite.
                 Preview online or download as Word-compatible .doc files.
+                可線上調整樣式，或下載範本文件離線編輯。
               </p>
             </div>
 

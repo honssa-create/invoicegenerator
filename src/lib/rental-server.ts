@@ -2,7 +2,7 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
-import { getRentalTemplate } from './rental-template-server';
+import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
 import {
   allocateChargeItemsDirect,
   ensureUnitTenantLink,
@@ -787,6 +787,7 @@ export async function sendRentInvoice(
       dueDateChinese,
       input.paymentRemark,
       savedTpl?.paymentInstructions,
+      resolveCompanyFromTemplate(templateId, savedTpl),
     );
     const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
     email = await sendEmail(

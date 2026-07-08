@@ -2,7 +2,7 @@
 
 import '@/styles/formal-debit-note.css';
 import { debitNoteStyleToCssVars, type DebitNoteStyleTemplate } from '@/lib/debit-note-style';
-import { formatMoney, type FormalDebitNote } from '@/lib/rentals';
+import { formatMoney, formatDebitNoteCompanyMeta, type FormalDebitNote } from '@/lib/rentals';
 
 interface Props {
   doc: FormalDebitNote;
@@ -15,6 +15,7 @@ function moneyCell(amount: number) {
 
 export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
   const { company } = doc;
+  const companyMeta = formatDebitNoteCompanyMeta(company);
   const styleVars = styleTemplate ? debitNoteStyleToCssVars(styleTemplate) : undefined;
 
   return (
@@ -22,9 +23,7 @@ export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
       <header className="dn-header">
         <p className="dn-company-zh">{company.nameZh}</p>
         <p className="dn-company-en">{company.nameEn}</p>
-        <p className="dn-company-meta">
-          {company.address} · {company.phone} · {company.taxId}
-        </p>
+        {companyMeta && <p className="dn-company-meta">{companyMeta}</p>}
         <h1 className="dn-title">繳 費 通 知 單</h1>
         <p className="dn-subtitle">DEBIT NOTE</p>
       </header>
@@ -56,7 +55,7 @@ export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
 
       <section className="dn-section">
         <h2 className="dn-section-title">
-          【第一部份：本期新增費用 (Current Period Charges: {doc.targetPeriodLabel})】
+          本期新增費用 (Current Period Charges: {doc.targetPeriodLabel})
         </h2>
         <table className="dn-table">
           <thead>
@@ -93,7 +92,7 @@ export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
       {doc.arrearRows.length > 0 && (
         <section className="dn-section">
           <h2 className="dn-section-title">
-            【第二部份：前期逾期欠款 (Overdue Arrears Summary)】
+            前期逾期欠款 (Overdue Arrears Summary)
           </h2>
           {doc.settledPeriodsNote && <p className="dn-settled-note">{doc.settledPeriodsNote}</p>}
           <table className="dn-table">
@@ -143,7 +142,7 @@ export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
       </div>
 
       <footer className="dn-footer">
-        <h3 className="dn-footer-title">【底部：付款指示與備註 Payment Instructions & Remarks】</h3>
+        <h3 className="dn-footer-title">付款指示與備註 Payment Instructions & Remarks</h3>
         <pre className="dn-footer-instructions">{doc.paymentInstructionsText}</pre>
         {doc.footerRemark && <p className="dn-footer-remark">{doc.footerRemark}</p>}
       </footer>

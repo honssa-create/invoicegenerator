@@ -45,7 +45,7 @@ type Options = Record<OptionType, string[]>;
 type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
-const PAGE_SIZES = [20, 30, 50] as const;
+const PAGE_SIZES = [10, 20, 30, 50] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 
 function buildPageNumbers(current: number, total: number): (number | '…')[] {
@@ -103,6 +103,7 @@ export default function ExpensesPage() {
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
+  const [newBatch, setNewBatch] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
@@ -283,6 +284,7 @@ export default function ExpensesPage() {
   const openCreate = () => {
     setForm({ ...EMPTY_FORM, category: options.category[0] || '' });
     setFormReceipts([]);
+    setNewBatch(false);
     setEditingId(null);
     setScanMessage('');
     setSupplierOcrMatch(null);
@@ -467,7 +469,12 @@ export default function ExpensesPage() {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, payment_status: 'paid', receipt_paths: formReceipts.map((r) => r.path) }),
+      body: JSON.stringify({
+        ...form,
+        payment_status: 'paid',
+        receipt_paths: formReceipts.map((r) => r.path),
+        ...(editingId ? {} : { new_batch: newBatch }),
+      }),
     });
     const data = await res.json();
     setSaving(false);
@@ -944,7 +951,20 @@ export default function ExpensesPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
-                  <p className="text-[11px] text-gray-400 mt-1">Batch ID &amp; Receipt No. assigned on save (EXP-YYYYMM-XXX / EXP-YYYYMM-XXX-CC001)</p>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Receipt No. assigned on save — serial increments per upload (EXP-YYYYMM-026-CC001 → CC002…)
+                  </p>
+                  {!editingId && (
+                    <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newBatch}
+                        onChange={(e) => setNewBatch(e.target.checked)}
+                        className="rounded border-gray-300 text-brand-600"
+                      />
+                      New batch 新批次 (next EXP-YYYYMM-XXX instead of continuing current batch)
+                    </label>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Shopping Platform 消費平台</label>
@@ -1068,7 +1088,8 @@ export default function ExpensesPage() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
-              {detail.batch_id && detailField('Batch ID', detail.batch_id)}
+              {detailField('Receipt No. 收據編號', detail.receipt_no || `EXP-${detail.id}`)}
+              {detail.batch_id && detailField('Batch ID 批次編號', detail.batch_id)}
               {detailField('Paid Date 支出日期', detail.paid_date)}
               {detailField('Platform 消費平台', detail.platform)}
               {detailField('Supplier 供應商', detail.merchant)}

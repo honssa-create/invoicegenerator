@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { attachReceipts, normalizeNumber, receiptPathsFromBody } from '@/lib/expense-server';
+import {
+  assignExpenseNumbers,
+  attachReceipts,
+  normalizeNumber,
+  paymentMethodCode,
+  receiptPathsFromBody,
+  reissueReceiptNumber,
+} from '@/lib/expense-server';
 import { canAccessExpense, expenseWhereClause, getDataOwnerId } from '@/lib/org-server';
 import { trashExpense } from '@/lib/trash';
 import type { Expense } from '@/lib/types';
@@ -50,11 +57,40 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
     }
 
+    const existing = db
+      .prepare('SELECT batch_id, receipt_no, payment_method, paid_date FROM expenses WHERE id = ? AND user_id = ?')
+      .get(params.id, ownerId) as {
+      batch_id: string | null;
+      receipt_no: string | null;
+      payment_method: string | null;
+      paid_date: string | null;
+    } | undefined;
+    if (!existing) {
+      return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
+    }
+
+    const nextPaymentMethod = body.payment_method?.trim() || null;
+    const paidDate = body.paid_date?.trim() || existing.paid_date || null;
+    let batchId = existing.batch_id;
+    let receiptNo = existing.receipt_no;
+    if (!batchId || !receiptNo) {
+      const assigned = assignExpenseNumbers(ownerId, paidDate, nextPaymentMethod);
+      batchId = assigned.batchId;
+      receiptNo = assigned.receiptNo;
+    } else {
+      const oldCode = paymentMethodCode(existing.payment_method);
+      const newCode = paymentMethodCode(nextPaymentMethod);
+      if (oldCode !== newCode) {
+        receiptNo = reissueReceiptNumber(ownerId, Number(params.id), batchId, nextPaymentMethod);
+      }
+    }
+
     const update = db.transaction(() => {
       db.prepare(
         `UPDATE expenses SET
            category = ?, merchant = ?, supplier_input = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
            order_no = ?, platform = ?, payment_method = ?, notes = ?, special_notes = ?, payment_status = ?, receipt_path = ?,
+           batch_id = ?, receipt_no = ?,
            updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`
       ).run(
@@ -63,14 +99,16 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         body.supplier_input?.trim() || null,
         amount_hkd,
         amount_rmb,
-        body.paid_date?.trim() || null,
+        paidDate,
         body.order_no?.trim() || null,
         body.platform?.trim() || null,
-        body.payment_method?.trim() || null,
+        nextPaymentMethod,
         body.notes?.trim() || null,
         body.special_notes?.trim() || null,
         payment_status,
         receiptPaths[0] || null,
+        batchId,
+        receiptNo,
         params.id,
         ownerId
       );

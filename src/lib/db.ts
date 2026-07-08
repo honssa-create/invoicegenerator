@@ -111,6 +111,9 @@ if (!expenseColumns.some((c) => c.name === 'receipt_no')) {
 if (!expenseColumns.some((c) => c.name === 'batch_id')) {
   db.exec('ALTER TABLE expenses ADD COLUMN batch_id TEXT');
 }
+if (!expenseColumns.some((c) => c.name === 'payment_method')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
+}
 
 function migratePaymentCode(method: string | null | undefined): 'CC' | 'CS' | 'BT' | 'OT' {
   const m = (method || '').toLowerCase();
@@ -496,11 +499,6 @@ try {
   console.error('Could not create unique receipt_no index:', err);
 }
 
-// Migration: add payment_method column to expenses.
-if (!db.prepare('PRAGMA table_info(expenses)').all().some((c) => (c as { name: string }).name === 'payment_method')) {
-  db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
-}
-
 // Tables for multiple receipt images per expense and user-managed dropdown options.
 db.exec(`
   CREATE TABLE IF NOT EXISTS expense_receipts (
@@ -850,6 +848,9 @@ db.exec(`
   if (!ruCols.includes('address')) {
     try { db.exec('ALTER TABLE rental_units ADD COLUMN address TEXT'); } catch { /* exists */ }
   }
+  if (!ruCols.includes('billing_company')) {
+    try { db.exec('ALTER TABLE rental_units ADD COLUMN billing_company TEXT'); } catch { /* exists */ }
+  }
 }
 
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.
@@ -1104,6 +1105,39 @@ db.exec(`
   );
   for (const section of ['invoices', 'quotations', 'expenses']) {
     upsert.run(section);
+  }
+}
+
+// Per-company debit note style templates (label / elite).
+{
+  const styleCols = (db.prepare('PRAGMA table_info(rental_debit_note_styles)').all() as { name: string }[]).map((c) => c.name);
+  if (!styleCols.includes('company_key')) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS rental_debit_note_styles_v2 (
+          user_id INTEGER NOT NULL,
+          company_key TEXT NOT NULL,
+          styles_json TEXT NOT NULL,
+          updated_at TEXT DEFAULT (datetime('now')),
+          PRIMARY KEY (user_id, company_key),
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      const legacy = db.prepare('SELECT user_id, styles_json FROM rental_debit_note_styles').all() as {
+        user_id: number; styles_json: string;
+      }[];
+      const insert = db.prepare(
+        `INSERT OR IGNORE INTO rental_debit_note_styles_v2 (user_id, company_key, styles_json) VALUES (?, ?, ?)`
+      );
+      for (const row of legacy) {
+        insert.run(row.user_id, 'label', row.styles_json);
+        insert.run(row.user_id, 'elite', row.styles_json);
+      }
+      db.exec('DROP TABLE rental_debit_note_styles');
+      db.exec('ALTER TABLE rental_debit_note_styles_v2 RENAME TO rental_debit_note_styles');
+    } catch (err) {
+      console.error('rental_debit_note_styles migration:', err);
+    }
   }
 }
 

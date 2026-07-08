@@ -20,7 +20,8 @@ function DebitNoteContent() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
-  const { style, setStyle, saving: savingStyle, saveMessage, save: saveStyle } = useDebitNoteStyleTemplate(readOnly);
+  const [paymentTemplate, setPaymentTemplate] = useState<DebitNotePaymentTemplateId>('label');
+  const { style, setStyle, saving: savingStyle, saveMessage, save: saveStyle } = useDebitNoteStyleTemplate(paymentTemplate, readOnly);
   const tenantId = searchParams.get('tenantId') || searchParams.get('tenant_id');
   const unitId = searchParams.get('unitId') || searchParams.get('unit_id');
   const unitIds = searchParams.get('unitIds') || searchParams.get('unit_ids');
@@ -37,7 +38,6 @@ function DebitNoteContent() {
   const [doc, setDoc] = useState<FormalDebitNote | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [paymentTemplate, setPaymentTemplate] = useState<DebitNotePaymentTemplateId>('label');
   const [paymentInstructionsText, setPaymentInstructionsText] = useState('');
   const [footerRemark, setFooterRemark] = useState('');
   const [sending, setSending] = useState(false);
@@ -214,6 +214,7 @@ function DebitNoteContent() {
             onFooterRemark={setFooterRemark}
           />
           <DebitNoteTemplateEditor
+            companyKey={paymentTemplate}
             style={style}
             onChange={setStyle}
             onSave={saveStyle}

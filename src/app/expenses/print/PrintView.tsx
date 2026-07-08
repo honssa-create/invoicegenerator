@@ -114,7 +114,7 @@ function ReceiptImage({
         data-image-key={imageKey}
         loading="eager"
         decoding="sync"
-        className="expense-print-receipt-img block w-full border border-gray-200 object-contain object-top bg-white"
+        className="expense-print-receipt-img block w-full border border-gray-200 object-contain object-top bg-white print:max-w-full print:max-h-[75vh] print:object-contain print:mx-auto"
         onLoad={() => onReady(imageKey)}
         onError={() => onReady(imageKey)}
       />
@@ -285,6 +285,7 @@ export default function PrintView() {
               key={page.key}
               className={`expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none${pageIndex > 0 ? ' expense-print-sheet--continued' : ''}`}
             >
+              <div className="expense-print-keep-together">
               {page.showFullSummary ? (
                 <ExpenseSummary e={page.expense} />
               ) : (
@@ -309,6 +310,7 @@ export default function PrintView() {
                     No receipt image uploaded for this expense.
                   </div>
                 )}
+              </div>
               </div>
             </article>
           ))}

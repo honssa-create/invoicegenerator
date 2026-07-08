@@ -47,6 +47,27 @@
     @apply overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0;
   }
 
+  .expense-table-scroll {
+    overflow-x: scroll;
+    scrollbar-gutter: stable;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar {
+    height: 12px;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar-track {
+    @apply bg-gray-100;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-gray-300;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400;
+  }
+
   .modal-overlay {
     @apply fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4;
   }

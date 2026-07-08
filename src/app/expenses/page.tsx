@@ -45,6 +45,20 @@ type Options = Record<OptionType, string[]>;
 type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
+const PAGE_SIZES = [20, 30, 50] as const;
+type PageSize = (typeof PAGE_SIZES)[number];
+
+function buildPageNumbers(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | '…')[] = [1];
+  if (current > 3) pages.push('…');
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let p = start; p <= end; p++) pages.push(p);
+  if (current < total - 2) pages.push('…');
+  if (total > 1) pages.push(total);
+  return pages;
+}
 
 function cloneDefaultOptions(): Options {
   return {
@@ -84,6 +98,8 @@ export default function ExpensesPage() {
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
+  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [page, setPage] = useState(1);
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
@@ -92,6 +108,9 @@ export default function ExpensesPage() {
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const bottomScrollRef = useRef<HTMLDivElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
 
   const loadExpenses = () => {
     setLoading(true);
@@ -207,6 +226,41 @@ export default function ExpensesPage() {
     });
     return list;
   }, [expenses, filters, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(displayed.length / pageSize));
+  const pageStart = displayed.length ? (page - 1) * pageSize : 0;
+  const pageEnd = Math.min(page * pageSize, displayed.length);
+  const pagedRows = displayed.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters, sort, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const update = () => setTableScrollWidth(el.scrollWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pagedRows, loading]);
+
+  const syncScrollFromTable = () => {
+    if (tableScrollRef.current && bottomScrollRef.current) {
+      bottomScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  };
+
+  const syncScrollFromBottom = () => {
+    if (tableScrollRef.current && bottomScrollRef.current) {
+      tableScrollRef.current.scrollLeft = bottomScrollRef.current.scrollLeft;
+    }
+  };
 
   const totalHkd = displayed.reduce((sum, e) => sum + (e.amount_hkd || 0), 0);
   const totalRmb = displayed.reduce((sum, e) => sum + (e.amount_rmb || 0), 0);
@@ -448,8 +502,13 @@ export default function ExpensesPage() {
       return next;
     });
   };
-  const allSelected = displayed.length > 0 && displayed.every((e) => selected.has(e.id));
-  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(displayed.map((e) => e.id)));
+  const allSelected = pagedRows.length > 0 && pagedRows.every((e) => selected.has(e.id));
+  const toggleSelectAll = () =>
+    setSelected(
+      allSelected
+        ? new Set(Array.from(selected).filter((id) => !pagedRows.some((e) => e.id === id)))
+        : new Set([...Array.from(selected), ...pagedRows.map((e) => e.id)])
+    );
 
   const openDetail = (e: Expense) => setDetail(e);
 
@@ -640,7 +699,70 @@ export default function ExpensesPage() {
         </div>
       </FilterBar>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-gray-200">
+        {!loading && displayed.length > 0 && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-gray-100 text-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-gray-600">
+                <span className="text-xs font-medium text-gray-500 whitespace-nowrap">Rows per page</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value) as PageSize)}
+                  className="px-2 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                >
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </label>
+              <span className="text-gray-500 text-xs sm:text-sm">
+                Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+              >
+                ← Prev
+              </button>
+              {buildPageNumbers(page, totalPages).map((p, i) =>
+                p === '…' ? (
+                  <span key={`ellipsis-${i}`} className="px-1 text-gray-400">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPage(p)}
+                    className={`min-w-[2rem] px-2 py-1 rounded-lg border text-xs font-medium ${
+                      p === page
+                        ? 'bg-brand-600 border-brand-600 text-white'
+                        : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div
+          ref={tableScrollRef}
+          onScroll={syncScrollFromTable}
+          className="expense-table-scroll overflow-x-scroll overscroll-x-contain"
+        >
         {loading ? (
           <div className="p-12 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
@@ -673,7 +795,7 @@ export default function ExpensesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {displayed.map((e) => {
+              {pagedRows.map((e) => {
                 const rowBg = selected.has(e.id) ? 'bg-brand-50/40' : 'bg-white';
                 const stickyCell = `${rowBg} group-hover:bg-gray-50`;
                 return (
@@ -712,6 +834,62 @@ export default function ExpensesPage() {
               })}
             </tbody>
           </table>
+        )}
+        </div>
+
+        {!loading && displayed.length > 0 && (
+          <div
+            ref={bottomScrollRef}
+            onScroll={syncScrollFromBottom}
+            className="expense-table-scroll overflow-x-scroll overflow-y-hidden border-t border-gray-200 bg-gray-50/80"
+            aria-label="Horizontal table scroll"
+          >
+            <div style={{ width: tableScrollWidth || '100%', height: 14 }} />
+          </div>
+        )}
+
+        {!loading && displayed.length > 0 && totalPages > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 text-sm">
+            <span className="text-gray-500 text-xs sm:text-sm">
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+              >
+                ← Prev
+              </button>
+              {buildPageNumbers(page, totalPages).map((p, i) =>
+                p === '…' ? (
+                  <span key={`footer-ellipsis-${i}`} className="px-1 text-gray-400">…</span>
+                ) : (
+                  <button
+                    key={`footer-${p}`}
+                    type="button"
+                    onClick={() => setPage(p)}
+                    className={`min-w-[2rem] px-2 py-1 rounded-lg border text-xs font-medium ${
+                      p === page
+                        ? 'bg-brand-600 border-brand-600 text-white'
+                        : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

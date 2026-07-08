@@ -49,7 +49,8 @@ import {
   debitNoteCompanyForUnit,
   resolveUnitBillingCompany,
   type DebitNoteCompanyId,
-  electricityFormulaForUnit,
+  resolveElectricityFormula,
+  normalizeUtilityBillingMode,
   formatBillingPeriodLabel,
   meterDataFromInputs,
   pastLeaseStatusLabel,
@@ -182,7 +183,7 @@ function RentalDetailInner() {
   const [tenantEmail, setTenantEmail] = useState('');
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
-  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
+  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_shared_meter');
   const [billingCompany, setBillingCompany] = useState<DebitNoteCompanyId | ''>('');
   const [leaseStartDate, setLeaseStartDate] = useState('');
   const [leaseEndDate, setLeaseEndDate] = useState('');
@@ -296,7 +297,7 @@ function RentalDetailInner() {
           setTenantEmail(useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''));
           setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
           setBaseRent(String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)));
-          setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
+          setUtilityBillingMode(normalizeUtilityBillingMode(d.unit.utilityBillingMode));
           setBillingCompany(
             d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
               ? d.unit.billingCompany
@@ -387,8 +388,13 @@ function RentalDetailInner() {
     setBaseRentPeriodTo(calc.periodTo);
   }, [dueDateDay, period]);
 
-  const electricityFormula = data?.unit ? electricityFormulaForUnit(data.unit.unitName) : null;
-  const waterMeterFormula = data?.unit ? unitHasWaterMeterFormula(data.unit.unitName) : false;
+  const showUtilityFees = utilityBillingMode !== 'tenant_pays';
+  const electricityFormula = data?.unit && showUtilityFees
+    ? resolveElectricityFormula(data.unit.unitName, utilityBillingMode)
+    : null;
+  const waterMeterFormula = data?.unit && showUtilityFees
+    ? unitHasWaterMeterFormula(data.unit.unitName)
+    : false;
 
   useEffect(() => {
     if (!waterMeterFormula) return;
@@ -1122,14 +1128,15 @@ function RentalDetailInner() {
                 </div>
 
                 {/* Electricity */}
+                {showUtilityFees && (
                 <div className="rounded-xl border border-yellow-100 bg-yellow-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-yellow-800 mb-3">電費 Electricity Fee</p>
                   {electricityFormula ? (
                     <>
                       <p className="text-xs text-yellow-700/80 mb-3">
                         {electricityFormula === '213a'
-                          ? '213A formula: 實用電度數 = (今次 − 前次) − 其他單位；AMOUNT = 實用電度數 × 每度電費'
-                          : 'Stock Room formula: 用電度數 = 今次錶數 − 前次錶數；AMOUNT = 用電度數 × 每度電費'}
+                          ? '大分錶分拆: 實用電度數 = (今次 − 前次) − 其他單位；AMOUNT = 實用電度數 × 每度電費'
+                          : '獨立分錶: 用電度數 = 今次錶數 − 前次錶數；AMOUNT = 用電度數 × 每度電費'}
                       </p>
                       <div className="grid md:grid-cols-3 gap-3 mb-4">
                         <div>
@@ -1185,8 +1192,10 @@ function RentalDetailInner() {
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Water */}
+                {showUtilityFees && (
                 <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
                   <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
                   {waterMeterFormula ? (
@@ -1231,6 +1240,7 @@ function RentalDetailInner() {
                     </div>
                   )}
                 </div>
+                )}
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
                     <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Note (optional)</label>

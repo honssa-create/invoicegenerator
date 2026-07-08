@@ -41,7 +41,7 @@ const blankUnit: Partial<RentalUnit> = {
   unitName: '', tenantName: '', tenantPhone: '', tenantEmail: '',
   currentYearRent: 0, previousYearsRent: [], leaseStartDate: '', leaseEndDate: '',
   dueDateDay: 1, autoSendReceiptEmail: false, automationEnabled: true,
-  utilityBillingMode: 'company_proxy',
+  utilityBillingMode: 'company_shared_meter',
 };
 
 export default function RentalsPage() {
@@ -562,7 +562,7 @@ export default function RentalsPage() {
                 <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>
                 <UtilityBillingPicker
                   compact
-                  value={(unitModal.utilityBillingMode || 'company_proxy') as UtilityBillingMode}
+                  value={(unitModal.utilityBillingMode || 'company_shared_meter') as UtilityBillingMode}
                   onChange={(mode) => setUnitModal({ ...unitModal, utilityBillingMode: mode })}
                 />
               </div>

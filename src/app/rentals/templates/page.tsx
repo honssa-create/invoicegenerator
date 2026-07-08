@@ -31,7 +31,7 @@ function makeSampleDoc(companyKey: DebitNoteCompanyId): FormalDebitNote {
       phone: '',
       email: '',
       notes: '',
-      utilityBillingMode: 'company_proxy',
+      utilityBillingMode: 'company_shared_meter',
       created_at: '',
       updated_at: '',
     },
@@ -54,7 +54,7 @@ function makeSampleDoc(companyKey: DebitNoteCompanyId): FormalDebitNote {
     ),
     paymentTemplateId: companyKey,
     companyIds: [companyKey],
-    units: [{ id: 0, unitName, utilityBillingMode: 'company_proxy', billingCompany: companyKey }],
+    units: [{ id: 0, unitName, utilityBillingMode: 'company_shared_meter', billingCompany: companyKey }],
   };
 }
 

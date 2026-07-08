@@ -851,6 +851,14 @@ db.exec(`
   if (!ruCols.includes('billing_company')) {
     try { db.exec('ALTER TABLE rental_units ADD COLUMN billing_company TEXT'); } catch { /* exists */ }
   }
+  try {
+    db.exec(`UPDATE rental_units SET utility_billing_mode = 'company_shared_meter' WHERE utility_billing_mode = 'company_proxy'`);
+    db.exec(`UPDATE rental_tenants SET utility_billing_mode = 'company_shared_meter' WHERE utility_billing_mode = 'company_proxy'`);
+    db.exec(`
+      UPDATE rental_units SET utility_billing_mode = 'company_sub_meter'
+      WHERE LOWER(TRIM(unit_name)) IN ('stock room 1', 'stock room 2')
+    `);
+  } catch { /* migration */ }
 }
 
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.

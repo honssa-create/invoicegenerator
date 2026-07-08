@@ -565,12 +565,27 @@ export const CHARGE_STATUS_LABELS: Record<RentalChargeItemStatus, string> = {
   paid: '已付 Paid',
 };
 
-export type UtilityBillingMode = 'tenant_pays' | 'company_proxy';
+export type UtilityBillingMode = 'tenant_pays' | 'company_sub_meter' | 'company_shared_meter';
 
 export const UTILITY_BILLING_MODE_LABELS: Record<UtilityBillingMode, string> = {
   tenant_pays: '租客自行繳付水電費',
-  company_proxy: '水電費由公司代交 再向租客收取',
+  company_sub_meter: '水電費由公司代交 再向租客收取 (獨立分錶)',
+  company_shared_meter: '水電費由公司代交 再向租客收取 (大分錶分拆)',
 };
+
+export const UTILITY_BILLING_MODE_ORDER: UtilityBillingMode[] = [
+  'tenant_pays',
+  'company_sub_meter',
+  'company_shared_meter',
+];
+
+/** Normalize stored DB / legacy values to a current billing mode. */
+export function normalizeUtilityBillingMode(value: string | null | undefined): UtilityBillingMode {
+  if (value === 'tenant_pays') return 'tenant_pays';
+  if (value === 'company_sub_meter') return 'company_sub_meter';
+  if (value === 'company_shared_meter' || value === 'company_proxy') return 'company_shared_meter';
+  return 'company_shared_meter';
+}
 
 /** Fixed portfolio units — seeded per user on first dashboard load. */
 export interface DefaultRentalUnitSeed {
@@ -582,11 +597,11 @@ export interface DefaultRentalUnitSeed {
 export const DEFAULT_RENTAL_UNITS: DefaultRentalUnitSeed[] = [
   { unitName: '204', utilityBillingMode: 'tenant_pays' },
   { unitName: '205', utilityBillingMode: 'tenant_pays' },
-  { unitName: '213A', utilityBillingMode: 'company_proxy' },
+  { unitName: '213A', utilityBillingMode: 'company_shared_meter' },
   { unitName: '213B', utilityBillingMode: 'tenant_pays' },
   { unitName: '214', utilityBillingMode: 'tenant_pays' },
-  { unitName: 'Stock Room 1', utilityBillingMode: 'company_proxy' },
-  { unitName: 'Stock Room 2', utilityBillingMode: 'company_proxy' },
+  { unitName: 'Stock Room 1', utilityBillingMode: 'company_sub_meter' },
+  { unitName: 'Stock Room 2', utilityBillingMode: 'company_sub_meter' },
 ];
 
 export type ElectricityFormula = '213a' | 'stock_room';
@@ -610,6 +625,18 @@ export function electricityFormulaForUnit(unitName: string): ElectricityFormula 
   if (n === '213a') return '213a';
   if (n === 'stock room 1' || n === 'stock room 2') return 'stock_room';
   return null;
+}
+
+/** Electricity calculator formula from unit name + billing mode. */
+export function resolveElectricityFormula(
+  unitName: string,
+  mode: UtilityBillingMode,
+): ElectricityFormula | null {
+  if (mode === 'tenant_pays') return null;
+  const base = electricityFormulaForUnit(unitName);
+  if (!base) return null;
+  if (mode === 'company_sub_meter') return 'stock_room';
+  return base;
 }
 
 export function parseElectricityMeterJson(raw: string | null | undefined): ElectricityMeterData | null {
@@ -734,13 +761,17 @@ export function waterMeterDataFromInputs(prev: string, curr: string, rate: strin
   };
 }
 
+export function companyBillsUtilities(mode: UtilityBillingMode): boolean {
+  return mode === 'company_sub_meter' || mode === 'company_shared_meter';
+}
+
 /** Charge types included on tenant bills / debit notes for this utility mode. */
 export function utilityChargeTypesForMode(mode: UtilityBillingMode): RentalChargeType[] {
-  return mode === 'company_proxy' ? ['rent', 'water', 'electricity'] : ['rent'];
+  return companyBillsUtilities(mode) ? ['rent', 'water', 'electricity'] : ['rent'];
 }
 
 export function tenantBillsUtilities(mode: UtilityBillingMode): boolean {
-  return mode === 'company_proxy';
+  return companyBillsUtilities(mode);
 }
 
 /** Unit-level setting with optional tenant fallback (legacy). */
@@ -748,9 +779,13 @@ export function resolveUtilityBillingMode(
   unitMode?: UtilityBillingMode | string | null,
   tenantMode?: UtilityBillingMode | string | null,
 ): UtilityBillingMode {
-  if (unitMode === 'tenant_pays' || unitMode === 'company_proxy') return unitMode;
-  if (tenantMode === 'tenant_pays' || tenantMode === 'company_proxy') return tenantMode;
-  return 'company_proxy';
+  if (unitMode != null && String(unitMode).trim() !== '') {
+    return normalizeUtilityBillingMode(unitMode);
+  }
+  if (tenantMode != null && String(tenantMode).trim() !== '') {
+    return normalizeUtilityBillingMode(tenantMode);
+  }
+  return 'company_shared_meter';
 }
 
 export interface RentalTenant {

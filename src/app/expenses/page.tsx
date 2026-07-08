@@ -42,7 +42,7 @@ const EMPTY_FORM = {
 type FormState = typeof EMPTY_FORM;
 type FormReceipt = { id?: number; path: string; url: string };
 type Options = Record<OptionType, string[]>;
-type SortKey = 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
+type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
 
@@ -161,7 +161,7 @@ export default function ExpensesPage() {
       if (filters.reason && e.category !== filters.reason) return false;
       if (filters.platform && e.platform !== filters.platform) return false;
       if (q) {
-        const hay = [e.receipt_no, e.merchant, e.supplier_input, e.platform, e.payment_method, e.category, e.notes, e.special_notes]
+        const hay = [e.batch_id, e.receipt_no, e.merchant, e.supplier_input, e.platform, e.payment_method, e.category, e.notes, e.special_notes]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -173,6 +173,9 @@ export default function ExpensesPage() {
     list = [...list].sort((a, b) => {
       let base: number;
       switch (sort.key) {
+        case 'batch':
+          base = String(a.batch_id || '').localeCompare(String(b.batch_id || ''));
+          break;
         case 'number':
           base = String(a.receipt_no || '').localeCompare(String(b.receipt_no || ''));
           break;
@@ -647,13 +650,14 @@ export default function ExpensesPage() {
             <p>No expenses match. Add one, import a sheet, or clear filters.</p>
           </div>
         ) : (
-          <table className="w-full min-w-[1400px] border-separate border-spacing-0">
+          <table className="w-full min-w-[1520px] border-separate border-spacing-0">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-4 py-3 sticky left-0 z-20 bg-white w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('number', 'Receipt No.', 'sticky left-14 z-20 bg-white min-w-[7.5rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
+                {sortTh('batch', 'Batch ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
+                {sortTh('number', 'Receipt No.', 'sticky left-[11.5rem] z-20 bg-white min-w-[10rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
                 {sortTh('supplier', 'Supplier 供應商')}
@@ -681,7 +685,8 @@ export default function ExpensesPage() {
                   <td className={`px-4 py-3 sticky left-0 z-10 w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] ${stickyCell}`} onClick={(ev) => ev.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleSelect(e.id)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label={`Select ${e.receipt_no || e.id}`} />
                   </td>
-                  <td className={`px-4 py-3 sticky left-14 z-10 min-w-[7.5rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm font-mono text-brand-700 whitespace-nowrap font-medium ${stickyCell}`}>{e.receipt_no || '—'}</td>
+                  <td className={`px-4 py-3 sticky left-14 z-10 min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm font-mono text-gray-700 whitespace-nowrap ${stickyCell}`}>{e.batch_id || '—'}</td>
+                  <td className={`px-4 py-3 sticky left-[11.5rem] z-10 min-w-[10rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm font-mono text-brand-700 whitespace-nowrap font-medium ${stickyCell}`}>{e.receipt_no || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.paid_date || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.platform || '—'}</td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[160px] truncate" title={expenseSupplierName(e)}>{expenseSupplierName(e) || '—'}</td>
@@ -761,7 +766,7 @@ export default function ExpensesPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
-                  <p className="text-[11px] text-gray-400 mt-1">Receipt No. uses this month (EXP-YYYYMM-XXX)</p>
+                  <p className="text-[11px] text-gray-400 mt-1">Batch ID &amp; Receipt No. assigned on save (EXP-YYYYMM-XXX / EXP-YYYYMM-XXX-CC001)</p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Shopping Platform 消費平台</label>
@@ -861,6 +866,9 @@ export default function ExpensesPage() {
               <div>
                 <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
                 <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
+                {detail.batch_id && (
+                  <p className="text-sm font-mono text-gray-500 mt-0.5">Batch {detail.batch_id}</p>
+                )}
                 <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(detail) || 'Unnamed supplier'}</p>
               </div>
               <div className="flex gap-2 shrink-0">
@@ -882,6 +890,7 @@ export default function ExpensesPage() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
+              {detail.batch_id && detailField('Batch ID', detail.batch_id)}
               {detailField('Paid Date 支出日期', detail.paid_date)}
               {detailField('Platform 消費平台', detail.platform)}
               {detailField('Supplier 供應商', detail.merchant)}

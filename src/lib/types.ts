@@ -78,6 +78,7 @@ export interface Expense {
   user_id: number;
   created_by_user_id?: number | null;
   receipt_no: string | null;
+  batch_id: string | null;
   category: string;
   merchant: string | null;
   supplier_input: string | null;

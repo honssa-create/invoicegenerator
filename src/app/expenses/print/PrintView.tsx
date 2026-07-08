@@ -42,6 +42,7 @@ function ExpenseSummary({ e }: { e: Expense }) {
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider opacity-80">Receipt No.</p>
           <p className="text-xl sm:text-2xl font-bold font-mono truncate">{e.receipt_no || `EXP-${e.id}`}</p>
+          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Batch {e.batch_id}</p>}
         </div>
         <div className="text-right text-sm shrink-0">
           <p className="font-semibold max-w-[12rem] truncate">{expenseSupplierName(e) || 'Unnamed merchant'}</p>
@@ -120,6 +121,33 @@ function ReceiptImage({
       />
     </figure>
   );
+}
+
+/** A4 printable height in CSS px (Chrome print). */
+const PRINT_PAGE_HEIGHT_PX = 1050;
+
+/** Cap receipt images so summary + image fit one printed page in Chrome. */
+function prepareExpensePrintLayout() {
+  document.querySelectorAll<HTMLElement>('.expense-print-sheet').forEach((sheet) => {
+    const header = sheet.querySelector<HTMLElement>('.expense-print-summary, .expense-print-mini-header');
+    const img = sheet.querySelector<HTMLImageElement>('.expense-print-receipt-img');
+    if (!img) return;
+    const headerH = header?.offsetHeight ?? 0;
+    const cap = Math.max(160, PRINT_PAGE_HEIGHT_PX - headerH - 16);
+    img.style.maxHeight = `${cap}px`;
+    img.style.width = '100%';
+    img.style.height = 'auto';
+    img.style.objectFit = 'contain';
+  });
+}
+
+function clearExpensePrintLayout() {
+  document.querySelectorAll<HTMLImageElement>('.expense-print-receipt-img').forEach((img) => {
+    img.style.removeProperty('max-height');
+    img.style.removeProperty('width');
+    img.style.removeProperty('height');
+    img.style.removeProperty('object-fit');
+  });
 }
 
 function buildPrintPages(expenses: Expense[]): PrintPage[] {
@@ -205,6 +233,17 @@ export default function PrintView() {
   }, [expectedImageKeys, markImageReady]);
 
   useEffect(() => {
+    const onBefore = () => prepareExpensePrintLayout();
+    const onAfter = () => clearExpensePrintLayout();
+    window.addEventListener('beforeprint', onBefore);
+    window.addEventListener('afterprint', onAfter);
+    return () => {
+      window.removeEventListener('beforeprint', onBefore);
+      window.removeEventListener('afterprint', onAfter);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ids.length) {
       setExpenses([]);
       setLoading(false);
@@ -236,7 +275,8 @@ export default function PrintView() {
   }, [idsParam]);
 
   const handlePrint = () => {
-    window.print();
+    prepareExpensePrintLayout();
+    requestAnimationFrame(() => window.print());
   };
 
   if (loading) {
@@ -285,30 +325,32 @@ export default function PrintView() {
               key={page.key}
               className={`expense-print-sheet mb-6 print:mb-0 bg-white rounded-xl border border-gray-200 print:border-0 print:rounded-none shadow-sm print:shadow-none${pageIndex > 0 ? ' expense-print-sheet--continued' : ''}`}
             >
-              {page.showFullSummary ? (
-                <ExpenseSummary e={page.expense} />
-              ) : (
-                <ExpenseMiniHeader
-                  e={page.expense}
-                  receiptIndex={page.receiptIndex}
-                  receiptCount={page.receiptCount}
-                />
-              )}
-
-              <div className="expense-print-body px-4 pb-4 sm:px-6 sm:pb-6 print:px-0 print:pb-0">
-                {page.receipt ? (
-                  <ReceiptImage
-                    e={page.expense}
-                    receipt={page.receipt}
-                    index={page.receiptIndex}
-                    imageKey={page.imageKey}
-                    onReady={markImageReady}
-                  />
+              <div className="expense-print-keep-together">
+                {page.showFullSummary ? (
+                  <ExpenseSummary e={page.expense} />
                 ) : (
-                  <div className="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 text-sm">
-                    No receipt image uploaded for this expense.
-                  </div>
+                  <ExpenseMiniHeader
+                    e={page.expense}
+                    receiptIndex={page.receiptIndex}
+                    receiptCount={page.receiptCount}
+                  />
                 )}
+
+                <div className="expense-print-body px-4 pb-4 sm:px-6 sm:pb-6 print:px-0 print:pb-0">
+                  {page.receipt ? (
+                    <ReceiptImage
+                      e={page.expense}
+                      receipt={page.receipt}
+                      index={page.receiptIndex}
+                      imageKey={page.imageKey}
+                      onReady={markImageReady}
+                    />
+                  ) : (
+                    <div className="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 text-sm">
+                      No receipt image uploaded for this expense.
+                    </div>
+                  )}
+                </div>
               </div>
             </article>
           ))}

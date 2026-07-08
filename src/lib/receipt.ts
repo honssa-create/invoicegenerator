@@ -4,8 +4,6 @@ import crypto from 'crypto';
 import type { ReceiptScanResult } from './types';
 import { isR2Configured, uploadBufferToR2 } from './r2';
 
-const RECEIPTS_DIR = path.join(process.cwd(), 'data', 'receipts');
-
 const ALLOWED_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
@@ -14,10 +12,31 @@ const ALLOWED_EXT: Record<string, string> = {
   'image/gif': '.gif',
 };
 
-export function ensureReceiptsDir() {
-  if (!fs.existsSync(RECEIPTS_DIR)) {
-    fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+/**
+ * Receipt files directory. Co-located with SQLite when DB_PATH is set (Railway volume).
+ * Override with RECEIPTS_DIR. Production should prefer R2 (see saveReceipt).
+ */
+export function resolveReceiptsDir(): string {
+  if (process.env.RECEIPTS_DIR?.trim()) {
+    return process.env.RECEIPTS_DIR.trim();
   }
+  const dbPath = process.env.DB_PATH?.trim();
+  if (dbPath && process.env.NEXT_PHASE !== 'phase-production-build') {
+    return path.join(path.dirname(dbPath), 'receipts');
+  }
+  return path.join(process.cwd(), 'data', 'receipts');
+}
+
+function receiptsDir(): string {
+  const dir = resolveReceiptsDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+export function ensureReceiptsDir() {
+  receiptsDir();
 }
 
 /** Save an image to R2 (production) or local disk (dev fallback). Returns public URL or bare filename. */
@@ -27,13 +46,13 @@ export async function saveReceipt(
   originalName = 'receipt',
 ): Promise<string> {
   if (isR2Configured()) {
-    return uploadBufferToR2(buffer, mimeType, originalName);
+    return uploadBufferToR2(buffer, mimeType, originalName, 'receipts');
   }
 
   ensureReceiptsDir();
   const ext = ALLOWED_EXT[mimeType] || '.png';
   const filename = `${crypto.randomUUID()}${ext}`;
-  fs.writeFileSync(path.join(RECEIPTS_DIR, filename), buffer);
+  fs.writeFileSync(path.join(receiptsDir(), filename), buffer);
   return filename;
 }
 
@@ -41,7 +60,7 @@ export function receiptFilePath(filename: string): string | null {
   // Guard against path traversal — only allow a bare filename.
   const base = path.basename(filename);
   if (base !== filename) return null;
-  const full = path.join(RECEIPTS_DIR, base);
+  const full = path.join(receiptsDir(), base);
   if (!fs.existsSync(full)) return null;
   return full;
 }

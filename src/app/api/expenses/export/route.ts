@@ -36,6 +36,7 @@ export async function GET(request: Request) {
     'Expense Reason (支出原因)': categoryLabel(e.category),
     Receipts: e.receipt_count,
     'Special Notes (特別事項)': e.special_notes || '',
+    'Batch ID': e.batch_id || '',
     'Receipt No.': e.receipt_no || '',
     'Order No.': e.order_no || '',
     'Payment Status': e.payment_status,
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
   const ws = XLSX.utils.json_to_sheet(data);
   ws['!cols'] = [
     { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 28 }, { wch: 14 }, { wch: 14 },
-    { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 15 },
+    { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 15 },
   ];
 
   const wb = XLSX.utils.book_new();

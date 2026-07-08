@@ -11,11 +11,13 @@ import {
   formatDebitNoteChargeDescription,
   formatDebitNotePeriodLong,
   formatDisplayDate,
+  formatMoney,
   formatPeriodRangeShort,
   buildDebitNoteFooterRemark,
   buildDebitNotePaymentInstructionsText,
   defaultPaymentTemplateForUnits,
   formatDebitNoteUnitLabel,
+  renderDebitNoteFooterRemark,
   resolveDebitNoteCompanyHeader,
   resolveDebitNoteCompanyIds,
   displayRentalStatus,
@@ -44,10 +46,17 @@ import {
   type PeriodPaymentAllocation,
   type TenantBillingHistoryRow,
   type UtilityBillingMode,
+  addBillingMonths,
+  derivePeriodPaymentStatus,
+  type PeriodChargeAllocationEntry,
+  type RentalLease,
+  type UnitLeasePaymentLedgerRow,
+  type UnitLeasePeriodChargeDetail,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
+import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
 
 function logRentalActivity(
   userId: number, unitId: number, action: string,
@@ -631,9 +640,65 @@ function buildArrearDetails(
   const units = Array.from(new Set(items.map((i) => i.unitName)));
   const types = Array.from(new Set(items.map((i) => i.chargeType)));
   const unitStr = units.join(', ');
-  if (types.length === 1 && types[0] === 'rent') return `${unitStr} (全月租金)`;
+  if (types.length === 1 && types[0] === 'rent') return `${unitStr} 租金`;
   const typeLabels = types.map((t) => CHARGE_TYPE_LABELS[t]).join('、');
   return `${unitStr} (${typeLabels})`;
+}
+
+type RecordBillingPeriods = {
+  rentFrom: string | null;
+  rentTo: string | null;
+  waterFrom: string | null;
+  waterTo: string | null;
+  elecFrom: string | null;
+  elecTo: string | null;
+};
+
+function loadRecordBillingPeriods(
+  userId: number,
+  legacyRecordIds: number[],
+): Map<number, RecordBillingPeriods> {
+  const map = new Map<number, RecordBillingPeriods>();
+  if (!legacyRecordIds.length) return map;
+  const placeholders = legacyRecordIds.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT id, base_rent_period_from, base_rent_period_to,
+            water_period_from, water_period_to, electricity_period_from, electricity_period_to
+     FROM rental_records WHERE user_id = ? AND id IN (${placeholders})`
+  ).all(userId, ...legacyRecordIds) as {
+    id: number;
+    base_rent_period_from: string | null;
+    base_rent_period_to: string | null;
+    water_period_from: string | null;
+    water_period_to: string | null;
+    electricity_period_from: string | null;
+    electricity_period_to: string | null;
+  }[];
+  for (const r of rows) {
+    map.set(r.id, {
+      rentFrom: r.base_rent_period_from,
+      rentTo: r.base_rent_period_to,
+      waterFrom: r.water_period_from,
+      waterTo: r.water_period_to,
+      elecFrom: r.electricity_period_from,
+      elecTo: r.electricity_period_to,
+    });
+  }
+  return map;
+}
+
+function recordBillingRange(
+  chargeType: RentalChargeType,
+  legacyRecordId: number | null | undefined,
+  recordPeriods: Map<number, RecordBillingPeriods>,
+): { from: string | null; to: string | null } | undefined {
+  if (!legacyRecordId) return undefined;
+  const rec = recordPeriods.get(legacyRecordId);
+  if (!rec) return undefined;
+  if (chargeType === 'rent') return { from: rec.rentFrom, to: rec.rentTo };
+  if (chargeType === 'water') return { from: rec.waterFrom, to: rec.waterTo };
+  if (chargeType === 'electricity') return { from: rec.elecFrom, to: rec.elecTo };
+  return undefined;
 }
 
 function buildSettledPeriodsNote(
@@ -691,6 +756,11 @@ export function buildFormalDebitNote(
   const isBillable = (unitId: number, chargeType: RentalChargeType) =>
     utilityChargeTypesForMode(unitModeMap[unitId] ?? matrix.tenant.utilityBillingMode).includes(chargeType);
 
+  const legacyIds = Array.from(
+    new Set(charges.map((c) => c.legacyRecordId).filter((id): id is number => Boolean(id))),
+  );
+  const recordPeriods = loadRecordBillingPeriods(userId, legacyIds);
+
   const currentCharges: FormalDebitNoteLine[] = [];
   for (const col of matrix.columns) {
     if (!isBillable(col.unitId, col.chargeType)) continue;
@@ -702,7 +772,11 @@ export function buildFormalDebitNote(
     if (outstanding <= 0) continue;
     currentCharges.push({
       unitName: formatDebitNoteUnitLabel(col.unitName),
-      description: formatDebitNoteChargeDescription(targetPeriod, col.chargeType),
+      description: formatDebitNoteChargeDescription(
+        targetPeriod,
+        col.chargeType,
+        recordBillingRange(col.chargeType, item.legacyRecordId, recordPeriods),
+      ),
       amount: outstanding,
       chargeType: col.chargeType,
     });
@@ -737,7 +811,22 @@ export function buildFormalDebitNote(
   const grandTotal = currentSubtotal + totalArrears;
 
   const companyIds = resolveDebitNoteCompanyIds(matrix.units.map((u) => u.unitName));
-  const company: DebitNoteCompanyInfo = { ...resolveDebitNoteCompanyHeader(companyIds), ...options?.company };
+  const paymentTemplateId: DebitNotePaymentTemplateId =
+    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
+  const savedTemplate = getRentalTemplate(userId, paymentTemplateId);
+  const companyOverride = resolveCompanyFromTemplate(paymentTemplateId, savedTemplate);
+  const company: DebitNoteCompanyInfo = {
+    ...resolveDebitNoteCompanyHeader(companyIds),
+    ...options?.company,
+    ...(companyOverride ? {
+      nameZh: companyOverride.nameZh,
+      nameEn: companyOverride.nameEn,
+      address: companyOverride.address,
+      phone: companyOverride.phone,
+      taxId: companyOverride.taxId,
+      chequePayee: companyOverride.chequePayee,
+    } : {}),
+  };
   const issuedDate = new Date().toISOString().slice(0, 10);
   const dueDate = debitNoteDueDate(issuedDate);
   const dueDateDisplay = formatDisplayDate(dueDate);
@@ -752,16 +841,16 @@ export function buildFormalDebitNote(
     .join(' · ');
 
   const noteNo = peekDebitNoteNumber(userId, targetPeriod);
-  const paymentTemplateId: DebitNotePaymentTemplateId =
-    options?.paymentTemplate ?? defaultPaymentTemplateForUnits(matrix.units.map((u) => u.unitName));
   const paymentInstructionsText = options?.paymentInstructionsText ?? buildDebitNotePaymentInstructionsText(
     paymentTemplateId,
     noteNo,
     dueDateChinese,
     options?.paymentRemark,
+    savedTemplate?.paymentInstructions,
   );
   const paymentInstructions = paymentInstructionsText.split('\n').filter((l) => l !== '');
-  const footerRemark = options?.footerRemark ?? buildDebitNoteFooterRemark(
+  const footerRemark = options?.footerRemark ?? renderDebitNoteFooterRemark(
+    savedTemplate?.footerRemark,
     targetPeriod,
     dueDateDisplay,
     arrearPeriods,
@@ -952,6 +1041,162 @@ export function getUnitPaymentHistory(unitId: number, userId: number): RentalPay
       ...p,
       allocations: p.allocations.filter((a) => a.unitId === unitId),
     }));
+}
+
+/** Outstanding charge items for a single unit (FIFO order). */
+export function getUnitOutstandingCharges(unitId: number, userId: number): RentalChargeItem[] {
+  return (db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE user_id = ? AND unit_id = ? AND amount_due > amount_allocated
+     ORDER BY billing_period ASC,
+       CASE charge_type WHEN 'rent' THEN 1 WHEN 'water' THEN 2 ELSE 3 END`
+  ).all(userId, unitId) as ChargeRow[]).map(hydrateCharge);
+}
+
+interface LedgerRecordRow {
+  id: number;
+  billing_period: string;
+  base_rent: number;
+  water_fee: number;
+  electricity_fee: number;
+  actual_amount: number;
+  amount_paid: number;
+  paid_date: string | null;
+  paid_at: string | null;
+  invoice_ref: string | null;
+  receipt_ref: string | null;
+}
+
+interface LedgerAllocationRow {
+  charge_item_id: number;
+  charge_type: RentalChargeType;
+  billing_period: string;
+  amount: number;
+  payment_id: number;
+  payment_date: string;
+  method: string | null;
+  reference: string | null;
+}
+
+/** Lease-period payment ledger for unit profile (every month in 租約期). */
+export function getUnitLeasePaymentLedger(
+  unitId: number,
+  userId: number,
+  lease: RentalLease | null,
+): UnitLeasePaymentLedgerRow[] {
+  if (!lease) return [];
+
+  const start = lease.leaseStartDate?.slice(0, 7);
+  const end = (lease.actualEndDate || lease.leaseEndDate)?.slice(0, 7);
+  if (!start || !end || start > end) return [];
+
+  const records = db.prepare(
+    `SELECT id, billing_period, base_rent, water_fee, electricity_fee, actual_amount,
+            amount_paid, paid_date, paid_at, invoice_ref, receipt_ref
+     FROM rental_records
+     WHERE user_id = ? AND unit_id = ? AND billing_period >= ? AND billing_period <= ?
+     ORDER BY billing_period ASC`
+  ).all(userId, unitId, start, end) as LedgerRecordRow[];
+
+  const chargeRows = db.prepare(
+    `SELECT * FROM rental_charge_items
+     WHERE user_id = ? AND unit_id = ? AND billing_period >= ? AND billing_period <= ?`
+  ).all(userId, unitId, start, end) as ChargeRow[];
+
+  const chargeIds = chargeRows.map((c) => c.id);
+  const allocByChargeId = new Map<number, PeriodChargeAllocationEntry[]>();
+  if (chargeIds.length) {
+    const placeholders = chargeIds.map(() => '?').join(',');
+    const allocRows = db.prepare(
+      `SELECT a.charge_item_id, a.amount, p.id AS payment_id, p.payment_date, p.method, p.reference
+       FROM rental_payment_allocations a
+       JOIN rental_payments p ON p.id = a.payment_id
+       WHERE a.user_id = ? AND a.charge_item_id IN (${placeholders})
+       ORDER BY p.payment_date DESC, a.id DESC`
+    ).all(userId, ...chargeIds) as LedgerAllocationRow[];
+
+    for (const row of allocRows) {
+      const list = allocByChargeId.get(row.charge_item_id) || [];
+      list.push({
+        paymentId: row.payment_id,
+        paymentDate: row.payment_date,
+        amount: row.amount,
+        method: row.method,
+        reference: row.reference,
+      });
+      allocByChargeId.set(row.charge_item_id, list);
+    }
+  }
+
+  const recordByPeriod = Object.fromEntries(records.map((r) => [r.billing_period, r]));
+  const chargesByPeriod = new Map<string, ChargeRow[]>();
+  for (const c of chargeRows) {
+    const list = chargesByPeriod.get(c.billing_period) || [];
+    list.push(c);
+    chargesByPeriod.set(c.billing_period, list);
+  }
+
+  const months: string[] = [];
+  let period = start;
+  while (period <= end) {
+    months.push(period);
+    period = addBillingMonths(period, 1);
+  }
+
+  const chargeTypes: RentalChargeType[] = ['rent', 'water', 'electricity'];
+
+  const rows = months.map((billingPeriod) => {
+    const record = recordByPeriod[billingPeriod];
+    const periodChargeRows = chargesByPeriod.get(billingPeriod) || [];
+
+    const charges: UnitLeasePeriodChargeDetail[] = chargeTypes.map((chargeType) => {
+      const item = periodChargeRows.find((c) => c.charge_type === chargeType);
+      const fallbackDue = chargeType === 'rent'
+        ? (record?.base_rent ?? lease.baseRent ?? 0)
+        : chargeType === 'water'
+          ? (record?.water_fee ?? 0)
+          : (record?.electricity_fee ?? 0);
+      const amountDue = item?.amount_due ?? fallbackDue;
+      const amountAllocated = item?.amount_allocated ?? 0;
+      const status = deriveChargeItemStatus(amountDue, amountAllocated);
+      return {
+        chargeType,
+        amountDue,
+        amountAllocated,
+        outstanding: chargeOutstanding({ amountDue, amountAllocated }),
+        status,
+        allocations: item ? (allocByChargeId.get(item.id) || []) : [],
+      };
+    });
+
+    const baseRent = charges.find((c) => c.chargeType === 'rent')?.amountDue ?? 0;
+    const waterFee = charges.find((c) => c.chargeType === 'water')?.amountDue ?? 0;
+    const electricityFee = charges.find((c) => c.chargeType === 'electricity')?.amountDue ?? 0;
+    const total = record?.actual_amount ?? (baseRent + waterFee + electricityFee);
+    const amountReceived = charges.reduce((s, c) => s + c.amountAllocated, 0);
+
+    const allocDates = charges.flatMap((c) => c.allocations.map((a) => a.paymentDate)).filter(Boolean);
+    const receivedDate = allocDates.length
+      ? allocDates.sort().reverse()[0]
+      : (record?.paid_date || record?.paid_at?.slice(0, 10) || null);
+
+    return {
+      billingPeriod,
+      recordId: record?.id ?? null,
+      baseRent,
+      waterFee,
+      electricityFee,
+      total,
+      amountReceived,
+      receivedDate,
+      status: derivePeriodPaymentStatus(charges),
+      invoiceRef: record?.invoice_ref ?? null,
+      receiptRef: record?.receipt_ref ?? null,
+      charges,
+    };
+  });
+
+  return rows.reverse();
 }
 
 export function getRentalPaymentDetail(paymentId: number | string, userId: number) {
@@ -1262,8 +1507,11 @@ function syncLegacyRecordFromCharges(chargeItemIds: number[], userId: number, pa
       ).run(totalPaid, fullyPaid ? 'paid' : 'pending', fullyPaid ? 1 : 0, paymentDate, fullyPaid ? 1 : 0, recordId, userId);
     } else {
       db.prepare(
-        `UPDATE rental_records SET amount_paid = ?, status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
-      ).run(totalPaid, fullyPaid ? 'paid' : 'pending', recordId, userId);
+        `UPDATE rental_records SET amount_paid = ?, status = ?,
+          paid_date = CASE WHEN ? THEN paid_date ELSE NULL END,
+          paid_at = CASE WHEN ? THEN paid_at ELSE NULL END,
+          updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+      ).run(totalPaid, fullyPaid ? 'paid' : 'pending', fullyPaid ? 1 : 0, fullyPaid ? 1 : 0, recordId, userId);
     }
   }
 }
@@ -1279,4 +1527,50 @@ export function getPaymentAllocations(paymentId: number, userId: number): (Renta
     ...hydrateAllocation(r),
     charge: hydrateCharge(r),
   }));
+}
+
+/** Delete a tenant payment and reverse all allocations on billing items + legacy records. */
+export function deleteRentalPayment(paymentId: number | string, userId: number): boolean {
+  const paymentRow = db.prepare(
+    'SELECT * FROM rental_payments WHERE id = ? AND user_id = ?'
+  ).get(paymentId, userId) as PaymentRow | undefined;
+  if (!paymentRow) return false;
+
+  const allocations = db.prepare(
+    'SELECT charge_item_id, amount FROM rental_payment_allocations WHERE payment_id = ? AND user_id = ?'
+  ).all(paymentId, userId) as { charge_item_id: number; amount: number }[];
+
+  const chargeIds: number[] = [];
+  const unitIds = new Set<number>();
+
+  const run = db.transaction(() => {
+    const getCharge = db.prepare(
+      'SELECT amount_allocated, unit_id FROM rental_charge_items WHERE id = ? AND user_id = ?'
+    );
+    const updateCharge = db.prepare(
+      `UPDATE rental_charge_items SET amount_allocated = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
+    );
+    for (const a of allocations) {
+      const charge = getCharge.get(a.charge_item_id, userId) as { amount_allocated: number; unit_id: number } | undefined;
+      if (!charge) continue;
+      const next = Math.max(0, (charge.amount_allocated || 0) - a.amount);
+      updateCharge.run(next, a.charge_item_id, userId);
+      chargeIds.push(a.charge_item_id);
+      unitIds.add(charge.unit_id);
+    }
+    db.prepare('DELETE FROM rental_payments WHERE id = ? AND user_id = ?').run(paymentId, userId);
+    for (const id of chargeIds) refreshChargeItemStatus(id);
+  });
+  run();
+
+  syncLegacyRecordFromCharges(chargeIds, userId);
+
+  const note = `Payment #${paymentId} · ${formatMoney(paymentRow.amount)} · ${paymentRow.payment_date}`;
+  if (unitIds.size) {
+    for (const uid of Array.from(unitIds)) logRentalActivity(userId, uid, 'Payment Deleted 收款已刪除', note);
+  } else {
+    const units = getTenantUnits(paymentRow.tenant_id, userId);
+    if (units[0]) logRentalActivity(userId, units[0].id, 'Payment Deleted 收款已刪除', note);
+  }
+  return true;
 }

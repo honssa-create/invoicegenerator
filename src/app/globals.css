@@ -47,6 +47,27 @@
     @apply overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0;
   }
 
+  .expense-table-scroll {
+    overflow-x: scroll;
+    scrollbar-gutter: stable;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar {
+    height: 12px;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar-track {
+    @apply bg-gray-100;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-gray-300;
+  }
+
+  .expense-table-scroll::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400;
+  }
+
   .modal-overlay {
     @apply fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4;
   }
@@ -105,12 +126,19 @@
     column-count: 1 !important;
   }
 
-  /* One receipt block per sheet; allow tall content to flow across pages */
+  /*
+   * One printed page per receipt sheet. Flex + 100vh scales tall mobile
+   * screenshots to fit below the summary (Chrome avoids blank gaps from
+   * break-inside:avoid on oversized blocks).
+   */
   .expense-print-root .expense-print-sheet {
-    display: block !important;
+    display: flex !important;
+    flex-direction: column !important;
     box-sizing: border-box !important;
     width: 100% !important;
-    overflow: visible !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
@@ -121,8 +149,6 @@
     position: static !important;
     page-break-after: always !important;
     break-after: page !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-sheet:last-child {
@@ -135,40 +161,57 @@
     break-before: page !important;
   }
 
+  .expense-print-root .expense-print-keep-together {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
   .expense-print-root .expense-print-summary,
   .expense-print-root .expense-print-mini-header,
   .expense-print-root .expense-print-banner {
+    flex: 0 0 auto !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
   }
 
   .expense-print-root .expense-print-body {
-    display: block !important;
-    overflow: visible !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
     padding: 2mm 0 0 !important;
   }
 
   .expense-print-root .expense-print-figure {
-    display: block !important;
-    overflow: visible !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
     margin: 0 !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-receipt-img {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    max-height: none !important;
+    max-height: 100% !important;
     height: auto !important;
     object-fit: contain !important;
     object-position: top center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
     border-left: none !important;
     border-right: none !important;
     border-bottom: none !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
   }
 
   .expense-print-root .expense-print-details {

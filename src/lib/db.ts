@@ -103,36 +103,97 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id);
 `);
 
-// Migration: add sequential receipt numbers to the expenses table.
+// Migration: batch_id + receipt numbers (EXP-YYYYMM-XXX / EXP-YYYYMM-XXX-CC001).
 const expenseColumns = db.prepare('PRAGMA table_info(expenses)').all() as { name: string }[];
 if (!expenseColumns.some((c) => c.name === 'receipt_no')) {
   db.exec('ALTER TABLE expenses ADD COLUMN receipt_no TEXT');
 }
+if (!expenseColumns.some((c) => c.name === 'batch_id')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN batch_id TEXT');
+}
 
-// Receipt numbers use the EXP-YYYYMM-XXX format, where YYYYMM is derived from the
-// expense date. Renumber any records that are missing a number or still use an
-// older format so historical/backfilled data slots into the right month.
-const NEW_NUMBER_RE = /^EXP-\d{6}-\d{3,}$/;
+function migratePaymentCode(method: string | null | undefined): 'CC' | 'CS' | 'BT' | 'OT' {
+  const m = (method || '').toLowerCase();
+  if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
+  if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
+  if (/bank|transfer|轉帳|转账|fps|payme|wire|cheque|check/.test(m)) return 'BT';
+  return 'OT';
+}
+
+const BATCH_RE = /^EXP-\d{6}-\d{3}$/;
+const RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
+
 const numberYm = (row: { paid_date: string | null; created_at: string | null }) => {
   const src = row.paid_date && /^\d{4}-\d{2}/.test(row.paid_date) ? row.paid_date : row.created_at || '';
   const ym = src.slice(0, 7);
   return ym ? ym.replace('-', '') : new Date().toISOString().slice(0, 7).replace('-', '');
 };
 
-const numberRows = db
-  .prepare('SELECT id, user_id, receipt_no, paid_date, created_at FROM expenses')
-  .all() as { id: number; user_id: number; receipt_no: string | null; paid_date: string | null; created_at: string | null }[];
+type NumberRow = {
+  id: number;
+  user_id: number;
+  receipt_no: string | null;
+  batch_id: string | null;
+  payment_method: string | null;
+  paid_date: string | null;
+  created_at: string | null;
+};
 
-const needsNumber = numberRows.filter((r) => !r.receipt_no || !NEW_NUMBER_RE.test(r.receipt_no));
+const numberRows = db
+  .prepare(
+    'SELECT id, user_id, receipt_no, batch_id, payment_method, paid_date, created_at FROM expenses'
+  )
+  .all() as NumberRow[];
+
+const updateBoth = db.prepare('UPDATE expenses SET batch_id = ?, receipt_no = ? WHERE id = ?');
+const updateBatch = db.prepare('UPDATE expenses SET batch_id = ? WHERE id = ?');
+
+// Pass 1: new receipt format → derive batch_id from receipt prefix.
+for (const row of numberRows) {
+  if (row.batch_id || !RECEIPT_RE.test(row.receipt_no || '')) continue;
+  const batchId = row.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
+  updateBatch.run(batchId, row.id);
+  row.batch_id = batchId;
+}
+
+// Pass 2: legacy EXP-YYYYMM-XXX receipt → batch_id = old receipt, extend with payment code.
+for (const row of numberRows) {
+  if (RECEIPT_RE.test(row.receipt_no || '')) continue;
+  if (!BATCH_RE.test(row.receipt_no || '')) continue;
+  const batchId = row.receipt_no!;
+  const code = migratePaymentCode(row.payment_method);
+  const newReceipt = `${batchId}-${code}001`;
+  updateBoth.run(batchId, newReceipt, row.id);
+  row.batch_id = batchId;
+  row.receipt_no = newReceipt;
+}
+
+// Pass 3: missing / invalid — assign fresh batch + receipt numbers.
+const needsNumber = numberRows.filter(
+  (r) => !r.batch_id || !r.receipt_no || !RECEIPT_RE.test(r.receipt_no)
+);
 
 if (needsNumber.length) {
-  const counters = new Map<string, number>();
-  // Seed counters from records already using the new format.
+  const batchCounters = new Map<string, number>();
+  const receiptCounters = new Map<string, number>();
+
   for (const r of numberRows) {
-    if (r.receipt_no && NEW_NUMBER_RE.test(r.receipt_no)) {
-      const key = `${r.user_id}-${r.receipt_no.slice(4, 10)}`;
-      const serial = parseInt(r.receipt_no.slice(11), 10);
-      counters.set(key, Math.max(counters.get(key) || 0, serial));
+    const bid =
+      r.batch_id || (BATCH_RE.test(r.receipt_no || '') ? r.receipt_no : null) ||
+      (RECEIPT_RE.test(r.receipt_no || '') ? r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '') : null);
+    if (bid && BATCH_RE.test(bid)) {
+      const key = `${r.user_id}-${bid.slice(4, 10)}`;
+      batchCounters.set(key, Math.max(batchCounters.get(key) || 0, parseInt(bid.slice(11), 10)));
+    }
+    const rm = RECEIPT_RE.exec(r.receipt_no || '');
+    if (rm) {
+      const batchId = r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
+      const code = rm[1];
+      const receiptKey = `${r.user_id}-${batchId}-${code}`;
+      receiptCounters.set(
+        receiptKey,
+        Math.max(receiptCounters.get(receiptKey) || 0, parseInt(r.receipt_no!.slice(-3), 10))
+      );
     }
   }
 
@@ -146,14 +207,21 @@ if (needsNumber.length) {
       a.id - b.id
   );
 
-  const update = db.prepare('UPDATE expenses SET receipt_no = ? WHERE id = ?');
   const backfill = db.transaction(() => {
     for (const row of needsNumber) {
       const ym = numberYm(row);
-      const key = `${row.user_id}-${ym}`;
-      const next = (counters.get(key) || 0) + 1;
-      counters.set(key, next);
-      update.run(`EXP-${ym}-${String(next).padStart(3, '0')}`, row.id);
+      const batchKey = `${row.user_id}-${ym}`;
+      const batchNext = (batchCounters.get(batchKey) || 0) + 1;
+      batchCounters.set(batchKey, batchNext);
+      const batchId = `EXP-${ym}-${String(batchNext).padStart(3, '0')}`;
+
+      const code = migratePaymentCode(row.payment_method);
+      const receiptKey = `${row.user_id}-${batchId}-${code}`;
+      const receiptNext = (receiptCounters.get(receiptKey) || 0) + 1;
+      receiptCounters.set(receiptKey, receiptNext);
+      const receiptNo = `${batchId}-${code}${String(receiptNext).padStart(3, '0')}`;
+
+      updateBoth.run(batchId, receiptNo, row.id);
     }
   });
   backfill();
@@ -701,6 +769,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_rental_leases_unit ON rental_leases(unit_id);
   CREATE INDEX IF NOT EXISTS idx_rental_leases_current ON rental_leases(unit_id, is_current);
   CREATE INDEX IF NOT EXISTS idx_rental_lease_docs_lease ON rental_lease_documents(lease_id);
+
+  CREATE TABLE IF NOT EXISTS rental_document_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    template_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    payment_instructions TEXT NOT NULL DEFAULT '',
+    footer_remark TEXT NOT NULL DEFAULT '',
+    rent_invoice_note TEXT NOT NULL DEFAULT '',
+    company_json TEXT,
+    updated_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, template_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 {

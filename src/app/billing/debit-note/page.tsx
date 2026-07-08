@@ -41,6 +41,7 @@ function DebitNoteContent() {
   const [paymentInstructionsText, setPaymentInstructionsText] = useState('');
   const [footerRemark, setFooterRemark] = useState('');
   const [sending, setSending] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [sendToast, setSendToast] = useState('');
 
   useEffect(() => {
@@ -136,6 +137,22 @@ function DebitNoteContent() {
     setSendToast(data.sent ? 'Debit note sent by email ✓' : 'Logged (no email provider configured)');
   };
 
+  const saveTemplate = async () => {
+    if (!displayDoc) return;
+    setSavingTemplate(true);
+    setSendToast('');
+    const res = await fetch(`/api/rental-templates/${encodeURIComponent(paymentTemplate)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paymentInstructions: displayDoc.paymentInstructionsText,
+        footerRemark: displayDoc.footerRemark,
+      }),
+    });
+    setSavingTemplate(false);
+    setSendToast(res.ok ? 'Template saved to Templates section ✓' : 'Failed to save template');
+  };
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
   }
@@ -157,6 +174,20 @@ function DebitNoteContent() {
             ← Back
           </Link>
           <div className="flex flex-wrap gap-2">
+            <Link
+              href="/rentals/templates"
+              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+            >
+              Templates 範本
+            </Link>
+            <button
+              type="button"
+              onClick={saveTemplate}
+              disabled={savingTemplate}
+              className="px-4 py-2 border border-brand-300 text-brand-700 text-sm rounded-lg hover:bg-brand-50 disabled:opacity-50"
+            >
+              {savingTemplate ? 'Saving…' : 'Save Template 儲存範本'}
+            </button>
             <button
               type="button"
               onClick={sendDebitNote}

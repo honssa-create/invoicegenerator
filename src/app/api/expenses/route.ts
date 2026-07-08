@@ -3,7 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import {
   attachReceipts,
-  generateReceiptNumber,
+  assignExpenseNumbers,
   normalizeNumber,
   receiptPathsFromBody,
 } from '@/lib/expense-server';
@@ -78,19 +78,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
     }
 
-    const receiptNo = generateReceiptNumber(ownerId, body.paid_date?.trim() || null);
+    const { batchId, receiptNo } = assignExpenseNumbers(
+      ownerId,
+      body.paid_date?.trim() || null,
+      body.payment_method?.trim() || null,
+    );
 
     const create = db.transaction(() => {
       const result = db
         .prepare(
           `INSERT INTO expenses
-            (user_id, created_by_user_id, receipt_no, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
           session.userId,
           receiptNo,
+          batchId,
           category,
           body.merchant?.trim() || null,
           body.supplier_input?.trim() || null,

@@ -1,19 +1,42 @@
 import type { DebitNoteStyleTemplate } from '@/lib/debit-note-style';
+import {
+  DEBIT_NOTE_COMPANY_PROFILES,
+  buildDebitNotePaymentInstructionsText,
+  type DebitNoteCompanyId,
+} from '@/lib/rentals';
 
 function escCss(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+function escHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 /** Self-contained HTML document for editing debit note styles offline (opens in Word or browser). */
-export function buildDebitNoteStyleTemplateHtml(style: DebitNoteStyleTemplate): string {
+export function buildDebitNoteStyleTemplateHtml(
+  style: DebitNoteStyleTemplate,
+  companyKey: DebitNoteCompanyId = 'label',
+): string {
   const s = style;
+  const company = DEBIT_NOTE_COMPANY_PROFILES[companyKey];
+  const paymentText = buildDebitNotePaymentInstructionsText(
+    companyKey,
+    'DN-202607-0001',
+    '2026年7月15日',
+  );
+  const premises = companyKey === 'label' ? '204' : '213A';
   return `<!DOCTYPE html>
 <html lang="zh-Hant" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">
 <head>
   <meta charset="UTF-8" />
   <meta name="ProgId" content="Word.Document" />
   <meta name="Generator" content="InvoiceFlow" />
-  <title>Debit Note Style Template — 繳費通知單樣式範本</title>
+  <title>Debit Note Style — ${escHtml(company.nameEn)}</title>
   <!-- Edit the :root { } block below, then re-upload this file to apply styles -->
   <style>
     :root {
@@ -92,22 +115,22 @@ export function buildDebitNoteStyleTemplateHtml(style: DebitNoteStyleTemplate): 
 </head>
 <body>
   <div class="edit-banner">
-    <strong>Debit Note Style Template 繳費通知單樣式範本</strong>
+    <strong>Debit Note Style — ${escHtml(company.nameEn)}</strong>
     Edit the <code>:root</code> variables in &lt;style&gt; above · Open in Word or browser · Upload back to apply.
   </div>
   <main class="preview-page">
     <div class="formal-debit-note">
       <header class="dn-header">
-        <p class="dn-company-zh">鴻宇有限公司</p>
-        <p class="dn-company-en">HONOUR ELITE LIMITED</p>
-        <p class="dn-company-meta">(公司地址) · (電話) · (稅務編號)</p>
+        <p class="dn-company-zh">${escHtml(company.nameZh)}</p>
+        <p class="dn-company-en">${escHtml(company.nameEn)}</p>
+        <p class="dn-company-meta">${escHtml(company.address)} · ${escHtml(company.phone)} · ${escHtml(company.taxId)}</p>
         <h1 class="dn-title">繳 費 通 知 單</h1>
         <p class="dn-subtitle">DEBIT NOTE</p>
       </header>
       <div class="dn-meta">
         <div class="dn-meta-left">
           <p><span class="dn-label">致 (To):</span> <span class="dn-value-strong">Tenant</span></p>
-          <p><span class="dn-label">物業 (Premises):</span> 213A</p>
+          <p><span class="dn-label">物業 (Premises):</span> ${escHtml(premises)}</p>
         </div>
         <div class="dn-meta-right">
           <p><span class="dn-label">單據編號 (Note No.):</span> <span class="dn-value-strong">DN-202607-0001</span></p>
@@ -150,22 +173,7 @@ export function buildDebitNoteStyleTemplateHtml(style: DebitNoteStyleTemplate): 
       </div>
       <footer class="dn-footer">
         <h3 class="dn-footer-title">【底部：付款指示與備註 Payment Instructions &amp; Remarks】</h3>
-        <pre class="dn-footer-instructions">1. 敬請於到期日 (發單日7日內, 2026年7月15日) 或之前繳清上述款項。
-2.
-We accept both cheque payment and bank transfer
-(Please remark the Note no. DN-202607-0001 on the cheque or in the bank transfer note.)
-
--
-
-Crossed cheque made payable to "Honour Elite Limited"
-
--
-
-Bank transfer detail:
-
--
-
--</pre>
+        <pre class="dn-footer-instructions">${escHtml(paymentText)}</pre>
       </footer>
     </div>
   </main>
@@ -175,27 +183,26 @@ Bank transfer detail:
 
 export type DebitNoteTemplateDownloadFormat = 'doc' | 'html';
 
-const DOWNLOAD_NAMES: Record<DebitNoteTemplateDownloadFormat, string> = {
-  doc: 'Debit-Note-Style-Template.doc',
-  html: 'Debit-Note-Style-Template.html',
-};
-
-const DOWNLOAD_MIME: Record<DebitNoteTemplateDownloadFormat, string> = {
-  doc: 'application/msword',
-  html: 'text/html;charset=utf-8',
+const COMPANY_FILE_SLUG: Record<DebitNoteCompanyId, string> = {
+  label: 'Honour-Label',
+  elite: 'Honour-Elite',
 };
 
 /** Trigger browser download of editable style template (Word-compatible .doc or .html). */
 export function downloadDebitNoteStyleTemplate(
   style: DebitNoteStyleTemplate,
+  companyKey: DebitNoteCompanyId,
   format: DebitNoteTemplateDownloadFormat = 'doc',
 ): void {
-  const html = buildDebitNoteStyleTemplateHtml(style);
-  const blob = new Blob(['\ufeff', html], { type: DOWNLOAD_MIME[format] });
+  const slug = COMPANY_FILE_SLUG[companyKey];
+  const ext = format === 'doc' ? 'doc' : 'html';
+  const mime = format === 'doc' ? 'application/msword' : 'text/html;charset=utf-8';
+  const html = buildDebitNoteStyleTemplateHtml(style, companyKey);
+  const blob = new Blob(['\ufeff', html], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = DOWNLOAD_NAMES[format];
+  a.download = `Debit-Note-Style-${slug}.${ext}`;
   a.click();
   URL.revokeObjectURL(url);
 }

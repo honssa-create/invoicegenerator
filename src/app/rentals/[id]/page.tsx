@@ -45,7 +45,10 @@ import {
   utilityLineLabel,
   calcElectricityFeeForFormula,
   calcWaterFeeFromMeter,
+  DEBIT_NOTE_COMPANY_CHOICES,
   debitNoteCompanyForUnit,
+  resolveUnitBillingCompany,
+  type DebitNoteCompanyId,
   electricityFormulaForUnit,
   formatBillingPeriodLabel,
   meterDataFromInputs,
@@ -180,6 +183,7 @@ function RentalDetailInner() {
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
   const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_proxy');
+  const [billingCompany, setBillingCompany] = useState<DebitNoteCompanyId | ''>('');
   const [leaseStartDate, setLeaseStartDate] = useState('');
   const [leaseEndDate, setLeaseEndDate] = useState('');
   const [depositAmount, setDepositAmount] = useState('');
@@ -293,6 +297,11 @@ function RentalDetailInner() {
           setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
           setBaseRent(String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)));
           setUtilityBillingMode(d.unit.utilityBillingMode || 'company_proxy');
+          setBillingCompany(
+            d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
+              ? d.unit.billingCompany
+              : '',
+          );
           setLeaseStartDate(useLease
             ? toFormDate(profileLease.leaseStartDate)
             : (d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : ''));
@@ -544,6 +553,7 @@ function RentalDetailInner() {
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
         utilityBillingMode,
+        billingCompany: billingCompany || null,
         leaseStartDate: fromFormDate(leaseStartDate),
         leaseEndDate: fromFormDate(leaseEndDate),
         depositAmount: Number(depositAmount) || 0,
@@ -1033,6 +1043,26 @@ function RentalDetailInner() {
             </div>
           </div>
         </div>
+        {!readOnly && (
+        <div className="mt-6 pt-5 border-t border-gray-100">
+          <label className="block text-xs font-medium text-gray-500 mb-2">Debit note company 繳費通知單公司</label>
+          <p className="text-xs text-gray-400 mb-3">
+            Select which company heading and template apply to this unit. Auto uses unit name rules (204/205 → Label; 213A/213B/214/Stock → Elite).
+          </p>
+          <select
+            className={fieldCls}
+            value={billingCompany}
+            onChange={(e) => setBillingCompany(e.target.value as DebitNoteCompanyId | '')}
+          >
+            <option value="">
+              Auto — {DEBIT_NOTE_COMPANY_CHOICES.find((c) => c.id === resolveUnitBillingCompany({ unitName: data?.unit.unitName || '', billingCompany: null }))?.label}
+            </option>
+            {DEBIT_NOTE_COMPANY_CHOICES.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+        )}
         {!readOnly && (
         <div className="mt-6 pt-5 border-t border-gray-100">
           <label className="block text-xs font-medium text-gray-500 mb-2">水電費安排 Utility Billing</label>

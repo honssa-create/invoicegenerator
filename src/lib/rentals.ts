@@ -39,6 +39,8 @@ export interface RentalUnit {
   autoSendReceiptEmail: boolean;
   automationEnabled: boolean;
   utilityBillingMode: UtilityBillingMode;
+  /** Honour Label vs Honour Elite debit note company; null = auto from unit name. */
+  billingCompany: DebitNoteCompanyId | null;
   address: string;
   created_at: string;
   updated_at: string;
@@ -894,7 +896,7 @@ export type DebitNoteMode = 'grouped' | 'single';
 
 export interface RentPaymentNoticeMatrix {
   tenant: RentalTenant;
-  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode'>[];
+  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode' | 'billingCompany'>[];
   /** Target billing month (YYYY-MM). Alias: targetPeriod. */
   period: string;
   targetPeriod: string;
@@ -980,16 +982,43 @@ export function debitNoteCompanyForUnit(unitName: string): DebitNoteCompanyId {
   return 'label';
 }
 
+export function resolveUnitBillingCompany(unit: {
+  unitName: string;
+  billingCompany?: DebitNoteCompanyId | null;
+}): DebitNoteCompanyId {
+  if (unit.billingCompany === 'label' || unit.billingCompany === 'elite') {
+    return unit.billingCompany;
+  }
+  return debitNoteCompanyForUnit(unit.unitName);
+}
+
 export function resolveDebitNoteCompanyIds(unitNames: string[]): DebitNoteCompanyId[] {
   const ids = new Set(unitNames.map(debitNoteCompanyForUnit));
   const order: DebitNoteCompanyId[] = ['label', 'elite'];
   return order.filter((id) => ids.has(id));
 }
 
-export function defaultPaymentTemplateForUnits(unitNames: string[]): DebitNotePaymentTemplateId {
-  const ids = resolveDebitNoteCompanyIds(unitNames);
+export function resolveDebitNoteCompanyIdsFromUnits(
+  units: { unitName: string; billingCompany?: DebitNoteCompanyId | null }[],
+): DebitNoteCompanyId[] {
+  const ids = new Set(units.map(resolveUnitBillingCompany));
+  const order: DebitNoteCompanyId[] = ['label', 'elite'];
+  return order.filter((id) => ids.has(id));
+}
+
+export function defaultPaymentTemplateForUnits(
+  units: { unitName: string; billingCompany?: DebitNoteCompanyId | null }[] | string[],
+): DebitNotePaymentTemplateId {
+  const ids = Array.isArray(units) && units.length && typeof units[0] === 'string'
+    ? resolveDebitNoteCompanyIds(units as string[])
+    : resolveDebitNoteCompanyIdsFromUnits(units as { unitName: string; billingCompany?: DebitNoteCompanyId | null }[]);
   return ids.length === 1 ? ids[0] : 'label';
 }
+
+export const DEBIT_NOTE_COMPANY_CHOICES: { id: DebitNoteCompanyId; label: string }[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標' },
+  { id: 'elite', label: 'Honour Elite Limited 鴻宇' },
+];
 
 /** Company header block for formal debit notes. */
 export interface DebitNoteCompanyInfo {
@@ -1131,7 +1160,7 @@ export interface FormalDebitNote {
   paymentInstructionsText: string;
   paymentTemplateId: DebitNotePaymentTemplateId;
   companyIds: DebitNoteCompanyId[];
-  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode'>[];
+  units: Pick<RentalUnit, 'id' | 'unitName' | 'utilityBillingMode' | 'billingCompany'>[];
 }
 
 /** Lease row on tenant profile — all units this tenant has occupied. */

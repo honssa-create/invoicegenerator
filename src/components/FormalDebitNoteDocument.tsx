@@ -1,21 +1,24 @@
 'use client';
 
 import '@/styles/formal-debit-note.css';
+import { debitNoteStyleToCssVars, type DebitNoteStyleTemplate } from '@/lib/debit-note-style';
 import { formatMoney, type FormalDebitNote } from '@/lib/rentals';
 
 interface Props {
   doc: FormalDebitNote;
+  styleTemplate?: DebitNoteStyleTemplate;
 }
 
 function moneyCell(amount: number) {
   return new Intl.NumberFormat('en-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 }
 
-export default function FormalDebitNoteDocument({ doc }: Props) {
+export default function FormalDebitNoteDocument({ doc, styleTemplate }: Props) {
   const { company } = doc;
+  const styleVars = styleTemplate ? debitNoteStyleToCssVars(styleTemplate) : undefined;
 
   return (
-    <div className="formal-debit-note a4-page-content">
+    <div className="formal-debit-note a4-page-content" style={styleVars}>
       <header className="dn-header">
         <p className="dn-company-zh">{company.nameZh}</p>
         <p className="dn-company-en">{company.nameEn}</p>

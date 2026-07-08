@@ -3,7 +3,10 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
-import DebitNoteNotesTemplateEditor, { useDebitNoteNotesTemplate } from '@/components/DebitNoteNotesTemplateEditor';
+import DebitNoteNotesTemplateEditor, {
+  type NotesDraft,
+  useDebitNoteNotesTemplate,
+} from '@/components/DebitNoteNotesTemplateEditor';
 import DebitNoteTemplateEditor, { useDebitNoteStyleTemplate } from '@/components/DebitNoteTemplateEditor';
 import FormalDebitNoteDocument from '@/components/FormalDebitNoteDocument';
 import { useAuth } from '@/components/AuthProvider';
@@ -11,13 +14,39 @@ import { isSectionReadOnly } from '@/lib/permissions';
 import {
   DEBIT_NOTE_COMPANY_CHOICES,
   buildDebitNotePaymentInstructionsText,
+  renderDebitNoteFooterRemark,
   resolveDebitNoteCompanyHeader,
   type DebitNoteCompanyId,
   type FormalDebitNote,
 } from '@/lib/rentals';
 
-function makeSampleDoc(companyKey: DebitNoteCompanyId): FormalDebitNote {
+function buildNotesPreviewDoc(companyKey: DebitNoteCompanyId, draft: NotesDraft): FormalDebitNote {
   const unitName = companyKey === 'label' ? '204' : '213A';
+  const header = resolveDebitNoteCompanyHeader([companyKey]);
+  const company = {
+    ...header,
+    nameZh: draft.company.nameZh?.trim() || header.nameZh,
+    nameEn: draft.company.nameEn?.trim() || header.nameEn,
+    address: draft.company.address?.trim() || '',
+    phone: draft.company.phone?.trim() || '',
+    taxId: draft.company.taxId?.trim() || '',
+    chequePayee: draft.company.chequePayee?.trim() || header.chequePayee,
+  };
+  const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+    companyKey,
+    'DN-202607-0001',
+    '2026年7月15日',
+    null,
+    draft.paymentInstructions,
+    draft.company,
+  );
+  const footerRemark = renderDebitNoteFooterRemark(
+    draft.footerRemark,
+    '2026-07',
+    '15/07/2026',
+    [],
+    1500,
+  );
   return {
     noteNo: 'DN-202607-0001',
     issuedDate: '2026-07-08',
@@ -31,30 +60,26 @@ function makeSampleDoc(companyKey: DebitNoteCompanyId): FormalDebitNote {
       phone: '',
       email: '',
       notes: '',
-      utilityBillingMode: 'company_proxy',
+      utilityBillingMode: 'company_shared_meter',
       created_at: '',
       updated_at: '',
     },
     premises: unitName,
     targetPeriod: '2026-07',
     targetPeriodLabel: '07/2026',
-    company: resolveDebitNoteCompanyHeader([companyKey]),
+    company,
     currentCharges: [],
     currentSubtotal: 0,
     arrearRows: [],
     settledPeriodsNote: null,
     totalArrears: 0,
-    grandTotal: 0,
-    footerRemark: '請於 15/07/2026前繳交 本期費用，總計 HK$0.00',
-    paymentInstructions: [],
-    paymentInstructionsText: buildDebitNotePaymentInstructionsText(
-      companyKey,
-      'DN-202607-0001',
-      '2026年7月15日',
-    ),
+    grandTotal: 1500,
+    footerRemark,
+    paymentInstructions: paymentInstructionsText.split('\n').filter((l) => l !== ''),
+    paymentInstructionsText,
     paymentTemplateId: companyKey,
     companyIds: [companyKey],
-    units: [{ id: 0, unitName, utilityBillingMode: 'company_proxy', billingCompany: companyKey }],
+    units: [{ id: 0, unitName, utilityBillingMode: 'company_shared_meter', billingCompany: companyKey }],
   };
 }
 
@@ -93,7 +118,11 @@ function LayoutSection({
   readOnly: boolean;
 }) {
   const { style, setStyle, loading, saving, saveMessage, save } = useDebitNoteStyleTemplate(companyKey, readOnly);
-  const sampleDoc = useMemo(() => makeSampleDoc(companyKey), [companyKey]);
+  const { draft: notesDraft, loading: notesLoading } = useDebitNoteNotesTemplate(companyKey, true);
+  const sampleDoc = useMemo(() => {
+    if (notesLoading) return buildNotesPreviewDoc(companyKey, { paymentInstructions: '', footerRemark: '', company: {} });
+    return buildNotesPreviewDoc(companyKey, notesDraft);
+  }, [companyKey, notesDraft, notesLoading]);
 
   if (loading) {
     return <p className="text-sm text-gray-400 py-4">Loading layout template…</p>;
@@ -131,16 +160,8 @@ function NotesSection({
   readOnly: boolean;
 }) {
   const { draft, setDraft, loading, saving, saveMessage, save } = useDebitNoteNotesTemplate(companyKey, readOnly);
-  const previewText = useMemo(
-    () => buildDebitNotePaymentInstructionsText(
-      companyKey,
-      'DN-202607-0001',
-      '2026年7月15日',
-      null,
-      draft.paymentInstructions,
-    ),
-    [companyKey, draft.paymentInstructions],
-  );
+  const { style, loading: styleLoading } = useDebitNoteStyleTemplate(companyKey, true);
+  const previewDoc = useMemo(() => buildNotesPreviewDoc(companyKey, draft), [companyKey, draft]);
 
   if (loading) {
     return <p className="text-sm text-gray-400 py-4">Loading notes template…</p>;
@@ -157,19 +178,18 @@ function NotesSection({
         saving={saving}
         saveMessage={saveMessage}
       />
-      <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
+      <div className="mt-6">
         <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">Preview 預覽</p>
-        <p className="text-sm font-semibold text-gray-800 mb-1">
-          {draft.company.nameZh} · {draft.company.nameEn}
-        </p>
-        <p className="text-xs text-gray-500 mb-3">
-          {[draft.company.address, draft.company.phone, draft.company.taxId].filter(Boolean).join(' · ')}
-        </p>
-        <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed bg-gray-50 border border-gray-100 rounded-lg p-4">
-          {previewText}
-        </pre>
-        <p className="text-xs text-gray-500 mt-3 font-medium">Footer 底部備註</p>
-        <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans mt-1">{draft.footerRemark}</pre>
+        {styleLoading ? (
+          <p className="text-sm text-gray-400 py-4">Loading preview…</p>
+        ) : (
+          <main
+            className="a4-page mx-auto shadow print:shadow-none"
+            style={{ padding: style.pagePadding }}
+          >
+            <FormalDebitNoteDocument doc={previewDoc} styleTemplate={style} />
+          </main>
+        )}
       </div>
     </>
   );

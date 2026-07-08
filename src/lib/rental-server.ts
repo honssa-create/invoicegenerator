@@ -2,7 +2,7 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
-import { getRentalTemplate } from './rental-template-server';
+import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
 import {
   allocateChargeItemsDirect,
   ensureUnitTenantLink,
@@ -52,13 +52,14 @@ import {
   billingPeriodAfterLeaseEnd,
   billingPeriodWithinLease,
   nextBillingPeriod,
+  normalizeUtilityBillingMode,
+  resolveElectricityFormula,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
   CHARGE_DISPLAY_ORDER,
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
-  electricityFormulaForUnit,
   calcElectricityFeeForFormula,
   unitHasWaterMeterFormula,
   calcWaterFeeFromMeter,
@@ -141,9 +142,7 @@ function hydrateUnit(row: UnitRow): RentalUnit {
     leaseStartDate: row.lease_start_date || '', leaseEndDate: row.lease_end_date || '',
     dueDateDay: row.due_date_day || 1, autoSendReceiptEmail: Boolean(row.auto_send_receipt_email),
     automationEnabled: Boolean(row.automation_enabled),
-    utilityBillingMode: (row.utility_billing_mode === 'tenant_pays' || row.utility_billing_mode === 'company_proxy'
-      ? row.utility_billing_mode
-      : 'company_proxy') as RentalUnit['utilityBillingMode'],
+    utilityBillingMode: normalizeUtilityBillingMode(row.utility_billing_mode),
     billingCompany: row.billing_company === 'label' || row.billing_company === 'elite'
       ? row.billing_company
       : null,
@@ -294,7 +293,7 @@ export function createRentalUnit(userId: number, input: Partial<RentalUnit>): Re
     normalizeStoredDate(input.leaseEndDate) || null,
     Number(input.dueDateDay) || 1, input.autoSendReceiptEmail ? 1 : 0,
     input.automationEnabled === false ? 0 : 1,
-    input.utilityBillingMode === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
+    normalizeUtilityBillingMode(input.utilityBillingMode),
   );
   const unit = getRentalUnit(Number(res.lastInsertRowid), userId)!;
   logRentalActivity(userId, unit.id, 'Unit created');
@@ -345,7 +344,7 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
     (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
     (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
-    (input.utilityBillingMode ?? existing.utilityBillingMode) === 'tenant_pays' ? 'tenant_pays' : 'company_proxy',
+    normalizeUtilityBillingMode(input.utilityBillingMode ?? existing.utilityBillingMode),
     (input.address ?? existing.address)?.trim() || null,
     input.billingCompany !== undefined
       ? (input.billingCompany === 'label' || input.billingCompany === 'elite' ? input.billingCompany : null)
@@ -493,8 +492,13 @@ export function updateRentRecordUtilities(
   }
   let water = Number(input.waterFee ?? existing.waterFee) || 0;
   let elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
-  const elecFormula = unit ? electricityFormulaForUnit(unit.unitName) : null;
-  const waterFormula = unit ? unitHasWaterMeterFormula(unit.unitName) : false;
+  const billingMode = unit ? resolveUtilityBillingMode(unit.utilityBillingMode) : 'company_shared_meter';
+  const elecFormula = unit && billingMode !== 'tenant_pays'
+    ? resolveElectricityFormula(unit.unitName, billingMode)
+    : null;
+  const waterFormula = unit && billingMode !== 'tenant_pays'
+    ? unitHasWaterMeterFormula(unit.unitName)
+    : false;
   const meter = input.electricityMeter !== undefined ? input.electricityMeter : existing.electricityMeter;
   const waterMeter = input.waterMeter !== undefined ? input.waterMeter : existing.waterMeter;
   if (elecFormula && meter) {
@@ -783,6 +787,7 @@ export async function sendRentInvoice(
       dueDateChinese,
       input.paymentRemark,
       savedTpl?.paymentInstructions,
+      resolveCompanyFromTemplate(templateId, savedTpl),
     );
     const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
     email = await sendEmail(

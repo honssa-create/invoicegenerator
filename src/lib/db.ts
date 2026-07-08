@@ -191,8 +191,7 @@ if (needsNumber.length) {
     const rm = RECEIPT_RE.exec(r.receipt_no || '');
     if (rm) {
       const batchId = r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
-      const code = rm[1];
-      const receiptKey = `${r.user_id}-${batchId}-${code}`;
+      const receiptKey = `${r.user_id}-${batchId}`;
       receiptCounters.set(
         receiptKey,
         Math.max(receiptCounters.get(receiptKey) || 0, parseInt(r.receipt_no!.slice(-3), 10))
@@ -219,7 +218,7 @@ if (needsNumber.length) {
       const batchId = `EXP-${ym}-${String(batchNext).padStart(3, '0')}`;
 
       const code = migratePaymentCode(row.payment_method);
-      const receiptKey = `${row.user_id}-${batchId}-${code}`;
+      const receiptKey = `${row.user_id}-${batchId}`;
       const receiptNext = (receiptCounters.get(receiptKey) || 0) + 1;
       receiptCounters.set(receiptKey, receiptNext);
       const receiptNo = `${batchId}-${code}${String(receiptNext).padStart(3, '0')}`;
@@ -851,6 +850,14 @@ db.exec(`
   if (!ruCols.includes('billing_company')) {
     try { db.exec('ALTER TABLE rental_units ADD COLUMN billing_company TEXT'); } catch { /* exists */ }
   }
+  try {
+    db.exec(`UPDATE rental_units SET utility_billing_mode = 'company_shared_meter' WHERE utility_billing_mode = 'company_proxy'`);
+    db.exec(`UPDATE rental_tenants SET utility_billing_mode = 'company_shared_meter' WHERE utility_billing_mode = 'company_proxy'`);
+    db.exec(`
+      UPDATE rental_units SET utility_billing_mode = 'company_sub_meter'
+      WHERE LOWER(TRIM(unit_name)) IN ('stock room 1', 'stock room 2')
+    `);
+  } catch { /* migration */ }
 }
 
 // Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.

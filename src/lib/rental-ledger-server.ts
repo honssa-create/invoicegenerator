@@ -54,6 +54,7 @@ import {
   type UnitLeasePeriodChargeDetail,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
+  normalizeUtilityBillingMode,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
 import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
@@ -96,9 +97,6 @@ interface AllocationRow {
   amount: number; created_at: string;
 }
 
-function normalizeUtilityBillingMode(value: string | null | undefined): UtilityBillingMode {
-  return value === 'tenant_pays' ? 'tenant_pays' : 'company_proxy';
-}
 
 function hydrateTenant(row: TenantRow, unitCount = 0): RentalTenant {
   return {
@@ -848,6 +846,7 @@ export function buildFormalDebitNote(
     dueDateChinese,
     options?.paymentRemark,
     savedTemplate?.paymentInstructions,
+    companyOverride,
   );
   const paymentInstructions = paymentInstructionsText.split('\n').filter((l) => l !== '');
   const footerRemark = options?.footerRemark ?? renderDebitNoteFooterRemark(

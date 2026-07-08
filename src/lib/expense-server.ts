@@ -62,7 +62,40 @@ export function getLatestBatchId(userId: number, expenseDate?: string | null): s
   return `${prefix}${String(maxSerial).padStart(3, '0')}`;
 }
 
-/** Receipt no: {batchId}-{CC|CS|BT|OT}NNN — serial per batch + payment code. */
+/** Parse trailing 3-digit serial from a full receipt number. */
+export function parseReceiptSerial(receiptNo: string | null | undefined): number | null {
+  const m = EXPENSE_RECEIPT_RE.exec(receiptNo || '');
+  if (!m) return null;
+  return parseInt(receiptNo!.slice(-3), 10);
+}
+
+function maxReceiptSerialInBatch(
+  userId: number,
+  batchId: string,
+  excludeExpenseId?: number,
+): number {
+  const escaped = batchId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${escaped}-(CC|CS|BT|OT)(\\d{3})$`);
+  const rows = db
+    .prepare(
+      excludeExpenseId != null
+        ? 'SELECT receipt_no FROM expenses WHERE user_id = ? AND batch_id = ? AND id != ?'
+        : 'SELECT receipt_no FROM expenses WHERE user_id = ? AND batch_id = ?',
+    )
+    .all(
+      ...(excludeExpenseId != null
+        ? [userId, batchId, excludeExpenseId]
+        : [userId, batchId]),
+    ) as { receipt_no: string | null }[];
+  let max = 0;
+  for (const r of rows) {
+    const m = re.exec(r.receipt_no || '');
+    if (m) max = Math.max(max, parseInt(m[2], 10));
+  }
+  return max;
+}
+
+/** Receipt no: {batchId}-{CC|CS|BT|OT}NNN — last 3 digits serial per batch (all payment codes). */
 export function generateReceiptNumber(
   userId: number,
   batchId: string,
@@ -70,25 +103,8 @@ export function generateReceiptNumber(
   excludeExpenseId?: number,
 ): string {
   const code = paymentMethodCode(paymentMethod);
-  const prefix = `${batchId}-${code}`;
-  const rows = db
-    .prepare(
-      excludeExpenseId != null
-        ? 'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ? AND id != ?'
-        : 'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?'
-    )
-    .all(
-      ...(excludeExpenseId != null
-        ? [userId, `${prefix}%`, excludeExpenseId]
-        : [userId, `${prefix}%`]),
-    ) as { receipt_no: string | null }[];
-  let max = 0;
-  const re = new RegExp(`^${batchId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-${code}(\\d{3})$`);
-  for (const r of rows) {
-    const m = re.exec(r.receipt_no || '');
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return `${batchId}-${code}${String(max + 1).padStart(3, '0')}`;
+  const next = maxReceiptSerialInBatch(userId, batchId, excludeExpenseId) + 1;
+  return `${batchId}-${code}${String(next).padStart(3, '0')}`;
 }
 
 export interface AssignExpenseNumbersOptions {
@@ -116,13 +132,21 @@ export function assignExpenseNumbers(
   return { batchId, receiptNo };
 }
 
-/** Re-issue receipt suffix when payment method changes but batch stays the same. */
+/** Re-issue receipt when payment method changes — keeps the same 3-digit serial. */
 export function reissueReceiptNumber(
   userId: number,
   expenseId: number,
   batchId: string,
   paymentMethod: string | null | undefined,
 ): string {
+  const row = db
+    .prepare('SELECT receipt_no FROM expenses WHERE id = ? AND user_id = ?')
+    .get(expenseId, userId) as { receipt_no: string | null } | undefined;
+  const code = paymentMethodCode(paymentMethod);
+  const serial = parseReceiptSerial(row?.receipt_no);
+  if (serial != null) {
+    return `${batchId}-${code}${String(serial).padStart(3, '0')}`;
+  }
   return generateReceiptNumber(userId, batchId, paymentMethod, expenseId);
 }
 

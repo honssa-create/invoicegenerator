@@ -1,6 +1,7 @@
 import type { RentalDocumentTemplate } from '@/lib/rental-templates';
 import {
   DEBIT_NOTE_COMPANY_PROFILES,
+  formatDebitNoteCompanyMeta,
   type DebitNoteCompanyId,
   type DebitNoteCompanyProfile,
 } from '@/lib/rentals';

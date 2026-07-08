@@ -2,6 +2,7 @@ import type { DebitNoteStyleTemplate } from '@/lib/debit-note-style';
 import {
   DEBIT_NOTE_COMPANY_PROFILES,
   buildDebitNotePaymentInstructionsText,
+  formatDebitNoteCompanyMeta,
   type DebitNoteCompanyId,
 } from '@/lib/rentals';
 
@@ -30,6 +31,7 @@ export function buildDebitNoteStyleTemplateHtml(
     '2026年7月15日',
   );
   const premises = companyKey === 'label' ? '204' : '213A';
+  const companyMeta = formatDebitNoteCompanyMeta(company);
   return `<!DOCTYPE html>
 <html lang="zh-Hant" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">
 <head>
@@ -123,7 +125,7 @@ export function buildDebitNoteStyleTemplateHtml(
       <header class="dn-header">
         <p class="dn-company-zh">${escHtml(company.nameZh)}</p>
         <p class="dn-company-en">${escHtml(company.nameEn)}</p>
-        <p class="dn-company-meta">${escHtml(company.address)} · ${escHtml(company.phone)} · ${escHtml(company.taxId)}</p>
+        ${companyMeta ? `<p class="dn-company-meta">${escHtml(companyMeta)}</p>` : ''}
         <h1 class="dn-title">繳 費 通 知 單</h1>
         <p class="dn-subtitle">DEBIT NOTE</p>
       </header>
@@ -139,7 +141,7 @@ export function buildDebitNoteStyleTemplateHtml(
         </div>
       </div>
       <section class="dn-section">
-        <h2 class="dn-section-title">【第一部份：本期新增費用 (Current Period Charges: 07/2026)】</h2>
+        <h2 class="dn-section-title">本期新增費用 (Current Period Charges: 07/2026)</h2>
         <table class="dn-table">
           <thead>
             <tr>
@@ -172,7 +174,7 @@ export function buildDebitNoteStyleTemplateHtml(
         </table>
       </div>
       <footer class="dn-footer">
-        <h3 class="dn-footer-title">【底部：付款指示與備註 Payment Instructions &amp; Remarks】</h3>
+        <h3 class="dn-footer-title">付款指示與備註 Payment Instructions &amp; Remarks</h3>
         <pre class="dn-footer-instructions">${escHtml(paymentText)}</pre>
       </footer>
     </div>

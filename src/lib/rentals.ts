@@ -955,21 +955,35 @@ export const DEBIT_NOTE_COMPANY_PROFILES: Record<DebitNoteCompanyId, DebitNoteCo
     id: 'label',
     nameZh: '鴻宇商標有限公司',
     nameEn: 'HONOUR LABEL LIMITED',
-    address: '(公司地址)',
-    phone: '(電話)',
-    taxId: '(稅務編號)',
+    address: '',
+    phone: '',
+    taxId: '',
     chequePayee: 'Honour Label Limited',
   },
   elite: {
     id: 'elite',
     nameZh: '鴻宇有限公司',
     nameEn: 'HONOUR ELITE LIMITED',
-    address: '(公司地址)',
-    phone: '(電話)',
-    taxId: '(稅務編號)',
+    address: '',
+    phone: '',
+    taxId: '',
     chequePayee: 'Honour Elite Limited',
   },
 };
+
+const DEBIT_NOTE_META_PLACEHOLDERS = new Set(['(公司地址)', '(電話)', '(稅務編號)']);
+
+/** Company address / phone / tax line — omits blanks and legacy placeholders. */
+export function formatDebitNoteCompanyMeta(company: {
+  address?: string | null;
+  phone?: string | null;
+  taxId?: string | null;
+}): string {
+  return [company.address, company.phone, company.taxId]
+    .map((s) => s?.trim())
+    .filter((s): s is string => Boolean(s) && !DEBIT_NOTE_META_PLACEHOLDERS.has(s as string))
+    .join(' · ');
+}
 
 /** Honour Label: 204, 205. Honour Elite: 213A, Stock Rooms, 214. */
 export function debitNoteCompanyForUnit(unitName: string): DebitNoteCompanyId {
@@ -1080,8 +1094,9 @@ export function buildDebitNotePaymentInstructionsText(
   dueDateChinese: string,
   manualRemark?: string | null,
   customBody?: string | null,
+  companyOverride?: Partial<DebitNoteCompanyProfile> | null,
 ): string {
-  const profile = DEBIT_NOTE_COMPANY_PROFILES[templateId];
+  const profile = { ...DEBIT_NOTE_COMPANY_PROFILES[templateId], ...companyOverride };
   const bankLines = templateId === 'label'
     ? '374-279610-001\nHONOUR LABEL LIMITED\nHANG SENG BANK (bank code : 024)'
     : '-\n\n-';

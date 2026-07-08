@@ -848,6 +848,7 @@ export function buildFormalDebitNote(
     dueDateChinese,
     options?.paymentRemark,
     savedTemplate?.paymentInstructions,
+    companyOverride,
   );
   const paymentInstructions = paymentInstructionsText.split('\n').filter((l) => l !== '');
   const footerRemark = options?.footerRemark ?? renderDebitNoteFooterRemark(

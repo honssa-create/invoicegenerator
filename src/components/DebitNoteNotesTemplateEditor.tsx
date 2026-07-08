@@ -12,11 +12,32 @@ import {
 import type { RentalDocumentTemplate } from '@/lib/rental-templates';
 import { DEFAULT_FOOTER_REMARK_TEMPLATE } from '@/lib/rental-templates';
 
-type NotesDraft = {
+const META_PLACEHOLDERS = new Set(['(公司地址)', '(電話)', '(稅務編號)']);
+
+export type NotesDraft = {
   paymentInstructions: string;
   footerRemark: string;
   company: Partial<DebitNoteCompanyProfile>;
 };
+
+function cleanMetaField(value: string | undefined | null): string {
+  const trimmed = value?.trim() || '';
+  return META_PLACEHOLDERS.has(trimmed) ? '' : trimmed;
+}
+
+function normalizeCompany(
+  companyKey: DebitNoteCompanyId,
+  company: Partial<DebitNoteCompanyProfile> | null | undefined,
+): Partial<DebitNoteCompanyProfile> {
+  const defaults = DEBIT_NOTE_COMPANY_PROFILES[companyKey];
+  const c = { ...defaults, ...company };
+  return {
+    ...c,
+    address: cleanMetaField(c.address),
+    phone: cleanMetaField(c.phone),
+    taxId: cleanMetaField(c.taxId),
+  };
+}
 
 function defaultDraft(companyKey: DebitNoteCompanyId): NotesDraft {
   const profile = DEBIT_NOTE_COMPANY_PROFILES[companyKey];
@@ -24,6 +45,14 @@ function defaultDraft(companyKey: DebitNoteCompanyId): NotesDraft {
     paymentInstructions: buildDebitNotePaymentInstructionsText(companyKey, 'DN-XXXXXX-0000', 'yyyy年mm月dd日'),
     footerRemark: DEFAULT_FOOTER_REMARK_TEMPLATE,
     company: { ...profile },
+  };
+}
+
+function draftFromTemplate(companyKey: DebitNoteCompanyId, tpl: RentalDocumentTemplate): NotesDraft {
+  return {
+    paymentInstructions: tpl.paymentInstructions,
+    footerRemark: tpl.footerRemark,
+    company: normalizeCompany(companyKey, tpl.company),
   };
 }
 
@@ -170,6 +199,15 @@ export default function DebitNoteNotesTemplateEditor({
   );
 }
 
+async function fetchNotesDraft(companyKey: DebitNoteCompanyId): Promise<NotesDraft> {
+  const res = await fetch('/api/rental-templates');
+  if (!res.ok) return defaultDraft(companyKey);
+  const data = await res.json();
+  const tpl = data?.templates?.find((t: RentalDocumentTemplate) => t.templateKey === companyKey);
+  return tpl ? draftFromTemplate(companyKey, tpl) : defaultDraft(companyKey);
+}
+
+/** Load saved debit note notes template for one billing company. */
 export function useDebitNoteNotesTemplate(companyKey: DebitNoteCompanyId, readOnly?: boolean) {
   const [draft, setDraft] = useState<NotesDraft>(() => defaultDraft(companyKey));
   const [loading, setLoading] = useState(true);
@@ -177,36 +215,33 @@ export function useDebitNoteNotesTemplate(companyKey: DebitNoteCompanyId, readOn
   const [saveMessage, setSaveMessage] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    fetch('/api/rental-templates')
-      .then(async (r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const tpl = data?.templates?.find((t: RentalDocumentTemplate) => t.templateKey === companyKey);
-        if (tpl) {
-          setDraft({
-            paymentInstructions: tpl.paymentInstructions,
-            footerRemark: tpl.footerRemark,
-            company: tpl.company ?? DEBIT_NOTE_COMPANY_PROFILES[companyKey],
-          });
-        } else {
-          setDraft(defaultDraft(companyKey));
-        }
+    void fetchNotesDraft(companyKey)
+      .then((next) => {
+        if (!cancelled) setDraft(next);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [companyKey]);
 
   const save = useCallback(async () => {
     if (readOnly) return;
     setSaving(true);
     setSaveMessage('');
+    const payload = {
+      paymentInstructions: draft.paymentInstructions,
+      footerRemark: draft.footerRemark,
+      company: normalizeCompany(companyKey, draft.company),
+    };
     const res = await fetch(`/api/rental-templates/${encodeURIComponent(companyKey)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        paymentInstructions: draft.paymentInstructions,
-        footerRemark: draft.footerRemark,
-        company: draft.company,
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     setSaving(false);
@@ -214,13 +249,10 @@ export function useDebitNoteNotesTemplate(companyKey: DebitNoteCompanyId, readOn
       setSaveMessage(data.error || 'Save failed');
       return;
     }
-    if (data.template) {
-      setDraft({
-        paymentInstructions: data.template.paymentInstructions,
-        footerRemark: data.template.footerRemark,
-        company: data.template.company ?? draft.company,
-      });
-    }
+    const refreshed = data.template
+      ? draftFromTemplate(companyKey, data.template as RentalDocumentTemplate)
+      : await fetchNotesDraft(companyKey);
+    setDraft(refreshed);
     setSaveMessage('Template saved ✓');
     setTimeout(() => setSaveMessage(''), 3000);
   }, [readOnly, draft, companyKey]);

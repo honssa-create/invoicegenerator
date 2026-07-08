@@ -639,7 +639,7 @@ function buildArrearDetails(
   const units = Array.from(new Set(items.map((i) => i.unitName)));
   const types = Array.from(new Set(items.map((i) => i.chargeType)));
   const unitStr = units.join(', ');
-  if (types.length === 1 && types[0] === 'rent') return `${unitStr} (全月租金)`;
+  if (types.length === 1 && types[0] === 'rent') return `${unitStr} 租金`;
   const typeLabels = types.map((t) => CHARGE_TYPE_LABELS[t]).join('、');
   return `${unitStr} (${typeLabels})`;
 }

@@ -116,7 +116,7 @@ export function buildDebitNoteStyleTemplateHtml(
 <body>
   <div class="edit-banner">
     <strong>Debit Note Style — ${escHtml(company.nameEn)}</strong>
-    Edit the <code>:root</code> variables in &lt;style&gt; above · Open in Word or browser.
+    Edit the <code>:root</code> variables in &lt;style&gt; above · Open in Word or browser · Upload back to apply.
   </div>
   <main class="preview-page">
     <div class="formal-debit-note">

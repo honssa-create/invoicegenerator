@@ -42,7 +42,7 @@ export default function FormalDebitNoteDocument({ doc }: Props) {
       {/* Part 1: Current period */}
       <section className="mb-8">
         <h2 className="font-bold text-base mb-2">
-          【第一部份：本期新增費用 (Current Period Charges: {doc.targetPeriodLabel})】
+          本期費用 (Current Period Charges: {doc.targetPeriodLabel})
         </h2>
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -78,7 +78,7 @@ export default function FormalDebitNoteDocument({ doc }: Props) {
       {doc.arrearRows.length > 0 && (
         <section className="mb-8">
           <h2 className="font-bold text-base mb-1">
-            【第二部份：前期逾期欠款 (Overdue Arrears Summary)】
+            前期逾期欠款 (Overdue Arrears Summary)
           </h2>
           {doc.settledPeriodsNote && (
             <p className="text-xs text-gray-600 mb-2 italic">{doc.settledPeriodsNote}</p>

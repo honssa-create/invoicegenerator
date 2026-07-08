@@ -7,6 +7,7 @@ import {
   normalizeDebitNoteStyle,
   type DebitNoteStyleTemplate,
 } from '@/lib/debit-note-style';
+import { downloadDebitNoteStyleTemplate } from '@/lib/debit-note-style-document';
 
 interface Props {
   style: DebitNoteStyleTemplate;
@@ -96,28 +97,44 @@ export default function DebitNoteTemplateEditor({
             })}
           </div>
 
-          {!readOnly && (
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {onSave && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => downloadDebitNoteStyleTemplate(style, 'doc')}
+              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+            >
+              Download doc 下載範本
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadDebitNoteStyleTemplate(style, 'html')}
+              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+            >
+              Download HTML
+            </button>
+            {!readOnly && (
+              <>
+                {onSave && (
+                  <button
+                    type="button"
+                    onClick={() => void onSave()}
+                    disabled={saving}
+                    className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : 'Save template 儲存範本'}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => void onSave()}
-                  disabled={saving}
-                  className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
+                  onClick={reset}
+                  className="px-4 py-2 border border-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
                 >
-                  {saving ? 'Saving…' : 'Save template 儲存範本'}
+                  Reset to default 重設
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={reset}
-                className="px-4 py-2 border border-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
-              >
-                Reset to default 重設
-              </button>
-              {saveMessage && <span className="text-sm text-brand-700">{saveMessage}</span>}
-            </div>
-          )}
+                {saveMessage && <span className="text-sm text-brand-700">{saveMessage}</span>}
+              </>
+            )}
+          </div>
         </div>
       )}
     </section>

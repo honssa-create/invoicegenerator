@@ -2,6 +2,7 @@ import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
 import { saveReceipt } from './receipt';
+import { getRentalTemplate } from './rental-template-server';
 import {
   allocateChargeItemsDirect,
   ensureUnitTenantLink,
@@ -9,6 +10,8 @@ import {
   getOutstandingChargeItemsForUnits,
   getRentalTenant,
   getTenantUnits,
+  getUnitLeasePaymentLedger,
+  getUnitOutstandingCharges,
   getUnitPaymentHistory,
   recordTenantPaymentWithAllocations,
   syncChargeItemsFromRecord,
@@ -18,6 +21,8 @@ import {
   getCurrentLeaseForUnit,
   getLeaseDocuments,
   getLeaseHistory,
+  getLeaseById,
+  getPreviousLeasesForUser,
   getRentalDashboardAlerts,
   shouldAutoDispatchInvoice,
   syncAllLeaseStatuses,
@@ -43,6 +48,7 @@ import {
   outstandingBalance,
   normalizeStoredDate,
   billingPeriodAfterLeaseEnd,
+  billingPeriodWithinLease,
   nextBillingPeriod,
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
@@ -61,12 +67,15 @@ import {
   type RentalChargeItem,
   type RentalChargeType,
   type DebitNotePaymentTemplateId,
+  type RentalLease,
   type RentRecord,
   type RentalActivityLog,
   type RentalPaymentReceipt,
   type RentalStatus,
   type RentalUnit,
   type RentalUnitWithRecord,
+  type UnitLeasePaymentLedgerRow,
+  type PreviousLeaseRecord,
 } from './rentals';
 
 // ---------------------------------------------------------------------------
@@ -342,7 +351,52 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
   updateCurrentLeaseFromUnit(updated, {
     depositAmount: input.depositAmount !== undefined ? Number(input.depositAmount) || 0 : undefined,
   });
+  if (input.currentYearRent !== undefined) {
+    const lease = getCurrentLeaseForUnit(updated.id, userId);
+    if (lease) syncLeaseBaseRentToRecords(userId, updated.id, lease);
+  }
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Lease-scoped base rent
+// ---------------------------------------------------------------------------
+
+/** Apply lease base_rent to unpaid records within the lease month range. */
+export function syncLeaseBaseRentToRecords(
+  userId: number,
+  unitId: number,
+  lease: Pick<RentalLease, 'baseRent' | 'leaseStartDate' | 'leaseEndDate' | 'actualEndDate'>,
+) {
+  const startMonth = (normalizeStoredDate(lease.leaseStartDate) || lease.leaseStartDate).slice(0, 7);
+  const endMonth = (normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate) || lease.leaseEndDate).slice(0, 7);
+  db.prepare(
+    `UPDATE rental_records SET
+      base_rent = ?,
+      actual_amount = ? + COALESCE(water_fee, 0) + COALESCE(electricity_fee, 0),
+      updated_at = datetime('now')
+     WHERE user_id = ? AND unit_id = ?
+       AND billing_period >= ? AND billing_period <= ?
+       AND status != 'paid' AND COALESCE(amount_paid, 0) <= 0`
+  ).run(lease.baseRent, lease.baseRent, userId, unitId, startMonth, endMonth);
+
+  const rows = db.prepare(
+    `SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ?
+     AND billing_period >= ? AND billing_period <= ?
+     AND status != 'paid' AND COALESCE(amount_paid, 0) <= 0`
+  ).all(userId, unitId, startMonth, endMonth) as { id: number }[];
+  for (const row of rows) {
+    const rec = getRentRecord(row.id, userId);
+    if (rec) syncChargeItemsFromRecord(rec);
+  }
+}
+
+function resolveBaseRentForPeriod(unit: RentalUnit, period: string, userId: number): number {
+  const lease = getCurrentLeaseForUnit(unit.id, userId);
+  if (lease && billingPeriodWithinLease(period, lease.leaseStartDate, lease.leaseEndDate)) {
+    return lease.baseRent;
+  }
+  return unit.currentYearRent || 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,22 +409,25 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
     'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?'
   ).get(unit.user_id, unit.id, period) as RecordRow | undefined;
   if (found) {
+    const leaseRent = resolveBaseRentForPeriod(unit, period, unit.user_id);
     const updates: string[] = [];
     const vals: (string | number)[] = [];
-    if (!found.base_rent && unit.currentYearRent > 0) {
+    const targetRent = leaseRent || unit.currentYearRent || found.base_rent || 0;
+    if ((found.base_rent || 0) !== targetRent && targetRent > 0
+        && found.status !== 'paid' && (found.amount_paid || 0) <= 0) {
       updates.push('base_rent = ?');
-      vals.push(unit.currentYearRent);
+      vals.push(targetRent);
+    } else if (!found.base_rent && targetRent > 0) {
+      updates.push('base_rent = ?');
+      vals.push(targetRent);
     }
     if (!found.base_rent_period_from || !found.base_rent_period_to) {
       updates.push('base_rent_period_from = ?', 'base_rent_period_to = ?');
       vals.push(defaults.from, defaults.to);
     }
     if (updates.length) {
-      const total = computeTotal(
-        unit.currentYearRent || found.base_rent || 0,
-        found.water_fee || 0,
-        found.electricity_fee || 0,
-      );
+      const rent = targetRent;
+      const total = computeTotal(rent, found.water_fee || 0, found.electricity_fee || 0);
       updates.push('actual_amount = ?', "updated_at = datetime('now')");
       vals.push(total, found.id);
       db.prepare(`UPDATE rental_records SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
@@ -383,7 +440,7 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
     return hydrated;
   }
 
-  const base = unit.currentYearRent;
+  const base = resolveBaseRentForPeriod(unit, period, unit.user_id) || unit.currentYearRent;
   const res = db.prepare(
     `INSERT INTO rental_records
       (user_id, unit_id, billing_period, base_rent, base_rent_period_from, base_rent_period_to,
@@ -419,10 +476,14 @@ export function updateRentRecordUtilities(
 ): RentRecord | null {
   const existing = getRentRecord(id, userId);
   if (!existing) return null;
-  const base = Number(input.baseRent ?? existing.baseRent) || 0;
+  const unit = getRentalUnit(existing.unitId, userId);
+  const lease = unit ? getCurrentLeaseForUnit(unit.id, userId) : null;
+  let base = Number(existing.baseRent) || 0;
+  if (lease && billingPeriodWithinLease(existing.billingPeriod, lease.leaseStartDate, lease.leaseEndDate)) {
+    base = lease.baseRent;
+  }
   let water = Number(input.waterFee ?? existing.waterFee) || 0;
   let elec = Number(input.electricityFee ?? existing.electricityFee) || 0;
-  const unit = getRentalUnit(existing.unitId, userId);
   const elecFormula = unit ? electricityFormulaForUnit(unit.unitName) : null;
   const waterFormula = unit ? unitHasWaterMeterFormula(unit.unitName) : false;
   const meter = input.electricityMeter !== undefined ? input.electricityMeter : existing.electricityMeter;
@@ -519,15 +580,40 @@ export function listRentalDashboard(userId: number, period = currentBillingPerio
   const outstanding = records.reduce((s, r) => s + outstandingBalance(r), 0);
   const paidCount = records.filter((r) => displayRentalStatus(r) === 'paid').length;
   const alerts = getRentalDashboardAlerts(userId, period);
-  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts };
+  const previousLeases = getPreviousLeasesForUser(userId);
+  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts, previousLeases };
 }
 
-export function getRentalUnitDetail(unitId: number | string, userId: number, period = currentBillingPeriod()) {
+export function getRentalUnitDetail(
+  unitId: number | string,
+  userId: number,
+  period = currentBillingPeriod(),
+  options?: { leaseId?: number | string },
+) {
   ensureDefaultRentalUnits(userId);
   const unit = getRentalUnit(unitId, userId);
   if (!unit) return null;
-  ensureRentRecord(unit, period);
-  applyOverdueStatuses(userId, period);
+
+  const requestedLeaseId = options?.leaseId ? Number(options.leaseId) : null;
+  const requestedLease = requestedLeaseId ? getLeaseById(requestedLeaseId, userId) : null;
+  const isHistoricalView = Boolean(
+    requestedLease && requestedLease.unitId === unit.id && !requestedLease.isCurrent,
+  );
+  if (requestedLeaseId && !isHistoricalView) return null;
+
+  const activeLease = getCurrentLeaseForUnit(unit.id, userId);
+  const displayLease = isHistoricalView ? requestedLease! : activeLease;
+  const readOnlyLease = isHistoricalView || (
+    displayLease != null && (
+      computeLeaseDisplayStatus(displayLease) === 'ended'
+      || computeLeaseDisplayStatus(displayLease) === 'terminated'
+    )
+  );
+
+  if (!isHistoricalView) {
+    ensureRentRecord(unit, period);
+    applyOverdueStatuses(userId, period);
+  }
   const suggestedPrevElectricityReading = getSuggestedPrevElectricityReading(userId, Number(unitId), period);
   const suggestedPrevWaterReading = getSuggestedPrevWaterReading(userId, Number(unitId), period);
   const currentRecord = getRentRecord(
@@ -548,15 +634,25 @@ export function getRentalUnitDetail(unitId: number | string, userId: number, per
     ? (db.prepare('SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1')
         .get(currentRecord.id) as ReceiptRow | undefined)
     : undefined;
-  const currentLease = getCurrentLeaseForUnit(unit.id, userId);
+  const currentLease = activeLease;
+  let paymentHistory = getUnitPaymentHistory(unit.id, userId);
+  if (isHistoricalView && displayLease?.tenantId) {
+    paymentHistory = paymentHistory.filter((p) => p.tenantId === displayLease.tenantId);
+  }
   return {
     unit, currentRecord, history, activities,
     chargeItems,
-    paymentHistory: getUnitPaymentHistory(unit.id, userId),
+    paymentHistory,
+    paymentLedger: getUnitLeasePaymentLedger(unit.id, userId, displayLease),
+    outstandingCharges: isHistoricalView ? [] : getUnitOutstandingCharges(unit.id, userId),
     latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
     currentLease,
+    viewingLease: isHistoricalView ? displayLease : null,
+    displayLease,
+    readOnlyLease,
+    isHistoricalView,
     leaseHistory: getLeaseHistory(unit.id, userId),
-    leaseDocuments: currentLease ? getLeaseDocuments(currentLease.id, userId) : [],
+    leaseDocuments: displayLease ? getLeaseDocuments(displayLease.id, userId) : [],
     suggestedPrevElectricityReading,
     suggestedPrevWaterReading,
   };
@@ -670,17 +766,20 @@ export async function sendRentInvoice(
     const dueDisplay = formatDisplayDate(dueDate);
     const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
     const templateId = input.paymentTemplate ?? debitNoteCompanyForUnit(unit.unitName);
+    const savedTpl = getRentalTemplate(userId, templateId);
     const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
     const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
       templateId,
       noteNo,
       dueDateChinese,
       input.paymentRemark,
+      savedTpl?.paymentInstructions,
     );
+    const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
     email = await sendEmail(
       unit.tenantEmail,
       `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, input.note, paymentInstructionsText)
+      invoiceHtml(unit, fresh, invoiceNote, paymentInstructionsText)
     );
   }
   logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);

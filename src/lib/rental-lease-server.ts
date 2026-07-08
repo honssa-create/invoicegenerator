@@ -10,6 +10,8 @@ import {
   isLeaseBillingActive,
   normalizeStoredDate,
   outstandingBalance,
+  pastLeaseStatusLabel,
+  type PreviousLeaseRecord,
   type LeaseDocumentType,
   type LeaseStoredStatus,
   type RentalDashboardAlert,
@@ -89,6 +91,31 @@ export function getLeaseHistory(unitId: number | string, userId: number): Rental
   return (db.prepare(
     `SELECT * FROM rental_leases WHERE unit_id = ? AND user_id = ? ORDER BY lease_start_date DESC, id DESC`
   ).all(unitId, userId) as LeaseRow[]).map(hydrateLease);
+}
+
+/** All ended / terminated leases across units (master-panel history). */
+export function getPreviousLeasesForUser(userId: number): PreviousLeaseRecord[] {
+  const rows = db.prepare(
+    `SELECT l.*, u.unit_name
+     FROM rental_leases l
+     JOIN rental_units u ON u.id = l.unit_id AND u.user_id = l.user_id
+     WHERE l.user_id = ? AND l.is_current = 0
+       AND l.status IN ('ended', 'terminated')
+     ORDER BY COALESCE(l.actual_end_date, l.lease_end_date) DESC, l.id DESC`
+  ).all(userId) as (LeaseRow & { unit_name: string })[];
+
+  return rows.map((row) => ({
+    leaseId: row.id,
+    unitId: row.unit_id,
+    unitName: row.unit_name,
+    tenantId: row.tenant_id,
+    tenantName: row.tenant_name,
+    leaseStartDate: row.lease_start_date,
+    leaseEndDate: row.lease_end_date,
+    actualEndDate: row.actual_end_date,
+    status: row.status as LeaseStoredStatus,
+    statusLabel: pastLeaseStatusLabel(row.status as LeaseStoredStatus),
+  }));
 }
 
 export function getLeaseById(leaseId: number | string, userId: number): RentalLease | null {

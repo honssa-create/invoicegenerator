@@ -95,6 +95,7 @@ const API_PREFIXES: [string, PermissionSection][] = [
   ['/api/kitchen-prep', 'kitchen_prep'],
   ['/api/kitchen', 'kitchen'],
   ['/api/rentals', 'rentals'],
+  ['/api/rental-templates', 'rentals'],
   ['/api/expenses', 'expenses'],
   ['/api/expense-options', 'expenses'],
   ['/api/receipts', 'expenses'],

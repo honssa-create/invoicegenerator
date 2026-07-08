@@ -64,7 +64,8 @@ export default function RentalTemplatesPage() {
             <Link href="/rentals" className="text-sm text-brand-600 font-medium">← Back to Rentals</Link>
             <h1 className="text-xl font-bold text-gray-900 mt-2">Debit Note Template 繳費通知單樣式</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Customise fonts, colours, and spacing. Saved styles apply to all debit notes.
+              Customise fonts, colours, and spacing — or download the template doc to edit offline.
+              可線上調整樣式，或下載範本文件離線編輯後上傳。
             </p>
             <div className="mt-4">
               <DebitNoteTemplateEditor

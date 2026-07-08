@@ -45,7 +45,7 @@ type Options = Record<OptionType, string[]>;
 type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
-const PAGE_SIZES = [20, 30, 50] as const;
+const PAGE_SIZES = [10, 20, 30, 50] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 
 function buildPageNumbers(current: number, total: number): (number | '…')[] {

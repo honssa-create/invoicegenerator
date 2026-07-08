@@ -82,6 +82,7 @@ export async function POST(request: Request) {
       ownerId,
       body.paid_date?.trim() || null,
       body.payment_method?.trim() || null,
+      { newBatch: Boolean(body.new_batch) },
     );
 
     const create = db.transaction(() => {

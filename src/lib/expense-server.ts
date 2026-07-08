@@ -53,17 +53,35 @@ export function generateBatchId(userId: number, expenseDate?: string | null): st
   return `EXP-${ym}-${String(next).padStart(3, '0')}`;
 }
 
+/** Latest batch ID for user+month (highest EXP-YYYYMM-XXX serial), or null. */
+export function getLatestBatchId(userId: number, expenseDate?: string | null): string | null {
+  const ym = expenseYm(expenseDate);
+  const prefix = `EXP-${ym}-`;
+  const maxSerial = maxBatchSerial(userId, ym);
+  if (maxSerial < 1) return null;
+  return `${prefix}${String(maxSerial).padStart(3, '0')}`;
+}
+
 /** Receipt no: {batchId}-{CC|CS|BT|OT}NNN — serial per batch + payment code. */
 export function generateReceiptNumber(
   userId: number,
   batchId: string,
   paymentMethod: string | null | undefined,
+  excludeExpenseId?: number,
 ): string {
   const code = paymentMethodCode(paymentMethod);
   const prefix = `${batchId}-${code}`;
   const rows = db
-    .prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?')
-    .all(userId, `${prefix}%`) as { receipt_no: string | null }[];
+    .prepare(
+      excludeExpenseId != null
+        ? 'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ? AND id != ?'
+        : 'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?'
+    )
+    .all(
+      ...(excludeExpenseId != null
+        ? [userId, `${prefix}%`, excludeExpenseId]
+        : [userId, `${prefix}%`]),
+    ) as { receipt_no: string | null }[];
   let max = 0;
   const re = new RegExp(`^${batchId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-${code}(\\d{3})$`);
   for (const r of rows) {
@@ -73,15 +91,39 @@ export function generateReceiptNumber(
   return `${batchId}-${code}${String(max + 1).padStart(3, '0')}`;
 }
 
-/** Assign batch + receipt numbers on create (upload / manual save). */
+export interface AssignExpenseNumbersOptions {
+  /** Reuse this batch (e.g. import loop or explicit batch). */
+  batchId?: string | null;
+  /** Start a new EXP-YYYYMM-XXX batch instead of reusing the latest in the month. */
+  newBatch?: boolean;
+}
+
+/** Assign batch + receipt numbers on create (upload / manual save / import). */
 export function assignExpenseNumbers(
   userId: number,
   expenseDate: string | null | undefined,
   paymentMethod: string | null | undefined,
+  options?: AssignExpenseNumbersOptions,
 ): { batchId: string; receiptNo: string } {
-  const batchId = generateBatchId(userId, expenseDate);
+  let batchId = options?.batchId?.trim() || '';
+  if (batchId && !EXPENSE_BATCH_RE.test(batchId)) batchId = '';
+  if (!batchId) {
+    batchId = options?.newBatch
+      ? generateBatchId(userId, expenseDate)
+      : (getLatestBatchId(userId, expenseDate) || generateBatchId(userId, expenseDate));
+  }
   const receiptNo = generateReceiptNumber(userId, batchId, paymentMethod);
   return { batchId, receiptNo };
+}
+
+/** Re-issue receipt suffix when payment method changes but batch stays the same. */
+export function reissueReceiptNumber(
+  userId: number,
+  expenseId: number,
+  batchId: string,
+  paymentMethod: string | null | undefined,
+): string {
+  return generateReceiptNumber(userId, batchId, paymentMethod, expenseId);
 }
 
 // Insert a custom dropdown option if it is not already a default or existing value.

@@ -239,13 +239,17 @@ export async function POST(request: Request) {
   );
 
   const persist = db.transaction(() => {
+    let importBatchId: string | null = null;
     for (const row of candidates) {
       if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
       if (syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
       if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
       if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
-      const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod);
+      const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod, {
+        batchId: importBatchId,
+      });
+      importBatchId = batchId;
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(
         ownerId,

@@ -5,12 +5,13 @@ import {
   type DebitNoteStyleTemplate,
 } from '@/lib/debit-note-style';
 import type { DebitNoteCompanyId } from '@/lib/rentals';
+import type { TemplateCompanyVariantId } from '@/lib/document-templates';
 
-const COMPANY_KEYS: DebitNoteCompanyId[] = ['label', 'elite'];
+const COMPANY_KEYS: TemplateCompanyVariantId[] = ['label', 'elite', 'joint'];
 
 export function getDebitNoteStyleTemplate(
   userId: number,
-  companyKey: DebitNoteCompanyId = 'label',
+  companyKey: TemplateCompanyVariantId = 'label',
 ): DebitNoteStyleTemplate {
   const row = db.prepare(
     'SELECT styles_json FROM rental_debit_note_styles WHERE user_id = ? AND company_key = ?'
@@ -25,16 +26,17 @@ export function getDebitNoteStyleTemplate(
 
 export function listDebitNoteStyleTemplates(
   userId: number,
-): Record<DebitNoteCompanyId, DebitNoteStyleTemplate> {
+): Record<TemplateCompanyVariantId, DebitNoteStyleTemplate> {
   return {
     label: getDebitNoteStyleTemplate(userId, 'label'),
     elite: getDebitNoteStyleTemplate(userId, 'elite'),
+    joint: getDebitNoteStyleTemplate(userId, 'joint'),
   };
 }
 
 export function saveDebitNoteStyleTemplate(
   userId: number,
-  companyKey: DebitNoteCompanyId,
+  companyKey: TemplateCompanyVariantId,
   style: DebitNoteStyleTemplate,
 ): DebitNoteStyleTemplate {
   const normalized = normalizeDebitNoteStyle(style);

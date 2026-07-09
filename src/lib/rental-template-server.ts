@@ -6,6 +6,11 @@ import {
   type DebitNotePaymentTemplateId,
 } from './rentals';
 import {
+  defaultDebitNoteNotesDraft,
+  defaultJointCompanyProfile,
+  type TemplateCompanyVariantId,
+} from './document-templates';
+import {
   DEFAULT_FOOTER_REMARK_TEMPLATE,
   DEFAULT_PAYMENT_INSTRUCTIONS_TEMPLATE,
   DEFAULT_RENT_INVOICE_NOTE,
@@ -32,11 +37,14 @@ interface TemplateRow {
   created_at: string;
 }
 
-const BUILTIN_KEYS: DebitNotePaymentTemplateId[] = ['label', 'elite'];
+const BUILTIN_KEYS: TemplateCompanyVariantId[] = ['label', 'elite', 'joint'];
 
 function defaultBankLines(templateKey: string): string {
   if (templateKey === 'label') {
     return '374-279610-001\nHONOUR LABEL LIMITED\nHANG SENG BANK (bank code : 024)';
+  }
+  if (templateKey === 'joint') {
+    return 'Honour Label Limited:\n374-279610-001\nHONOUR LABEL LIMITED\nHANG SENG BANK (bank code : 024)\n\nHonour Elite Limited:\n-\n-';
   }
   return '-\n\n-';
 }
@@ -73,12 +81,18 @@ function defaultName(templateKey: string): string {
   if (templateKey === 'label' || templateKey === 'elite') {
     return DEBIT_NOTE_PAYMENT_TEMPLATE_LABELS[templateKey];
   }
+  if (templateKey === 'joint') {
+    return 'Template — Honour Label & Honour Elite (Joint) 聯合';
+  }
   return templateKey;
 }
 
 function defaultCompany(templateKey: string): Partial<DebitNoteCompanyProfile> | null {
   if (templateKey === 'label' || templateKey === 'elite') {
     return { ...DEBIT_NOTE_COMPANY_PROFILES[templateKey] };
+  }
+  if (templateKey === 'joint') {
+    return defaultJointCompanyProfile();
   }
   return null;
 }
@@ -90,6 +104,7 @@ export function ensureDefaultRentalTemplates(userId: number): void {
     ).get(userId, key);
     if (existing) continue;
     const company = defaultCompany(key);
+    const draft = defaultDebitNoteNotesDraft(key);
     db.prepare(
       `INSERT INTO rental_document_templates
         (user_id, template_key, name, payment_instructions, footer_remark, rent_invoice_note, company_json)
@@ -98,8 +113,8 @@ export function ensureDefaultRentalTemplates(userId: number): void {
       userId,
       key,
       defaultName(key),
-      defaultPaymentInstructions(key),
-      DEFAULT_FOOTER_REMARK_TEMPLATE,
+      draft.paymentInstructions,
+      draft.footerRemark,
       DEFAULT_RENT_INVOICE_NOTE,
       company ? JSON.stringify(company) : null,
     );
@@ -177,6 +192,9 @@ export function resolveCompanyFromTemplate(
   if (template?.company && Object.keys(template.company).length) return template.company;
   if (templateKey === 'label' || templateKey === 'elite') {
     return { ...DEBIT_NOTE_COMPANY_PROFILES[templateKey] };
+  }
+  if (templateKey === 'joint') {
+    return defaultJointCompanyProfile();
   }
   return null;
 }

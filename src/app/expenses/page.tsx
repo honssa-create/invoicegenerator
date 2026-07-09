@@ -103,7 +103,7 @@ export default function ExpensesPage() {
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
-  const [newBatch, setNewBatch] = useState(false);
+  const [continueBatch, setContinueBatch] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
@@ -284,7 +284,7 @@ export default function ExpensesPage() {
   const openCreate = () => {
     setForm({ ...EMPTY_FORM, category: options.category[0] || '' });
     setFormReceipts([]);
-    setNewBatch(false);
+    setContinueBatch(false);
     setEditingId(null);
     setScanMessage('');
     setSupplierOcrMatch(null);
@@ -473,7 +473,7 @@ export default function ExpensesPage() {
         ...form,
         payment_status: 'paid',
         receipt_paths: formReceipts.map((r) => r.path),
-        ...(editingId ? {} : { new_batch: newBatch }),
+        ...(editingId ? {} : { reuse_batch: continueBatch }),
       }),
     });
     const data = await res.json();
@@ -952,18 +952,17 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Batch EXP-YYYYMM-XXX (YYYYMM = paid date month; XXX restarts each month).
-                    Receipt …-CC001 — last 3 digits serial per payment method in batch (CC001, CC002, CS001…).
+                    Batch ID serial (…-026, …-027) and receipt serial (…-CC001, …-CC002) assigned on save
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={newBatch}
-                        onChange={(e) => setNewBatch(e.target.checked)}
+                        checked={continueBatch}
+                        onChange={(e) => setContinueBatch(e.target.checked)}
                         className="rounded border-gray-300 text-brand-600"
                       />
-                      New batch 新批次 (next EXP-YYYYMM-XXX in this paid month)
+                      Continue previous batch 繼續上一批次 (same EXP-YYYYMM-XXX, receipt serial +1)
                     </label>
                   )}
                 </div>

@@ -125,20 +125,22 @@ export async function POST(request: Request) {
 
   let rows: Record<string, unknown>[];
   let hyperlinkByRow = new Map<number, string[]>();
+  let worksheet: XLSX.WorkSheet | undefined;
+  const isCsv = name.endsWith('.csv');
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const wb = name.endsWith('.csv')
+    const wb = isCsv
       ? XLSX.read(buffer.toString('utf8'), { type: 'string' })
-      : XLSX.read(buffer, { type: 'buffer', cellDates: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      : XLSX.read(buffer, { type: 'buffer', cellDates: true, cellFormula: true });
+    worksheet = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-    if (!name.endsWith('.csv') && ws['!ref']) {
-      const headerAoA = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+    if (!isCsv && worksheet['!ref']) {
+      const headerAoA = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as unknown[][];
       const headerRow = (headerAoA[0] || []).map((c) => String(c ?? ''));
       const receiptCol = findReceiptColumnIndex(headerRow);
-      const byReceiptCol = hyperlinkUrlsByDataRow(ws, receiptCol);
-      const byAllCols = hyperlinkUrlsFromAllColumns(ws);
+      const byReceiptCol = hyperlinkUrlsByDataRow(worksheet, receiptCol);
+      const byAllCols = hyperlinkUrlsFromAllColumns(worksheet);
       hyperlinkByRow = mergeUrlMaps(byReceiptCol, byAllCols);
     }
   } catch {
@@ -204,7 +206,9 @@ export async function POST(request: Request) {
     const { paths, warnings } = await resolveImportReceiptPaths(
       sheetRow,
       row,
-      hyperlinkByRow.get(idx) || []
+      hyperlinkByRow.get(idx) || [],
+      isCsv ? undefined : worksheet,
+      isCsv ? undefined : idx,
     );
     receiptWarnings.push(...warnings);
     receiptFetched += paths.length;
@@ -239,18 +243,13 @@ export async function POST(request: Request) {
   );
 
   const persist = db.transaction(() => {
-    const importBatchByMonth = new Map<string, string>();
     for (const row of candidates) {
       if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
       if (syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
       if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
       if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
-      const ym = expensePaidYearMonth(row.date);
-      const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod, {
-        batchId: importBatchByMonth.get(ym),
-      });
-      importBatchByMonth.set(ym, batchId);
+      const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod);
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(
         ownerId,

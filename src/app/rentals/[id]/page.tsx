@@ -1135,8 +1135,8 @@ function RentalDetailInner() {
                     <>
                       <p className="text-xs text-yellow-700/80 mb-3">
                         {electricityFormula === '213a'
-                          ? '大分錶分拆: 實用電度數 = (今次 − 前次) − 其他單位；AMOUNT = 實用電度數 × 每度電費'
-                          : '獨立分錶: 用電度數 = 今次錶數 − 前次錶數；AMOUNT = 用電度數 × 每度電費'}
+                          ? '大分錶分拆: 實用電度數 = (今次 − 前次) − 其他單位；電費 = 實用電度數 × 每度電費'
+                          : '獨立分錶: 電費 = (今次 − 前次) × 每度電費'}
                       </p>
                       <div className="grid md:grid-cols-3 gap-3 mb-4">
                         <div>

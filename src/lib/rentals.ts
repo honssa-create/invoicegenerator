@@ -633,10 +633,8 @@ export function resolveElectricityFormula(
   mode: UtilityBillingMode,
 ): ElectricityFormula | null {
   if (mode === 'tenant_pays') return null;
-  const base = electricityFormulaForUnit(unitName);
-  if (!base) return null;
   if (mode === 'company_sub_meter') return 'stock_room';
-  return base;
+  return electricityFormulaForUnit(unitName);
 }
 
 export function parseElectricityMeterJson(raw: string | null | undefined): ElectricityMeterData | null {

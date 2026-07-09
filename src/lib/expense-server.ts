@@ -108,10 +108,10 @@ export function generateReceiptNumber(
 }
 
 export interface AssignExpenseNumbersOptions {
-  /** Reuse this batch (e.g. import loop or explicit batch). */
+  /** Reuse this batch (e.g. explicit batch from caller). */
   batchId?: string | null;
-  /** Start a new EXP-YYYYMM-XXX batch instead of reusing the latest in the month. */
-  newBatch?: boolean;
+  /** Continue the latest month batch instead of starting EXP-YYYYMM-XXX+1. */
+  reuseBatch?: boolean;
 }
 
 /** Assign batch + receipt numbers on create (upload / manual save / import). */
@@ -126,9 +126,9 @@ export function assignExpenseNumbers(
     batchId = '';
   }
   if (!batchId) {
-    batchId = options?.newBatch
-      ? generateBatchId(userId, expenseDate)
-      : (getLatestBatchId(userId, expenseDate) || generateBatchId(userId, expenseDate));
+    batchId = options?.reuseBatch
+      ? (getLatestBatchId(userId, expenseDate) || generateBatchId(userId, expenseDate))
+      : generateBatchId(userId, expenseDate);
   }
   const receiptNo = generateReceiptNumber(userId, batchId, paymentMethod);
   return { batchId, receiptNo };

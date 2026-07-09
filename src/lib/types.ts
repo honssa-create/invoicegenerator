@@ -88,6 +88,9 @@ export interface Expense {
   order_no: string | null;
   platform: string | null;
   payment_method: string | null;
+  payment_channel: string | null;
+  funding_source: string | null;
+  card_last4: string | null;
   notes: string | null;
   special_notes: string | null;
   payment_status: PaymentStatus;

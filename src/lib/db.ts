@@ -1063,6 +1063,15 @@ try {
   if (!expenseCols.some((c) => c.name === 'supplier_input')) {
     db.exec('ALTER TABLE expenses ADD COLUMN supplier_input TEXT');
   }
+  if (!expenseCols.some((c) => c.name === 'payment_channel')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN payment_channel TEXT');
+  }
+  if (!expenseCols.some((c) => c.name === 'funding_source')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN funding_source TEXT');
+  }
+  if (!expenseCols.some((c) => c.name === 'card_last4')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN card_last4 TEXT');
+  }
 }
 
 db.exec(`

@@ -27,8 +27,16 @@ function batchMatchesExpenseMonth(batchId: string, expenseDate?: string | null):
   return batchId.startsWith(`EXP-${expenseYm(expenseDate)}-`);
 }
 
-/** Map payment method label → CC / CS / BT / OT. */
-export function paymentMethodCode(method: string | null | undefined): ExpensePaymentCode {
+/** Map payment method / funding source → CC / CS / BT / OT. */
+export function paymentMethodCode(
+  method: string | null | undefined,
+  fundingSource?: string | null | undefined,
+): ExpensePaymentCode {
+  if (fundingSource) {
+    if (fundingSource === 'cc_self' || fundingSource === 'cc_company') return 'CC';
+    if (fundingSource === 'cash') return 'CS';
+    return 'OT';
+  }
   const m = (method || '').toLowerCase();
   if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
   if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
@@ -84,8 +92,9 @@ export function generateReceiptNumber(
   batchId: string,
   paymentMethod: string | null | undefined,
   excludeExpenseId?: number,
+  fundingSource?: string | null,
 ): string {
-  const code = paymentMethodCode(paymentMethod);
+  const code = paymentMethodCode(paymentMethod, fundingSource);
   const prefix = `${batchId}-${code}`;
   const rows = db
     .prepare(
@@ -112,6 +121,7 @@ export interface AssignExpenseNumbersOptions {
   batchId?: string | null;
   /** Continue the latest month batch instead of starting EXP-YYYYMM-XXX+1. */
   reuseBatch?: boolean;
+  fundingSource?: string | null;
 }
 
 /** Assign batch + receipt numbers on create (upload / manual save / import). */
@@ -130,7 +140,13 @@ export function assignExpenseNumbers(
       ? (getLatestBatchId(userId, expenseDate) || generateBatchId(userId, expenseDate))
       : generateBatchId(userId, expenseDate);
   }
-  const receiptNo = generateReceiptNumber(userId, batchId, paymentMethod);
+  const receiptNo = generateReceiptNumber(
+    userId,
+    batchId,
+    paymentMethod,
+    undefined,
+    options?.fundingSource,
+  );
   return { batchId, receiptNo };
 }
 
@@ -140,8 +156,9 @@ export function reissueReceiptNumber(
   expenseId: number,
   batchId: string,
   paymentMethod: string | null | undefined,
+  fundingSource?: string | null,
 ): string {
-  return generateReceiptNumber(userId, batchId, paymentMethod, expenseId);
+  return generateReceiptNumber(userId, batchId, paymentMethod, expenseId, fundingSource);
 }
 
 // Insert a custom dropdown option if it is not already a default or existing value.

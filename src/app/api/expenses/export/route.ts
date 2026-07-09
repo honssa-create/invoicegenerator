@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { categoryLabel } from '@/lib/expenses';
+import { categoryLabel, expensePaymentDisplay, fundingSourceLabel, paymentChannelLabel } from '@/lib/expenses';
 import { expenseWhereClause } from '@/lib/org-server';
 import type { Expense } from '@/lib/types';
 
@@ -32,7 +32,10 @@ export async function GET(request: Request) {
     'Notes (注意事項)': e.notes || '',
     'Amount (RMB)': e.amount_rmb ?? null,
     'Amount (HKD)': e.amount_hkd ?? null,
-    'Payment Method (支付方式)': e.payment_method || '',
+    'Payment Channel (支付渠道)': paymentChannelLabel(e.payment_channel),
+    'Funding Source (扣款來源)': fundingSourceLabel(e.funding_source),
+    'Card Last 4 (信用卡尾四位)': e.card_last4 || '',
+    'Payment Method (支付方式) [legacy]': e.payment_method || expensePaymentDisplay(e),
     'Expense Reason (支出原因)': categoryLabel(e.category),
     Receipts: e.receipt_count,
     'Special Notes (特別事項)': e.special_notes || '',

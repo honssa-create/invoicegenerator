@@ -7,6 +7,7 @@ import {
   normalizeNumber,
   receiptPathsFromBody,
 } from '@/lib/expense-server';
+import { normalizeExpensePaymentFields } from '@/lib/expense-payment-fields';
 import { getDataOwnerId } from '@/lib/org-server';
 import type { Expense } from '@/lib/types';
 
@@ -78,19 +79,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
     }
 
+    const payment = normalizeExpensePaymentFields(body);
+    if (!payment.ok) {
+      return NextResponse.json({ error: payment.error }, { status: 400 });
+    }
+
     const { batchId, receiptNo } = assignExpenseNumbers(
       ownerId,
       body.paid_date?.trim() || null,
-      body.payment_method?.trim() || null,
-      { reuseBatch: Boolean(body.reuse_batch) },
+      null,
+      { reuseBatch: Boolean(body.reuse_batch), fundingSource: payment.fields.funding_source },
     );
 
     const create = db.transaction(() => {
       const result = db
         .prepare(
           `INSERT INTO expenses
-            (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, payment_channel, funding_source, card_last4, notes, special_notes, payment_status, receipt_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
@@ -105,7 +111,10 @@ export async function POST(request: Request) {
           body.paid_date?.trim() || null,
           body.order_no?.trim() || null,
           body.platform?.trim() || null,
-          body.payment_method?.trim() || null,
+          null,
+          payment.fields.payment_channel,
+          payment.fields.funding_source,
+          payment.fields.card_last4,
           body.notes?.trim() || null,
           body.special_notes?.trim() || null,
           payment_status,

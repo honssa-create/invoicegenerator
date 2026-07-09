@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { assignExpenseNumbers, syncOption } from '@/lib/expense-server';
+import { assignExpenseNumbers, expensePaidYearMonth, syncOption } from '@/lib/expense-server';
 import {
   findReceiptColumnIndex,
   hyperlinkUrlsByDataRow,
@@ -239,17 +239,18 @@ export async function POST(request: Request) {
   );
 
   const persist = db.transaction(() => {
-    let importBatchId: string | null = null;
+    const importBatchByMonth = new Map<string, string>();
     for (const row of candidates) {
       if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
       if (syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
       if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
       if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
+      const ym = expensePaidYearMonth(row.date);
       const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod, {
-        batchId: importBatchId,
+        batchId: importBatchByMonth.get(ym),
       });
-      importBatchId = batchId;
+      importBatchByMonth.set(ym, batchId);
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(
         ownerId,

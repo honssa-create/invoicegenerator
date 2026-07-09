@@ -952,7 +952,8 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Receipt No. assigned on save — last 3 digits serial per batch (…-CC001 → …-CC002 → …-CS003)
+                    Batch EXP-YYYYMM-XXX (YYYYMM = paid date month; XXX restarts each month).
+                    Receipt …-CC001 — last 3 digits serial per payment method in batch (CC001, CC002, CS001…).
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
@@ -962,7 +963,7 @@ export default function ExpensesPage() {
                         onChange={(e) => setNewBatch(e.target.checked)}
                         className="rounded border-gray-300 text-brand-600"
                       />
-                      New batch 新批次 (next EXP-YYYYMM-XXX instead of continuing current batch)
+                      New batch 新批次 (next EXP-YYYYMM-XXX in this paid month)
                     </label>
                   )}
                 </div>

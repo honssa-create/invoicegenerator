@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { assignExpenseNumbers, syncOption } from '@/lib/expense-server';
+import { assignExpenseNumbers, expensePaidYearMonth, syncOption } from '@/lib/expense-server';
 import {
   findReceiptColumnIndex,
   hyperlinkUrlsByDataRow,

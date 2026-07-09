@@ -145,19 +145,45 @@ export interface ReceiptFetchWarning {
 async function downloadImageBuffer(url: string): Promise<{ buf: Buffer; contentType: string | null } | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const fetchOpts = {
+    signal: controller.signal,
+    redirect: 'follow' as const,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; InvoiceFlow-ExpenseImport/1.0)',
+      Accept: 'image/*,application/octet-stream,*/*;q=0.8',
+    },
+  };
+
   try {
-    const res = await fetch(normalizeReceiptDownloadUrl(url), {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: {
-        'User-Agent': 'InvoiceFlow-ExpenseImport/1.0',
-        Accept: 'image/*,*/*;q=0.8',
-      },
-    });
+    let target = normalizeReceiptDownloadUrl(url);
+    let res = await fetch(target, fetchOpts);
     if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+
+    let buf = Buffer.from(await res.arrayBuffer());
+    let contentType = res.headers.get('content-type');
+
+    // Google Drive virus-scan interstitial returns HTML — follow confirm link and retry.
+    if (
+      /drive\.google\.com/i.test(target) &&
+      buf.length > 0 &&
+      buf.length < 2_000_000 &&
+      /text\/html/i.test(contentType || '') &&
+      /virus scan|download anyway|confirm=/i.test(buf.toString('utf8', 0, Math.min(buf.length, 8000)))
+    ) {
+      const html = buf.toString('utf8');
+      const confirmMatch = html.match(/confirm=([0-9A-Za-z_-]+)/);
+      const idMatch = target.match(/[?&]id=([^&]+)/);
+      if (confirmMatch && idMatch) {
+        target = `https://drive.google.com/uc?export=download&id=${idMatch[1]}&confirm=${confirmMatch[1]}`;
+        res = await fetch(target, fetchOpts);
+        if (!res.ok) return null;
+        buf = Buffer.from(await res.arrayBuffer());
+        contentType = res.headers.get('content-type');
+      }
+    }
+
     if (!buf.length) return null;
-    return { buf, contentType: res.headers.get('content-type') };
+    return { buf, contentType };
   } catch {
     return null;
   } finally {
@@ -254,7 +280,7 @@ export function findReceiptColumnIndex(headerRow: string[]): number {
   return -1;
 }
 
-type SheetCell = { l?: { Target?: string }; v?: unknown; w?: string };
+type SheetCell = { l?: { Target?: string }; v?: unknown; w?: string; f?: string };
 
 function cellUrls(cell: SheetCell | undefined): string[] {
   if (!cell) return [];
@@ -264,6 +290,9 @@ function cellUrls(cell: SheetCell | undefined): string[] {
   }
   for (const u of extractReceiptUrls(cell.v)) urls.add(u);
   for (const u of extractReceiptUrls(cell.w)) urls.add(u);
+  if (cell.f) {
+    for (const u of extractReceiptUrls(cell.f)) urls.add(u);
+  }
   return Array.from(urls);
 }
 
@@ -304,14 +333,27 @@ export function hyperlinkUrlsFromAllColumns(ws: XLSX.WorkSheet): Map<number, str
 export async function resolveImportReceiptPaths(
   rowNumber: number,
   row: Record<string, unknown>,
-  extraUrls: string[] = []
+  extraUrls: string[] = [],
+  ws?: XLSX.WorkSheet,
+  dataRowIndex?: number,
 ): Promise<{ paths: string[]; warnings: ReceiptFetchWarning[] }> {
   const urls = collectReceiptUrlsFromRow(row, extraUrls);
+
+  if (ws && dataRowIndex != null && ws['!ref']) {
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const sheetRow = range.s.r + 1 + dataRowIndex;
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const ref = XLSX.utils.encode_cell({ r: sheetRow, c });
+      for (const u of cellUrls(ws[ref] as SheetCell | undefined)) urls.push(u);
+    }
+  }
+
+  const uniqueUrls = Array.from(new Set(urls.map((u) => u.trim()).filter(Boolean)));
   const paths: string[] = [];
   const warnings: ReceiptFetchWarning[] = [];
   const rowLabel = String(rowNumber);
 
-  for (const url of urls) {
+  for (const url of uniqueUrls) {
     const result = await fetchAndStoreReceiptFromUrl(url, rowLabel);
     if ('path' in result) paths.push(result.path);
     else warnings.push({ ...result.warning, row: rowNumber });

@@ -8,10 +8,10 @@ import {
 } from '@/lib/debit-note-style-server';
 import { rentalOwnerId } from '@/lib/org-server';
 import { isSectionReadOnly } from '@/lib/permissions';
-import type { DebitNoteCompanyId } from '@/lib/rentals';
+import { isTemplateCompanyVariantId, type TemplateCompanyVariantId } from '@/lib/document-templates';
 
-function parseCompanyKey(raw: string | null): DebitNoteCompanyId | null {
-  return raw === 'label' || raw === 'elite' ? raw : null;
+function parseCompanyKey(raw: string | null): TemplateCompanyVariantId | null {
+  return raw && isTemplateCompanyVariantId(raw) ? raw : null;
 }
 
 export async function GET(request: Request) {
@@ -41,7 +41,7 @@ export async function PUT(request: Request) {
   }
   const company = parseCompanyKey(body.company ?? null);
   if (!company) {
-    return NextResponse.json({ error: 'company must be label or elite' }, { status: 400 });
+    return NextResponse.json({ error: 'company must be label, elite, or joint' }, { status: 400 });
   }
   const style = saveDebitNoteStyleTemplate(ownerId, company, normalizeDebitNoteStyle(body.style));
   return NextResponse.json({ company, style, saved: true });

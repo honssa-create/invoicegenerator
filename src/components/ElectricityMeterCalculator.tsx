@@ -175,24 +175,31 @@ export default function ElectricityMeterCalculator({
       )}
 
       <div className="rounded-lg border border-yellow-200 bg-yellow-50/60 p-3 text-sm space-y-1">
-        <p className="text-gray-700">
-          <span className="text-gray-500">用電度數 Usage</span>{' '}
-          <span className="font-mono font-semibold">{usage.toFixed(2)}</span>
-          <span className="text-gray-400 text-xs ml-1">= 今次 − 前次</span>
-        </p>
-        {formula === '213a' && (
-          <p className="text-gray-700">
-            <span className="text-gray-500">實用電度數 Net usage</span>{' '}
-            <span className="font-mono font-semibold">{netUsage.toFixed(2)}</span>
-            <span className="text-gray-400 text-xs ml-1">= 用電度數 − 其他單位</span>
+        {formula === '213a' ? (
+          <>
+            <p className="text-gray-700">
+              <span className="text-gray-500">用電度數 Usage</span>{' '}
+              <span className="font-mono font-semibold">{usage.toFixed(2)}</span>
+              <span className="text-gray-400 text-xs ml-1">= 今次 − 前次</span>
+            </p>
+            <p className="text-gray-700">
+              <span className="text-gray-500">實用電度數 Net usage</span>{' '}
+              <span className="font-mono font-semibold">{netUsage.toFixed(2)}</span>
+              <span className="text-gray-400 text-xs ml-1">= 用電度數 − 其他單位</span>
+            </p>
+            <p className="text-gray-900 font-semibold pt-1 border-t border-yellow-200/80">
+              電費 = {formatMoney(amount)}
+              <span className="text-gray-500 font-normal text-xs ml-2">(實用電度數 × 每度電費)</span>
+            </p>
+          </>
+        ) : (
+          <p className="text-gray-900 font-semibold">
+            電費 = {formatMoney(amount)}
+            <span className="text-gray-500 font-normal text-xs ml-2 block mt-1 sm:inline sm:mt-0">
+              = ({curr?.toFixed(2) ?? '—'} − {prev?.toFixed(2) ?? '—'}) × {rate?.toFixed(4) ?? '—'}
+            </span>
           </p>
         )}
-        <p className="text-gray-900 font-semibold pt-1 border-t border-yellow-200/80">
-          AMOUNT 電費 = {formatMoney(amount)}
-          <span className="text-gray-500 font-normal text-xs ml-2">
-            ({formula === '213a' ? '實用電度數' : '用電度數'} × 每度電費)
-          </span>
-        </p>
       </div>
     </div>
   );

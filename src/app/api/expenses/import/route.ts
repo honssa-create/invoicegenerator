@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { assignExpenseNumbers, expensePaidYearMonth, syncOption } from '@/lib/expense-server';
+import { assignExpenseNumbersAtomic, syncOption } from '@/lib/expense-server';
 import {
   findReceiptColumnIndex,
   hyperlinkUrlsByDataRow,
@@ -11,6 +11,8 @@ import {
   type ReceiptFetchWarning,
 } from '@/lib/expense-import-receipts';
 import { getDataOwnerId } from '@/lib/org-server';
+import { legacyPaymentToFundingSource } from '@/lib/expenses';
+import type { FundingSourceId } from '@/lib/expenses';
 
 const MAX_BYTES = 15 * 1024 * 1024;
 
@@ -176,6 +178,12 @@ export async function POST(request: Request) {
       continue;
     }
 
+    if (!date) {
+      skipped++;
+      errors.push(`Row ${sheetRow}: missing paid date (required for receipt numbering)`);
+      continue;
+    }
+
     if (amountHkd === null && amountRmb === null) {
       skipped++;
       errors.push(`Row ${sheetRow}: missing amount`);
@@ -235,12 +243,14 @@ export async function POST(request: Request) {
 
   const insertExpense = db.prepare(
     `INSERT INTO expenses
-       (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, notes, special_notes, payment_status, receipt_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, payment_channel, funding_source, card_last4, notes, special_notes, payment_status, receipt_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertReceipt = db.prepare(
-    'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
+    'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
   );
+
+  let expenseReportId: string | null = null;
 
   const persist = db.transaction(() => {
     for (const row of candidates) {
@@ -249,13 +259,19 @@ export async function POST(request: Request) {
       if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
       if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
-      const { batchId, receiptNo } = assignExpenseNumbers(ownerId, row.date, row.paymentMethod);
+      const fundingSource = (legacyPaymentToFundingSource(row.paymentMethod) || 'cash') as FundingSourceId;
+      const { expenseReportId: reportId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
+        expenseReportId,
+        fundingSource,
+      });
+      expenseReportId = reportId;
+
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(
         ownerId,
         session.userId,
         receiptNo,
-        batchId,
+        reportId,
         row.reason || 'other',
         row.merchant,
         row.supplierInput,
@@ -264,11 +280,14 @@ export async function POST(request: Request) {
         row.date,
         null,
         row.platform,
-        row.paymentMethod,
+        null,
+        'direct',
+        fundingSource,
+        null,
         row.notes,
         row.specialNotes,
         'paid',
-        primaryPath
+        primaryPath,
       );
       const expenseId = result.lastInsertRowid as number;
       for (const p of row.receiptPaths) {
@@ -279,7 +298,7 @@ export async function POST(request: Request) {
   });
 
   try {
-    persist();
+    persist.immediate();
   } catch {
     return NextResponse.json({ error: 'Import failed while saving rows' }, { status: 500 });
   }

@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import {
+  assignExpenseNumbersAtomic,
   attachReceipts,
-  assignExpenseNumbers,
   normalizeNumber,
   receiptPathsFromBody,
 } from '@/lib/expense-server';
@@ -74,6 +74,7 @@ export async function POST(request: Request) {
     const amount_rmb = normalizeNumber(body.amount_rmb);
     const receiptPaths = receiptPathsFromBody(body);
     const ownerId = getDataOwnerId(session.userId);
+    const paidDate = body.paid_date?.trim() || '';
 
     if (amount_hkd === null && amount_rmb === null) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
@@ -84,31 +85,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: payment.error }, { status: 400 });
     }
 
-    const { batchId, receiptNo } = assignExpenseNumbers(
-      ownerId,
-      body.paid_date?.trim() || null,
-      null,
-      { reuseBatch: Boolean(body.reuse_batch), fundingSource: payment.fields.funding_source },
-    );
+    if (!paidDate) {
+      return NextResponse.json({ error: 'Paid date is required for receipt numbering 請填寫支出日期' }, { status: 400 });
+    }
 
     const create = db.transaction(() => {
+      const { expenseReportId, receiptNo } = assignExpenseNumbersAtomic(ownerId, paidDate, {
+        reuseReport: Boolean(body.reuse_batch),
+        fundingSource: payment.fields.funding_source!,
+      });
+
       const result = db
         .prepare(
           `INSERT INTO expenses
             (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, payment_channel, funding_source, card_last4, notes, special_notes, payment_status, receipt_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           ownerId,
           session.userId,
           receiptNo,
-          batchId,
+          expenseReportId,
           category,
           body.merchant?.trim() || null,
           body.supplier_input?.trim() || null,
           amount_hkd,
           amount_rmb,
-          body.paid_date?.trim() || null,
+          paidDate,
           body.order_no?.trim() || null,
           body.platform?.trim() || null,
           null,
@@ -118,21 +121,22 @@ export async function POST(request: Request) {
           body.notes?.trim() || null,
           body.special_notes?.trim() || null,
           payment_status,
-          receiptPaths[0] || null
+          receiptPaths[0] || null,
         );
       const expenseId = result.lastInsertRowid as number;
       const insertReceipt = db.prepare(
-        'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
+        'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
       );
       for (const p of receiptPaths) insertReceipt.run(expenseId, ownerId, p);
       return expenseId;
     });
 
-    const expenseId = create();
+    const expenseId = create.immediate();
     const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId) as Expense;
     attachReceipts([expense]);
     return NextResponse.json({ expense }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: 'Failed to create expense' }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create expense';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

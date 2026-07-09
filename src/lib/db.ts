@@ -1074,6 +1074,32 @@ try {
   }
 }
 
+// Global parent Expense ID sequence (EXP-000001, never resets).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_report_sequence (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    next_serial INTEGER NOT NULL DEFAULT 1
+  );
+  INSERT OR IGNORE INTO expense_report_sequence (id, next_serial) VALUES (1, 1);
+`);
+{
+  const maxReportRow = db
+    .prepare(
+      `SELECT batch_id FROM expenses
+       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
+       ORDER BY batch_id DESC LIMIT 1`,
+    )
+    .get() as { batch_id: string } | undefined;
+  if (maxReportRow?.batch_id) {
+    const n = parseInt(maxReportRow.batch_id.slice(4), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      db.prepare(
+        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
+      ).run(n + 1);
+    }
+  }
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS role_permissions (
     role TEXT NOT NULL,

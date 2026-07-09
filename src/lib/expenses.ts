@@ -87,6 +87,23 @@ export type FundingSourceId = (typeof FUNDING_SOURCES)[number]['value'];
 
 export const FUNDING_SOURCE_CC_SELF: FundingSourceId = 'cc_self';
 
+/** Receipt No. suffix codes (Funding Source → code). */
+export const FUNDING_SOURCE_CODES: Record<FundingSourceId, string> = {
+  cc_self: 'CCS',
+  cc_company: 'CCC',
+  alipay_balance: 'AB',
+  paypal_balance: 'PB',
+  cash: 'CS',
+};
+
+export const FUNDING_SOURCE_CODE_VALUES = ['CCS', 'CCC', 'AB', 'PB', 'CS'] as const;
+export type FundingSourceCode = (typeof FUNDING_SOURCE_CODE_VALUES)[number];
+
+export function fundingSourceToCode(source: FundingSourceId | string | null | undefined): FundingSourceCode | null {
+  if (!source) return null;
+  return (FUNDING_SOURCE_CODES as Record<string, string>)[source] as FundingSourceCode | undefined ?? null;
+}
+
 const PAYMENT_CHANNEL_LABELS = Object.fromEntries(PAYMENT_CHANNELS.map((o) => [o.value, o.label]));
 const FUNDING_SOURCE_LABELS = Object.fromEntries(FUNDING_SOURCES.map((o) => [o.value, o.label]));
 

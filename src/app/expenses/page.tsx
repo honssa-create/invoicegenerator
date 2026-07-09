@@ -501,6 +501,10 @@ export default function ExpensesPage() {
       setError('Select a funding source 請選擇扣款來源');
       return;
     }
+    if (!form.paid_date) {
+      setError('Paid date is required for receipt numbering 請填寫支出日期');
+      return;
+    }
     if (form.funding_source === FUNDING_SOURCE_CC_SELF && !isValidCardLast4(form.card_last4)) {
       setError('Enter the last 4 digits of the card (信用卡尾四位數字)');
       return;
@@ -827,7 +831,7 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 sticky left-0 z-20 bg-white w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('batch', 'Batch ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
+                {sortTh('batch', 'Expense ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('number', 'Receipt No.', 'sticky left-[11.5rem] z-20 bg-white min-w-[10rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
@@ -994,7 +998,7 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Batch ID serial (…-026, …-027) and receipt serial (…-CC001, …-CC002) assigned on save
+                    Receipt No. uses paid date month + funding source (e.g. EXP-202604-CCS001). Expense ID assigned on submit.
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
@@ -1004,7 +1008,7 @@ export default function ExpensesPage() {
                         onChange={(e) => setContinueBatch(e.target.checked)}
                         className="rounded border-gray-300 text-brand-600"
                       />
-                      Continue previous batch 繼續上一批次 (same EXP-YYYYMM-XXX, receipt serial +1)
+                      Continue previous report 繼續上一份報銷單 (same Expense ID, new Receipt No.)
                     </label>
                   )}
                 </div>
@@ -1160,7 +1164,7 @@ export default function ExpensesPage() {
                 <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
                 <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
                 {detail.batch_id && (
-                  <p className="text-sm font-mono text-gray-500 mt-0.5">Batch {detail.batch_id}</p>
+                  <p className="text-sm font-mono text-gray-500 mt-0.5">Expense ID {detail.batch_id}</p>
                 )}
                 <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(detail) || 'Unnamed supplier'}</p>
               </div>
@@ -1184,7 +1188,7 @@ export default function ExpensesPage() {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
               {detailField('Receipt No. 收據編號', detail.receipt_no || `EXP-${detail.id}`)}
-              {detail.batch_id && detailField('Batch ID 批次編號', detail.batch_id)}
+              {detail.batch_id && detailField('Expense ID 報銷單編號', detail.batch_id)}
               {detailField('Paid Date 支出日期', detail.paid_date)}
               {detailField('Platform 消費平台', detail.platform)}
               {detailField('Supplier 供應商', detail.merchant)}

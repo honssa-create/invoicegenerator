@@ -8,10 +8,10 @@ import {
   type DebitNoteStyleTemplate,
 } from '@/lib/debit-note-style';
 import { downloadDebitNoteStyleTemplate } from '@/lib/debit-note-style-document';
-import { DEBIT_NOTE_COMPANY_CHOICES, type DebitNoteCompanyId } from '@/lib/rentals';
+import { DEBIT_NOTE_COMPANY_VARIANTS, type TemplateCompanyVariantId } from '@/lib/document-templates';
 
 interface Props {
-  companyKey: DebitNoteCompanyId;
+  companyKey: TemplateCompanyVariantId;
   style: DebitNoteStyleTemplate;
   onChange: (style: DebitNoteStyleTemplate) => void;
   onSave?: () => Promise<void>;
@@ -19,6 +19,10 @@ interface Props {
   saving?: boolean;
   saveMessage?: string;
   className?: string;
+  /** Inline form without collapsible chrome (split-screen editor). */
+  embedded?: boolean;
+  /** Hide download / save / reset row (parent provides actions). */
+  hideActions?: boolean;
 }
 
 export default function DebitNoteTemplateEditor({
@@ -30,9 +34,11 @@ export default function DebitNoteTemplateEditor({
   saving,
   saveMessage,
   className = '',
+  embedded = false,
+  hideActions = false,
 }: Props) {
   const [open, setOpen] = useState(true);
-  const companyLabel = DEBIT_NOTE_COMPANY_CHOICES.find((c) => c.id === companyKey)?.label ?? companyKey;
+  const companyLabel = DEBIT_NOTE_COMPANY_VARIANTS.find((c) => c.id === companyKey)?.shortLabel ?? companyKey;
 
   const setField = useCallback(
     (key: keyof DebitNoteStyleTemplate, value: string) => {
@@ -43,23 +49,14 @@ export default function DebitNoteTemplateEditor({
 
   const reset = () => onChange({ ...DEFAULT_DEBIT_NOTE_STYLE });
 
-  return (
-    <section className={`border border-gray-200 rounded-xl bg-white overflow-hidden ${className}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left bg-gray-50 hover:bg-gray-100/80"
-      >
-        <span className="font-semibold text-gray-900">Layout 樣式 — {companyLabel}</span>
-        <span className="text-gray-400 text-sm">{open ? '▼' : '▶'}</span>
-      </button>
-
-      {open && (
-        <div className="p-4 space-y-4 border-t border-gray-100">
+  const formBody = (
+        <div className={embedded ? 'space-y-4' : 'p-4 space-y-4 border-t border-gray-100'}>
+          {!embedded && (
           <p className="text-xs text-gray-500">
             Edit colours, fonts, and spacing — preview updates instantly. Save applies to debit notes for this company.
             編輯字體與顏色，即時預覽；儲存後套用至該公司的繳費通知單。
           </p>
+          )}
 
           <div className="grid sm:grid-cols-2 gap-3">
             {DEBIT_NOTE_STYLE_FIELDS.map((field) => {
@@ -101,17 +98,18 @@ export default function DebitNoteTemplateEditor({
             })}
           </div>
 
+          {!hideActions && (
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               type="button"
-              onClick={() => downloadDebitNoteStyleTemplate(style, companyKey, 'doc')}
+              onClick={() => downloadDebitNoteStyleTemplate(style, companyKey === 'joint' ? 'label' : companyKey, 'doc')}
               className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
             >
               Download doc 下載範本
             </button>
             <button
               type="button"
-              onClick={() => downloadDebitNoteStyleTemplate(style, companyKey, 'html')}
+              onClick={() => downloadDebitNoteStyleTemplate(style, companyKey === 'joint' ? 'label' : companyKey, 'html')}
               className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
             >
               Download HTML
@@ -139,14 +137,31 @@ export default function DebitNoteTemplateEditor({
               </>
             )}
           </div>
+          )}
         </div>
-      )}
+  );
+
+  if (embedded) {
+    return <div className={className}>{formBody}</div>;
+  }
+
+  return (
+    <section className={`border border-gray-200 rounded-xl bg-white overflow-hidden ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left bg-gray-50 hover:bg-gray-100/80"
+      >
+        <span className="font-semibold text-gray-900">Layout 樣式 — {companyLabel}</span>
+        <span className="text-gray-400 text-sm">{open ? '▼' : '▶'}</span>
+      </button>
+      {open && formBody}
     </section>
   );
 }
 
-/** Load saved debit note style template for one billing company. */
-export function useDebitNoteStyleTemplate(companyKey: DebitNoteCompanyId, readOnly?: boolean) {
+/** Load saved debit note style template for one billing company variant. */
+export function useDebitNoteStyleTemplate(companyKey: TemplateCompanyVariantId, readOnly?: boolean) {
   const [style, setStyle] = useState<DebitNoteStyleTemplate>({ ...DEFAULT_DEBIT_NOTE_STYLE });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

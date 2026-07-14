@@ -250,7 +250,7 @@ export async function POST(request: Request) {
     'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
   );
 
-  let expenseReportId: string | null = null;
+  let batchId: string | null = null;
 
   const persist = db.transaction(() => {
     for (const row of candidates) {
@@ -260,18 +260,18 @@ export async function POST(request: Request) {
       if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
       const fundingSource = (legacyPaymentToFundingSource(row.paymentMethod) || 'cash') as FundingSourceId;
-      const { expenseReportId: reportId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
-        expenseReportId,
+      const { batchId: reportBatchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
+        batchId,
         fundingSource,
       });
-      expenseReportId = reportId;
+      batchId = reportBatchId;
 
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(
         ownerId,
         session.userId,
         receiptNo,
-        reportId,
+        reportBatchId,
         row.reason || 'other',
         row.merchant,
         row.supplierInput,

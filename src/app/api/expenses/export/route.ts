@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     'Expense Reason (支出原因)': categoryLabel(e.category),
     Receipts: e.receipt_count,
     'Special Notes (特別事項)': e.special_notes || '',
-    'Expense ID': e.batch_id || '',
+    'Batch ID': e.batch_id || '',
     'Receipt No.': e.receipt_no || '',
     'Order No.': e.order_no || '',
     'Payment Status': e.payment_status,

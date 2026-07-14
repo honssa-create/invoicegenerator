@@ -90,8 +90,8 @@ export async function POST(request: Request) {
     }
 
     const create = db.transaction(() => {
-      const { expenseReportId, receiptNo } = assignExpenseNumbersAtomic(ownerId, paidDate, {
-        reuseReport: Boolean(body.reuse_batch),
+      const { batchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, paidDate, {
+        reuseBatch: Boolean(body.reuse_batch),
         fundingSource: payment.fields.funding_source!,
       });
 
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
           ownerId,
           session.userId,
           receiptNo,
-          expenseReportId,
+          batchId,
           category,
           body.merchant?.trim() || null,
           body.supplier_input?.trim() || null,

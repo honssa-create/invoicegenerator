@@ -89,12 +89,12 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
 
       const fundingSource = payment.fields.funding_source as FundingSourceId;
-      let expenseReportId = existing.batch_id;
+      let batchId = existing.batch_id;
       let receiptNo = existing.receipt_no;
 
-      if (!expenseReportId || !receiptNo) {
+      if (!batchId || !receiptNo) {
         const assigned = assignExpenseNumbersAtomic(ownerId, paidDate, { fundingSource });
-        expenseReportId = assigned.expenseReportId;
+        batchId = assigned.batchId;
         receiptNo = assigned.receiptNo;
       } else {
         const prevFunding =
@@ -141,7 +141,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         body.special_notes?.trim() || null,
         payment_status,
         receiptPaths[0] || null,
-        expenseReportId,
+        batchId,
         receiptNo,
         params.id,
         ownerId,

@@ -1074,7 +1074,7 @@ try {
   }
 }
 
-// Global parent Expense ID sequence (EXP-000001, never resets).
+// Global parent Batch ID sequence (EXP-0000001, never resets).
 db.exec(`
   CREATE TABLE IF NOT EXISTS expense_report_sequence (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1086,12 +1086,28 @@ db.exec(`
   const maxReportRow = db
     .prepare(
       `SELECT batch_id FROM expenses
-       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
+       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
        ORDER BY batch_id DESC LIMIT 1`,
     )
     .get() as { batch_id: string } | undefined;
   if (maxReportRow?.batch_id) {
     const n = parseInt(maxReportRow.batch_id.slice(4), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      db.prepare(
+        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
+      ).run(n + 1);
+    }
+  }
+  const legacyMaxRow = db
+    .prepare(
+      `SELECT batch_id FROM expenses
+       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
+         AND batch_id NOT GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]-*'
+       ORDER BY batch_id DESC LIMIT 1`,
+    )
+    .get() as { batch_id: string } | undefined;
+  if (legacyMaxRow?.batch_id) {
+    const n = parseInt(legacyMaxRow.batch_id.slice(4), 10);
     if (Number.isFinite(n) && n >= 1) {
       db.prepare(
         'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',

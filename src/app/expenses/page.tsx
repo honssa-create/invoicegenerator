@@ -11,9 +11,18 @@ import {
   DEFAULT_OPTIONS,
   OPTION_TYPES,
   EXPENSE_STATUS_COLORS,
+  FUNDING_SOURCES,
+  FUNDING_SOURCE_CC_SELF,
+  PAYMENT_CHANNELS,
   categoryLabel,
+  expensePaymentDisplay,
   expenseSupplierName,
   formatMoney,
+  fundingSourceLabel,
+  isValidCardLast4,
+  legacyPaymentToChannel,
+  legacyPaymentToFundingSource,
+  paymentChannelLabel,
   type OptionType,
 } from '@/lib/expenses';
 import {
@@ -34,7 +43,9 @@ const EMPTY_FORM = {
   paid_date: '',
   order_no: '',
   platform: '',
-  payment_method: '',
+  payment_channel: '',
+  funding_source: '',
+  card_last4: '',
   notes: '',
   special_notes: '',
 };
@@ -44,7 +55,7 @@ type FormReceipt = { id?: number; path: string; url: string };
 type Options = Record<OptionType, string[]>;
 type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
-const EMPTY_FILTERS = { dateStart: '', dateEnd: '', paymentMethod: '', reason: '', platform: '', search: '' };
+const EMPTY_FILTERS = { dateStart: '', dateEnd: '', fundingSource: '', reason: '', platform: '', search: '' };
 const PAGE_SIZES = [10, 20, 30, 50] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 
@@ -165,7 +176,7 @@ export default function ExpensesPage() {
   };
 
   const reasonOptions = Array.from(new Set([...(options.category || []), ...expenses.map((e) => e.category).filter(Boolean)]));
-  const paymentOptions = Array.from(new Set([...(options.payment_method || []), ...expenses.map((e) => e.payment_method).filter(Boolean) as string[]]));
+  const fundingSourceOptions = FUNDING_SOURCES.map((o) => o.value);
   const platformOptions = Array.from(new Set([...(options.platform || []), ...expenses.map((e) => e.platform).filter(Boolean) as string[]]));
   const supplierOptions = useMemo(
     () => mergeSupplierLists(options.supplier, expenses.map((e) => e.merchant)),
@@ -177,11 +188,28 @@ export default function ExpensesPage() {
     let list = expenses.filter((e) => {
       if (filters.dateStart && (!e.paid_date || e.paid_date < filters.dateStart)) return false;
       if (filters.dateEnd && (!e.paid_date || e.paid_date > filters.dateEnd)) return false;
-      if (filters.paymentMethod && e.payment_method !== filters.paymentMethod) return false;
+      if (filters.fundingSource) {
+        const src = e.funding_source || legacyPaymentToFundingSource(e.payment_method);
+        if (src !== filters.fundingSource) return false;
+      }
       if (filters.reason && e.category !== filters.reason) return false;
       if (filters.platform && e.platform !== filters.platform) return false;
       if (q) {
-        const hay = [e.batch_id, e.receipt_no, e.merchant, e.supplier_input, e.platform, e.payment_method, e.category, e.notes, e.special_notes]
+        const hay = [
+          e.batch_id,
+          e.receipt_no,
+          e.merchant,
+          e.supplier_input,
+          e.platform,
+          e.payment_channel,
+          e.funding_source,
+          e.card_last4,
+          e.payment_method,
+          expensePaymentDisplay(e),
+          e.category,
+          e.notes,
+          e.special_notes,
+        ]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -206,7 +234,7 @@ export default function ExpensesPage() {
           base = expenseSupplierName(a).localeCompare(expenseSupplierName(b));
           break;
         case 'payment':
-          base = String(a.payment_method || '').localeCompare(String(b.payment_method || ''));
+          base = expensePaymentDisplay(a).localeCompare(expensePaymentDisplay(b));
           break;
         case 'platform':
           base = String(a.platform || '').localeCompare(String(b.platform || ''));
@@ -303,7 +331,9 @@ export default function ExpensesPage() {
       paid_date: e.paid_date || '',
       order_no: e.order_no || '',
       platform: e.platform || '',
-      payment_method: e.payment_method || '',
+      payment_channel: e.payment_channel || legacyPaymentToChannel(e.payment_method),
+      funding_source: e.funding_source || legacyPaymentToFundingSource(e.payment_method),
+      card_last4: e.card_last4 || '',
       notes: e.notes || '',
       special_notes: e.special_notes || '',
     });
@@ -461,6 +491,22 @@ export default function ExpensesPage() {
     setError('');
     if (!form.amount_hkd && !form.amount_rmb) {
       setError('Enter an amount in HKD or RMB');
+      return;
+    }
+    if (!form.payment_channel) {
+      setError('Select a payment channel 請選擇支付渠道');
+      return;
+    }
+    if (!form.funding_source) {
+      setError('Select a funding source 請選擇扣款來源');
+      return;
+    }
+    if (!form.paid_date) {
+      setError('Paid date is required for receipt numbering 請填寫支出日期');
+      return;
+    }
+    if (form.funding_source === FUNDING_SOURCE_CC_SELF && !isValidCardLast4(form.card_last4)) {
+      setError('Enter the last 4 digits of the card (信用卡尾四位數字)');
       return;
     }
     setSaving(true);
@@ -684,10 +730,10 @@ export default function ExpensesPage() {
         onClear={() => setFilters(EMPTY_FILTERS)}
       >
         <div className="flex flex-col">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Payment 支付方式</label>
-          <select value={filters.paymentMethod} onChange={(e) => setFilters((f) => ({ ...f, paymentMethod: e.target.value }))} className={selectCls}>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">Funding Source 扣款來源</label>
+          <select value={filters.fundingSource} onChange={(e) => setFilters((f) => ({ ...f, fundingSource: e.target.value }))} className={selectCls}>
             <option value="">All</option>
-            {paymentOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            {fundingSourceOptions.map((o) => <option key={o} value={o}>{fundingSourceLabel(o)}</option>)}
           </select>
         </div>
         <div className="flex flex-col">
@@ -785,7 +831,7 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 sticky left-0 z-20 bg-white w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('batch', 'Batch ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
+                {sortTh('batch', 'Expense ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('number', 'Receipt No.', 'sticky left-[11.5rem] z-20 bg-white min-w-[10rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
@@ -793,7 +839,7 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 whitespace-nowrap">Notes 注意事項</th>
                 {sortTh('rmb', '支出金額(RMB)')}
                 {sortTh('hkd', '支出金額(HKD)')}
-                {sortTh('payment', 'Payment 支付方式')}
+                {sortTh('payment', 'Payment 支付')}
                 {sortTh('reason', 'Reason 支出原因')}
                 <th className="px-4 py-3 whitespace-nowrap">Receipts 付款收據</th>
                 <th className="px-4 py-3 whitespace-nowrap min-w-[120px]">Special Notes 特別事項</th>
@@ -822,7 +868,7 @@ export default function ExpensesPage() {
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.notes || ''}>{e.notes || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_rmb, 'CNY')}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_hkd, 'HKD')}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{e.payment_method || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{expensePaymentDisplay(e)}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
                   <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.special_notes || ''}>{e.special_notes || '—'}</td>
@@ -952,7 +998,7 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Batch ID serial (…-026, …-027) and receipt serial (…-CC001, …-CC002) assigned on save
+                    Receipt No. uses paid date month + funding source (e.g. EXP-202604-CCS001). Expense ID assigned on submit.
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
@@ -962,7 +1008,7 @@ export default function ExpensesPage() {
                         onChange={(e) => setContinueBatch(e.target.checked)}
                         className="rounded border-gray-300 text-brand-600"
                       />
-                      Continue previous batch 繼續上一批次 (same EXP-YYYYMM-XXX, receipt serial +1)
+                      Continue previous report 繼續上一份報銷單 (same Expense ID, new Receipt No.)
                     </label>
                   )}
                 </div>
@@ -1016,9 +1062,62 @@ export default function ExpensesPage() {
                   <TagSelect value={form.category} options={options.category || []} onChange={(v) => setForm((f) => ({ ...f, category: v }))} onAdd={(v) => addOption('category', v)} placeholder="Select or add a reason" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Payment Method 支付方式</label>
-                  <TagSelect value={form.payment_method} options={options.payment_method || []} onChange={(v) => setForm((f) => ({ ...f, payment_method: v }))} onAdd={(v) => addOption('payment_method', v)} placeholder="Select or add a method" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Payment Channel 支付渠道</label>
+                  <select
+                    value={form.payment_channel}
+                    onChange={(ev) => setForm((f) => ({ ...f, payment_channel: ev.target.value }))}
+                    className={inputCls}
+                    required
+                  >
+                    <option value="">Select channel…</option>
+                    {PAYMENT_CHANNELS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Funding Source 扣款來源</label>
+                  <select
+                    value={form.funding_source}
+                    onChange={(ev) =>
+                      setForm((f) => ({
+                        ...f,
+                        funding_source: ev.target.value,
+                        card_last4: ev.target.value === FUNDING_SOURCE_CC_SELF ? f.card_last4 : '',
+                      }))
+                    }
+                    className={inputCls}
+                    required
+                  >
+                    <option value="">Select source…</option>
+                    {FUNDING_SOURCES.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {form.funding_source === FUNDING_SOURCE_CC_SELF && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Last 4 digits of card (信用卡尾四位數字)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d{4}"
+                      maxLength={4}
+                      value={form.card_last4}
+                      onChange={(ev) =>
+                        setForm((f) => ({
+                          ...f,
+                          card_last4: ev.target.value.replace(/\D/g, '').slice(0, 4),
+                        }))
+                      }
+                      className={inputCls}
+                      placeholder="e.g., 1234"
+                      required
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">支出金額(RMB)</label>
                   <input type="number" step="0.01" min="0" value={form.amount_rmb} onChange={(ev) => setForm({ ...form, amount_rmb: ev.target.value })} className={inputCls} placeholder="Leave blank if unknown" />
@@ -1065,7 +1164,7 @@ export default function ExpensesPage() {
                 <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
                 <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
                 {detail.batch_id && (
-                  <p className="text-sm font-mono text-gray-500 mt-0.5">Batch {detail.batch_id}</p>
+                  <p className="text-sm font-mono text-gray-500 mt-0.5">Expense ID {detail.batch_id}</p>
                 )}
                 <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(detail) || 'Unnamed supplier'}</p>
               </div>
@@ -1089,14 +1188,21 @@ export default function ExpensesPage() {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
               {detailField('Receipt No. 收據編號', detail.receipt_no || `EXP-${detail.id}`)}
-              {detail.batch_id && detailField('Batch ID 批次編號', detail.batch_id)}
+              {detail.batch_id && detailField('Expense ID 報銷單編號', detail.batch_id)}
               {detailField('Paid Date 支出日期', detail.paid_date)}
               {detailField('Platform 消費平台', detail.platform)}
               {detailField('Supplier 供應商', detail.merchant)}
               {detail.supplier_input && detailField('供應商 (input)', detail.supplier_input)}
               {detailField('支出金額(RMB)', formatMoney(detail.amount_rmb, 'CNY'))}
               {detailField('支出金額(HKD)', formatMoney(detail.amount_hkd, 'HKD'))}
-              {detailField('Payment 支付方式', detail.payment_method)}
+              {detailField('Payment Channel 支付渠道', paymentChannelLabel(detail.payment_channel))}
+              {detailField('Funding Source 扣款來源', fundingSourceLabel(detail.funding_source))}
+              {detail.funding_source === FUNDING_SOURCE_CC_SELF && detail.card_last4
+                ? detailField('Card Last 4 信用卡尾四位', detail.card_last4)
+                : null}
+              {!detail.funding_source && detail.payment_method
+                ? detailField('Payment 支付方式 [legacy]', detail.payment_method)
+                : null}
               {detailField('Reason 支出原因', categoryLabel(detail.category))}
               {detailField('Order No. 訂單編號', detail.order_no)}
               <div>

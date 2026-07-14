@@ -1,11 +1,22 @@
 import db from './db';
 import type { Expense } from './types';
 import { DEFAULT_SUPPLIERS } from './expense-suppliers';
+import {
+  fundingSourceToCode,
+  type FundingSourceId,
+} from './expenses';
 
-export type ExpensePaymentCode = 'CC' | 'CS' | 'BT' | 'OT';
+/** Parent Expense ID: EXP-000001 (global, never resets). */
+export const EXPENSE_REPORT_ID_RE = /^EXP-\d{6}$/;
 
-export const EXPENSE_BATCH_RE = /^EXP-\d{6}-\d{3}$/;
-export const EXPENSE_RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
+/** Child Receipt No.: EXP-YYYYMM-{CCS|CCC|AB|PB|CS}001 */
+export const EXPENSE_RECEIPT_RE = /^EXP-(\d{6})-(CCS|CCC|AB|PB|CS)(\d{3})$/;
+
+/** @deprecated Legacy batch format kept for old rows. */
+export const LEGACY_EXPENSE_BATCH_RE = /^EXP-\d{6}-\d{3}$/;
+
+/** @deprecated Legacy receipt format kept for old rows. */
+export const LEGACY_EXPENSE_RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
 
 export function normalizeNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -13,22 +24,184 @@ export function normalizeNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function expenseYm(expenseDate?: string | null): string {
-  const src = expenseDate && /^\d{4}-\d{2}/.test(expenseDate) ? expenseDate : new Date().toISOString();
-  return src.slice(0, 7).replace('-', '');
+/** YYYYMM strictly from paid_date (required for receipt numbering). */
+export function expensePaidYearMonth(paidDate: string | null | undefined): string | null {
+  if (!paidDate || !/^\d{4}-\d{2}-\d{2}$/.test(paidDate.trim())) return null;
+  return paidDate.trim().slice(0, 7).replace('-', '');
 }
 
-/** YYYYMM from expense paid_date (falls back to today when missing). */
-export function expensePaidYearMonth(expenseDate?: string | null): string {
-  return expenseYm(expenseDate);
+export function requirePaidYearMonth(paidDate: string | null | undefined): string {
+  const ym = expensePaidYearMonth(paidDate);
+  if (!ym) {
+    throw new Error('Paid date (支出日期) is required and must be YYYY-MM-DD for receipt numbering');
+  }
+  return ym;
 }
 
-function batchMatchesExpenseMonth(batchId: string, expenseDate?: string | null): boolean {
-  return batchId.startsWith(`EXP-${expenseYm(expenseDate)}-`);
+function receiptPrefix(ym: string, code: string): string {
+  return `EXP-${ym}-${code}`;
 }
 
-/** Map payment method label → CC / CS / BT / OT. */
-export function paymentMethodCode(method: string | null | undefined): ExpensePaymentCode {
+/** Extract the trailing 3-digit serial from a receipt number string. */
+export function parseReceiptSequence(receiptNo: string | null | undefined): number | null {
+  if (!receiptNo) return null;
+  const m = EXPENSE_RECEIPT_RE.exec(receiptNo);
+  if (m) return parseInt(m[2], 10);
+  const tail = receiptNo.slice(-3);
+  if (/^\d{3}$/.test(tail)) return parseInt(tail, 10);
+  return null;
+}
+
+function maxReceiptSerialForPrefix(
+  userId: number,
+  prefix: string,
+  excludeExpenseId?: number,
+): number {
+  const like = `${prefix}%`;
+  const rows = (
+    excludeExpenseId != null
+      ? db
+          .prepare(
+            'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ? AND id != ?',
+          )
+          .all(userId, like, excludeExpenseId)
+      : db.prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?').all(userId, like)
+  ) as { receipt_no: string | null }[];
+
+  let max = 0;
+  for (const r of rows) {
+    const seq = parseReceiptSequence(r.receipt_no);
+    if (seq != null) max = Math.max(max, seq);
+  }
+  return max;
+}
+
+/**
+ * Allocate the next global Expense ID (EXP-000001…).
+ * Must run inside an IMMEDIATE transaction.
+ */
+export function allocateExpenseReportIdAtomic(): string {
+  const row = db.prepare('SELECT next_serial FROM expense_report_sequence WHERE id = 1').get() as
+    | { next_serial: number }
+    | undefined;
+  if (!row) {
+    throw new Error('expense_report_sequence not initialized');
+  }
+  const allocated = row.next_serial;
+  db.prepare('UPDATE expense_report_sequence SET next_serial = next_serial + 1 WHERE id = 1').run();
+  return `EXP-${String(allocated).padStart(6, '0')}`;
+}
+
+/** Latest parent Expense ID for a user (new format only). */
+export function getLatestExpenseReportId(userId: number): string | null {
+  const row = db
+    .prepare(
+      `SELECT batch_id FROM expenses
+       WHERE user_id = ? AND batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(userId) as { batch_id: string | null } | undefined;
+  const id = row?.batch_id?.trim();
+  return id && EXPENSE_REPORT_ID_RE.test(id) ? id : null;
+}
+
+/**
+ * Generate the next Receipt No. for YYYYMM + funding source code.
+ * Must run inside an IMMEDIATE transaction.
+ */
+export function generateReceiptNumberAtomic(
+  userId: number,
+  paidDate: string,
+  fundingSource: FundingSourceId,
+  excludeExpenseId?: number,
+): string {
+  const ym = requirePaidYearMonth(paidDate);
+  const code = fundingSourceToCode(fundingSource);
+  if (!code) {
+    throw new Error('Invalid funding source for receipt numbering');
+  }
+  const prefix = receiptPrefix(ym, code);
+  const next = maxReceiptSerialForPrefix(userId, prefix, excludeExpenseId) + 1;
+  return `${prefix}${String(next).padStart(3, '0')}`;
+}
+
+export interface AssignExpenseNumbersOptions {
+  /** Reuse this parent Expense ID (e.g. import batch or explicit). */
+  expenseReportId?: string | null;
+  /** Continue the user's latest parent Expense ID instead of allocating a new one. */
+  reuseReport?: boolean;
+  fundingSource: FundingSourceId;
+}
+
+export interface AssignedExpenseNumbers {
+  /** Parent Expense ID (stored in batch_id). */
+  expenseReportId: string;
+  /** Child Receipt No. */
+  receiptNo: string;
+}
+
+/**
+ * Assign parent Expense ID + child Receipt No.
+ * Call only inside db.transaction(...).immediate().
+ */
+export function assignExpenseNumbersAtomic(
+  userId: number,
+  paidDate: string,
+  options: AssignExpenseNumbersOptions,
+): AssignedExpenseNumbers {
+  let expenseReportId = options.expenseReportId?.trim() || '';
+  if (expenseReportId && !EXPENSE_REPORT_ID_RE.test(expenseReportId)) {
+    expenseReportId = '';
+  }
+  if (!expenseReportId) {
+    if (options.reuseReport) {
+      expenseReportId = getLatestExpenseReportId(userId) || allocateExpenseReportIdAtomic();
+    } else {
+      expenseReportId = allocateExpenseReportIdAtomic();
+    }
+  }
+
+  const receiptNo = generateReceiptNumberAtomic(userId, paidDate, options.fundingSource);
+  return { expenseReportId, receiptNo };
+}
+
+/** Re-issue receipt when paid_date or funding source changes on update. */
+export function reissueReceiptNumberAtomic(
+  userId: number,
+  expenseId: number,
+  paidDate: string,
+  fundingSource: FundingSourceId,
+): string {
+  return generateReceiptNumberAtomic(userId, paidDate, fundingSource, expenseId);
+}
+
+export function receiptNumberPrefix(
+  paidDate: string,
+  fundingSource: FundingSourceId,
+): string {
+  const ym = requirePaidYearMonth(paidDate);
+  const code = fundingSourceToCode(fundingSource);
+  if (!code) throw new Error('Invalid funding source');
+  return receiptPrefix(ym, code);
+}
+
+// ---------------------------------------------------------------------------
+// Legacy helpers (import / old payment_method rows)
+// ---------------------------------------------------------------------------
+
+export type ExpensePaymentCode = 'CC' | 'CS' | 'BT' | 'OT';
+
+/** @deprecated Use fundingSourceToCode for new receipt numbers. */
+export function paymentMethodCode(
+  method: string | null | undefined,
+  fundingSource?: string | null | undefined,
+): ExpensePaymentCode {
+  if (fundingSource) {
+    const code = fundingSourceToCode(fundingSource);
+    if (code === 'CCS' || code === 'CCC') return 'CC';
+    if (code === 'CS') return 'CS';
+    return 'OT';
+  }
   const m = (method || '').toLowerCase();
   if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
   if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
@@ -36,116 +209,7 @@ export function paymentMethodCode(method: string | null | undefined): ExpensePay
   return 'OT';
 }
 
-function maxBatchSerial(userId: number, ym: string): number {
-  const prefix = `EXP-${ym}-`;
-  let max = 0;
-  const bump = (value: string | null | undefined) => {
-    if (!value?.startsWith(prefix)) return;
-    const m = /^EXP-\d{6}-(\d{3})(?:-|$)/.exec(value);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  };
-  const batchRows = db
-    .prepare('SELECT batch_id FROM expenses WHERE user_id = ? AND batch_id LIKE ?')
-    .all(userId, `${prefix}%`) as { batch_id: string | null }[];
-  for (const r of batchRows) bump(r.batch_id);
-  const receiptRows = db
-    .prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?')
-    .all(userId, `${prefix}%`) as { receipt_no: string | null }[];
-  for (const r of receiptRows) bump(r.receipt_no);
-  return max;
-}
-
-/** Batch ID: EXP-YYYYMM-XXX — YYYYMM from paid_date; XXX serial restarts each calendar month. */
-export function generateBatchId(userId: number, expenseDate?: string | null): string {
-  const ym = expenseYm(expenseDate);
-  const next = maxBatchSerial(userId, ym) + 1;
-  return `EXP-${ym}-${String(next).padStart(3, '0')}`;
-}
-
-/** Latest batch ID for user+month (highest EXP-YYYYMM-XXX serial), or null. */
-export function getLatestBatchId(userId: number, expenseDate?: string | null): string | null {
-  const ym = expenseYm(expenseDate);
-  const prefix = `EXP-${ym}-`;
-  const maxSerial = maxBatchSerial(userId, ym);
-  if (maxSerial < 1) return null;
-  return `${prefix}${String(maxSerial).padStart(3, '0')}`;
-}
-
-/** Parse trailing 3-digit serial from a full receipt number. */
-export function parseReceiptSerial(receiptNo: string | null | undefined): number | null {
-  const m = EXPENSE_RECEIPT_RE.exec(receiptNo || '');
-  if (!m) return null;
-  return parseInt(receiptNo!.slice(-3), 10);
-}
-
-/** Receipt no: {batchId}-{CC|CS|BT|OT}NNN — NNN serial per batch + payment code (CC001, CC002, CS001…). */
-export function generateReceiptNumber(
-  userId: number,
-  batchId: string,
-  paymentMethod: string | null | undefined,
-  excludeExpenseId?: number,
-): string {
-  const code = paymentMethodCode(paymentMethod);
-  const prefix = `${batchId}-${code}`;
-  const rows = db
-    .prepare(
-      excludeExpenseId != null
-        ? 'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ? AND id != ?'
-        : 'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?',
-    )
-    .all(
-      ...(excludeExpenseId != null
-        ? [userId, `${prefix}%`, excludeExpenseId]
-        : [userId, `${prefix}%`]),
-    ) as { receipt_no: string | null }[];
-  let max = 0;
-  const re = new RegExp(`^${batchId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-${code}(\\d{3})$`);
-  for (const r of rows) {
-    const m = re.exec(r.receipt_no || '');
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return `${batchId}-${code}${String(max + 1).padStart(3, '0')}`;
-}
-
-export interface AssignExpenseNumbersOptions {
-  /** Reuse this batch (e.g. explicit batch from caller). */
-  batchId?: string | null;
-  /** Continue the latest month batch instead of starting EXP-YYYYMM-XXX+1. */
-  reuseBatch?: boolean;
-}
-
-/** Assign batch + receipt numbers on create (upload / manual save / import). */
-export function assignExpenseNumbers(
-  userId: number,
-  expenseDate: string | null | undefined,
-  paymentMethod: string | null | undefined,
-  options?: AssignExpenseNumbersOptions,
-): { batchId: string; receiptNo: string } {
-  let batchId = options?.batchId?.trim() || '';
-  if (batchId && (!EXPENSE_BATCH_RE.test(batchId) || !batchMatchesExpenseMonth(batchId, expenseDate))) {
-    batchId = '';
-  }
-  if (!batchId) {
-    batchId = options?.reuseBatch
-      ? (getLatestBatchId(userId, expenseDate) || generateBatchId(userId, expenseDate))
-      : generateBatchId(userId, expenseDate);
-  }
-  const receiptNo = generateReceiptNumber(userId, batchId, paymentMethod);
-  return { batchId, receiptNo };
-}
-
-/** Re-issue receipt when payment method changes (new CC/CS/BT/OT suffix + next serial for that code). */
-export function reissueReceiptNumber(
-  userId: number,
-  expenseId: number,
-  batchId: string,
-  paymentMethod: string | null | undefined,
-): string {
-  return generateReceiptNumber(userId, batchId, paymentMethod, expenseId);
-}
-
 // Insert a custom dropdown option if it is not already a default or existing value.
-// Used by both the options API and batch import "tag sync".
 const DEFAULTS: Record<string, string[]> = {
   payment_method: ['Credit Card 0860', '現金', '淘寶', '拼多多', '其他，請註明', 'Hing現金'],
   category: ['包裝用品', '公司用品', '快遞費用', '燕南豐包裝物資', 'Honour打版', 'Honour貨款月結', 'Honour貨款(單次)'],
@@ -164,12 +228,11 @@ export function syncOption(userId: number, type: string, value: string | null | 
   db.prepare('INSERT OR IGNORE INTO expense_options (user_id, type, value) VALUES (?, ?, ?)').run(
     userId,
     type,
-    trimmed
+    trimmed,
   );
   return true;
 }
 
-// Supports both the new receipt_paths array and the legacy single receipt_path field.
 export function receiptPathsFromBody(body: Record<string, unknown>): string[] {
   const list = Array.isArray(body.receipt_paths) ? body.receipt_paths : [];
   const paths = list.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean);
@@ -185,7 +248,7 @@ export function attachReceipts(expenses: Expense[]): Expense[] {
   const placeholders = ids.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT id, expense_id, path FROM expense_receipts WHERE expense_id IN (${placeholders}) ORDER BY id`
+      `SELECT id, expense_id, path FROM expense_receipts WHERE expense_id IN (${placeholders}) ORDER BY id`,
     )
     .all(...ids) as { id: number; expense_id: number; path: string }[];
   const map = new Map<number, { id: number; path: string }[]>();
@@ -198,7 +261,6 @@ export function attachReceipts(expenses: Expense[]): Expense[] {
     if (attached.length > 0) {
       e.receipts = attached;
     } else if (e.receipt_path?.trim()) {
-      // Legacy single receipt_path — PrintView resolves id 0 to /api/expenses/[id]/receipt
       e.receipts = [{ id: 0, path: e.receipt_path.trim() }];
     } else {
       e.receipts = [];

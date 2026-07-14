@@ -1063,6 +1063,41 @@ try {
   if (!expenseCols.some((c) => c.name === 'supplier_input')) {
     db.exec('ALTER TABLE expenses ADD COLUMN supplier_input TEXT');
   }
+  if (!expenseCols.some((c) => c.name === 'payment_channel')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN payment_channel TEXT');
+  }
+  if (!expenseCols.some((c) => c.name === 'funding_source')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN funding_source TEXT');
+  }
+  if (!expenseCols.some((c) => c.name === 'card_last4')) {
+    db.exec('ALTER TABLE expenses ADD COLUMN card_last4 TEXT');
+  }
+}
+
+// Global parent Expense ID sequence (EXP-000001, never resets).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_report_sequence (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    next_serial INTEGER NOT NULL DEFAULT 1
+  );
+  INSERT OR IGNORE INTO expense_report_sequence (id, next_serial) VALUES (1, 1);
+`);
+{
+  const maxReportRow = db
+    .prepare(
+      `SELECT batch_id FROM expenses
+       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
+       ORDER BY batch_id DESC LIMIT 1`,
+    )
+    .get() as { batch_id: string } | undefined;
+  if (maxReportRow?.batch_id) {
+    const n = parseInt(maxReportRow.batch_id.slice(4), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      db.prepare(
+        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
+      ).run(n + 1);
+    }
+  }
 }
 
 db.exec(`

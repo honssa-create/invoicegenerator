@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { categoryLabel, expenseSupplierName, formatMoney } from '@/lib/expenses';
+import { categoryLabel, expensePaymentDisplay, expenseSupplierName, formatMoney } from '@/lib/expenses';
 import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
 import type { Expense } from '@/lib/types';
 
@@ -42,7 +42,7 @@ function ExpenseSummary({ e }: { e: Expense }) {
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider opacity-80">Receipt No.</p>
           <p className="text-xl sm:text-2xl font-bold font-mono truncate">{e.receipt_no || `EXP-${e.id}`}</p>
-          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Batch {e.batch_id}</p>}
+          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Expense ID {e.batch_id}</p>}
         </div>
         <div className="text-right text-sm shrink-0">
           <p className="font-semibold max-w-[12rem] truncate">{expenseSupplierName(e) || 'Unnamed merchant'}</p>
@@ -60,7 +60,7 @@ function ExpenseSummary({ e }: { e: Expense }) {
         <div><span className="text-gray-500">Reason (支出原因):</span> {categoryLabel(e.category)}</div>
         <div><span className="text-gray-500">Amount (RMB):</span> {formatMoney(e.amount_rmb, 'CNY')}</div>
         <div><span className="text-gray-500">Amount (HKD):</span> {formatMoney(e.amount_hkd, 'HKD')}</div>
-        <div><span className="text-gray-500">Payment (支付方式):</span> {e.payment_method || '—'}</div>
+        <div><span className="text-gray-500">Payment (支付):</span> {expensePaymentDisplay(e)}</div>
         <div><span className="text-gray-500">Status:</span> <span className="capitalize">{e.payment_status}</span></div>
         {e.order_no && <div><span className="text-gray-500">Order No.:</span> {e.order_no}</div>}
         {e.notes && (

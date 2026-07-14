@@ -53,7 +53,7 @@ const EMPTY_FORM = {
 type FormState = typeof EMPTY_FORM;
 type FormReceipt = { id?: number; path: string; url: string };
 type Options = Record<OptionType, string[]>;
-type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'payment' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
+type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'paymentChannel' | 'fundingSource' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', fundingSource: '', reason: '', platform: '', search: '' };
 const PAGE_SIZES = [10, 20, 30, 50] as const;
@@ -115,6 +115,7 @@ export default function ExpensesPage() {
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
   const [continueBatch, setContinueBatch] = useState(false);
+  const [importSingleBatch, setImportSingleBatch] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
@@ -233,9 +234,18 @@ export default function ExpensesPage() {
         case 'supplier':
           base = expenseSupplierName(a).localeCompare(expenseSupplierName(b));
           break;
-        case 'payment':
-          base = expensePaymentDisplay(a).localeCompare(expensePaymentDisplay(b));
+        case 'paymentChannel': {
+          const aCh = paymentChannelLabel(a.payment_channel || legacyPaymentToChannel(a.payment_method));
+          const bCh = paymentChannelLabel(b.payment_channel || legacyPaymentToChannel(b.payment_method));
+          base = aCh.localeCompare(bCh);
           break;
+        }
+        case 'fundingSource': {
+          const aFs = fundingSourceLabel(a.funding_source || legacyPaymentToFundingSource(a.payment_method));
+          const bFs = fundingSourceLabel(b.funding_source || legacyPaymentToFundingSource(b.payment_method));
+          base = aFs.localeCompare(bFs);
+          break;
+        }
         case 'platform':
           base = String(a.platform || '').localeCompare(String(b.platform || ''));
           break;
@@ -449,6 +459,7 @@ export default function ExpensesPage() {
     setImporting(true);
     const fd = new FormData();
     fd.append('file', file);
+    if (importSingleBatch) fd.append('single_batch', '1');
     try {
       const res = await fetch('/api/expenses/import', { method: 'POST', body: fd });
       const data = await res.json();
@@ -684,18 +695,29 @@ export default function ExpensesPage() {
           >
             🖨 Print Selected{selected.size > 0 ? ` (${selected.size})` : ''}
           </button>
-          <div
-            onClick={() => importInputRef.current?.click()}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
-            }}
-            onDragOver={(e) => e.preventDefault()}
-            className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
-            title="Drag a .csv / .xlsx / .xls file here or click to select"
-          >
-            {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
-            <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
+          <div className="flex flex-col gap-1.5">
+            <div
+              onClick={() => importInputRef.current?.click()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
+              title="Drag a .csv / .xlsx / .xls file here or click to select"
+            >
+              {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
+              <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none px-1">
+              <input
+                type="checkbox"
+                checked={importSingleBatch}
+                onChange={(e) => setImportSingleBatch(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+              />
+              Group import as one Batch ID 整批共用同一報銷單編號
+            </label>
           </div>
           <a
             href="/api/expenses/export"
@@ -839,7 +861,8 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 whitespace-nowrap">Notes 注意事項</th>
                 {sortTh('rmb', '支出金額(RMB)')}
                 {sortTh('hkd', '支出金額(HKD)')}
-                {sortTh('payment', 'Payment 支付')}
+                {sortTh('paymentChannel', 'Payment Channel 支付渠道')}
+                {sortTh('fundingSource', 'Funding Source 扣款來源')}
                 {sortTh('reason', 'Reason 支出原因')}
                 <th className="px-4 py-3 whitespace-nowrap">Receipts 付款收據</th>
                 <th className="px-4 py-3 whitespace-nowrap min-w-[120px]">Special Notes 特別事項</th>
@@ -868,7 +891,12 @@ export default function ExpensesPage() {
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.notes || ''}>{e.notes || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_rmb, 'CNY')}</td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatMoney(e.amount_hkd, 'HKD')}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{expensePaymentDisplay(e)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                    {paymentChannelLabel(e.payment_channel || legacyPaymentToChannel(e.payment_method))}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                    {fundingSourceLabel(e.funding_source || legacyPaymentToFundingSource(e.payment_method))}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{categoryLabel(e.category)}</td>
                   <td className="px-4 py-3">{renderReceiptsCell(e)}</td>
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={e.special_notes || ''}>{e.special_notes || '—'}</td>

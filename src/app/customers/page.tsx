@@ -66,7 +66,7 @@ export default function CustomersPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this customer?')) return;
+    if (!confirm('Move this customer to Deleted Records? You can restore it within 60 days.')) return;
     const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) {
@@ -78,22 +78,21 @@ export default function CustomersPage() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
-          <p className="text-gray-500 mt-1">Manage your client list</p>
+          <h1 className="page-title">Customers</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">Manage your client list</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
-        >
-          + Add Customer
-        </button>
+        <div className="page-actions">
+          <button onClick={openCreate} className="btn bg-brand-600 text-white hover:bg-brand-700">
+            + Add Customer
+          </button>
+        </div>
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg p-6 shadow-xl">
+        <div className="modal-overlay">
+          <div className="modal-panel">
             <h2 className="text-lg font-semibold mb-4">
               {editingId ? 'Edit Customer' : 'New Customer'}
             </h2>
@@ -174,7 +173,8 @@ export default function CustomersPage() {
             <p>No customers yet. Add your first client to start invoicing.</p>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="table-scroll">
+          <table className="w-full min-w-[640px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3">Name</th>
@@ -205,6 +205,7 @@ export default function CustomersPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </AppLayout>

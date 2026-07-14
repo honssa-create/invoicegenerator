@@ -25,6 +25,7 @@ export interface Invoice {
   id: number;
   user_id: number;
   customer_id: number;
+  order_id: number | null;
   invoice_number: string;
   status: InvoiceStatus;
   issue_date: string;
@@ -34,6 +35,13 @@ export interface Invoice {
   terms: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface LinkedOrderSummary {
+  id: number;
+  po_number: string | null;
+  name: string | null;
+  description: string | null;
 }
 
 export interface InvoiceItem {
@@ -56,6 +64,50 @@ export interface InvoiceWithDetails extends Invoice {
   subtotal: number;
   tax_amount: number;
   total: number;
+}
+
+export type PaymentStatus = 'unpaid' | 'pending' | 'paid';
+
+export interface ExpenseReceipt {
+  id: number;
+  path: string;
+}
+
+export interface Expense {
+  id: number;
+  user_id: number;
+  created_by_user_id?: number | null;
+  receipt_no: string | null;
+  batch_id: string | null;
+  category: string;
+  merchant: string | null;
+  supplier_input: string | null;
+  amount_hkd: number | null;
+  amount_rmb: number | null;
+  paid_date: string | null;
+  order_no: string | null;
+  platform: string | null;
+  payment_method: string | null;
+  payment_channel: string | null;
+  funding_source: string | null;
+  card_last4: string | null;
+  notes: string | null;
+  special_notes: string | null;
+  payment_status: PaymentStatus;
+  receipt_path: string | null;
+  receipts: ExpenseReceipt[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReceiptScanResult {
+  merchant: string | null;
+  date: string | null;
+  amount_hkd: number | null;
+  amount_rmb: number | null;
+  receipt_path: string | null;
+  raw_text: string;
+  source: 'ai' | 'ocr';
 }
 
 export interface DashboardStats {

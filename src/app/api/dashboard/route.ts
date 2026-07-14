@@ -62,6 +62,16 @@ export async function GET(request: Request) {
     }
   ).count;
 
+  const expenseTotals = db
+    .prepare(
+      `SELECT
+         COUNT(*) as count,
+         COALESCE(SUM(amount_hkd), 0) as hkd,
+         COALESCE(SUM(amount_rmb), 0) as rmb
+       FROM expenses WHERE user_id = ?`
+    )
+    .get(session.userId) as { count: number; hkd: number; rmb: number };
+
   return NextResponse.json({
     totalInvoices,
     totalRevenue,
@@ -69,5 +79,8 @@ export async function GET(request: Request) {
     overdueCount,
     customerCount,
     recentInvoices,
+    expenseCount: expenseTotals.count,
+    totalExpensesHkd: expenseTotals.hkd,
+    totalExpensesRmb: expenseTotals.rmb,
   });
 }

@@ -6,8 +6,11 @@ import {
   type FundingSourceId,
 } from './expenses';
 
-/** Parent Expense ID: EXP-000001 (global, never resets). */
-export const EXPENSE_REPORT_ID_RE = /^EXP-\d{6}$/;
+/** Parent Batch ID: EXP-0000001 (global 7-digit serial, never resets). */
+export const EXPENSE_REPORT_ID_RE = /^EXP-\d{7}$/;
+
+/** @deprecated Prior 6-digit parent IDs (EXP-000001). */
+export const LEGACY_EXPENSE_REPORT_ID_RE = /^EXP-\d{6}$/;
 
 /** Child Receipt No.: EXP-YYYYMM-{CCS|CCC|AB|PB|CS}001 */
 export const EXPENSE_RECEIPT_RE = /^EXP-(\d{6})-(CCS|CCC|AB|PB|CS)(\d{3})$/;
@@ -46,7 +49,7 @@ function receiptPrefix(ym: string, code: string): string {
 export function parseReceiptSequence(receiptNo: string | null | undefined): number | null {
   if (!receiptNo) return null;
   const m = EXPENSE_RECEIPT_RE.exec(receiptNo);
-  if (m) return parseInt(m[2], 10);
+  if (m) return parseInt(m[3], 10);
   const tail = receiptNo.slice(-3);
   if (/^\d{3}$/.test(tail)) return parseInt(tail, 10);
   return null;
@@ -76,8 +79,12 @@ function maxReceiptSerialForPrefix(
   return max;
 }
 
+function isExpenseReportId(id: string): boolean {
+  return EXPENSE_REPORT_ID_RE.test(id) || LEGACY_EXPENSE_REPORT_ID_RE.test(id);
+}
+
 /**
- * Allocate the next global Expense ID (EXP-000001…).
+ * Allocate the next global Batch ID (EXP-0000001…).
  * Must run inside an IMMEDIATE transaction.
  */
 export function allocateExpenseReportIdAtomic(): string {
@@ -89,20 +96,23 @@ export function allocateExpenseReportIdAtomic(): string {
   }
   const allocated = row.next_serial;
   db.prepare('UPDATE expense_report_sequence SET next_serial = next_serial + 1 WHERE id = 1').run();
-  return `EXP-${String(allocated).padStart(6, '0')}`;
+  return `EXP-${String(allocated).padStart(7, '0')}`;
 }
 
-/** Latest parent Expense ID for a user (new format only). */
+/** Latest parent Batch ID for a user (EXP-0000001 format, or legacy 6-digit). */
 export function getLatestExpenseReportId(userId: number): string | null {
-  const row = db
+  const rows = db
     .prepare(
       `SELECT batch_id FROM expenses
-       WHERE user_id = ? AND batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
-       ORDER BY id DESC LIMIT 1`,
+       WHERE user_id = ? AND batch_id LIKE 'EXP-%' AND batch_id NOT LIKE '%-%-%'
+       ORDER BY id DESC`,
     )
-    .get(userId) as { batch_id: string | null } | undefined;
-  const id = row?.batch_id?.trim();
-  return id && EXPENSE_REPORT_ID_RE.test(id) ? id : null;
+    .all(userId) as { batch_id: string | null }[];
+  for (const row of rows) {
+    const id = row.batch_id?.trim();
+    if (id && isExpenseReportId(id)) return id;
+  }
+  return null;
 }
 
 /**
@@ -126,22 +136,22 @@ export function generateReceiptNumberAtomic(
 }
 
 export interface AssignExpenseNumbersOptions {
-  /** Reuse this parent Expense ID (e.g. import batch or explicit). */
-  expenseReportId?: string | null;
-  /** Continue the user's latest parent Expense ID instead of allocating a new one. */
-  reuseReport?: boolean;
+  /** Reuse this parent Batch ID (e.g. import batch or explicit). */
+  batchId?: string | null;
+  /** Continue the user's latest Batch ID instead of allocating a new one. */
+  reuseBatch?: boolean;
   fundingSource: FundingSourceId;
 }
 
 export interface AssignedExpenseNumbers {
-  /** Parent Expense ID (stored in batch_id). */
-  expenseReportId: string;
+  /** Parent Batch ID (stored in batch_id). */
+  batchId: string;
   /** Child Receipt No. */
   receiptNo: string;
 }
 
 /**
- * Assign parent Expense ID + child Receipt No.
+ * Assign parent Batch ID + child Receipt No.
  * Call only inside db.transaction(...).immediate().
  */
 export function assignExpenseNumbersAtomic(
@@ -149,20 +159,20 @@ export function assignExpenseNumbersAtomic(
   paidDate: string,
   options: AssignExpenseNumbersOptions,
 ): AssignedExpenseNumbers {
-  let expenseReportId = options.expenseReportId?.trim() || '';
-  if (expenseReportId && !EXPENSE_REPORT_ID_RE.test(expenseReportId)) {
-    expenseReportId = '';
+  let batchId = options.batchId?.trim() || '';
+  if (batchId && !isExpenseReportId(batchId)) {
+    batchId = '';
   }
-  if (!expenseReportId) {
-    if (options.reuseReport) {
-      expenseReportId = getLatestExpenseReportId(userId) || allocateExpenseReportIdAtomic();
+  if (!batchId) {
+    if (options.reuseBatch) {
+      batchId = getLatestExpenseReportId(userId) || allocateExpenseReportIdAtomic();
     } else {
-      expenseReportId = allocateExpenseReportIdAtomic();
+      batchId = allocateExpenseReportIdAtomic();
     }
   }
 
   const receiptNo = generateReceiptNumberAtomic(userId, paidDate, options.fundingSource);
-  return { expenseReportId, receiptNo };
+  return { batchId, receiptNo };
 }
 
 /** Re-issue receipt when paid_date or funding source changes on update. */

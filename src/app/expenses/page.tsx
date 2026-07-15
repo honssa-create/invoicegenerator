@@ -115,7 +115,6 @@ export default function ExpensesPage() {
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
   const [continueBatch, setContinueBatch] = useState(false);
-  const [importSingleBatch, setImportSingleBatch] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
@@ -459,7 +458,6 @@ export default function ExpensesPage() {
     setImporting(true);
     const fd = new FormData();
     fd.append('file', file);
-    if (importSingleBatch) fd.append('single_batch', '1');
     try {
       const res = await fetch('/api/expenses/import', { method: 'POST', body: fd });
       const data = await res.json();
@@ -695,29 +693,18 @@ export default function ExpensesPage() {
           >
             🖨 Print Selected{selected.size > 0 ? ` (${selected.size})` : ''}
           </button>
-          <div className="flex flex-col gap-1.5">
-            <div
-              onClick={() => importInputRef.current?.click()}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
-              title="Drag a .csv / .xlsx / .xls file here or click to select"
-            >
-              {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
-              <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
-            </div>
-            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none px-1">
-              <input
-                type="checkbox"
-                checked={importSingleBatch}
-                onChange={(e) => setImportSingleBatch(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-              />
-              Group import as one Batch ID 整批共用同一報銷單編號
-            </label>
+          <div
+            onClick={() => importInputRef.current?.click()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
+            title="Drag a .csv / .xlsx / .xls file here or click to select"
+          >
+            {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
+            <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
           </div>
           <a
             href="/api/expenses/export"

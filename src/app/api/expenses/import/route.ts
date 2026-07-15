@@ -117,7 +117,6 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
   }
-  const singleBatch = formData.get('single_batch') === '1' || formData.get('single_batch') === 'true';
   if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: 'File too large (max 15 MB)' }, { status: 400 });
   }
@@ -251,8 +250,6 @@ export async function POST(request: Request) {
     'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
   );
 
-  let sharedBatchId: string | null = null;
-
   const persist = db.transaction(() => {
     for (const row of candidates) {
       if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
@@ -262,10 +259,8 @@ export async function POST(request: Request) {
 
       const fundingSource = (legacyPaymentToFundingSource(row.paymentMethod) || 'cash') as FundingSourceId;
       const { batchId: reportBatchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
-        batchId: singleBatch ? sharedBatchId : null,
         fundingSource,
       });
-      if (singleBatch) sharedBatchId = reportBatchId;
 
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(

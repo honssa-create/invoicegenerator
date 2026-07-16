@@ -152,9 +152,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         ownerId,
       );
       const insertReceipt = db.prepare(
-        'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
+        'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
       );
-      for (const p of receiptPaths) insertReceipt.run(params.id, ownerId, p);
+      for (const p of receiptPaths) insertReceipt.run(params.id, ownerId, p, null);
     });
 
     update.immediate();

@@ -71,6 +71,7 @@ export type PaymentStatus = 'unpaid' | 'pending' | 'paid';
 export interface ExpenseReceipt {
   id: number;
   path: string;
+  source_url?: string | null;
 }
 
 export interface Expense {

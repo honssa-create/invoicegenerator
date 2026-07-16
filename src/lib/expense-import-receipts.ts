@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { saveReceipt } from './receipt';
+import { shouldKeepRemoteUrlInsteadOfEphemeralSave } from './receipt-storage';
 
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -277,8 +278,13 @@ export async function storeImportImageBuffer(
   return saveReceipt(buffer, mimeType, originalName);
 }
 
+export interface ImportReceiptRef {
+  path: string;
+  sourceUrl?: string | null;
+}
+
 export type ReceiptFetchResult =
-  | { path: string; warning?: ReceiptFetchWarning }
+  | { path: string; sourceUrl?: string | null; warning?: ReceiptFetchWarning }
   | { warning: ReceiptFetchWarning };
 
 function linkPreviewFallback(url: string, rowLabel: string, detail: string): ReceiptFetchResult {
@@ -290,6 +296,7 @@ function linkPreviewFallback(url: string, rowLabel: string, detail: string): Rec
   }
   return {
     path: trimmed,
+    sourceUrl: trimmed,
     warning: {
       row: 0,
       url,
@@ -327,8 +334,13 @@ export async function fetchAndStoreReceiptFromUrl(
       /* ignore */
     }
 
+    const sourceUrl = url.trim();
+    if (shouldKeepRemoteUrlInsteadOfEphemeralSave()) {
+      return { path: sourceUrl, sourceUrl };
+    }
+
     const path = await saveReceipt(buf, mimeType, filename);
-    return { path };
+    return { path, sourceUrl };
   } catch {
     return linkPreviewFallback(url, rowLabel, 'receipt download failed — link may be expired');
   }
@@ -430,7 +442,7 @@ export async function resolveImportReceiptPaths(
   extraUrls: string[] = [],
   ws?: XLSX.WorkSheet,
   dataRowIndex?: number,
-): Promise<{ paths: string[]; warnings: ReceiptFetchWarning[] }> {
+): Promise<{ refs: ImportReceiptRef[]; warnings: ReceiptFetchWarning[] }> {
   const urls = collectReceiptUrlsFromRow(row, extraUrls);
 
   if (ws && dataRowIndex != null && ws['!ref']) {
@@ -443,17 +455,19 @@ export async function resolveImportReceiptPaths(
   }
 
   const uniqueUrls = Array.from(new Set(urls.map((u) => u.trim()).filter(Boolean)));
-  const paths: string[] = [];
+  const refs: ImportReceiptRef[] = [];
   const warnings: ReceiptFetchWarning[] = [];
   const rowLabel = String(rowNumber);
 
   for (const url of uniqueUrls) {
     const result = await fetchAndStoreReceiptFromUrl(url, rowLabel);
-    if ('path' in result) paths.push(result.path);
+    if ('path' in result) {
+      refs.push({ path: result.path, sourceUrl: result.sourceUrl ?? null });
+    }
     if ('warning' in result && result.warning) {
       warnings.push({ ...result.warning, row: rowNumber });
     }
   }
 
-  return { paths, warnings };
+  return { refs, warnings };
 }

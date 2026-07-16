@@ -258,20 +258,27 @@ export function attachReceipts(expenses: Expense[]): Expense[] {
   const placeholders = ids.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT id, expense_id, path FROM expense_receipts WHERE expense_id IN (${placeholders}) ORDER BY id`,
+      `SELECT id, expense_id, path, source_url FROM expense_receipts WHERE expense_id IN (${placeholders}) ORDER BY id`,
     )
-    .all(...ids) as { id: number; expense_id: number; path: string }[];
-  const map = new Map<number, { id: number; path: string }[]>();
+    .all(...ids) as { id: number; expense_id: number; path: string; source_url: string | null }[];
+  const map = new Map<number, { id: number; path: string; source_url: string | null }[]>();
   for (const r of rows) {
     if (!map.has(r.expense_id)) map.set(r.expense_id, []);
-    map.get(r.expense_id)!.push({ id: r.id, path: r.path });
+    map.get(r.expense_id)!.push({ id: r.id, path: r.path, source_url: r.source_url });
   }
   for (const e of expenses) {
     const attached = map.get(e.id) || [];
     if (attached.length > 0) {
       e.receipts = attached;
     } else if (e.receipt_path?.trim()) {
-      e.receipts = [{ id: 0, path: e.receipt_path.trim() }];
+      const legacyPath = e.receipt_path.trim();
+      e.receipts = [
+        {
+          id: 0,
+          path: legacyPath,
+          source_url: /^https?:\/\//i.test(legacyPath) ? legacyPath : null,
+        },
+      ];
     } else {
       e.receipts = [];
     }

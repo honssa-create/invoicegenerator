@@ -9,6 +9,7 @@ import {
   hyperlinkUrlsFromAllColumns,
   resolveImportReceiptPaths,
   storeImportImageBuffer,
+  type ImportReceiptRef,
   type ReceiptFetchWarning,
 } from '@/lib/expense-import-receipts';
 import { scanXlsxReceiptAssets } from '@/lib/expense-import-xlsx-assets';
@@ -99,7 +100,7 @@ interface PreparedRow {
   platform: string | null;
   notes: string | null;
   specialNotes: string | null;
-  receiptPaths: string[];
+  receiptRefs: ImportReceiptRef[];
 }
 
 export async function POST(request: Request) {
@@ -221,7 +222,7 @@ export async function POST(request: Request) {
     }
     seenInBatch.add(dupKey);
 
-    const { paths: urlPaths, warnings } = await resolveImportReceiptPaths(
+    const { refs: urlRefs, warnings } = await resolveImportReceiptPaths(
       sheetRow,
       row,
       [
@@ -231,15 +232,15 @@ export async function POST(request: Request) {
       isCsv ? undefined : worksheet,
       isCsv ? undefined : idx,
     );
-    const paths = [...urlPaths];
+    const receiptRefs = [...urlRefs];
     receiptWarnings.push(...warnings);
-    receiptFetched += urlPaths.length;
+    receiptFetched += urlRefs.length;
     receiptFailed += warnings.length;
 
     for (const embedded of xlsxAssets?.imagesByDataRow.get(idx) || []) {
       try {
         const stored = await storeImportImageBuffer(embedded.buffer, embedded.mimeType, embedded.name);
-        paths.push(stored);
+        receiptRefs.push({ path: stored, sourceUrl: null });
         receiptFetched++;
       } catch {
         receiptFailed++;
@@ -263,7 +264,7 @@ export async function POST(request: Request) {
       platform,
       notes,
       specialNotes,
-      receiptPaths: paths,
+      receiptRefs,
     });
   }
 
@@ -276,7 +277,7 @@ export async function POST(request: Request) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertReceipt = db.prepare(
-    'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
+    'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
   );
 
   const persist = db.transaction(() => {
@@ -291,7 +292,7 @@ export async function POST(request: Request) {
         fundingSource,
       });
 
-      const primaryPath = row.receiptPaths[0] || null;
+      const primaryPath = row.receiptRefs[0]?.path || null;
       const result = insertExpense.run(
         ownerId,
         session.userId,
@@ -315,8 +316,8 @@ export async function POST(request: Request) {
         primaryPath,
       );
       const expenseId = result.lastInsertRowid as number;
-      for (const p of row.receiptPaths) {
-        insertReceipt.run(expenseId, ownerId, p);
+      for (const ref of row.receiptRefs) {
+        insertReceipt.run(expenseId, ownerId, ref.path, ref.sourceUrl ?? null);
       }
       imported++;
     }

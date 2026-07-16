@@ -525,6 +525,14 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_expense_options_user ON expense_options(user_id, type);
+
+  CREATE TABLE IF NOT EXISTS expense_option_settings (
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    db_authoritative INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, type),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // Rental Income Management — unit leases + monthly rent records.

@@ -57,7 +57,7 @@ export function extractReceiptUrls(raw: unknown): string[] {
   return Array.from(urls);
 }
 
-/** Convert share links (Google Drive, Dropbox) to direct-download URLs when possible. */
+/** Convert share links (Google Drive, Dropbox, OneDrive) to direct-download URLs when possible. */
 export function normalizeReceiptDownloadUrl(url: string): string {
   const trimmed = url.trim();
   const driveFile = trimmed.match(/drive\.google\.com\/file\/d\/([^/]+)/i);
@@ -77,7 +77,62 @@ export function normalizeReceiptDownloadUrl(url: string): string {
       return trimmed.replace('dl=0', 'dl=1');
     }
   }
+  if (/1drv\.ms|onedrive\.live\.com/i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      if (!u.searchParams.has('download')) {
+        u.searchParams.set('download', '1');
+      }
+      return u.toString();
+    } catch {
+      return trimmed;
+    }
+  }
   return trimmed;
+}
+
+function extractImageUrlFromHtml(html: string): string | null {
+  const og =
+    html.match(/property=["']og:image(?::url)?["'][^>]*content=["']([^"']+)["']/i) ||
+    html.match(/content=["']([^"']+)["'][^>]*property=["']og:image(?::url)?["']/i);
+  if (og?.[1]) return og[1].trim();
+
+  const imgMatches = html.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi) || [];
+  for (const tag of imgMatches) {
+    const m = tag.match(/src=["'](https?:\/\/[^"']+)["']/i);
+    if (m?.[1] && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(m[1])) return m[1];
+  }
+  return null;
+}
+
+function googleDriveFileId(url: string): string | null {
+  return (
+    url.match(/drive\.google\.com\/file\/d\/([^/]+)/i)?.[1] ||
+    url.match(/[?&]id=([^&]+)/i)?.[1] ||
+    null
+  );
+}
+
+function downloadCandidates(url: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string) => {
+    const t = u.trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+
+  add(normalizeReceiptDownloadUrl(url));
+  add(url.trim());
+
+  const driveId = googleDriveFileId(url);
+  if (driveId) {
+    add(`https://drive.google.com/uc?export=download&id=${driveId}`);
+    add(`https://drive.google.com/thumbnail?id=${driveId}&sz=w2000`);
+  }
+
+  return out;
 }
 
 function sniffImageMime(buf: Buffer): string | null {
@@ -142,7 +197,11 @@ export interface ReceiptFetchWarning {
   message: string;
 }
 
-async function downloadImageBuffer(url: string): Promise<{ buf: Buffer; contentType: string | null } | null> {
+async function downloadImageBuffer(
+  url: string,
+  depth = 0,
+): Promise<{ buf: Buffer; contentType: string | null } | null> {
+  if (depth > 2) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   const fetchOpts = {
@@ -155,40 +214,67 @@ async function downloadImageBuffer(url: string): Promise<{ buf: Buffer; contentT
   };
 
   try {
-    let target = normalizeReceiptDownloadUrl(url);
-    let res = await fetch(target, fetchOpts);
-    if (!res.ok) return null;
+    for (const initialTarget of downloadCandidates(url)) {
+      let target = initialTarget;
+      let res = await fetch(target, fetchOpts);
+      if (!res.ok) continue;
 
-    let buf = Buffer.from(await res.arrayBuffer());
-    let contentType = res.headers.get('content-type');
+      let buf = Buffer.from(await res.arrayBuffer());
+      let contentType = res.headers.get('content-type');
 
-    // Google Drive virus-scan interstitial returns HTML — follow confirm link and retry.
-    if (
-      /drive\.google\.com/i.test(target) &&
-      buf.length > 0 &&
-      buf.length < 2_000_000 &&
-      /text\/html/i.test(contentType || '') &&
-      /virus scan|download anyway|confirm=/i.test(buf.toString('utf8', 0, Math.min(buf.length, 8000)))
-    ) {
-      const html = buf.toString('utf8');
-      const confirmMatch = html.match(/confirm=([0-9A-Za-z_-]+)/);
-      const idMatch = target.match(/[?&]id=([^&]+)/);
-      if (confirmMatch && idMatch) {
-        target = `https://drive.google.com/uc?export=download&id=${idMatch[1]}&confirm=${confirmMatch[1]}`;
-        res = await fetch(target, fetchOpts);
-        if (!res.ok) return null;
-        buf = Buffer.from(await res.arrayBuffer());
-        contentType = res.headers.get('content-type');
+      if (
+        /drive\.google\.com/i.test(target) &&
+        buf.length > 0 &&
+        buf.length < 2_000_000 &&
+        /text\/html/i.test(contentType || '') &&
+        /virus scan|download anyway|confirm=/i.test(buf.toString('utf8', 0, Math.min(buf.length, 8000)))
+      ) {
+        const html = buf.toString('utf8');
+        const confirmMatch = html.match(/confirm=([0-9A-Za-z_-]+)/);
+        const idMatch = target.match(/[?&]id=([^&]+)/);
+        if (confirmMatch && idMatch) {
+          target = `https://drive.google.com/uc?export=download&id=${idMatch[1]}&confirm=${confirmMatch[1]}`;
+          res = await fetch(target, fetchOpts);
+          if (!res.ok) continue;
+          buf = Buffer.from(await res.arrayBuffer());
+          contentType = res.headers.get('content-type');
+        }
+      }
+
+      if (!buf.length) continue;
+
+      if (/text\/html/i.test(contentType || '')) {
+        const nested = extractImageUrlFromHtml(buf.toString('utf8', 0, Math.min(buf.length, 500_000)));
+        if (nested && nested !== url) {
+          const nestedResult = await downloadImageBuffer(nested, depth + 1);
+          if (nestedResult) return nestedResult;
+        }
+        continue;
+      }
+
+      if (normalizeImageMime(contentType, target, buf)) {
+        return { buf, contentType };
       }
     }
 
-    if (!buf.length) return null;
-    return { buf, contentType };
+    return null;
   } catch {
     return null;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Store an in-memory image buffer from import (embedded Excel / WPS DISPIMG). */
+export async function storeImportImageBuffer(
+  buffer: Buffer,
+  mimeType: string,
+  originalName = 'imported-receipt',
+): Promise<string> {
+  if (buffer.length > MAX_RECEIPT_BYTES) {
+    throw new Error('Receipt image too large (max 10 MB)');
+  }
+  return saveReceipt(buffer, mimeType, originalName);
 }
 
 /** Download a remote receipt image and store it via saveReceipt (local disk or R2). */

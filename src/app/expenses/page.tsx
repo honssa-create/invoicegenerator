@@ -346,7 +346,7 @@ export default function ExpensesPage() {
       notes: e.notes || '',
       special_notes: e.special_notes || '',
     });
-    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r) })));
+    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r, e.id) })));
     setEditingId(e.id);
     setScanMessage('');
     setSupplierOcrMatch(null);
@@ -578,7 +578,7 @@ export default function ExpensesPage() {
     const receipts = expense.receipts || [];
     if (!receipts[index]) return;
     setLightbox({
-      urls: receipts.map((r) => expenseReceiptUrl(r)),
+      urls: receipts.map((r) => expenseReceiptUrl(r, expense.id)),
       index,
     });
   };
@@ -644,7 +644,7 @@ export default function ExpensesPage() {
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={r.id}
-            src={expenseReceiptUrl(r)}
+            src={expenseReceiptUrl(r, e.id)}
             alt="Receipt"
             onClick={() => openLightbox(e, i)}
             className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 transition"
@@ -1265,7 +1265,7 @@ export default function ExpensesPage() {
                       </div>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={expenseReceiptUrl(r)}
+                        src={expenseReceiptUrl(r, detail.id)}
                         alt={`Receipt ${i + 1}`}
                         className="w-full object-contain max-h-[45vh] bg-gray-50"
                       />

@@ -4,7 +4,12 @@ export function isStoredImageUrl(value: string | null | undefined): boolean {
   return Boolean(value && /^https?:\/\//i.test(value.trim()));
 }
 
-export function expenseReceiptUrl(receipt: { id: number; path: string }): string {
+export function expenseReceiptUrl(
+  receipt: { id: number; path: string },
+  expenseId?: number,
+): string {
+  if (receipt.id > 0) return `/api/receipts/${receipt.id}`;
+  if (expenseId && expenseId > 0) return `/api/expenses/${expenseId}/receipt`;
   return isStoredImageUrl(receipt.path) ? receipt.path : `/api/receipts/${receipt.id}`;
 }
 

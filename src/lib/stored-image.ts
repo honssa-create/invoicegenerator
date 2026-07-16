@@ -7,14 +7,20 @@ export function isStoredImageUrl(value: string | null | undefined): boolean {
   return Boolean(value && /^https?:\/\//i.test(value.trim()));
 }
 
-/** Serve a stored image: redirect to R2 URL or stream a legacy local file. */
-export function imageResponseForStoredPath(stored: string): NextResponse {
+/** Serve a stored image: redirect to R2/remote URL or stream a legacy local file. */
+export function imageResponseForStoredPath(
+  stored: string,
+  sourceUrl?: string | null,
+): NextResponse {
   if (isStoredImageUrl(stored)) {
     return NextResponse.redirect(stored.trim(), 302);
   }
 
   const filePath = receiptFilePath(stored);
   if (!filePath) {
+    if (sourceUrl && isStoredImageUrl(sourceUrl)) {
+      return NextResponse.redirect(sourceUrl.trim(), 302);
+    }
     return NextResponse.json({ error: 'File missing' }, { status: 404 });
   }
 

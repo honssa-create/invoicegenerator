@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { warnIfEphemeralReceiptStorage } from './receipt-storage';
 
 const defaultDbPath = path.join(process.cwd(), 'data', 'invoices.db');
 
@@ -1013,6 +1014,16 @@ if (legacyReceipts.length) {
   migrate();
 }
 
+try {
+  db.exec('ALTER TABLE expense_receipts ADD COLUMN source_url TEXT');
+} catch {
+  /* column exists */
+}
+db.prepare(
+  `UPDATE expense_receipts SET source_url = path
+   WHERE (source_url IS NULL OR source_url = '') AND path LIKE 'http%'`,
+).run();
+
 // Recycle bin — deleted records kept for 60 days before permanent purge.
 db.exec(`
   CREATE TABLE IF NOT EXISTS deleted_records (
@@ -1197,8 +1208,9 @@ db.exec(`
       console.error('rental_debit_note_styles migration:', err);
     }
   }
-}
+  }
 
+  warnIfEphemeralReceiptStorage();
   dbInstance = db;
   return dbInstance;
 }

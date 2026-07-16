@@ -125,9 +125,9 @@ export async function POST(request: Request) {
         );
       const expenseId = result.lastInsertRowid as number;
       const insertReceipt = db.prepare(
-        'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
+        'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
       );
-      for (const p of receiptPaths) insertReceipt.run(expenseId, ownerId, p);
+      for (const p of receiptPaths) insertReceipt.run(expenseId, ownerId, p, null);
       return expenseId;
     });
 

@@ -10,18 +10,6 @@ describe('imageResponseForStoredPath', () => {
     vi.resetModules();
   });
 
-  it('redirects when stored path is already a public URL', () => {
-    const res = imageResponseForStoredPath('https://cdn.example.com/a.jpg');
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://cdn.example.com/a.jpg');
-  });
-
-  it('falls back to source_url when local file is missing', () => {
-    const res = imageResponseForStoredPath('missing-file.jpg', 'https://cdn.example.com/fallback.jpg');
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://cdn.example.com/fallback.jpg');
-  });
-
   it('streams a local file when present', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'receipt-test-'));
     vi.stubEnv('RECEIPTS_DIR', dir);
@@ -30,8 +18,31 @@ describe('imageResponseForStoredPath', () => {
 
     vi.resetModules();
     const { imageResponseForStoredPath: serve } = await import('./stored-image');
-    const res = serve(filename);
+    const res = await serve(filename);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('image/jpeg');
+  });
+
+  it('returns 404 when local file and remote fallbacks are missing', async () => {
+    const res = await imageResponseForStoredPath('missing-file.jpg');
+    expect(res.status).toBe(404);
+  });
+
+  it('falls back to source_url when the primary local file is missing', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => 'image/png' },
+      arrayBuffer: async () => Uint8Array.from([0x89, 0x50, 0x4e, 0x47]).buffer,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.resetModules();
+    const { imageResponseForStoredPath: serve } = await import('./stored-image');
+    const res = await serve('missing-file.jpg', 'https://cdn.example.com/fallback.png');
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://cdn.example.com/fallback.png',
+      expect.objectContaining({ redirect: 'follow' }),
+    );
   });
 });

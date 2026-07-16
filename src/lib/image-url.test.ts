@@ -27,10 +27,6 @@ describe('formReceiptPreviewUrl', () => {
       '/api/expenses/scan-preview/ad8d63f0-4f76-47c5-a3d1-6f25bef3b499.jpg',
     );
   });
-
-  it('uses direct URL when path is already public and blob is absent', () => {
-    expect(formReceiptPreviewUrl('https://cdn.example.com/a.jpg')).toBe('https://cdn.example.com/a.jpg');
-  });
 });
 
 describe('scanPreviewReceiptUrl', () => {
@@ -41,22 +37,16 @@ describe('scanPreviewReceiptUrl', () => {
 });
 
 describe('expenseReceiptUrl', () => {
-  it('uses direct URL when path is already public (R2 / imported link)', () => {
+  it('always uses the auth API for saved receipts (R2, local, or remote path)', () => {
     expect(
-      expenseReceiptUrl({ id: 1, path: 'https://cdn.example.com/receipts/a.jpg' }, 5),
-    ).toBe('https://cdn.example.com/receipts/a.jpg');
-  });
-
-  it('uses API route for downloaded local files even when source_url is set', () => {
+      expenseReceiptUrl({ id: 1, path: 'https://pub-abc.r2.dev/receipts/a.jpg' }, 5),
+    ).toBe('/api/receipts/1');
     expect(
       expenseReceiptUrl(
-        { id: 2, path: 'a8d5d09b-c11b-415b-bd59-8bc545fa20ca.png', source_url: 'https://drive.google.com/file/d/abc/view' },
+        { id: 2, path: 'a8d5d09b.png', source_url: 'https://drive.google.com/file/d/abc/view' },
         5,
       ),
     ).toBe('/api/receipts/2');
-  });
-
-  it('uses API route for local filenames without source_url', () => {
     expect(expenseReceiptUrl({ id: 3, path: 'abc.jpg' }, 5)).toBe('/api/receipts/3');
   });
 

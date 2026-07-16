@@ -15,8 +15,7 @@ export function scanPreviewReceiptUrl(storedPath: string | null | undefined): st
 
 /**
  * Preview URL for receipts attached in the expense form (pre-save).
- * Prefer the in-browser blob from the File object — it is always immediately available,
- * unlike a freshly uploaded R2 URL which may not be public yet.
+ * Prefer the in-browser blob from the File object — it is always immediately available.
  */
 export function formReceiptPreviewUrl(
   storedPath: string,
@@ -27,34 +26,36 @@ export function formReceiptPreviewUrl(
   return scanPreviewReceiptUrl(storedPath) || '';
 }
 
+/**
+ * Display URL for a saved expense receipt.
+ * Always routes through the auth-scoped API so R2/local/remote paths are streamed server-side.
+ */
 export function expenseReceiptUrl(
   receipt: { id: number; path: string; source_url?: string | null },
   expenseId?: number,
 ): string {
-  // Public URL stored in path (R2 upload, or import fallback when download failed).
-  if (isStoredImageUrl(receipt.path)) return receipt.path.trim();
-  // Downloaded copy on disk — serve via API (source_url is only a server-side redeploy fallback).
   if (receipt.id > 0) return `/api/receipts/${receipt.id}`;
   if (expenseId && expenseId > 0) return `/api/expenses/${expenseId}/receipt`;
-  if (receipt.source_url && isStoredImageUrl(receipt.source_url)) return receipt.source_url.trim();
-  return `/api/receipts/${receipt.id}`;
+  if (isStoredImageUrl(receipt.path)) return receipt.path.trim();
+  return scanPreviewReceiptUrl(receipt.path) || `/api/receipts/${receipt.id}`;
 }
 
 export function orderFileUrl(file: { id: number; path: string }): string {
+  if (file.id > 0) return `/api/order-files/${file.id}`;
   return isStoredImageUrl(file.path) ? file.path : `/api/order-files/${file.id}`;
 }
 
 export function orderPaymentReceiptUrl(orderId: number, storedPath: string | null | undefined): string | null {
   if (!storedPath) return null;
-  return isStoredImageUrl(storedPath) ? storedPath : `/api/orders/${orderId}/payment-receipt`;
+  return `/api/orders/${orderId}/payment-receipt`;
 }
 
 export function inboundPhotoUrl(shipmentId: number, storedPath: string | null | undefined): string | null {
   if (!storedPath) return null;
-  return isStoredImageUrl(storedPath) ? storedPath : `/api/inbound-files/${shipmentId}`;
+  return `/api/inbound-files/${shipmentId}`;
 }
 
 export function otherIncomeReceiptUrl(recordId: number, storedPath: string | null | undefined): string | null {
   if (!storedPath) return null;
-  return isStoredImageUrl(storedPath) ? storedPath : `/api/other-income/${recordId}/receipt`;
+  return `/api/other-income/${recordId}/receipt`;
 }

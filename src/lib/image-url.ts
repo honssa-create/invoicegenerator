@@ -31,12 +31,12 @@ export function expenseReceiptUrl(
   receipt: { id: number; path: string; source_url?: string | null },
   expenseId?: number,
 ): string {
-  // R2 / imported external links are stored as public URLs — use them directly so
-  // <img> previews work without an auth-scoped API redirect hop.
+  // Public URL stored in path (R2 upload, or import fallback when download failed).
   if (isStoredImageUrl(receipt.path)) return receipt.path.trim();
-  if (receipt.source_url && isStoredImageUrl(receipt.source_url)) return receipt.source_url.trim();
+  // Downloaded copy on disk — serve via API (source_url is only a server-side redeploy fallback).
   if (receipt.id > 0) return `/api/receipts/${receipt.id}`;
   if (expenseId && expenseId > 0) return `/api/expenses/${expenseId}/receipt`;
+  if (receipt.source_url && isStoredImageUrl(receipt.source_url)) return receipt.source_url.trim();
   return `/api/receipts/${receipt.id}`;
 }
 

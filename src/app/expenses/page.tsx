@@ -24,7 +24,13 @@ import {
   legacyPaymentToFundingSource,
   paymentChannelLabel,
   type OptionType,
+  type FundingSourceId,
 } from '@/lib/expenses';
+import {
+  EMPTY_EXPENSE_EXPORT_FILTERS,
+  buildExpenseExportQuery,
+  type ExpenseExportFilters,
+} from '@/lib/expense-export';
 import {
   matchSupplierFromOcr,
   mergeSupplierLists,
@@ -119,6 +125,9 @@ export default function ExpensesPage() {
   const [importing, setImporting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFilters, setExportFilters] = useState<ExpenseExportFilters>(EMPTY_EXPENSE_EXPORT_FILTERS);
+  const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -670,6 +679,54 @@ export default function ExpensesPage() {
     router.push(`/expenses/${detail.id}/detail-print`);
   };
 
+  const openExportModal = () => {
+    setExportFilters({
+      paidFrom: filters.dateStart,
+      paidTo: filters.dateEnd,
+      createdFrom: '',
+      createdTo: '',
+      fundingSource: (filters.fundingSource as FundingSourceId) || '',
+    });
+    setShowExportModal(true);
+  };
+
+  const runExport = async () => {
+    if (exportFilters.paidFrom && exportFilters.paidTo && exportFilters.paidFrom > exportFilters.paidTo) {
+      setToast({ msg: 'Paid date range is invalid (start after end)', kind: 'error' });
+      return;
+    }
+    if (exportFilters.createdFrom && exportFilters.createdTo && exportFilters.createdFrom > exportFilters.createdTo) {
+      setToast({ msg: 'Created date range is invalid (start after end)', kind: 'error' });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/expenses/export${buildExpenseExportQuery(exportFilters)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setToast({ msg: data.error || 'Export failed', kind: 'error' });
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] || `expenses-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+      setToast({ msg: 'Excel export downloaded', kind: 'success' });
+    } catch {
+      setToast({ msg: 'Export failed', kind: 'error' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="page-header">
@@ -705,12 +762,13 @@ export default function ExpensesPage() {
             {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
             <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
           </div>
-          <a
-            href="/api/expenses/export"
+          <button
+            type="button"
+            onClick={openExportModal}
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
             ⬇ Export to Excel
-          </a>
+          </button>
           <button
             onClick={openCreate}
             className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
@@ -1250,6 +1308,118 @@ export default function ExpensesPage() {
             onClick={(ev) => ev.stopPropagation()}
             className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white cursor-default"
           />
+        </div>
+      )}
+
+      {showExportModal && (
+        <div className="modal-overlay" onClick={() => !exporting && setShowExportModal(false)}>
+          <div
+            className="modal-panel sm:max-w-lg"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-gray-900">Export to Excel 匯出 Excel</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Optional filters — leave blank to export all expenses. Prefilled from current table paid-date / funding filters.
+            </p>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">Paid Date Range 支出日期</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-gray-500">From</label>
+                    <input
+                      type="date"
+                      value={exportFilters.paidFrom}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, paidFrom: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-gray-500">To</label>
+                    <input
+                      type="date"
+                      value={exportFilters.paidTo}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, paidTo: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">Created Date Range 建立日期</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-gray-500">From</label>
+                    <input
+                      type="date"
+                      value={exportFilters.createdFrom}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, createdFrom: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-gray-500">To</label>
+                    <input
+                      type="date"
+                      value={exportFilters.createdTo}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, createdTo: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Funding Source 扣款來源</label>
+                <select
+                  value={exportFilters.fundingSource}
+                  onChange={(e) =>
+                    setExportFilters((f) => ({
+                      ...f,
+                      fundingSource: e.target.value as FundingSourceId | '',
+                    }))
+                  }
+                  className={selectCls + ' w-full'}
+                >
+                  <option value="">All 全部</option>
+                  {fundingSourceOptions.map((o) => (
+                    <option key={o} value={o}>
+                      {fundingSourceLabel(o)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setExportFilters(EMPTY_EXPENSE_EXPORT_FILTERS)}
+                disabled={exporting}
+                className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Clear filters
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                disabled={exporting}
+                className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={runExport}
+                disabled={exporting}
+                className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50"
+              >
+                {exporting ? 'Exporting…' : 'Download Excel'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

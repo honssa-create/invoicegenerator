@@ -4,6 +4,29 @@ export function isStoredImageUrl(value: string | null | undefined): boolean {
   return Boolean(value && /^https?:\/\//i.test(value.trim()));
 }
 
+/** Auth-scoped preview for a freshly uploaded receipt filename (before expense save). */
+export function scanPreviewReceiptUrl(storedPath: string | null | undefined): string | null {
+  const trimmed = storedPath?.trim();
+  if (!trimmed || isStoredImageUrl(trimmed)) return null;
+  const filename = trimmed.split(/[/\\]/).pop();
+  if (!filename || filename !== trimmed || filename.includes('..')) return null;
+  return `/api/expenses/scan-preview/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Preview URL for receipts attached in the expense form (pre-save).
+ * Prefer the in-browser blob from the File object — it is always immediately available,
+ * unlike a freshly uploaded R2 URL which may not be public yet.
+ */
+export function formReceiptPreviewUrl(
+  storedPath: string,
+  localBlobUrl?: string | null,
+): string {
+  if (localBlobUrl) return localBlobUrl;
+  if (isStoredImageUrl(storedPath)) return storedPath.trim();
+  return scanPreviewReceiptUrl(storedPath) || '';
+}
+
 export function expenseReceiptUrl(
   receipt: { id: number; path: string; source_url?: string | null },
   expenseId?: number,

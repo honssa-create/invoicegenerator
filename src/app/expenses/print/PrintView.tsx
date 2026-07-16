@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { categoryLabel, expensePaymentDisplay, expenseSupplierName, formatMoney } from '@/lib/expenses';
-import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
+import { expenseReceiptUrl } from '@/lib/image-url';
 import type { Expense } from '@/lib/types';
 
 type PrintPage = {
@@ -17,16 +17,10 @@ type PrintPage = {
 };
 
 function receiptSrc(expense: Expense, receipt: { id: number; path: string }): string {
-  if (receipt.id > 0) {
-    const url = expenseReceiptUrl(receipt);
-    if (url.startsWith('http')) return url;
-    if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
-    return url;
-  }
-  if (isStoredImageUrl(receipt.path)) return receipt.path;
-  const legacy = `/api/expenses/${expense.id}/receipt`;
-  if (typeof window !== 'undefined') return `${window.location.origin}${legacy}`;
-  return legacy;
+  const url = expenseReceiptUrl(receipt, expense.id);
+  if (url.startsWith('http')) return url;
+  if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
+  return url;
 }
 
 function receiptsForExpense(e: Expense): { id: number; path: string }[] {

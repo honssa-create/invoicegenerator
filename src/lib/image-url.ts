@@ -8,9 +8,12 @@ export function expenseReceiptUrl(
   receipt: { id: number; path: string },
   expenseId?: number,
 ): string {
+  // R2 / imported external links are stored as public URLs — use them directly so
+  // <img> previews work without an auth-scoped API redirect hop.
+  if (isStoredImageUrl(receipt.path)) return receipt.path.trim();
   if (receipt.id > 0) return `/api/receipts/${receipt.id}`;
   if (expenseId && expenseId > 0) return `/api/expenses/${expenseId}/receipt`;
-  return isStoredImageUrl(receipt.path) ? receipt.path : `/api/receipts/${receipt.id}`;
+  return `/api/receipts/${receipt.id}`;
 }
 
 export function orderFileUrl(file: { id: number; path: string }): string {

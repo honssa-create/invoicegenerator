@@ -117,120 +117,6 @@ if (!expenseColumns.some((c) => c.name === 'payment_method')) {
   db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
 }
 
-function migratePaymentCode(method: string | null | undefined): 'CC' | 'CS' | 'BT' | 'OT' {
-  const m = (method || '').toLowerCase();
-  if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
-  if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
-  if (/bank|transfer|轉帳|转账|fps|payme|wire|cheque|check/.test(m)) return 'BT';
-  return 'OT';
-}
-
-const BATCH_RE = /^EXP-\d{6}-\d{3}$/;
-const RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
-
-const numberYm = (row: { paid_date: string | null; created_at: string | null }) => {
-  const src = row.paid_date && /^\d{4}-\d{2}/.test(row.paid_date) ? row.paid_date : row.created_at || '';
-  const ym = src.slice(0, 7);
-  return ym ? ym.replace('-', '') : new Date().toISOString().slice(0, 7).replace('-', '');
-};
-
-type NumberRow = {
-  id: number;
-  user_id: number;
-  receipt_no: string | null;
-  batch_id: string | null;
-  payment_method: string | null;
-  paid_date: string | null;
-  created_at: string | null;
-};
-
-const numberRows = db
-  .prepare(
-    'SELECT id, user_id, receipt_no, batch_id, payment_method, paid_date, created_at FROM expenses'
-  )
-  .all() as NumberRow[];
-
-const updateBoth = db.prepare('UPDATE expenses SET batch_id = ?, receipt_no = ? WHERE id = ?');
-const updateBatch = db.prepare('UPDATE expenses SET batch_id = ? WHERE id = ?');
-
-// Pass 1: new receipt format → derive batch_id from receipt prefix.
-for (const row of numberRows) {
-  if (row.batch_id || !RECEIPT_RE.test(row.receipt_no || '')) continue;
-  const batchId = row.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
-  updateBatch.run(batchId, row.id);
-  row.batch_id = batchId;
-}
-
-// Pass 2: legacy EXP-YYYYMM-XXX receipt → batch_id = old receipt, extend with payment code.
-for (const row of numberRows) {
-  if (RECEIPT_RE.test(row.receipt_no || '')) continue;
-  if (!BATCH_RE.test(row.receipt_no || '')) continue;
-  const batchId = row.receipt_no!;
-  const code = migratePaymentCode(row.payment_method);
-  const newReceipt = `${batchId}-${code}001`;
-  updateBoth.run(batchId, newReceipt, row.id);
-  row.batch_id = batchId;
-  row.receipt_no = newReceipt;
-}
-
-// Pass 3: missing / invalid — assign fresh batch + receipt numbers.
-const needsNumber = numberRows.filter(
-  (r) => !r.batch_id || !r.receipt_no || !RECEIPT_RE.test(r.receipt_no)
-);
-
-if (needsNumber.length) {
-  const batchCounters = new Map<string, number>();
-  const receiptCounters = new Map<string, number>();
-
-  for (const r of numberRows) {
-    const bid =
-      r.batch_id || (BATCH_RE.test(r.receipt_no || '') ? r.receipt_no : null) ||
-      (RECEIPT_RE.test(r.receipt_no || '') ? r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '') : null);
-    if (bid && BATCH_RE.test(bid)) {
-      const key = `${r.user_id}-${bid.slice(4, 10)}`;
-      batchCounters.set(key, Math.max(batchCounters.get(key) || 0, parseInt(bid.slice(11), 10)));
-    }
-    const rm = RECEIPT_RE.exec(r.receipt_no || '');
-    if (rm) {
-      const batchId = r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
-      const receiptKey = `${r.user_id}-${batchId}`;
-      receiptCounters.set(
-        receiptKey,
-        Math.max(receiptCounters.get(receiptKey) || 0, parseInt(r.receipt_no!.slice(-3), 10))
-      );
-    }
-  }
-
-  const sortDate = (r: { paid_date: string | null; created_at: string | null }) =>
-    r.paid_date || r.created_at || '';
-  needsNumber.sort(
-    (a, b) =>
-      a.user_id - b.user_id ||
-      numberYm(a).localeCompare(numberYm(b)) ||
-      sortDate(a).localeCompare(sortDate(b)) ||
-      a.id - b.id
-  );
-
-  const backfill = db.transaction(() => {
-    for (const row of needsNumber) {
-      const ym = numberYm(row);
-      const batchKey = `${row.user_id}-${ym}`;
-      const batchNext = (batchCounters.get(batchKey) || 0) + 1;
-      batchCounters.set(batchKey, batchNext);
-      const batchId = `EXP-${ym}-${String(batchNext).padStart(3, '0')}`;
-
-      const code = migratePaymentCode(row.payment_method);
-      const receiptKey = `${row.user_id}-${batchId}`;
-      const receiptNext = (receiptCounters.get(receiptKey) || 0) + 1;
-      receiptCounters.set(receiptKey, receiptNext);
-      const receiptNo = `${batchId}-${code}${String(receiptNext).padStart(3, '0')}`;
-
-      updateBoth.run(batchId, receiptNo, row.id);
-    }
-  });
-  backfill();
-}
-
 // Order Management module tables (ClickUp-style order detail).
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
@@ -1086,47 +972,19 @@ try {
   }
 }
 
-// Global parent Batch ID sequence (EXP-0000001, never resets).
+// Global Expense ID sequence (EXP-0000001, never resets).
 db.exec(`
   CREATE TABLE IF NOT EXISTS expense_report_sequence (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     next_serial INTEGER NOT NULL DEFAULT 1
   );
   INSERT OR IGNORE INTO expense_report_sequence (id, next_serial) VALUES (1, 1);
+
+  CREATE TABLE IF NOT EXISTS app_migrations (
+    key TEXT PRIMARY KEY,
+    applied_at TEXT DEFAULT (datetime('now'))
+  );
 `);
-{
-  const maxReportRow = db
-    .prepare(
-      `SELECT batch_id FROM expenses
-       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-       ORDER BY batch_id DESC LIMIT 1`,
-    )
-    .get() as { batch_id: string } | undefined;
-  if (maxReportRow?.batch_id) {
-    const n = parseInt(maxReportRow.batch_id.slice(4), 10);
-    if (Number.isFinite(n) && n >= 1) {
-      db.prepare(
-        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
-      ).run(n + 1);
-    }
-  }
-  const legacyMaxRow = db
-    .prepare(
-      `SELECT batch_id FROM expenses
-       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
-         AND batch_id NOT GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]-*'
-       ORDER BY batch_id DESC LIMIT 1`,
-    )
-    .get() as { batch_id: string } | undefined;
-  if (legacyMaxRow?.batch_id) {
-    const n = parseInt(legacyMaxRow.batch_id.slice(4), 10);
-    if (Number.isFinite(n) && n >= 1) {
-      db.prepare(
-        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
-      ).run(n + 1);
-    }
-  }
-}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS role_permissions (
@@ -1214,6 +1072,31 @@ db.exec(`
   warnIfEphemeralReceiptStorage();
   warnIfR2Misconfigured();
   dbInstance = db;
+
+  // Advance Expense ID sequence on boot (never rewrites expense rows).
+  {
+    const seqRow = db.prepare('SELECT next_serial FROM expense_report_sequence WHERE id = 1').get() as
+      | { next_serial: number }
+      | undefined;
+    if (seqRow) {
+      let maxAllocated = 0;
+      const batchRows = db
+        .prepare('SELECT batch_id FROM expenses WHERE batch_id IS NOT NULL')
+        .all() as { batch_id: string }[];
+      for (const { batch_id } of batchRows) {
+        const id = batch_id.trim();
+        if (/^EXP-\d{7}$/.test(id) || /^EXP-\d{6}$/.test(id)) {
+          const n = parseInt(id.slice(4), 10);
+          if (Number.isFinite(n) && n >= 1) maxAllocated = Math.max(maxAllocated, n);
+        }
+      }
+      const next = Math.max(seqRow.next_serial, maxAllocated + 1);
+      if (next > seqRow.next_serial) {
+        db.prepare('UPDATE expense_report_sequence SET next_serial = ? WHERE id = 1').run(next);
+      }
+    }
+  }
+
   return dbInstance;
 }
 

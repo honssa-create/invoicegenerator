@@ -3,10 +3,11 @@ import type { Expense } from './types';
 import { DEFAULT_SUPPLIERS } from './expense-suppliers';
 import {
   fundingSourceToCode,
+  legacyPaymentToFundingSource,
   type FundingSourceId,
 } from './expenses';
 
-/** Parent Batch ID: EXP-0000001 (global 7-digit serial, never resets). */
+/** Expense ID (stored in batch_id): EXP-0000001 — global upload-order serial, never resets. */
 export const EXPENSE_REPORT_ID_RE = /^EXP-\d{7}$/;
 
 /** @deprecated Prior 6-digit parent IDs (EXP-000001). */
@@ -83,8 +84,123 @@ function isExpenseReportId(id: string): boolean {
   return EXPENSE_REPORT_ID_RE.test(id) || LEGACY_EXPENSE_REPORT_ID_RE.test(id);
 }
 
+export function isValidExpenseReportId(id: string | null | undefined): boolean {
+  return Boolean(id?.trim() && isExpenseReportId(id.trim()));
+}
+
+export function isValidExpenseReceiptNo(receiptNo: string | null | undefined): boolean {
+  return Boolean(receiptNo?.trim() && EXPENSE_RECEIPT_RE.test(receiptNo.trim()));
+}
+
+let numberingBootDone = false;
+
+function ensureExpenseNumberingBoot(): void {
+  if (numberingBootDone) return;
+  numberingBootDone = true;
+  syncExpenseReportSequenceFromDb();
+  migrateExpenseNumberingOnce();
+}
+
 /**
- * Allocate the next global Batch ID (EXP-0000001…).
+ * Keep expense_report_sequence at or above max allocated Expense ID.
+ * Safe to run on every boot — only advances, never rewrites expense rows.
+ */
+export function syncExpenseReportSequenceFromDb(): void {
+  const row = db.prepare('SELECT next_serial FROM expense_report_sequence WHERE id = 1').get() as
+    | { next_serial: number }
+    | undefined;
+  if (!row) return;
+
+  let maxAllocated = 0;
+  const batchRows = db
+    .prepare('SELECT batch_id FROM expenses WHERE batch_id IS NOT NULL')
+    .all() as { batch_id: string }[];
+
+  for (const { batch_id } of batchRows) {
+    const id = batch_id.trim();
+    if (EXPENSE_REPORT_ID_RE.test(id) || LEGACY_EXPENSE_REPORT_ID_RE.test(id)) {
+      const n = parseInt(id.slice(4), 10);
+      if (Number.isFinite(n) && n >= 1) maxAllocated = Math.max(maxAllocated, n);
+    }
+  }
+
+  const next = Math.max(row.next_serial, maxAllocated + 1);
+  if (next > row.next_serial) {
+    db.prepare('UPDATE expense_report_sequence SET next_serial = ? WHERE id = 1').run(next);
+  }
+}
+
+/**
+ * One-time migration from legacy EXP-YYYYMM-XXX numbering to Expense ID + Receipt No rules.
+ * Guarded by app_migrations — does not run again on redeploy.
+ */
+export function migrateExpenseNumberingOnce(): void {
+  const done = db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get('expense_numbering_v2');
+  if (done) return;
+
+  const rows = db
+    .prepare(
+      `SELECT id, user_id, batch_id, receipt_no, payment_method, funding_source, paid_date, created_at
+       FROM expenses ORDER BY id ASC`,
+    )
+    .all() as {
+    id: number;
+    user_id: number;
+    batch_id: string | null;
+    receipt_no: string | null;
+    payment_method: string | null;
+    funding_source: string | null;
+    paid_date: string | null;
+    created_at: string | null;
+  }[];
+
+  const needsFix = rows.filter((row) => {
+    const batchOk = isValidExpenseReportId(row.batch_id);
+    const receiptOk = isValidExpenseReceiptNo(row.receipt_no);
+    return !batchOk || !receiptOk;
+  });
+
+  const markDone = () => {
+    db.prepare('INSERT OR IGNORE INTO app_migrations (key) VALUES (?)').run('expense_numbering_v2');
+  };
+
+  if (!needsFix.length) {
+    markDone();
+    return;
+  }
+
+  const update = db.prepare('UPDATE expenses SET batch_id = ?, receipt_no = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    for (const row of needsFix) {
+      let batchId = row.batch_id?.trim() || '';
+      if (!isExpenseReportId(batchId)) {
+        batchId = allocateExpenseReportIdAtomic();
+      }
+
+      let receiptNo = row.receipt_no?.trim() || '';
+      if (!EXPENSE_RECEIPT_RE.test(receiptNo)) {
+        const paidDate =
+          row.paid_date && /^\d{4}-\d{2}-\d{2}$/.test(row.paid_date)
+            ? row.paid_date
+            : row.created_at?.slice(0, 10) || '1970-01-01';
+        const fundingSource = (
+          row.funding_source ||
+          legacyPaymentToFundingSource(row.payment_method) ||
+          'cash'
+        ) as FundingSourceId;
+        receiptNo = generateReceiptNumberAtomic(row.user_id, paidDate, fundingSource);
+      }
+
+      update.run(batchId, receiptNo, row.id);
+    }
+    markDone();
+  });
+  tx.immediate();
+  syncExpenseReportSequenceFromDb();
+}
+
+/**
+ * Allocate the next global Expense ID (EXP-0000001…).
  * Must run inside an IMMEDIATE transaction.
  */
 export function allocateExpenseReportIdAtomic(): string {
@@ -99,7 +215,7 @@ export function allocateExpenseReportIdAtomic(): string {
   return `EXP-${String(allocated).padStart(7, '0')}`;
 }
 
-/** Latest parent Batch ID for a user (EXP-0000001 format, or legacy 6-digit). */
+/** Latest Expense ID for a user (EXP-0000001 format, or legacy 6-digit). */
 export function getLatestExpenseReportId(userId: number): string | null {
   const rows = db
     .prepare(
@@ -136,22 +252,22 @@ export function generateReceiptNumberAtomic(
 }
 
 export interface AssignExpenseNumbersOptions {
-  /** Reuse this parent Batch ID (e.g. import batch or explicit). */
+  /** Reuse this Expense ID (e.g. explicit). */
   batchId?: string | null;
-  /** Continue the user's latest Batch ID instead of allocating a new one. */
+  /** Continue the user's latest Expense ID instead of allocating a new one. */
   reuseBatch?: boolean;
   fundingSource: FundingSourceId;
 }
 
 export interface AssignedExpenseNumbers {
-  /** Parent Batch ID (stored in batch_id). */
+  /** Expense ID (stored in batch_id). */
   batchId: string;
-  /** Child Receipt No. */
+  /** Receipt No. */
   receiptNo: string;
 }
 
 /**
- * Assign parent Batch ID + child Receipt No.
+ * Assign Expense ID + Receipt No.
  * Call only inside db.transaction(...).immediate().
  */
 export function assignExpenseNumbersAtomic(
@@ -159,6 +275,8 @@ export function assignExpenseNumbersAtomic(
   paidDate: string,
   options: AssignExpenseNumbersOptions,
 ): AssignedExpenseNumbers {
+  ensureExpenseNumberingBoot();
+
   let batchId = options.batchId?.trim() || '';
   if (batchId && !isExpenseReportId(batchId)) {
     batchId = '';

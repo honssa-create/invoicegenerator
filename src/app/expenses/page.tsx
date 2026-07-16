@@ -839,7 +839,7 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 sticky left-0 z-20 bg-white w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('batch', 'Batch ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
+                {sortTh('batch', 'Expense ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('number', 'Receipt No.', 'sticky left-[11.5rem] z-20 bg-white min-w-[10rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
@@ -1012,7 +1012,7 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Receipt No. uses paid date month + funding source (e.g. EXP-202604-CCS001). Batch ID assigned on submit.
+                    Receipt No. uses paid date month + funding source (e.g. EXP-202604-CCS001). Expense ID assigned on submit.
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
@@ -1022,7 +1022,7 @@ export default function ExpensesPage() {
                         onChange={(e) => setContinueBatch(e.target.checked)}
                         className="rounded border-gray-300 text-brand-600"
                       />
-                      Continue previous report 繼續上一份報銷單 (same Batch ID, new Receipt No.)
+                      Continue previous report 繼續上一份報銷單 (same Expense ID, new Receipt No.)
                     </label>
                   )}
                 </div>

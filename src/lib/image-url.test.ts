@@ -47,13 +47,13 @@ describe('expenseReceiptUrl', () => {
     ).toBe('https://cdn.example.com/receipts/a.jpg');
   });
 
-  it('uses source_url when local file path is stored but remote fallback exists', () => {
+  it('uses API route for downloaded local files even when source_url is set', () => {
     expect(
       expenseReceiptUrl(
-        { id: 2, path: 'lost-on-redeploy.jpg', source_url: 'https://drive.google.com/file/d/abc/view' },
+        { id: 2, path: 'a8d5d09b-c11b-415b-bd59-8bc545fa20ca.png', source_url: 'https://drive.google.com/file/d/abc/view' },
         5,
       ),
-    ).toBe('https://drive.google.com/file/d/abc/view');
+    ).toBe('/api/receipts/2');
   });
 
   it('uses API route for local filenames without source_url', () => {

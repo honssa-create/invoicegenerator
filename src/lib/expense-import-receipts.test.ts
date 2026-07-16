@@ -1,9 +1,47 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   collectReceiptUrlsFromRow,
   extractReceiptUrls,
   findReceiptColumnIndex,
 } from './expense-import-receipts';
+
+describe('fetchAndStoreReceiptFromUrl', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('saves downloaded images via saveReceipt and keeps source_url as metadata', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('R2_ENDPOINT', '');
+
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    ]);
+
+    vi.doMock('./receipt', () => ({
+      saveReceipt: vi.fn(async () => 'saved-receipt.png'),
+    }));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => 'image/png' },
+      arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { fetchAndStoreReceiptFromUrl } = await import('./expense-import-receipts');
+    const result = await fetchAndStoreReceiptFromUrl('https://cdn.test/receipt.png', '2');
+
+    expect('path' in result).toBe(true);
+    if ('path' in result) {
+      expect(result.path).not.toBe('https://cdn.test/receipt.png');
+      expect(result.path).toMatch(/\.png$/);
+      expect(result.sourceUrl).toBe('https://cdn.test/receipt.png');
+    }
+  });
+});
 
 describe('extractReceiptUrls', () => {
   it('pulls plain URLs from text', () => {

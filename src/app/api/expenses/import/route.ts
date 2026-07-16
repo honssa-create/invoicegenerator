@@ -8,8 +8,10 @@ import {
   hyperlinkUrlsByDataRow,
   hyperlinkUrlsFromAllColumns,
   resolveImportReceiptPaths,
+  storeImportImageBuffer,
   type ReceiptFetchWarning,
 } from '@/lib/expense-import-receipts';
+import { scanXlsxReceiptAssets } from '@/lib/expense-import-xlsx-assets';
 import { getDataOwnerId } from '@/lib/org-server';
 import { legacyPaymentToFundingSource } from '@/lib/expenses';
 import type { FundingSourceId } from '@/lib/expenses';
@@ -117,7 +119,6 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
   }
-  const singleBatch = formData.get('single_batch') === '1' || formData.get('single_batch') === 'true';
   if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: 'File too large (max 15 MB)' }, { status: 400 });
   }
@@ -129,9 +130,17 @@ export async function POST(request: Request) {
   let rows: Record<string, unknown>[];
   let hyperlinkByRow = new Map<number, string[]>();
   let worksheet: XLSX.WorkSheet | undefined;
+  let xlsxAssets: Awaited<ReturnType<typeof scanXlsxReceiptAssets>> | null = null;
   const isCsv = name.endsWith('.csv');
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (!isCsv) {
+      try {
+        xlsxAssets = await scanXlsxReceiptAssets(buffer);
+      } catch {
+        xlsxAssets = null;
+      }
+    }
     const wb = isCsv
       ? XLSX.read(buffer.toString('utf8'), { type: 'string' })
       : XLSX.read(buffer, { type: 'buffer', cellDates: true, cellFormula: true });
@@ -212,16 +221,35 @@ export async function POST(request: Request) {
     }
     seenInBatch.add(dupKey);
 
-    const { paths, warnings } = await resolveImportReceiptPaths(
+    const { paths: urlPaths, warnings } = await resolveImportReceiptPaths(
       sheetRow,
       row,
-      hyperlinkByRow.get(idx) || [],
+      [
+        ...(hyperlinkByRow.get(idx) || []),
+        ...(xlsxAssets?.urlsByDataRow.get(idx) || []),
+      ],
       isCsv ? undefined : worksheet,
       isCsv ? undefined : idx,
     );
+    const paths = [...urlPaths];
     receiptWarnings.push(...warnings);
-    receiptFetched += paths.length;
+    receiptFetched += urlPaths.length;
     receiptFailed += warnings.length;
+
+    for (const embedded of xlsxAssets?.imagesByDataRow.get(idx) || []) {
+      try {
+        const stored = await storeImportImageBuffer(embedded.buffer, embedded.mimeType, embedded.name);
+        paths.push(stored);
+        receiptFetched++;
+      } catch {
+        receiptFailed++;
+        receiptWarnings.push({
+          row: sheetRow,
+          url: embedded.name,
+          message: `Row ${sheetRow}: embedded receipt image could not be saved`,
+        });
+      }
+    }
 
     candidates.push({
       sheetRow,
@@ -251,8 +279,6 @@ export async function POST(request: Request) {
     'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
   );
 
-  let sharedBatchId: string | null = null;
-
   const persist = db.transaction(() => {
     for (const row of candidates) {
       if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
@@ -262,10 +288,8 @@ export async function POST(request: Request) {
 
       const fundingSource = (legacyPaymentToFundingSource(row.paymentMethod) || 'cash') as FundingSourceId;
       const { batchId: reportBatchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
-        batchId: singleBatch ? sharedBatchId : null,
         fundingSource,
       });
-      if (singleBatch) sharedBatchId = reportBatchId;
 
       const primaryPath = row.receiptPaths[0] || null;
       const result = insertExpense.run(

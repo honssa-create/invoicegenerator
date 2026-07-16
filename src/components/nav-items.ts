@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/cashflow', label: 'Cash Flow', icon: '💹', section: 'cashflow' },
   { href: '/scan-table', label: 'Scan to Table', icon: '📊', section: 'scan_table' },
   { href: '/customers', label: 'Customers', icon: '👥', section: 'customers' },
+  { href: '/settings', label: 'Settings', icon: '🔧', section: 'settings' },
   { href: '/trash', label: 'Deleted Records', icon: '🗑️', section: 'trash' },
   { href: '/admin', label: 'Administration', icon: '⚙️', section: 'admin' },
 ];

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
@@ -33,6 +33,7 @@ import {
 } from '@/lib/expense-suppliers';
 import type { Expense } from '@/lib/types';
 import { expenseReceiptUrl, formReceiptPreviewUrl } from '@/lib/image-url';
+import ExpenseDetailPanel from '@/components/ExpenseDetailPanel';
 
 const EMPTY_FORM = {
   category: '',
@@ -664,12 +665,10 @@ export default function ExpensesPage() {
     );
   };
 
-  const detailField = (label: string, value: ReactNode) => (
-    <div>
-      <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{label}</p>
-      <p className="text-sm text-gray-900 mt-0.5">{value || '—'}</p>
-    </div>
-  );
+  const printDetail = () => {
+    if (!detail) return;
+    router.push(`/expenses/${detail.id}/detail-print`);
+  };
 
   return (
     <AppLayout>
@@ -1174,106 +1173,36 @@ export default function ExpensesPage() {
             className="modal-panel sm:max-w-3xl my-0 sm:my-8"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
-                <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
-                {detail.batch_id && (
-                  <p className="text-sm font-mono text-gray-500 mt-0.5">Batch ID {detail.batch_id}</p>
-                )}
-                <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(detail) || 'Unnamed supplier'}</p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setDetail(null); openEdit(detail); }}
-                  className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDetail(null)}
-                  className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
-              {detailField('Receipt No. 收據編號', detail.receipt_no || `EXP-${detail.id}`)}
-              {detail.batch_id && detailField('Batch ID 報銷單編號', detail.batch_id)}
-              {detailField('Paid Date 支出日期', detail.paid_date)}
-              {detailField('Platform 消費平台', detail.platform)}
-              {detailField('Supplier 供應商', detail.merchant)}
-              {detail.supplier_input && detailField('供應商 (input)', detail.supplier_input)}
-              {detailField('支出金額(RMB)', formatMoney(detail.amount_rmb, 'CNY'))}
-              {detailField('支出金額(HKD)', formatMoney(detail.amount_hkd, 'HKD'))}
-              {detailField('Payment Channel 支付渠道', paymentChannelLabel(detail.payment_channel))}
-              {detailField('Funding Source 扣款來源', fundingSourceLabel(detail.funding_source))}
-              {detail.funding_source === FUNDING_SOURCE_CC_SELF && detail.card_last4
-                ? detailField('Card Last 4 信用卡尾四位', detail.card_last4)
-                : null}
-              {!detail.funding_source && detail.payment_method
-                ? detailField('Payment 支付方式 [legacy]', detail.payment_method)
-                : null}
-              {detailField('Reason 支出原因', categoryLabel(detail.category))}
-              {detailField('Order No. 訂單編號', detail.order_no)}
-              <div>
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Status 付款狀態</p>
-                <span className={`inline-flex mt-1 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[detail.payment_status]}`}>
-                  {detail.payment_status}
-                </span>
-              </div>
-            </div>
-
-            {detail.notes && (
-              <div className="mb-4">
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Notes 注意事項</p>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.notes}</p>
-              </div>
-            )}
-
-            {detail.special_notes && (
-              <div className="mb-6">
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Special Notes 特別事項</p>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.special_notes}</p>
-              </div>
-            )}
-
-            {!detail.notes && !detail.special_notes && <div className="mb-6" />}
-
-            <div>
-              <p className="text-sm font-semibold text-gray-900 mb-3">
-                Receipt Images 付款收據 ({(detail.receipts || []).length})
-              </p>
-              {(detail.receipts || []).length === 0 ? (
-                <p className="text-gray-400 text-sm py-8 text-center border border-dashed border-gray-200 rounded-xl">No receipt images attached.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {(detail.receipts || []).map((r, i) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => openLightbox(detail, i)}
-                      className="group text-left border border-gray-200 rounded-xl overflow-hidden hover:ring-2 hover:ring-brand-400 transition-shadow bg-white"
-                    >
-                      <div className="bg-brand-50 px-3 py-1.5 text-xs font-mono font-semibold text-brand-800 border-b border-brand-100 flex items-center justify-between">
-                        <span>{detail.receipt_no || `EXP-${detail.id}`} · #{i + 1}</span>
-                        <span className="text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">🔍 Enlarge</span>
-                      </div>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={expenseReceiptUrl(r, detail.id)}
-                        alt={`Receipt ${i + 1}`}
-                        className="w-full object-contain max-h-[45vh] bg-gray-50"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ExpenseDetailPanel
+              expense={detail}
+              interactive
+              onReceiptClick={(i) => openLightbox(detail, i)}
+              actions={
+                <>
+                  <button
+                    type="button"
+                    onClick={printDetail}
+                    className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    🖨 Print
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setDetail(null); openEdit(detail); }}
+                    className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetail(null)}
+                    className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                </>
+              }
+            />
           </div>
         </div>
       )}

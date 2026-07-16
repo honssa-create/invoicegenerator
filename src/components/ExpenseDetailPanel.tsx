@@ -48,7 +48,7 @@ export default function ExpenseDetailPanel({
             {expense.receipt_no || `EXP-${expense.id}`}
           </h2>
           {expense.batch_id && (
-            <p className="text-sm font-mono text-gray-500 mt-0.5">Batch ID {expense.batch_id}</p>
+            <p className="text-sm font-mono text-gray-500 mt-0.5">Expense ID {expense.batch_id}</p>
           )}
           <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(expense) || 'Unnamed supplier'}</p>
         </div>
@@ -57,7 +57,7 @@ export default function ExpenseDetailPanel({
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100 expense-detail-fields print:bg-white print:border-gray-200">
         {detailField('Receipt No. 收據編號', expense.receipt_no || `EXP-${expense.id}`)}
-        {expense.batch_id && detailField('Batch ID 報銷單編號', expense.batch_id)}
+        {expense.batch_id && detailField('Expense ID 報銷單編號', expense.batch_id)}
         {detailField('Paid Date 支出日期', expense.paid_date)}
         {detailField('Platform 消費平台', expense.platform)}
         {detailField('Supplier 供應商', expense.merchant)}

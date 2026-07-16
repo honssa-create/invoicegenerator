@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { categoryLabel, expensePaymentDisplay, expenseSupplierName, formatMoney } from '@/lib/expenses';
 import { expenseReceiptUrl } from '@/lib/image-url';
 import type { Expense } from '@/lib/types';
+import { BTN, bi } from '@/lib/ui-labels';
 
 type PrintPage = {
   key: string;
@@ -289,7 +290,7 @@ export default function PrintView() {
             onClick={() => router.push('/expenses')}
             className="text-sm text-brand-600 hover:text-brand-700 font-medium"
           >
-            ← Back to expenses
+            ← {bi('Back to expenses', '返回支出紀錄')}
           </button>
           <p className="text-xs text-gray-500 mt-0.5">
             {expenses.length} expense{expenses.length === 1 ? '' : 's'} · {printPages.length} print page
@@ -302,7 +303,7 @@ export default function PrintView() {
           disabled={!allImagesReady || printPages.length === 0}
           className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          🖨 Print
+          🖨 {BTN.print}
         </button>
       </div>
 

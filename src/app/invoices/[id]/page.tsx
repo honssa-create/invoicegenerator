@@ -11,6 +11,7 @@ import { isSectionReadOnly } from '@/lib/permissions';
 import { formatDate, calculateInvoiceTotals } from '@/lib/utils';
 import type { InvoiceWithDetails, LinkedOrderSummary } from '@/lib/types';
 import { orderTitle, type Order } from '@/lib/orders';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface LineItem {
   description: string;
@@ -109,7 +110,7 @@ export default function InvoiceDetailPage() {
       <div className="page-header">
         <div>
           <Link href="/invoices" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
-            ← Back to invoices
+            ← {bi('Back to invoices', '返回發票列表')}
           </Link>
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             <h1 className="page-title">{invoice.invoice_number}</h1>
@@ -121,26 +122,26 @@ export default function InvoiceDetailPage() {
             href={`/invoices/${id}/print`}
             className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
           >
-            Print / PDF
+            {BTN.printPdf}
           </Link>
           {!readOnly && (
           <>
           {!editing ? (
             <button onClick={() => setEditing(true)} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
-              Edit
+              {BTN.edit}
             </button>
           ) : (
             <>
               <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? BTN.saving : BTN.save}
               </button>
               <button onClick={() => setEditing(false)} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
-                Cancel
+                {BTN.cancel}
               </button>
             </>
           )}
           <button onClick={handleDelete} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">
-            Delete
+            {BTN.delete}
           </button>
           </>
           )}
@@ -152,7 +153,7 @@ export default function InvoiceDetailPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="grid md:grid-cols-2 gap-6 mb-6">
               <div>
-                <p className="text-xs text-gray-500 uppercase font-medium mb-1">Bill To</p>
+                <p className="text-xs text-gray-500 uppercase font-medium mb-1">{bi('Bill To', '帳單對象')}</p>
                 <p className="font-semibold text-gray-900">{invoice.customer_name}</p>
                 {invoice.customer_email && <p className="text-sm text-gray-600">{invoice.customer_email}</p>}
                 {invoice.customer_address && <p className="text-sm text-gray-600">{invoice.customer_address}</p>}
@@ -163,15 +164,15 @@ export default function InvoiceDetailPage() {
                 )}
               </div>
               <div className="text-right text-sm space-y-1">
-                <p><span className="text-gray-500">Issue Date:</span> <span className="font-medium">{formatDate(invoice.issue_date)}</span></p>
-                <p><span className="text-gray-500">Due Date:</span> <span className="font-medium">{formatDate(invoice.due_date)}</span></p>
+                <p><span className="text-gray-500">{bi('Issue Date', '開立日期')}:</span> <span className="font-medium">{formatDate(invoice.issue_date)}</span></p>
+                <p><span className="text-gray-500">{bi('Due Date', '到期日')}:</span> <span className="font-medium">{formatDate(invoice.due_date)}</span></p>
               </div>
             </div>
 
             {editing && (
               <div className="mb-4 flex gap-4">
                 <div>
-                  <label className="text-sm text-gray-500">Status</label>
+                  <label className="text-sm text-gray-500">{bi('Status', '狀態')}</label>
                   <select value={status} onChange={(e) => setStatus(e.target.value)}
                     className="block mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
                     <option value="draft">Draft</option>
@@ -181,7 +182,7 @@ export default function InvoiceDetailPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm text-gray-500">Tax Rate (%)</label>
+                  <label className="text-sm text-gray-500">{bi('Tax Rate (%)', '稅率 (%)')}</label>
                   <input type="number" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))}
                     className="block mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-24" />
                 </div>
@@ -191,10 +192,10 @@ export default function InvoiceDetailPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs text-gray-500 uppercase">
-                  <th className="pb-3">Description</th>
-                  <th className="pb-3 text-right">Qty</th>
-                  <th className="pb-3 text-right">Rate</th>
-                  <th className="pb-3 text-right">Amount</th>
+                  <th className="pb-3">{bi('Description', '描述')}</th>
+                  <th className="pb-3 text-right">{bi('Qty', '數量')}</th>
+                  <th className="pb-3 text-right">{bi('Rate', '單價')}</th>
+                  <th className="pb-3 text-right">{bi('Amount', '金額')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -243,9 +244,9 @@ export default function InvoiceDetailPage() {
 
             <div className="mt-6 flex justify-end">
               <div className="w-64 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{formatCurrency(totals.subtotal)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Tax</span><span>{formatCurrency(totals.taxAmount)}</span></div>
-                <div className="flex justify-between font-bold text-lg border-t pt-2"><span>Total</span><span>{formatCurrency(totals.total)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">{bi('Subtotal', '小計')}</span><span>{formatCurrency(totals.subtotal)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">{bi('Tax', '稅項')}</span><span>{formatCurrency(totals.taxAmount)}</span></div>
+                <div className="flex justify-between font-bold text-lg border-t pt-2"><span>{bi('Total', '總計')}</span><span>{formatCurrency(totals.total)}</span></div>
               </div>
             </div>
           </div>
@@ -259,7 +260,7 @@ export default function InvoiceDetailPage() {
                 🔗 {orderTitle(linkedOrder)}
               </Link>
             ) : (
-              <p className="text-sm text-gray-500 mb-2">No order linked.</p>
+              <p className="text-sm text-gray-500 mb-2">{bi('No order linked.', '尚未關聯訂單。')}</p>
             )}
             {!readOnly && (
             <select
@@ -267,27 +268,27 @@ export default function InvoiceDetailPage() {
               onChange={(e) => linkOrder(e.target.value)}
               className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
             >
-              <option value="">— Not linked —</option>
+              <option value="">{bi('— Not linked —', '— 未關聯 —')}</option>
               {orders.map((o) => <option key={o.id} value={o.id}>{orderTitle(o)}</option>)}
             </select>
             )}
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-3">Notes</h3>
+            <h3 className="font-semibold text-gray-900 mb-3">{bi('Notes', '備註')}</h3>
             {editing ? (
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
             ) : (
-              <p className="text-sm text-gray-600">{invoice.notes || 'No notes'}</p>
+              <p className="text-sm text-gray-600">{invoice.notes || bi('No notes', '無備註')}</p>
             )}
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-3">Terms</h3>
+            <h3 className="font-semibold text-gray-900 mb-3">{bi('Terms', '條款')}</h3>
             {editing ? (
               <textarea value={terms} onChange={(e) => setTerms(e.target.value)} rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
             ) : (
-              <p className="text-sm text-gray-600">{invoice.terms || 'No terms specified'}</p>
+              <p className="text-sm text-gray-600">{invoice.terms || bi('No terms specified', '未指定條款')}</p>
             )}
           </div>
           <ActivityFeed entityType="invoice" entityId={invoice.id} className="max-h-[520px]" />

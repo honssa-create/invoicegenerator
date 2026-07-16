@@ -9,6 +9,7 @@ import { formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 import { isSectionReadOnly } from '@/lib/permissions';
 import { QUOTATION_STATUS_COLORS, type QuotationWithDetails } from '@/lib/quotations';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 export default function QuotationsPage() {
   const router = useRouter();
@@ -43,13 +44,13 @@ export default function QuotationsPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Quotations 報價單</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? 'View quotations (read-only)' : 'Create quotations, export, and convert to orders or invoices'}</p>
+          <h1 className="page-title">{TITLE.quotations}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? bi('View quotations (read-only)', '查看報價單（唯讀）') : bi('Create quotations, export, and convert to orders or invoices', '建立報價單、匯出及轉換為訂單或發票')}</p>
         </div>
         <div className="page-actions">
           {!readOnly && (
           <button onClick={create} disabled={creating} className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            {creating ? 'Creating…' : '+ New Quotation'}
+            {creating ? BTN.creating : `+ ${bi('New Quotation', '新增報價單')}`}
           </button>
           )}
         </div>
@@ -59,17 +60,17 @@ export default function QuotationsPage() {
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : quotations.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">No quotations yet. Create your first quotation.</div>
+          <div className="p-12 text-center text-gray-500">{bi('No quotations yet. Create your first quotation.', '尚無報價單。建立第一張報價單。')}</div>
         ) : (
           <div className="table-scroll">
           <table className="w-full min-w-[640px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3">Quote #</th>
-                <th className="px-6 py-3">Customer</th>
-                <th className="px-6 py-3">Issue Date</th>
-                <th className="px-6 py-3">Total</th>
-                <th className="px-6 py-3">Status</th>
+                <th className="px-6 py-3">{bi('Quote #', '報價編號')}</th>
+                <th className="px-6 py-3">{bi('Customer', '客戶')}</th>
+                <th className="px-6 py-3">{bi('Issue Date', '開立日期')}</th>
+                <th className="px-6 py-3">{bi('Total', '總計')}</th>
+                <th className="px-6 py-3">{bi('Status', '狀態')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

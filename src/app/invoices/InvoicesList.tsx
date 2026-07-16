@@ -10,6 +10,7 @@ import { StatusBadge, formatCurrency } from '@/components/ui';
 import { isSectionReadOnly } from '@/lib/permissions';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type SortKey = 'number' | 'customer' | 'date' | 'due' | 'amount' | 'status';
 const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
@@ -132,21 +133,21 @@ export default function InvoicesList() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Invoices</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? 'View invoices (read-only)' : 'Create and manage your invoices'}</p>
+          <h1 className="page-title">{TITLE.invoices}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? bi('View invoices (read-only)', '查看發票（唯讀）') : bi('Create and manage your invoices', '建立及管理發票')}</p>
         </div>
         <div className="page-actions">
           {!readOnly && (
             <button onClick={runReminders} disabled={remindering} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
-              {remindering ? 'Checking…' : '⏰ Run 30-day reminders'}
+              {remindering ? bi('Checking…', '檢查中…') : bi('⏰ Run 30-day reminders', '⏰ 執行30天催款')}
             </button>
           )}
           <a href="/api/invoices/export" className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-            ⬇ Export to Excel
+            ⬇ {BTN.exportExcel}
           </a>
           {!readOnly && (
           <Link href="/invoices/new" className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
-            + New Invoice
+            + {TITLE.newInvoice}
           </Link>
           )}
         </div>
@@ -159,20 +160,20 @@ export default function InvoicesList() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Search invoice # or client…"
+        searchPlaceholder={bi('Search invoice # or client…', '搜尋發票編號或客戶…')}
         onClear={clearFilters}
       >
         <div className="flex flex-col">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Client</label>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Client', '客戶')}</label>
           <select value={client} onChange={(e) => setClient(e.target.value)} className={selectCls}>
-            <option value="">All</option>
+            <option value="">{BTN.all}</option>
             {clientOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div className="flex flex-col">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Status</label>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
           <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
-            <option value="">All</option>
+            <option value="">{BTN.all}</option>
             {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
           </select>
         </div>
@@ -185,21 +186,21 @@ export default function InvoicesList() {
           </div>
         ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No invoices match your filters.</p>
-            {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">Create an invoice</Link>}
+            <p>{bi('No invoices match your filters.', '沒有符合篩選條件的發票。')}</p>
+            {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">{bi('Create an invoice', '建立發票')}</Link>}
           </div>
         ) : (
           <div className="table-scroll">
           <table className="w-full min-w-[720px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                {sortTh('number', 'Invoice #')}
-                {sortTh('customer', 'Customer')}
-                {sortTh('date', 'Issue Date')}
-                {sortTh('due', 'Due Date')}
-                {sortTh('amount', 'Amount')}
-                {sortTh('status', 'Status')}
-                <th className="px-6 py-3">Actions</th>
+                {sortTh('number', bi('Invoice #', '發票編號'))}
+                {sortTh('customer', bi('Customer', '客戶'))}
+                {sortTh('date', bi('Issue Date', '開立日期'))}
+                {sortTh('due', bi('Due Date', '到期日'))}
+                {sortTh('amount', bi('Amount', '金額'))}
+                {sortTh('status', bi('Status', '狀態'))}
+                <th className="px-6 py-3">{bi('Actions', '操作')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -214,10 +215,10 @@ export default function InvoicesList() {
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(inv.total)}</td>
                   <td className="px-6 py-4"><StatusBadge status={inv.status} /></td>
                   <td className="px-6 py-4 text-sm space-x-3">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">View</Link>
-                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">Print</Link>
+                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.view}</Link>
+                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">{BTN.print}</Link>
                     {!readOnly && (
-                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
+                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button>
                     )}
                   </td>
                 </tr>

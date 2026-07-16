@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import RentPaymentNoticeMatrixView from '@/components/RentPaymentNoticeMatrix';
 import { currentBillingPeriod, formatDisplayDate, formatMoney, type RentPaymentNoticeMatrix } from '@/lib/rentals';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 type UnitNoticePayload = RentPaymentNoticeMatrix & { tenantId?: number; unitId?: number };
 
@@ -28,26 +29,26 @@ function UnitRentPaymentNoticeContent() {
           return null;
         }
         const data = await r.json();
-        if (!r.ok) throw new Error(data.error || 'Failed to load notice');
+        if (!r.ok) throw new Error(data.error || MSG.loadNoticeFailed);
         return data;
       })
       .then((d) => {
         if (d?.tenant) setMatrix(d);
-        else setError('Notice not available');
+        else setError(MSG.noticeNotAvailable);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load notice'))
+      .catch((e) => setError(e instanceof Error ? e.message : MSG.loadNoticeFailed))
       .finally(() => setLoading(false));
   }, [id, period, from, paidLookback]);
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
+    return <div className="min-h-screen flex items-center justify-center text-gray-400">{BTN.loading}</div>;
   }
 
   if (error || !matrix) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-gray-500 px-6 text-center">
-        <p>{error || 'Notice not available'}</p>
-        <Link href={`/rentals/${id}`} className="text-brand-600 text-sm font-medium">← Back to Unit</Link>
+        <p>{error || MSG.noticeNotAvailable}</p>
+        <Link href={`/rentals/${id}`} className="text-brand-600 text-sm font-medium">← {bi('Back to Unit', '返回單位')}</Link>
       </div>
     );
   }
@@ -59,9 +60,9 @@ function UnitRentPaymentNoticeContent() {
   return (
     <div className="rent-notice-print-root min-h-screen bg-gray-100 print:bg-white">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center">
-        <Link href={`/rentals/${id}`} className="text-sm text-brand-600 font-medium">← Back to Unit</Link>
+        <Link href={`/rentals/${id}`} className="text-sm text-brand-600 font-medium">← {bi('Back to Unit', '返回單位')}</Link>
         <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg">
-          Print / Save PDF
+          {BTN.printSavePdf}
         </button>
       </div>
 
@@ -103,7 +104,7 @@ function UnitRentPaymentNoticeContent() {
 
 export default function UnitRentPaymentNoticePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">{BTN.loading}</div>}>
       <UnitRentPaymentNoticeContent />
     </Suspense>
   );

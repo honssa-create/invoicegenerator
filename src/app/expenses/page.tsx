@@ -26,6 +26,7 @@ import {
   type OptionType,
   type FundingSourceId,
 } from '@/lib/expenses';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 import {
   EMPTY_EXPENSE_EXPORT_FILTERS,
   buildExpenseExportQuery,
@@ -369,7 +370,7 @@ export default function ExpensesPage() {
     const files = Array.from(fileList);
     if (!files.length) return;
     setScanning(true);
-    setScanMessage(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning the first…`);
+    setScanMessage(bi(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning the first…`, `上傳 ${files.length} 個檔案並掃描第一個…`));
     setError('');
 
     const localUrls = files.map((f) => URL.createObjectURL(f));
@@ -472,7 +473,7 @@ export default function ExpensesPage() {
       const res = await fetch('/api/expenses/import', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) {
-        setToast({ msg: data.error || 'Import failed', kind: 'error' });
+        setToast({ msg: data.error || MSG.importFailed, kind: 'error' });
         return;
       }
       let msg = `Imported ${data.imported} row(s), skipped ${data.skipped}`;
@@ -494,7 +495,7 @@ export default function ExpensesPage() {
       loadOptions();
       loadExpenses();
     } catch {
-      setToast({ msg: 'Import failed', kind: 'error' });
+      setToast({ msg: MSG.importFailed, kind: 'error' });
     } finally {
       setImporting(false);
     }
@@ -554,7 +555,7 @@ export default function ExpensesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Move this expense to Deleted Records? You can restore it within 60 days.')) return;
+    if (!confirm(bi('Move this expense to Deleted Records? You can restore it within 60 days.', '將此支出移至已刪除紀錄？可於 60 天內還原。'))) return;
     const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
     if (res.ok) {
       setSelected((prev) => {
@@ -610,7 +611,7 @@ export default function ExpensesPage() {
     const ids = displayed.filter((e) => selected.has(e.id)).map((e) => e.id);
     if (
       !confirm(
-        `Move ${ids.length} expense(s) to Deleted Records? You can restore them within 60 days.`
+        bi('Move {n} expense(s) to Deleted Records? You can restore them within 60 days.', '將 {n} 筆支出移至已刪除紀錄？可於 60 天內還原。').replace('{n}', String(ids.length))
       )
     ) {
       return;
@@ -624,7 +625,7 @@ export default function ExpensesPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setToast({ msg: data.error || 'Bulk delete failed', kind: 'error' });
+        setToast({ msg: data.error || MSG.bulkDeleteFailed, kind: 'error' });
         return;
       }
       setSelected(new Set());
@@ -634,7 +635,7 @@ export default function ExpensesPage() {
       if (data.not_found?.length) msg += ` · ${data.not_found.length} skipped (not found or no access)`;
       setToast({ msg, kind: 'success' });
     } catch {
-      setToast({ msg: 'Bulk delete failed', kind: 'error' });
+      setToast({ msg: MSG.bulkDeleteFailed, kind: 'error' });
     } finally {
       setBulkDeleting(false);
     }
@@ -705,7 +706,7 @@ export default function ExpensesPage() {
       const res = await fetch(`/api/expenses/export${buildExpenseExportQuery(exportFilters)}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setToast({ msg: data.error || 'Export failed', kind: 'error' });
+        setToast({ msg: data.error || MSG.exportFailed, kind: 'error' });
         return;
       }
       const blob = await res.blob();
@@ -721,7 +722,7 @@ export default function ExpensesPage() {
       setShowExportModal(false);
       setToast({ msg: 'Excel export downloaded', kind: 'success' });
     } catch {
-      setToast({ msg: 'Export failed', kind: 'error' });
+      setToast({ msg: MSG.exportFailed, kind: 'error' });
     } finally {
       setExporting(false);
     }
@@ -731,8 +732,8 @@ export default function ExpensesPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Expenses 支出紀錄</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Track costs, scan receipts, import sheets, and export your books</p>
+          <h1 className="page-title">{TITLE.expenses}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Track costs, scan receipts, import sheets, and export your books', '追蹤成本、掃描收據、匯入表格及匯出帳簿')}</p>
         </div>
         <div className="page-actions">
           <button
@@ -740,14 +741,14 @@ export default function ExpensesPage() {
             disabled={selected.size === 0 || bulkDeleting}
             className="px-4 py-2 bg-white border border-red-200 text-red-700 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {bulkDeleting ? 'Deleting…' : `🗑 Delete Selected${selected.size > 0 ? ` (${selected.size})` : ''}`}
+            {bulkDeleting ? BTN.deleting : `🗑 ${bi('Delete Selected', '刪除所選')}${selected.size > 0 ? ` (${selected.size})` : ''}`}
           </button>
           <button
             onClick={printSelected}
             disabled={selected.size === 0}
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            🖨 Print Selected{selected.size > 0 ? ` (${selected.size})` : ''}
+            🖨 {bi('Print Selected', '列印所選')}{selected.size > 0 ? ` (${selected.size})` : ''}
           </button>
           <div
             onClick={() => importInputRef.current?.click()}
@@ -759,7 +760,7 @@ export default function ExpensesPage() {
             className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
             title="Drag a .csv / .xlsx / .xls file here or click to select"
           >
-            {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
+            {importing ? bi('Importing…', '匯入中…') : `📥 ${bi('Import Expense (CSV/Excel)', '匯入支出 (CSV/Excel)')}`}
             <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
           </div>
           <button
@@ -767,13 +768,13 @@ export default function ExpensesPage() {
             onClick={openExportModal}
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
-            ⬇ Export to Excel
+            ⬇ {BTN.exportExcel}
           </button>
           <button
             onClick={openCreate}
             className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
           >
-            + Add Expense
+            + {bi('Add Expense', '新增支出')}
           </button>
         </div>
       </div>
@@ -792,7 +793,7 @@ export default function ExpensesPage() {
         onDateEnd={(v) => setFilters((f) => ({ ...f, dateEnd: v }))}
         search={filters.search}
         onSearch={(v) => setFilters((f) => ({ ...f, search: v }))}
-        searchPlaceholder="Search number, supplier, platform…"
+        searchPlaceholder={bi('Search number, supplier, platform…', '搜尋編號、供應商、平台…')}
         onClear={() => setFilters(EMPTY_FILTERS)}
       >
         <div className="flex flex-col">
@@ -888,7 +889,7 @@ export default function ExpensesPage() {
           </div>
         ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No expenses match. Add one, import a sheet, or clear filters.</p>
+            <p>{bi('No expenses match. Add one, import a sheet, or clear filters.', '沒有符合的支出。新增一筆、匯入試算表或清除篩選。')}</p>
           </div>
         ) : (
           <table className="w-full min-w-[1520px] border-separate border-spacing-0">
@@ -950,9 +951,9 @@ export default function ExpensesPage() {
                     </span>
                   </td>
                   <td className={`px-4 py-3 sticky right-0 z-10 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm space-x-3 whitespace-nowrap ${stickyCell}`} onClick={(ev) => ev.stopPropagation()}>
-                    <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">View</button>
-                    <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
-                    <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
+                    <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">{BTN.view}</button>
+                    <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.edit}</button>
+                    <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button>
                   </td>
                 </tr>
               );
@@ -1021,7 +1022,7 @@ export default function ExpensesPage() {
       {showForm && (
         <div className="modal-overlay overflow-y-auto py-4">
           <div className="modal-panel sm:max-w-2xl my-0 sm:my-8 !overflow-visible max-h-none">
-            <h2 className="text-lg font-semibold mb-4">{editingId ? 'Edit Expense' : 'New Expense'}</h2>
+            <h2 className="text-lg font-semibold mb-4">{editingId ? bi('Edit Expense', '編輯支出') : bi('New Expense', '新增支出')}</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
 
             <div
@@ -1214,10 +1215,10 @@ export default function ExpensesPage() {
 
               <div className="flex gap-3 pt-2">
                 <button type="submit" disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
-                  {saving ? 'Saving…' : editingId ? 'Update Expense' : 'Create Expense'}
+                  {saving ? BTN.saving : editingId ? bi('Update Expense', '更新支出') : bi('Create Expense', '建立支出')}
                 </button>
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">
-                  Cancel
+                  {BTN.cancel}
                 </button>
               </div>
             </form>
@@ -1242,21 +1243,21 @@ export default function ExpensesPage() {
                     onClick={printDetail}
                     className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50"
                   >
-                    🖨 Print
+                    🖨 {BTN.print}
                   </button>
                   <button
                     type="button"
                     onClick={() => { setDetail(null); openEdit(detail); }}
                     className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
                   >
-                    Edit
+                    {BTN.edit}
                   </button>
                   <button
                     type="button"
                     onClick={() => setDetail(null)}
                     className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
                   >
-                    Close
+                    {BTN.close}
                   </button>
                 </>
               }
@@ -1274,7 +1275,7 @@ export default function ExpensesPage() {
             type="button"
             onClick={() => setLightbox(null)}
             className="absolute top-4 right-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white text-xl hover:bg-white/20"
-            aria-label="Close"
+            aria-label={BTN.close}
           >
             ×
           </button>
@@ -1317,7 +1318,7 @@ export default function ExpensesPage() {
             className="modal-panel sm:max-w-lg"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold text-gray-900">Export to Excel 匯出 Excel</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{BTN.exportExcel}</h2>
             <p className="text-sm text-gray-500 mt-1">
               Optional filters — leave blank to export all expenses. Prefilled from current table paid-date / funding filters.
             </p>
@@ -1400,7 +1401,7 @@ export default function ExpensesPage() {
                 disabled={exporting}
                 className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
               >
-                Clear filters
+                {BTN.clearFilters}
               </button>
               <button
                 type="button"
@@ -1408,7 +1409,7 @@ export default function ExpensesPage() {
                 disabled={exporting}
                 className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
               >
-                Cancel
+                {BTN.cancel}
               </button>
               <button
                 type="button"
@@ -1416,7 +1417,7 @@ export default function ExpensesPage() {
                 disabled={exporting}
                 className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50"
               >
-                {exporting ? 'Exporting…' : 'Download Excel'}
+                {exporting ? BTN.exporting : BTN.downloadExcel}
               </button>
             </div>
           </div>

@@ -13,6 +13,7 @@ import {
   formulaSummaryForCapacity,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 export default function KitchenPrepPrintPage() {
   const { id } = useParams();
@@ -37,20 +38,20 @@ export default function KitchenPrepPrintPage() {
   return (
     <div className="min-h-screen bg-gray-100 print:bg-white">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <Link href={`/kitchen-prep/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to calculator</Link>
-        <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">Print / Save as PDF</button>
+        <Link href={`/kitchen-prep/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to calculator', '返回計算器')}</Link>
+        <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{BTN.printPdf}</button>
       </div>
 
       <div className="max-w-5xl mx-auto my-8 bg-white shadow-lg print:shadow-none print:my-0 print:max-w-none">
         <div className="p-8 print:p-6 prep-print-sheet">
           <div className="flex justify-between items-start border-b-4 border-brand-600 pb-5 mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 leading-tight">KITCHEN PREP SHEET</h1>
-              <p className="text-base text-gray-600 mt-1">廚房備料單 · Kitchen Summary 廚房總結</p>
+              <h1 className="text-2xl font-bold text-gray-900 leading-tight">{TITLE.kitchenPrepSheet}</h1>
+              <p className="text-base text-gray-600 mt-1">{bi('Kitchen Summary', '廚房總結')}</p>
             </div>
             <div className="text-right">
               <p className="text-xl font-bold font-mono text-brand-700">{order.order_code}</p>
-              <p className="text-sm text-gray-500 mt-1">Printed {new Date().toLocaleString('en-HK')}</p>
+              <p className="text-sm text-gray-500 mt-1">{bi('Printed', '列印時間')} {new Date().toLocaleString('en-HK')}</p>
             </div>
           </div>
 

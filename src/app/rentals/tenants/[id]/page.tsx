@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import RentPaymentNoticeMatrix from '@/components/RentPaymentNoticeMatrix';
 import ChargeAllocationGrid, {
@@ -368,14 +369,14 @@ export default function TenantDetailPage() {
   const inp = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm';
 
   if (loading && !detail) {
-    return <AppLayout><div className="p-12 text-center text-gray-400">Loading…</div></AppLayout>;
+    return <AppLayout><div className="p-12 text-center text-gray-400">{BTN.loading}</div></AppLayout>;
   }
   if (loadError || !detail) {
     return (
       <AppLayout>
         <div className="p-12 text-center">
           <p className="text-gray-500">{loadError || 'Tenant not found'}</p>
-          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← Back to Rentals</Link>
+          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← {bi('Back to Rentals', '返回租金管理')}</Link>
         </div>
       </AppLayout>
     );
@@ -426,7 +427,7 @@ export default function TenantDetailPage() {
     setBusy(false);
     if (!res.ok) {
       const d = await res.json();
-      setToast(d.error || 'Allocation failed');
+      setToast(d.error || MSG.allocationFailed);
       return;
     }
     setAllocateModal(null);
@@ -541,7 +542,7 @@ export default function TenantDetailPage() {
               onClick={() => setContactEditing(true)}
               className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50"
             >
-              Edit 編輯
+              {BTN.edit}
             </button>
           )}
         </div>
@@ -580,7 +581,7 @@ export default function TenantDetailPage() {
                   }}
                   className="px-4 py-2 border rounded-lg text-sm"
                 >
-                  Cancel
+                  {BTN.cancel}
                 </button>
                 <button
                   type="button"
@@ -588,7 +589,7 @@ export default function TenantDetailPage() {
                   disabled={contactSaving}
                   className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50"
                 >
-                  {contactSaving ? 'Saving…' : 'Save 儲存'}
+                  {contactSaving ? BTN.saving : BTN.save}
                 </button>
               </div>
             </div>
@@ -701,7 +702,7 @@ export default function TenantDetailPage() {
           </div>
           <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
             {(leaseHistory).length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">No contract history yet</p>
+              <p className="text-sm text-gray-400 text-center py-4">{bi('No contract history yet', '尚無合約紀錄')}</p>
             ) : (
               leaseHistory.map((l) => (
                 <div key={l.id} className={`rounded-xl border p-3 text-sm ${l.isCurrent ? 'border-brand-200 bg-brand-50/40' : 'border-gray-100'}`}>
@@ -818,7 +819,7 @@ export default function TenantDetailPage() {
                 </tr>
               ))}
               {(!billingHistory || billingHistory.length === 0) && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No billing history yet</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{bi('No billing history yet', '尚無帳單紀錄')}</td></tr>
               )}
             </tbody>
           </table>
@@ -1053,9 +1054,9 @@ export default function TenantDetailPage() {
               )}
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setPaymentModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setPaymentModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={savePayment} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
-                {busy ? 'Saving…' : 'Save & Allocate'}
+                {busy ? BTN.saving : bi('Save & Allocate', '儲存並分配')}
               </button>
             </div>
           </div>
@@ -1092,9 +1093,9 @@ export default function TenantDetailPage() {
               })}
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setAllocateModal(null)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setAllocateModal(null)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={saveAllocation} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
-                {busy ? 'Saving…' : 'Allocate'}
+                {busy ? BTN.saving : bi('Allocate', '分配')}
               </button>
             </div>
           </div>
@@ -1123,7 +1124,7 @@ export default function TenantDetailPage() {
                 Preview & Print 預覽列印
               </Link>
               <div className="flex gap-3">
-                <button type="button" onClick={() => setShowDebitNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+                <button type="button" onClick={() => setShowDebitNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
                 <button
                   type="button"
                   onClick={() => void sendDebitNote()}

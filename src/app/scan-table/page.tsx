@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import AppLayout from '@/components/AppLayout';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 export default function ScanTablePage() {
   const [grid, setGrid] = useState<string[][]>([]);
@@ -78,16 +79,16 @@ export default function ScanTablePage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Scan to Table 掃描成表格</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Upload an image or PDF of a printed table, then edit &amp; export it</p>
+          <h1 className="page-title">{TITLE.scanTable}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Upload an image or PDF of a printed table, then edit & export it', '上傳印刷表格的圖片或 PDF，然後編輯並匯出')}</p>
         </div>
         {grid.length > 0 && (
           <div className="page-actions">
             <button onClick={exportCsv} className="btn bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">
-              ⬇ Export CSV
+              ⬇ {BTN.exportCsv}
             </button>
             <button onClick={exportXlsx} className="btn bg-brand-600 text-white hover:bg-brand-700">
-              ⬇ Export Excel
+              ⬇ {BTN.exportExcel}
             </button>
           </div>
         )}

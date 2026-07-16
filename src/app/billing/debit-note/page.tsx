@@ -15,6 +15,7 @@ import {
   type DebitNotePaymentTemplateId,
   type FormalDebitNote,
 } from '@/lib/rentals';
+import { BTN, NAV, bi } from '@/lib/ui-labels';
 
 function DebitNoteContent() {
   const searchParams = useSearchParams();
@@ -154,14 +155,14 @@ function DebitNoteContent() {
   };
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
+    return <div className="min-h-screen flex items-center justify-center text-gray-400">{BTN.loading}</div>;
   }
 
   if (error || !doc || !displayDoc) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-gray-500 px-6 text-center">
         <p>{error || 'Debit note unavailable'}</p>
-        <Link href="/rentals" className="text-brand-600 text-sm font-medium">← Back to Rentals</Link>
+        <Link href="/rentals" className="text-brand-600 text-sm font-medium">← {bi('Back to Rentals', '返回租金管理')}</Link>
       </div>
     );
   }
@@ -171,7 +172,7 @@ function DebitNoteContent() {
       <div className="no-print bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-5xl mx-auto flex flex-wrap justify-between items-start gap-4">
           <Link href={unitId ? `/rentals/${unitId}` : `/rentals/tenants/${tenantId}`} className="text-sm text-brand-600 font-medium">
-            ← Back
+            ← {BTN.back}
           </Link>
           <div className="flex flex-wrap gap-2">
             <Link
@@ -186,7 +187,7 @@ function DebitNoteContent() {
               disabled={savingTemplate}
               className="px-4 py-2 border border-brand-300 text-brand-700 text-sm rounded-lg hover:bg-brand-50 disabled:opacity-50"
             >
-              {savingTemplate ? 'Saving…' : 'Save Template 儲存範本'}
+              {savingTemplate ? BTN.saving : bi('Save Template', '儲存範本')}
             </button>
             <button
               type="button"
@@ -197,7 +198,7 @@ function DebitNoteContent() {
               {sending ? 'Sending…' : 'Send Debit Note 發送'}
             </button>
             <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg">
-              Print / Save PDF
+              {BTN.printSavePdf}
             </button>
           </div>
         </div>
@@ -237,7 +238,7 @@ function DebitNoteContent() {
 
 export default function BillingDebitNotePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">{BTN.loading}</div>}>
       <DebitNoteContent />
     </Suspense>
   );

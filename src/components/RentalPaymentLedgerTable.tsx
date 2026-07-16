@@ -11,6 +11,7 @@ import {
   periodLedgerStatusLabel,
   type UnitLeasePaymentLedgerRow,
 } from '@/lib/rentals';
+import { BTN, bi } from '@/lib/ui-labels';
 
 interface Props {
   rows: UnitLeasePaymentLedgerRow[];
@@ -42,7 +43,7 @@ export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
                 key={r.billingPeriod}
                 className="hover:bg-brand-50/40 cursor-pointer"
                 onClick={() => setDetailRow(r)}
-                title="Click for charge breakdown 點擊查看明細"
+                title={bi('Click for charge breakdown', '點擊查看明細')}
               >
                 <td className="px-4 py-3 font-medium text-gray-900">{r.billingPeriod}</td>
                 <td className="px-4 py-3 text-right text-gray-600">{formatMoney(r.baseRent)}</td>
@@ -51,7 +52,7 @@ export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
                 <td className="px-4 py-3 text-right font-semibold text-gray-900">
                   {formatMoney(r.total)}
                   {r.amountReceived > 0 && r.amountReceived < r.total && (
-                    <p className="text-[10px] text-orange-600 font-normal">Received {formatMoney(r.amountReceived)}</p>
+                    <p className="text-[10px] text-orange-600 font-normal">{bi('Received', '已收')} {formatMoney(r.amountReceived)}</p>
                   )}
                 </td>
                 <td className="px-4 py-3 text-gray-600">{formatDisplayDate(r.receivedDate) || '—'}</td>
@@ -64,12 +65,12 @@ export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
                   <span className="space-x-2">
                     {r.recordId && r.invoiceRef && (
                       <Link href={`/rentals/records/${r.recordId}/invoice`} className="text-brand-600 text-xs hover:underline">
-                        Invoice
+                        {bi('Invoice', '發票')}
                       </Link>
                     )}
                     {r.recordId && r.receiptRef && (
                       <Link href={`/rentals/records/${r.recordId}/receipt`} className="text-brand-600 text-xs hover:underline">
-                        Receipt
+                        {bi('Receipt', '收據')}
                       </Link>
                     )}
                     {!r.invoiceRef && !r.receiptRef && <span className="text-gray-300 text-xs">—</span>}
@@ -80,7 +81,9 @@ export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-10 text-center text-gray-400">
-                  {leaseLabel ? `No billing periods for ${leaseLabel}` : 'No lease period — add a lease to track payments'}
+                  {leaseLabel
+                    ? bi(`No billing periods for ${leaseLabel}`, `${leaseLabel} 尚無帳期紀錄`)
+                    : bi('No lease period — add a lease to track payments', '尚無租期 — 請新增租約以追蹤收款')}
                 </td>
               </tr>
             )}

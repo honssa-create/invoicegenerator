@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { orderTitle, type Order } from '@/lib/orders';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface Business { name: string; company_name: string | null; email: string; }
 
@@ -41,21 +42,20 @@ export default function DeliveryNotePage() {
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <Link href={`/orders/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to order</Link>
-        <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">Print / Save as PDF</button>
+        <Link href={`/orders/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to order', '返回訂單')}</Link>
+        <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{BTN.printPdf}</button>
       </div>
 
       <div className="max-w-3xl mx-auto my-8 bg-white shadow-lg rounded-lg overflow-hidden print:shadow-none print:my-0 print:rounded-none">
         <div className="p-12">
           <div className="flex justify-between items-start mb-10">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">DELIVERY NOTE</h1>
-              <p className="text-lg text-gray-500 font-medium mt-1">出貨單</p>
+              <h1 className="text-3xl font-bold text-gray-900">{TITLE.deliveryNote}</h1>
             </div>
             <div className="text-right">
               <p className="font-bold text-lg text-gray-900">{business?.company_name || business?.name || 'InvoiceFlow'}</p>
               {business?.email && <p className="text-sm text-gray-600">{business.email}</p>}
-              <p className="text-sm text-gray-500 mt-1">Date: {new Date().toLocaleDateString('en-HK')}</p>
+              <p className="text-sm text-gray-500 mt-1">{bi('Date', '日期')}: {new Date().toLocaleDateString('en-HK')}</p>
             </div>
           </div>
 
@@ -63,7 +63,7 @@ export default function DeliveryNotePage() {
           <div className="mb-10 border-2 border-gray-900 rounded-xl p-5 flex items-center justify-between print-exact bg-gray-900 text-white">
             <div>
               <p className="text-xs uppercase tracking-widest opacity-80">Total Cartons 箱數</p>
-              <p className="text-sm opacity-80">Number of boxes to hand over</p>
+              <p className="text-sm opacity-80">{bi('Number of boxes to hand over', '需交付的箱數')}</p>
             </div>
             <p className="text-5xl font-extrabold leading-none">{cartons}</p>
           </div>

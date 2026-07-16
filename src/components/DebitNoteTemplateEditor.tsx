@@ -9,6 +9,7 @@ import {
 } from '@/lib/debit-note-style';
 import { downloadDebitNoteStyleTemplate } from '@/lib/debit-note-style-document';
 import { DEBIT_NOTE_COMPANY_VARIANTS, type TemplateCompanyVariantId } from '@/lib/document-templates';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface Props {
   companyKey: TemplateCompanyVariantId;
@@ -123,7 +124,7 @@ export default function DebitNoteTemplateEditor({
                     disabled={saving}
                     className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
                   >
-                    {saving ? 'Saving…' : 'Save template 儲存範本'}
+                    {saving ? BTN.saving : bi('Save template', '儲存範本')}
                   </button>
                 )}
                 <button
@@ -193,11 +194,11 @@ export function useDebitNoteStyleTemplate(companyKey: TemplateCompanyVariantId, 
     const data = await res.json().catch(() => ({}));
     setSaving(false);
     if (!res.ok) {
-      setSaveMessage(data.error || 'Save failed');
+      setSaveMessage(data.error || MSG.saveFailed);
       return;
     }
     if (data.style) setStyle(normalizeDebitNoteStyle(data.style));
-    setSaveMessage('Template saved ✓');
+    setSaveMessage(MSG.templateSaved);
     setTimeout(() => setSaveMessage(''), 3000);
   }, [readOnly, style, companyKey]);
 

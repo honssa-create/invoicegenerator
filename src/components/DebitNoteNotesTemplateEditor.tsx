@@ -13,6 +13,7 @@ import {
   defaultJointCompanyProfile,
   type TemplateCompanyVariantId,
 } from '@/lib/document-templates';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 const META_PLACEHOLDERS = new Set(['(公司地址)', '(電話)', '(稅務編號)']);
 
@@ -199,7 +200,7 @@ export default function DebitNoteNotesTemplateEditor({
                   disabled={saving}
                   className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
                 >
-                  {saving ? 'Saving…' : 'Save template 儲存範本'}
+                  {saving ? BTN.saving : bi('Save template', '儲存範本')}
                 </button>
               )}
               <button
@@ -207,7 +208,7 @@ export default function DebitNoteNotesTemplateEditor({
                 onClick={reset}
                 className="px-4 py-2 border border-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
               >
-                Reset to default 重設
+                {bi('Reset to default', '重設為預設')}
               </button>
               {saveMessage && <span className="text-sm text-brand-700">{saveMessage}</span>}
             </>
@@ -283,14 +284,14 @@ export function useDebitNoteNotesTemplate(variant: TemplateCompanyVariantId, rea
     const data = await res.json().catch(() => ({}));
     setSaving(false);
     if (!res.ok) {
-      setSaveMessage(data.error || 'Save failed');
+      setSaveMessage(data.error || MSG.saveFailed);
       return;
     }
     const refreshed = data.template
       ? draftFromTemplate(variant, data.template as RentalDocumentTemplate)
       : await fetchNotesDraft(variant);
     setDraft(refreshed);
-    setSaveMessage('Template saved ✓');
+    setSaveMessage(MSG.templateSaved);
     setTimeout(() => setSaveMessage(''), 3000);
   }, [readOnly, draft, variant]);
 

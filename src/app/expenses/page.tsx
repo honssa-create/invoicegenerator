@@ -32,7 +32,7 @@ import {
   type SupplierMatch,
 } from '@/lib/expense-suppliers';
 import type { Expense } from '@/lib/types';
-import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
+import { expenseReceiptUrl, formReceiptPreviewUrl } from '@/lib/image-url';
 
 const EMPTY_FORM = {
   category: '',
@@ -377,7 +377,7 @@ export default function ExpensesPage() {
       const newReceipts: FormReceipt[] = (data.receipts || []).map(
         (r: { path: string }, i: number) => ({
           path: r.path,
-          url: isStoredImageUrl(r.path) ? r.path : (localUrls[i] || r.path),
+          url: formReceiptPreviewUrl(r.path, localUrls[i]),
         })
       );
       setFormReceipts((prev) => [...prev, ...newReceipts]);

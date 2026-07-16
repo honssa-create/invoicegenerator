@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { expenseReceiptUrl, isStoredImageUrl } from './image-url';
+import {
+  expenseReceiptUrl,
+  formReceiptPreviewUrl,
+  isStoredImageUrl,
+  scanPreviewReceiptUrl,
+} from './image-url';
 
 describe('isStoredImageUrl', () => {
   it('detects http(s) URLs', () => {
@@ -7,6 +12,31 @@ describe('isStoredImageUrl', () => {
     expect(isStoredImageUrl('http://x.test/b.png')).toBe(true);
     expect(isStoredImageUrl('abc.jpg')).toBe(false);
     expect(isStoredImageUrl(null)).toBe(false);
+  });
+});
+
+describe('formReceiptPreviewUrl', () => {
+  it('prefers the local blob URL over a stored R2 URL', () => {
+    expect(
+      formReceiptPreviewUrl('https://cdn.example.com/receipts/a.jpg', 'blob:http://localhost/abc'),
+    ).toBe('blob:http://localhost/abc');
+  });
+
+  it('uses scan-preview for bare filenames when no blob is available', () => {
+    expect(formReceiptPreviewUrl('ad8d63f0-4f76-47c5-a3d1-6f25bef3b499.jpg')).toBe(
+      '/api/expenses/scan-preview/ad8d63f0-4f76-47c5-a3d1-6f25bef3b499.jpg',
+    );
+  });
+
+  it('uses direct URL when path is already public and blob is absent', () => {
+    expect(formReceiptPreviewUrl('https://cdn.example.com/a.jpg')).toBe('https://cdn.example.com/a.jpg');
+  });
+});
+
+describe('scanPreviewReceiptUrl', () => {
+  it('rejects paths with directories or http URLs', () => {
+    expect(scanPreviewReceiptUrl('https://cdn.test/a.jpg')).toBeNull();
+    expect(scanPreviewReceiptUrl('../etc/passwd')).toBeNull();
   });
 });
 

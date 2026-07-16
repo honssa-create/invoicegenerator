@@ -56,6 +56,54 @@ export function publicObjectUrl(key: string): string {
   return `${base}/${key.replace(/^\//, '')}`;
 }
 
+/** Extract the R2 object key when `stored` is our public bucket URL. */
+export function r2KeyFromPublicUrl(url: string): string | null {
+  const base = process.env.R2_PUBLIC_URL?.trim().replace(/\/+$/, '');
+  if (!base) return null;
+  const trimmed = url.trim();
+  if (!trimmed.startsWith(`${base}/`)) return null;
+  const key = trimmed.slice(base.length + 1);
+  if (!key || key.includes('..')) return null;
+  return key;
+}
+
+/** Stream an object from R2 using S3 credentials (works even when the public URL is misconfigured). */
+export async function streamR2Object(
+  key: string,
+): Promise<{ body: Uint8Array; contentType: string } | null> {
+  if (!isR2Configured()) return null;
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  try {
+    const out = await getR2Client().send(
+      new GetObjectCommand({
+        Bucket: requireEnv('R2_BUCKET_NAME'),
+        Key: key,
+      }),
+    );
+    if (!out.Body) return null;
+    return {
+      body: await out.Body.transformToByteArray(),
+      contentType: out.ContentType || 'image/jpeg',
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function warnIfR2Misconfigured(): void {
+  if (!isR2Configured()) return;
+  const endpoint = process.env.R2_ENDPOINT?.trim() || '';
+  if (/r2\.dev/i.test(endpoint)) {
+    console.warn(
+      '[InvoiceFlow] R2_ENDPOINT should be the S3 API endpoint ' +
+        '(https://<account_id>.r2.cloudflarestorage.com), not the public r2.dev URL.',
+    );
+  }
+  if (!process.env.R2_PUBLIC_URL?.trim()) {
+    console.warn('[InvoiceFlow] R2_PUBLIC_URL is missing — receipt paths cannot be resolved.');
+  }
+}
+
 /** Upload a buffer to R2 and return the public URL. */
 export async function uploadBufferToR2(
   buffer: Buffer,

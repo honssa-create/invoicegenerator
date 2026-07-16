@@ -232,6 +232,56 @@
     print-color-adjust: exact !important;
   }
 
+  /* Expense detail print — mirrors the detail modal layout */
+  .expense-detail-print-root {
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  .expense-detail-print-root .expense-detail-panel {
+    max-width: none !important;
+  }
+
+  .expense-detail-print-root .expense-detail-fields {
+    background: white !important;
+    border-color: #e5e7eb !important;
+    font-size: 10pt !important;
+    line-height: 1.35 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipts-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6mm !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipt-card {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipt-caption {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipt-img {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 130mm !important;
+    height: auto !important;
+    object-fit: contain !important;
+    object-position: top center !important;
+    background: white !important;
+  }
+
   /* Rent payment notice print */
   .rent-notice-print-root {
     background: white !important;

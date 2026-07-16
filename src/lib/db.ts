@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { warnIfEphemeralReceiptStorage } from './receipt-storage';
+import { warnIfR2Misconfigured } from './r2';
 
 const defaultDbPath = path.join(process.cwd(), 'data', 'invoices.db');
 
@@ -1211,6 +1212,7 @@ db.exec(`
   }
 
   warnIfEphemeralReceiptStorage();
+  warnIfR2Misconfigured();
   dbInstance = db;
   return dbInstance;
 }

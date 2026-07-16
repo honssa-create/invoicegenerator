@@ -65,6 +65,7 @@ export const NAV = {
   cashflow: bi('Cash Flow', '現金流'),
   scanTable: bi('Scan to Table', '掃描成表格'),
   customers: bi('Customers', '客戶'),
+  settings: bi('Settings', '設定'),
   trash: bi('Deleted Records', '已刪除紀錄'),
   admin: bi('Administration', '系統管理'),
 } as const;
@@ -85,6 +86,7 @@ export const TITLE = {
   accounting: bi('Accounting Reconciliation', '會計入帳一覽表'),
   cashflow: bi('Cash Flow & Reconciliation', '營運收支中央看板'),
   scanTable: bi('Scan to Table', '掃描成表格'),
+  settings: bi('Settings', '設定'),
   trash: bi('Deleted Records', '已刪除紀錄'),
   admin: bi('Administration', '系統管理'),
   invoiceDoc: bi('INVOICE', '發票'),

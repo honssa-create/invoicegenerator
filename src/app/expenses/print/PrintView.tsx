@@ -37,7 +37,7 @@ function ExpenseSummary({ e }: { e: Expense }) {
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider opacity-80">Receipt No.</p>
           <p className="text-xl sm:text-2xl font-bold font-mono truncate">{e.receipt_no || `EXP-${e.id}`}</p>
-          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Batch ID {e.batch_id}</p>}
+          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Expense ID {e.batch_id}</p>}
         </div>
         <div className="text-right text-sm shrink-0">
           <p className="font-semibold max-w-[12rem] truncate">{expenseSupplierName(e) || 'Unnamed merchant'}</p>

@@ -11,6 +11,7 @@ import { calculateInvoiceTotals } from '@/lib/utils';
 import { isSectionReadOnly } from '@/lib/permissions';
 import { QUOTATION_STATUSES, QUOTATION_STATUS_COLORS, type QuotationWithDetails } from '@/lib/quotations';
 import type { Customer } from '@/lib/types';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 interface LineItem { description: string; quantity: number; unit_price: number; }
 
@@ -75,7 +76,7 @@ export default function QuotationDetailPage() {
       body: JSON.stringify({ target }),
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Conversion failed'); return; }
+    if (!res.ok) { alert(data.error || MSG.conversionFailed); return; }
     router.push(target === 'invoice' ? `/invoices/${data.id}` : `/orders/${data.id}`);
   };
 
@@ -117,21 +118,21 @@ export default function QuotationDetailPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <Link href="/quotations" className="text-sm text-brand-600 hover:text-brand-700 font-medium">← Back to quotations</Link>
+          <Link href="/quotations" className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to quotations', '返回報價單')}</Link>
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             <h1 className="page-title">{quote.quote_number}</h1>
             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[status]}`}>{status}</span>
           </div>
         </div>
         <div className="page-actions">
-          <Link href={`/quotations/${id}/print`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">🧾 Generate PDF</Link>
-          <a href={`/api/quotations/${id}/export`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">⬇ Export Excel</a>
+          <Link href={`/quotations/${id}/print`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">🧾 {bi('Generate PDF', '產生 PDF')}</Link>
+          <a href={`/api/quotations/${id}/export`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">⬇ {BTN.exportExcel}</a>
           {!readOnly && (
           <>
-          <button onClick={copyToInvoice} disabled={copying} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">{copying ? 'Copying…' : '📋 Copy to New Invoice'}</button>
-          <button onClick={() => convert('order')} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">→ Convert to Order</button>
-          <button onClick={save} disabled={saving} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
-          <button onClick={del} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">Delete</button>
+          <button onClick={copyToInvoice} disabled={copying} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">{copying ? bi('Copying…', '複製中…') : `📋 ${bi('Copy to New Invoice', '複製為新發票')}`}</button>
+          <button onClick={() => convert('order')} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">→ {bi('Convert to Order', '轉換為訂單')}</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">{saving ? BTN.saving : BTN.save}</button>
+          <button onClick={del} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">{BTN.delete}</button>
           </>
           )}
         </div>
@@ -143,7 +144,7 @@ export default function QuotationDetailPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="grid md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Customer</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Customer', '客戶')}</label>
                 <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={readOnly} className={`${inputCls} w-full`}>
                   <option value="">— None —</option>
                   {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -170,8 +171,8 @@ export default function QuotationDetailPage() {
             </div>
 
             <div className="flex items-center justify-between mb-2">
-              <h2 className="font-semibold text-gray-900">Line Items</h2>
-              {!readOnly && <button onClick={addItem} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Add line</button>}
+              <h2 className="font-semibold text-gray-900">{bi('Line Items', '明細項目')}</h2>
+              {!readOnly && <button onClick={addItem} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ {bi('Add line', '新增行')}</button>}
             </div>
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase font-medium">
@@ -186,7 +187,7 @@ export default function QuotationDetailPage() {
                   {!readOnly && <button onClick={() => removeItem(i)} className="col-span-1 text-red-500 hover:text-red-700 text-sm">✕</button>}
                 </div>
               ))}
-              {items.length === 0 && <p className="text-sm text-gray-400 py-2">No line items. Click “+ Add line”.</p>}
+              {items.length === 0 && <p className="text-sm text-gray-400 py-2">{bi('No line items. Click “+ Add line”.', '尚無明細。點擊「+ 新增行」。')}</p>}
             </div>
 
             <div className="mt-6 flex justify-end">

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { SupplierMatch } from '@/lib/expense-suppliers';
+import { BTN, bi } from '@/lib/ui-labels';
 
 interface SupplierSelectProps {
   value: string;
@@ -18,7 +19,7 @@ export default function SupplierSelect({
   options = [],
   onChange,
   onAdd,
-  placeholder = 'Select supplier…',
+  placeholder = bi('Select supplier…', '選擇供應商…'),
   ocrMatch,
   onDismissOcrMatch,
 }: SupplierSelectProps) {
@@ -73,7 +74,7 @@ export default function SupplierSelect({
         <div className="mb-1.5 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
           <span className="shrink-0" aria-hidden>✨</span>
           <span className="flex-1">
-            Matched from receipt: <strong>{ocrMatch.supplier}</strong>
+            {bi('Matched from receipt:', '收據匹配：')} <strong>{ocrMatch.supplier}</strong>
             {' '}({Math.round(ocrMatch.score * 100)}% · {ocrMatch.method})
           </span>
           <button
@@ -81,7 +82,7 @@ export default function SupplierSelect({
             onClick={onDismissOcrMatch}
             className="shrink-0 text-amber-700 hover:text-amber-900 font-medium"
           >
-            Dismiss
+            {bi('Dismiss', '關閉')}
           </button>
         </div>
       )}
@@ -115,13 +116,13 @@ export default function SupplierSelect({
                   setQuery('');
                 }
               }}
-              placeholder="Search suppliers…"
+              placeholder={bi('Search suppliers…', '搜尋供應商…')}
               className="w-full px-2 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 outline-none"
             />
           </div>
           <div className="max-h-52 overflow-y-auto py-1">
             {filtered.length === 0 && !q && (
-              <div className="px-3 py-2 text-xs text-gray-400">No suppliers yet</div>
+              <div className="px-3 py-2 text-xs text-gray-400">{bi('No suppliers yet', '尚無供應商')}</div>
             )}
             {filtered.map((o) => (
               <button
@@ -142,7 +143,7 @@ export default function SupplierSelect({
                 disabled={adding}
                 className="w-full text-left px-3 py-2 text-sm text-brand-700 font-medium hover:bg-brand-50 border-t border-gray-100 disabled:opacity-50"
               >
-                {adding ? 'Adding…' : `+ Create "${q}"`}
+                {adding ? bi('Adding…', '新增中…') : `+ ${bi('Create', '建立')} "${q}"`}
               </button>
             )}
           </div>

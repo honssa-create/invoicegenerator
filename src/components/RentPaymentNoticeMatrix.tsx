@@ -1,6 +1,7 @@
 'use client';
 
 import { formatMoney, type RentPaymentNoticeMatrix } from '@/lib/rentals';
+import { bi } from '@/lib/ui-labels';
 
 interface Props {
   matrix: RentPaymentNoticeMatrix;
@@ -22,7 +23,7 @@ export default function RentPaymentNoticeMatrix({ matrix, compact }: Props) {
   }));
 
   if (!columns.length) {
-    return <p className="text-sm text-gray-500 py-6 text-center">No charge items for this tenant yet.</p>;
+    return <p className="text-sm text-gray-500 py-6 text-center">{bi('No charge items for this tenant yet.', '此租客尚無收費項目。')}</p>;
   }
 
   const colCount = columns.length;

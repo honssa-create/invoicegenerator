@@ -20,6 +20,7 @@ import {
   type Order,
   type OrderFieldDef,
 } from '@/lib/orders';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 interface InvoiceOption {
   id: number;
@@ -145,7 +146,7 @@ export default function OrderDetailPage() {
     try {
       const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) { setPaymentScanMsg(data.error || 'Scan failed'); return; }
+      if (!res.ok) { setPaymentScanMsg(data.error || MSG.scanFailed); return; }
       const r = data.result;
       const upd: Record<string, string> = { payment_receipt_path: r.receipt_path || '' };
       if (r.payment_date) upd.payment_date = r.payment_date;
@@ -162,7 +163,7 @@ export default function OrderDetailPage() {
       const found = [r.payment_date && 'date', r.amount != null && 'amount', r.bank && 'bank', r.method && 'method', r.reference && 'ref'].filter(Boolean);
       setPaymentScanMsg(found.length ? `Extracted via ${via}: ${found.join(', ')}. Please verify.` : `No fields auto-extracted (${via}). Enter manually.`);
     } catch {
-      setPaymentScanMsg('Scan failed');
+      setPaymentScanMsg(MSG.scanFailed);
     }
   };
 
@@ -188,7 +189,7 @@ export default function OrderDetailPage() {
   if (!order) {
     return (
       <AppLayout>
-        <div className="p-12 text-center text-gray-500">Order not found. <button onClick={() => router.push('/orders')} className="text-brand-600 underline">Back to orders</button></div>
+        <div className="p-12 text-center text-gray-500">{bi('Order not found.', '找不到訂單。')} <button onClick={() => router.push('/orders')} className="text-brand-600 underline">{bi('Back to orders', '返回訂單')}</button></div>
       </AppLayout>
     );
   }
@@ -305,9 +306,9 @@ export default function OrderDetailPage() {
   return (
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to orders</button>
+        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to orders', '返回訂單')}</button>
         <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
-          🚚 Generate Delivery Note
+          🚚 {bi('Generate Delivery Note', '產生出貨單')}
         </Link>
       </div>
 

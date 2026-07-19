@@ -7,6 +7,7 @@ import {
   OPTION_TYPES,
   type OptionType,
 } from '@/lib/expenses';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type ManagedOption = {
   id: number;
@@ -163,9 +164,9 @@ export default function SettingsPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Settings 設定</h1>
+          <h1 className="page-title">{TITLE.settings}</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            Manage dropdown options used across Expenses — add, edit, or remove suppliers, reasons, platforms, and more.
+            {bi('Manage dropdown options used across Expenses — add, edit, or remove suppliers, reasons, platforms, and more.', '管理支出模組的下拉選項 — 新增、編輯或刪除供應商、支出原因、平台等。')}
           </p>
         </div>
       </div>
@@ -225,7 +226,7 @@ export default function SettingsPage() {
                 disabled={adding || !newValue.trim()}
                 className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               >
-                {adding ? 'Adding…' : '+ Add'}
+                {adding ? bi('Adding…', '新增中…') : `+ ${BTN.add}`}
               </button>
             </form>
 
@@ -234,7 +235,7 @@ export default function SettingsPage() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
               </div>
             ) : currentOptions.length === 0 ? (
-              <div className="p-12 text-center text-gray-500 text-sm">No options yet. Add one above.</div>
+              <div className="p-12 text-center text-gray-500 text-sm">{bi('No options yet. Add one above.', '尚無選項。請在上方新增。')}</div>
             ) : (
               <ul className="divide-y divide-gray-100">
                 {currentOptions.map((option) => (
@@ -254,14 +255,14 @@ export default function SettingsPage() {
                           disabled={busyId === option.id}
                           className="px-3 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50"
                         >
-                          Save
+                          {BTN.save}
                         </button>
                         <button
                           type="button"
                           onClick={cancelEdit}
                           className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
                         >
-                          Cancel
+                          {BTN.cancel}
                         </button>
                       </>
                     ) : (
@@ -273,7 +274,7 @@ export default function SettingsPage() {
                           disabled={busyId === option.id}
                           className="px-3 py-1.5 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50 disabled:opacity-50"
                         >
-                          Edit
+                          {BTN.edit}
                         </button>
                         <button
                           type="button"
@@ -281,7 +282,7 @@ export default function SettingsPage() {
                           disabled={busyId === option.id}
                           className="px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50"
                         >
-                          Delete
+                          {BTN.delete}
                         </button>
                       </>
                     )}

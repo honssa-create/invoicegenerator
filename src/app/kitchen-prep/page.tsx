@@ -16,6 +16,7 @@ import {
   type PrepOrder,
   type PrepOrderType,
 } from '@/lib/kitchen-prep';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const STATUS_COLORS: Record<string, string> = {
   scheduled: 'bg-blue-100 text-blue-700',
@@ -152,12 +153,12 @@ export default function KitchenPrepListPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Kitchen Prep 廚房備料系統</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Scheduled stewing orders — click a row to open the ingredient calculator</p>
+          <h1 className="page-title">{TITLE.kitchenPrep}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Scheduled stewing orders — click a row to open the ingredient calculator', '排程燉製訂單 — 點擊列開啟配料計算器')}</p>
         </div>
         <div className="page-actions">
           <button onClick={() => { setError(''); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
-            + New Prep Order 新增備料單
+            + {bi('New Prep Order', '新增備料單')}
           </button>
         </div>
       </div>
@@ -169,7 +170,7 @@ export default function KitchenPrepListPage() {
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : orders.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">No scheduled prep orders yet. Create one to get started.</div>
+          <div className="p-12 text-center text-gray-500">{bi('No scheduled prep orders yet. Create one to get started.', '尚無排程備料單。建立第一張以開始。')}</div>
         ) : (
           <table className="w-full min-w-[800px] text-sm">
             <thead>
@@ -229,7 +230,7 @@ export default function KitchenPrepListPage() {
                         onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
                         className="inline-flex items-center justify-center min-h-[48px] px-4 py-2.5 text-sm sm:text-base font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
                       >
-                        完成燉製
+                        {bi('完成燉製', '完成燉製')}
                       </button>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
@@ -330,9 +331,9 @@ export default function KitchenPrepListPage() {
 
               <div className="flex gap-3 pt-2">
                 <button onClick={save} disabled={saving} className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium min-h-[48px]">
-                  {saving ? 'Creating…' : form.lines.length > 1 ? `Create ${form.lines.length} Orders` : 'Create & Open Calculator'}
+                  {saving ? BTN.creating : form.lines.length > 1 ? bi(`Create ${form.lines.length} Orders`, `建立 ${form.lines.length} 張訂單`) : bi('Create & Open Calculator', '建立並開啟計算器')}
                 </button>
-                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium min-h-[48px]">Cancel</button>
+                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium min-h-[48px]">{BTN.cancel}</button>
               </div>
             </div>
           </div>

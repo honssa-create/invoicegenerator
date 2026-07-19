@@ -9,6 +9,7 @@ import { formatCurrency } from '@/components/ui';
 import { calculateInvoiceTotals } from '@/lib/utils';
 import { isSectionReadOnly } from '@/lib/permissions';
 import type { Customer } from '@/lib/types';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface LineItem {
   description: string;
@@ -93,15 +94,15 @@ export default function NewInvoicePage() {
     <AppLayout>
       <div className="mb-8">
         <Link href="/invoices" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
-          ← Back to invoices
+          ← {bi('Back to invoices', '返回發票列表')}
         </Link>
-        <h1 className="text-2xl font-bold text-gray-900 mt-2">New Invoice</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mt-2">{TITLE.newInvoice}</h1>
       </div>
 
       {customers.length === 0 ? (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-yellow-800">
-          You need at least one customer before creating an invoice.{' '}
-          <Link href="/customers" className="font-medium underline">Add a customer</Link>
+          {bi('You need at least one customer before creating an invoice.', '建立發票前需至少有一位客戶。')}{' '}
+          <Link href="/customers" className="font-medium underline">{bi('Add a customer', '新增客戶')}</Link>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -110,39 +111,39 @@ export default function NewInvoicePage() {
           )}
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Invoice Details</h2>
+            <h2 className="font-semibold text-gray-900 mb-4">{bi('Invoice Details', '發票詳情')}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Customer *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Customer', '客戶')} *</label>
                 <select
                   value={customerId}
                   onChange={(e) => setCustomerId(e.target.value)}
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
                 >
-                  <option value="">Select customer</option>
+                  <option value="">{bi('Select customer', '選擇客戶')}</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Issue Date *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Issue Date', '開立日期')} *</label>
                 <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Due Date *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Due Date', '到期日')} *</label>
                 <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tax Rate (%)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Tax Rate (%)', '稅率 (%)')}</label>
                 <input type="number" min="0" step="0.01" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Status', '狀態')}</label>
                 <select value={status} onChange={(e) => setStatus(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
                   <option value="draft">Draft</option>
@@ -156,17 +157,17 @@ export default function NewInvoicePage() {
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900">Line Items</h2>
+              <h2 className="font-semibold text-gray-900">{bi('Line Items', '明細項目')}</h2>
               <button type="button" onClick={addItem} className="text-sm text-brand-600 hover:text-brand-700 font-medium">
-                + Add line
+                + {bi('Add line', '新增行')}
               </button>
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-12 gap-3 text-xs text-gray-500 uppercase font-medium">
-                <div className="col-span-5">Description</div>
-                <div className="col-span-2">Qty</div>
-                <div className="col-span-2">Unit Price</div>
-                <div className="col-span-2">Amount</div>
+                <div className="col-span-5">{bi('Description', '描述')}</div>
+                <div className="col-span-2">{bi('Qty', '數量')}</div>
+                <div className="col-span-2">{bi('Unit Price', '單價')}</div>
+                <div className="col-span-2">{bi('Amount', '金額')}</div>
                 <div className="col-span-1"></div>
               </div>
               {items.map((item, i) => (
@@ -174,7 +175,7 @@ export default function NewInvoicePage() {
                   <input
                     value={item.description}
                     onChange={(e) => updateItem(i, 'description', e.target.value)}
-                    placeholder="Service or product description"
+                    placeholder={bi('Service or product description', '服務或產品描述')}
                     className="col-span-5 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
                   />
                   <input
@@ -201,22 +202,22 @@ export default function NewInvoicePage() {
 
             <div className="mt-6 flex justify-end">
               <div className="w-64 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{formatCurrency(totals.subtotal)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Tax ({taxRate}%)</span><span>{formatCurrency(totals.taxAmount)}</span></div>
-                <div className="flex justify-between font-bold text-lg border-t pt-2"><span>Total</span><span>{formatCurrency(totals.total)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">{bi('Subtotal', '小計')}</span><span>{formatCurrency(totals.subtotal)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">{bi('Tax', '稅項')} ({taxRate}%)</span><span>{formatCurrency(totals.taxAmount)}</span></div>
+                <div className="flex justify-between font-bold text-lg border-t pt-2"><span>{bi('Total', '總計')}</span><span>{formatCurrency(totals.total)}</span></div>
               </div>
             </div>
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-6 grid md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Notes', '備註')}</label>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
-                placeholder="Notes visible to customer" />
+                placeholder={bi('Notes visible to customer', '客戶可見備註')} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Terms & Conditions</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Terms & Conditions', '條款及細則')}</label>
               <textarea value={terms} onChange={(e) => setTerms(e.target.value)} rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
             </div>
@@ -225,10 +226,10 @@ export default function NewInvoicePage() {
           <div className="flex gap-3">
             <button type="submit" disabled={saving}
               className="px-6 py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
-              {saving ? 'Creating...' : 'Create Invoice'}
+              {saving ? BTN.creating : bi('Create Invoice', '建立發票')}
             </button>
             <Link href="/invoices" className="px-6 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">
-              Cancel
+              {BTN.cancel}
             </Link>
           </div>
         </form>

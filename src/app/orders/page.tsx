@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { ORDER_STATUSES, STATUS_COLORS, orderTitle, type Order } from '@/lib/orders';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY = { po_number: '', name: '', description: '', delivery_date: '' };
 
@@ -44,12 +45,12 @@ export default function OrdersPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Orders 訂單管理</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Manage production orders with a ClickUp-style detail view</p>
+          <h1 className="page-title">{TITLE.orders}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Manage production orders with a ClickUp-style detail view', '以 ClickUp 風格詳情頁管理生產訂單')}</p>
         </div>
         <div className="page-actions">
           <button onClick={() => { setForm(EMPTY); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
-            + New Order
+            + {bi('New Order', '新增訂單')}
           </button>
         </div>
       </div>
@@ -58,16 +59,16 @@ export default function OrdersPage() {
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : orders.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">No orders yet. Create your first order.</div>
+          <div className="p-12 text-center text-gray-500">{bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}</div>
         ) : (
           <div className="table-scroll">
           <table className="w-full min-w-[560px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3">Order</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3">Delivery</th>
-                <th className="px-6 py-3">Updated</th>
+                <th className="px-6 py-3">{bi('Order', '訂單')}</th>
+                <th className="px-6 py-3">{bi('Status', '狀態')}</th>
+                <th className="px-6 py-3">{bi('Delivery', '交貨')}</th>
+                <th className="px-6 py-3">{bi('Updated', '更新')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -92,7 +93,7 @@ export default function OrdersPage() {
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-panel">
-            <h2 className="text-lg font-semibold mb-4">New Order</h2>
+            <h2 className="text-lg font-semibold mb-4">{bi('New Order', '新增訂單')}</h2>
             <form onSubmit={create} className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">PO# *</label>
@@ -111,8 +112,8 @@ export default function OrdersPage() {
                 <input value={form.delivery_date} onChange={(e) => setForm({ ...form, delivery_date: e.target.value })} className={inputCls} placeholder="e.g. 22/1" />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{saving ? 'Creating…' : 'Create'}</button>
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{saving ? BTN.creating : BTN.create}</button>
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">{BTN.cancel}</button>
               </div>
             </form>
           </div>

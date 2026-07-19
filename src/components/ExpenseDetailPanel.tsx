@@ -12,6 +12,7 @@ import {
 } from '@/lib/expenses';
 import { expenseReceiptUrl } from '@/lib/image-url';
 import type { Expense } from '@/lib/types';
+import { bi } from '@/lib/ui-labels';
 
 function detailField(label: string, value: ReactNode) {
   return (
@@ -50,7 +51,7 @@ export default function ExpenseDetailPanel({
           {expense.batch_id && (
             <p className="text-sm font-mono text-gray-500 mt-0.5">Expense ID {expense.batch_id}</p>
           )}
-          <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(expense) || 'Unnamed supplier'}</p>
+          <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(expense) || bi('Unnamed supplier', '未命名供應商')}</p>
         </div>
         {actions ? <div className="flex gap-2 shrink-0 no-print">{actions}</div> : null}
       </div>
@@ -110,7 +111,7 @@ export default function ExpenseDetailPanel({
         </p>
         {receipts.length === 0 ? (
           <p className="text-gray-400 text-sm py-8 text-center border border-dashed border-gray-200 rounded-xl">
-            No receipt images attached.
+            {bi('No receipt images attached.', '未附加收據圖片。')}
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 expense-detail-receipts-grid">
@@ -124,7 +125,7 @@ export default function ExpenseDetailPanel({
                     </span>
                     {interactive ? (
                       <span className="text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                        🔍 Enlarge
+                        🔍 {bi('Enlarge', '放大')}
                       </span>
                     ) : null}
                   </div>

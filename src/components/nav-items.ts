@@ -19,6 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/rentals/templates', label: 'Templates', icon: '📋', section: 'rentals' },
   { href: '/expenses', label: 'Expenses', icon: '🧾', section: 'expenses' },
   { href: '/accounting', label: 'Accounting', icon: '📒', section: 'accounting' },
+  { href: '/reconciliation', label: 'Reconciliation', icon: '🏦', section: 'reconciliation' },
   { href: '/cashflow', label: 'Cash Flow', icon: '💹', section: 'cashflow' },
   { href: '/scan-table', label: 'Scan to Table', icon: '📊', section: 'scan_table' },
   { href: '/customers', label: 'Customers', icon: '👥', section: 'customers' },

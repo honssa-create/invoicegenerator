@@ -919,6 +919,36 @@ db.prepare(
    WHERE (source_url IS NULL OR source_url = '') AND path LIKE 'http%'`,
 ).run();
 
+// Payment reconciliation (對帳) — Yedpay sync + bank statement matching.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reconciliation_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    order_no TEXT,
+    order_id INTEGER,
+    invoice_id INTEGER,
+    deposit_time TEXT NOT NULL,
+    gross_amount REAL NOT NULL,
+    payment_method TEXT NOT NULL CHECK(payment_method IN ('Yedpay', 'FPS', 'Payme')),
+    status TEXT NOT NULL DEFAULT 'Unmatched' CHECK(status IN ('Unmatched', 'Matched', 'Discrepancy')),
+    transaction_fee REAL NOT NULL DEFAULT 0,
+    net_amount REAL NOT NULL,
+    remarks TEXT,
+    source TEXT NOT NULL CHECK(source IN ('yedpay', 'bank_upload')),
+    external_id TEXT,
+    matched_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_reconciliation_user ON reconciliation_records(user_id);
+  CREATE INDEX IF NOT EXISTS idx_reconciliation_status ON reconciliation_records(user_id, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_reconciliation_external ON reconciliation_records(user_id, external_id)
+    WHERE external_id IS NOT NULL;
+`);
+
 // Recycle bin — deleted records kept for 60 days before permanent purge.
 db.exec(`
   CREATE TABLE IF NOT EXISTS deleted_records (
@@ -1011,12 +1041,12 @@ db.exec(`
       operator: {
         dashboard: true, quotations: true, invoices: true, orders: true, inbound: true,
         kitchen: true, kitchen_prep: true, rentals: false, expenses: true, accounting: false,
-        cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
+        cashflow: false, reconciliation: false, scan_table: true, customers: true, trash: false, admin: false,
       },
       accountant: {
         dashboard: true, quotations: true, invoices: true, orders: false, inbound: false,
         kitchen: false, kitchen_prep: false, rentals: true, expenses: true, accounting: true,
-        cashflow: true, scan_table: true, customers: true, trash: true, admin: false,
+        cashflow: true, reconciliation: true, scan_table: true, customers: true, trash: true, admin: false,
       },
     };
     const insert = db.prepare(
@@ -1042,6 +1072,16 @@ db.exec(`
   for (const section of ['invoices', 'quotations', 'expenses']) {
     upsert.run(section);
   }
+}
+
+// Seed reconciliation permissions for existing deployments.
+{
+  const upsert = db.prepare(
+    `INSERT INTO role_permissions (role, section, allowed) VALUES (?, 'reconciliation', ?)
+     ON CONFLICT(role, section) DO NOTHING`
+  );
+  upsert.run('accountant', 1);
+  upsert.run('operator', 0);
 }
 
 // Per-company debit note style templates (label / elite).

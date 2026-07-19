@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 
   const ownerId = getDataOwnerId(session.userId);
   return NextResponse.json({
-    configured: quickbooksConfigured(),
+    configured: quickbooksConfigured(ownerId),
     connected: isQuickBooksConnected(ownerId),
     last_synced_at: getSyncState(ownerId, 'quickbooks', 'invoices'),
   });

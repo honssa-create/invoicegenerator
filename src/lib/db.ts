@@ -1016,6 +1016,16 @@ db.exec(`
     WHERE original_order_id IS NOT NULL;
 `);
 
+// Per-user API integration credentials (WooCommerce, QuickBooks, Yedpay).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS integration_settings (
+    user_id INTEGER PRIMARY KEY,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
 // Recycle bin — deleted records kept for 60 days before permanent purge.
 db.exec(`
   CREATE TABLE IF NOT EXISTS deleted_records (

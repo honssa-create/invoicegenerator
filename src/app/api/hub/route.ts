@@ -18,12 +18,12 @@ export async function GET(request: Request) {
       return {
         platform,
         label: HUB_PLATFORM_LABELS[platform],
-        configured: quickbooksConfigured(),
+        configured: quickbooksConfigured(ownerId),
         connected: isQuickBooksConnected(ownerId),
         last_synced_at: getSyncState(ownerId, 'quickbooks', 'invoices'),
       };
     }
-    const wooConfigured = getWooStoreConfigs().some((s) => s.platform === platform);
+    const wooConfigured = getWooStoreConfigs(ownerId).some((s) => s.platform === platform);
     return {
       platform,
       label: HUB_PLATFORM_LABELS[platform],

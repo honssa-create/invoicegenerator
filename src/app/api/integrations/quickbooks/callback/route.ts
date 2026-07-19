@@ -30,8 +30,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const redirectUri = quickbooksRedirectUri(url.origin);
-    const tokens = await exchangeQuickBooksCode(code, redirectUri);
+    const redirectUri = quickbooksRedirectUri(userId, url.origin);
+    const tokens = await exchangeQuickBooksCode(userId, code, redirectUri);
     saveQuickBooksTokens(userId, { ...tokens, realmId });
     redirectBase.searchParams.set('connected', 'quickbooks');
     return NextResponse.redirect(redirectBase);

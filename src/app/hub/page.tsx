@@ -214,7 +214,7 @@ function OrderHubContent() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            No orders yet. Configure WooCommerce / QuickBooks credentials and run a sync.
+            No orders yet. Add API keys in Settings → API Integrations, then run a sync.
           </div>
         ) : (
           <table className="w-full min-w-[1100px] text-sm">

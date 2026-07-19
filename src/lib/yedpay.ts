@@ -1,5 +1,7 @@
 /** Yedpay REST API client (server-only). */
 
+import { getYedpayCredentials } from './integration-settings-server';
+
 export interface YedpayTransaction {
   id: string;
   status: string;
@@ -26,26 +28,28 @@ interface YedpayListResponse {
   };
 }
 
-export function yedpayConfigured(): boolean {
+export function yedpayConfigured(userId?: number): boolean {
+  if (userId) {
+    const creds = getYedpayCredentials(userId);
+    return Boolean(creds.access_token && creds.user_id);
+  }
   return Boolean(process.env.YEDPAY_ACCESS_TOKEN && process.env.YEDPAY_USER_ID);
 }
 
-function authHeaders(): HeadersInit {
-  const token = process.env.YEDPAY_ACCESS_TOKEN;
-  if (!token) throw new Error('YEDPAY_ACCESS_TOKEN is not configured');
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: 'application/json',
-  };
+function resolveCreds(userId: number) {
+  const creds = getYedpayCredentials(userId);
+  const token = creds.access_token || process.env.YEDPAY_ACCESS_TOKEN;
+  const yedpayUserId = creds.user_id || process.env.YEDPAY_USER_ID;
+  if (!token || !yedpayUserId) throw new Error('Yedpay is not configured');
+  return { token, yedpayUserId };
 }
 
 /** Fetch all paid/settled transactions, paginating through Yedpay results. */
-export async function fetchYedpayTransactions(options?: {
-  since?: string;
-  limit?: number;
-}): Promise<YedpayTransaction[]> {
-  const userId = process.env.YEDPAY_USER_ID;
-  if (!userId) throw new Error('YEDPAY_USER_ID is not configured');
+export async function fetchYedpayTransactions(
+  userId: number,
+  options?: { since?: string; limit?: number }
+): Promise<YedpayTransaction[]> {
+  const { token, yedpayUserId } = resolveCreds(userId);
 
   const limit = options?.limit ?? 50;
   const all: YedpayTransaction[] = [];
@@ -61,8 +65,14 @@ export async function fetchYedpayTransactions(options?: {
       params.set('paid_at>=', options.since);
     }
 
-    const url = `https://api.yedpay.com/v1/users/${encodeURIComponent(userId)}/transactions?${params.toString()}`;
-    const res = await fetch(url, { headers: authHeaders(), cache: 'no-store' });
+    const url = `https://api.yedpay.com/v1/users/${encodeURIComponent(yedpayUserId)}/transactions?${params.toString()}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
     const json = (await res.json()) as YedpayListResponse;
 
     if (!res.ok || !json.success) {

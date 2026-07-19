@@ -109,6 +109,7 @@ const API_PREFIXES: [string, PermissionSection][] = [
   ['/api/rental-templates', 'rentals'],
   ['/api/expenses', 'expenses'],
   ['/api/expense-options/manage', 'settings'],
+  ['/api/settings/integrations', 'settings'],
   ['/api/expense-options', 'expenses'],
   ['/api/receipts', 'expenses'],
   ['/api/accounting', 'accounting'],

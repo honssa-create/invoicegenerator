@@ -510,8 +510,8 @@ export async function syncYedpayForUser(userId: number): Promise<{
   matched: number;
   skipped: number;
 }> {
-  if (!yedpayConfigured()) {
-    throw new Error('Yedpay is not configured (set YEDPAY_ACCESS_TOKEN and YEDPAY_USER_ID)');
+  if (!yedpayConfigured(userId)) {
+    throw new Error('Yedpay is not configured — add credentials in Settings → API Integrations');
   }
 
   const sinceRow = db
@@ -520,7 +520,7 @@ export async function syncYedpayForUser(userId: number): Promise<{
     )
     .get(userId) as { last: string | null };
 
-  const transactions = await fetchYedpayTransactions({
+  const transactions = await fetchYedpayTransactions(userId, {
     since: sinceRow.last || undefined,
   });
 

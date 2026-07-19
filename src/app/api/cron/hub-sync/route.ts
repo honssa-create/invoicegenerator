@@ -13,7 +13,7 @@ async function runHubSyncForOwner(ownerId: number) {
     errors: string[];
   } = { user_id: ownerId, errors: [] };
 
-  if (getWooStoreConfigs().length) {
+  if (getWooStoreConfigs(ownerId).length) {
     try {
       result.woocommerce = await syncAllWooStores(ownerId);
     } catch (err) {

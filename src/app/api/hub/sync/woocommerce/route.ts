@@ -12,15 +12,15 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'order_hub', request.method);
   if (denied) return denied;
 
-  const stores = getWooStoreConfigs();
+  const ownerId = getDataOwnerId(session.userId);
+  const stores = getWooStoreConfigs(ownerId);
   if (!stores.length) {
     return NextResponse.json(
-      { error: 'No WooCommerce stores configured. Set WOOCOMMERCE_* env variables.' },
+      { error: 'No WooCommerce stores configured. Add API keys in Settings → API Integrations.' },
       { status: 400 }
     );
   }
 
-  const ownerId = getDataOwnerId(session.userId);
   const results = await syncAllWooStores(ownerId);
   return NextResponse.json({ results });
 }

@@ -7,6 +7,7 @@ import {
   upsertHubOrder,
 } from './hub-server';
 import { HUB_PLATFORM_PREFIX } from './hub';
+import { getQuickBooksCredentials } from './integration-settings-server';
 import {
   fetchWooOrders,
   getWooStoreConfigs,
@@ -71,15 +72,13 @@ export async function syncWooStore(userId: number, store: WooStoreConfig): Promi
 }
 
 export async function syncAllWooStores(userId: number): Promise<HubSyncResult[]> {
-  const stores = getWooStoreConfigs();
+  const stores = getWooStoreConfigs(userId);
   const results: HubSyncResult[] = [];
   for (const store of stores) {
     results.push(await syncWooStore(userId, store));
   }
   return results;
 }
-
-// --- QuickBooks ---
 
 export interface QuickBooksTokenRow {
   user_id: number;
@@ -89,30 +88,34 @@ export interface QuickBooksTokenRow {
   realm_id: string;
 }
 
-export function quickbooksConfigured(): boolean {
-  return Boolean(process.env.QUICKBOOKS_CLIENT_ID && process.env.QUICKBOOKS_CLIENT_SECRET);
+export function quickbooksConfigured(userId: number): boolean {
+  const creds = getQuickBooksCredentials(userId);
+  return Boolean(creds.client_id && creds.client_secret);
 }
 
-export function quickbooksRedirectUri(requestOrigin?: string): string {
+export function quickbooksRedirectUri(userId: number, requestOrigin?: string): string {
+  const fromSettings = getQuickBooksCredentials(userId).redirect_uri.trim();
+  if (fromSettings) return fromSettings;
   if (process.env.QUICKBOOKS_REDIRECT_URI) return process.env.QUICKBOOKS_REDIRECT_URI;
   const base = requestOrigin || process.env.APP_URL || 'http://localhost:3000';
   return `${base.replace(/\/$/, '')}/api/integrations/quickbooks/callback`;
 }
 
-export function quickbooksApiBase(): string {
-  return process.env.QUICKBOOKS_ENVIRONMENT === 'production'
+export function quickbooksApiBase(userId: number): string {
+  const env = getQuickBooksCredentials(userId).environment;
+  return env === 'production'
     ? 'https://quickbooks.api.intuit.com'
     : 'https://sandbox-quickbooks.api.intuit.com';
 }
 
 export function getQuickBooksAuthUrl(userId: number, requestOrigin?: string): string {
-  const clientId = process.env.QUICKBOOKS_CLIENT_ID;
-  if (!clientId) throw new Error('QUICKBOOKS_CLIENT_ID is not configured');
+  const creds = getQuickBooksCredentials(userId);
+  if (!creds.client_id) throw new Error('QuickBooks Client ID is not configured');
 
-  const redirectUri = quickbooksRedirectUri(requestOrigin);
+  const redirectUri = quickbooksRedirectUri(userId, requestOrigin);
   const state = Buffer.from(JSON.stringify({ userId })).toString('base64url');
   const params = new URLSearchParams({
-    client_id: clientId,
+    client_id: creds.client_id,
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'com.intuit.quickbooks.accounting',
@@ -153,14 +156,14 @@ export function isQuickBooksConnected(userId: number): boolean {
 }
 
 export async function exchangeQuickBooksCode(
+  userId: number,
   code: string,
   redirectUri: string
 ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-  const clientId = process.env.QUICKBOOKS_CLIENT_ID;
-  const clientSecret = process.env.QUICKBOOKS_CLIENT_SECRET;
-  if (!clientId || !clientSecret) throw new Error('QuickBooks credentials not configured');
+  const creds = getQuickBooksCredentials(userId);
+  if (!creds.client_id || !creds.client_secret) throw new Error('QuickBooks credentials not configured');
 
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const basic = Buffer.from(`${creds.client_id}:${creds.client_secret}`).toString('base64');
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
@@ -194,11 +197,10 @@ export async function exchangeQuickBooksCode(
 }
 
 async function refreshQuickBooksAccessToken(userId: number, row: QuickBooksTokenRow): Promise<string> {
-  const clientId = process.env.QUICKBOOKS_CLIENT_ID;
-  const clientSecret = process.env.QUICKBOOKS_CLIENT_SECRET;
-  if (!clientId || !clientSecret) throw new Error('QuickBooks credentials not configured');
+  const creds = getQuickBooksCredentials(userId);
+  if (!creds.client_id || !creds.client_secret) throw new Error('QuickBooks credentials not configured');
 
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const basic = Buffer.from(`${creds.client_id}:${creds.client_secret}`).toString('base64');
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: row.refresh_token,
@@ -308,7 +310,7 @@ export async function syncQuickBooksInvoices(userId: number): Promise<HubSyncRes
     ? `select * from Invoice where MetaData.LastUpdatedTime > '${lastSync}' MAXRESULTS 1000`
     : 'select * from Invoice MAXRESULTS 1000';
 
-  const url = `${quickbooksApiBase()}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
+  const url = `${quickbooksApiBase(userId)}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,

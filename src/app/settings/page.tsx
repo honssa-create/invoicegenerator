@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
+import IntegrationsSettingsPanel from '@/components/IntegrationsSettingsPanel';
 import {
   OPTION_LABELS,
   OPTION_TYPES,
   type OptionType,
 } from '@/lib/expenses';
+
+type SettingsSection = 'dropdowns' | 'integrations';
 
 type ManagedOption = {
   id: number;
@@ -24,6 +27,7 @@ const EMPTY_OPTIONS: OptionsByType = {
 };
 
 export default function SettingsPage() {
+  const [section, setSection] = useState<SettingsSection>('dropdowns');
   const [activeType, setActiveType] = useState<OptionType>('supplier');
   const [options, setOptions] = useState<OptionsByType>(EMPTY_OPTIONS);
   const [loading, setLoading] = useState(true);
@@ -165,7 +169,7 @@ export default function SettingsPage() {
         <div>
           <h1 className="page-title">Settings 設定</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            Manage dropdown options used across Expenses — add, edit, or remove suppliers, reasons, platforms, and more.
+            Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, Yedpay).
           </p>
         </div>
       </div>
@@ -181,7 +185,31 @@ export default function SettingsPage() {
       )}
 
       <div className="flex flex-col lg:flex-row gap-6">
-        <aside className="lg:w-56 shrink-0">
+        <aside className="lg:w-56 shrink-0 space-y-3">
+          <nav className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSection('dropdowns')}
+              className={`w-full text-left px-4 py-3 text-sm border-b border-gray-100 transition-colors ${
+                section === 'dropdowns' ? 'bg-brand-50 text-brand-800 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Expense Dropdowns
+              <span className="block text-xs font-normal text-gray-500 mt-0.5">Suppliers, reasons, platforms</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSection('integrations')}
+              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                section === 'integrations' ? 'bg-brand-50 text-brand-800 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              API Integrations
+              <span className="block text-xs font-normal text-gray-500 mt-0.5">WooCommerce, QuickBooks, Yedpay</span>
+            </button>
+          </nav>
+
+          {section === 'dropdowns' && (
           <nav className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             {OPTION_TYPES.map((type) => (
               <button
@@ -201,9 +229,13 @@ export default function SettingsPage() {
               </button>
             ))}
           </nav>
+          )}
         </aside>
 
         <section className="flex-1 min-w-0">
+          {section === 'integrations' ? (
+            <IntegrationsSettingsPanel onToast={(msg, kind) => setToast({ msg, kind })} />
+          ) : (
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100">
               <h2 className="text-lg font-semibold text-gray-900">{OPTION_LABELS[activeType]}</h2>
@@ -290,6 +322,7 @@ export default function SettingsPage() {
               </ul>
             )}
           </div>
+          )}
         </section>
       </div>
     </AppLayout>

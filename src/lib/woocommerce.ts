@@ -1,4 +1,5 @@
 import type { HubPlatform } from './hub';
+import { getIntegrationSettings } from './integration-settings-server';
 
 export interface WooStoreConfig {
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
@@ -37,33 +38,36 @@ function authHeader(key: string, secret: string): string {
   return `Basic ${token}`;
 }
 
-export function getWooStoreConfigs(): WooStoreConfig[] {
-  const stores: Array<{ platform: WooStoreConfig['platform']; env: string; label: string }> = [
-    { platform: 'nestiee', env: 'NESTIEE', label: 'nestiee.com.hk' },
-    { platform: 'honour', env: 'HONOUR', label: 'honour.com.hk' },
-    { platform: 'cupmoka', env: 'CUPMOKA', label: 'cupmoka.com.hk' },
-  ];
+const STORE_META: Array<{
+  platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
+  label: string;
+}> = [
+  { platform: 'nestiee', label: 'nestiee.com.hk' },
+  { platform: 'honour', label: 'honour.com.hk' },
+  { platform: 'cupmoka', label: 'cupmoka.com.hk' },
+];
 
+export function getWooStoreConfigs(userId: number): WooStoreConfig[] {
+  const settings = getIntegrationSettings(userId).woocommerce;
   const configs: WooStoreConfig[] = [];
-  for (const s of stores) {
-    const storeUrl = process.env[`WOOCOMMERCE_${s.env}_URL`]?.trim();
-    const consumerKey = process.env[`WOOCOMMERCE_${s.env}_KEY`]?.trim();
-    const consumerSecret = process.env[`WOOCOMMERCE_${s.env}_SECRET`]?.trim();
-    if (storeUrl && consumerKey && consumerSecret) {
+
+  for (const s of STORE_META) {
+    const store = settings[s.platform];
+    if (store.url && store.key && store.secret) {
       configs.push({
         platform: s.platform,
         label: s.label,
-        storeUrl: storeUrl.replace(/\/$/, ''),
-        consumerKey,
-        consumerSecret,
+        storeUrl: store.url.replace(/\/$/, ''),
+        consumerKey: store.key,
+        consumerSecret: store.secret,
       });
     }
   }
   return configs;
 }
 
-export function wooStoreConfigured(platform: WooStoreConfig['platform']): boolean {
-  return getWooStoreConfigs().some((c) => c.platform === platform);
+export function wooStoreConfigured(platform: WooStoreConfig['platform'], userId: number): boolean {
+  return getWooStoreConfigs(userId).some((c) => c.platform === platform);
 }
 
 export function mapWooStatus(status: string): string {

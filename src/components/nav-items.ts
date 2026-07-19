@@ -1,4 +1,5 @@
 import type { PermissionSection } from '@/lib/permissions';
+import { NAV } from '@/lib/ui-labels';
 
 export interface NavItem {
   href: string;
@@ -8,21 +9,21 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard', icon: '📊', section: 'dashboard' },
-  { href: '/quotations', label: 'Quotations', icon: '📝', section: 'quotations' },
-  { href: '/invoices', label: 'Invoices', icon: '📄', section: 'invoices' },
-  { href: '/orders', label: 'Orders', icon: '📦', section: 'orders' },
-  { href: '/inbound', label: 'Inbound', icon: '📥', section: 'inbound' },
-  { href: '/kitchen', label: 'Kitchen', icon: '🍲', section: 'kitchen' },
-  { href: '/kitchen-prep', label: 'Kitchen Prep', icon: '🥣', section: 'kitchen_prep' },
-  { href: '/rentals', label: 'Rentals', icon: '🏠', section: 'rentals' },
-  { href: '/rentals/templates', label: 'Templates', icon: '📋', section: 'rentals' },
-  { href: '/expenses', label: 'Expenses', icon: '🧾', section: 'expenses' },
-  { href: '/accounting', label: 'Accounting', icon: '📒', section: 'accounting' },
-  { href: '/cashflow', label: 'Cash Flow', icon: '💹', section: 'cashflow' },
-  { href: '/scan-table', label: 'Scan to Table', icon: '📊', section: 'scan_table' },
-  { href: '/customers', label: 'Customers', icon: '👥', section: 'customers' },
-  { href: '/settings', label: 'Settings', icon: '🔧', section: 'settings' },
-  { href: '/trash', label: 'Deleted Records', icon: '🗑️', section: 'trash' },
-  { href: '/admin', label: 'Administration', icon: '⚙️', section: 'admin' },
+  { href: '/dashboard', label: NAV.dashboard, icon: '📊', section: 'dashboard' },
+  { href: '/quotations', label: NAV.quotations, icon: '📝', section: 'quotations' },
+  { href: '/invoices', label: NAV.invoices, icon: '📄', section: 'invoices' },
+  { href: '/orders', label: NAV.orders, icon: '📦', section: 'orders' },
+  { href: '/inbound', label: NAV.inbound, icon: '📥', section: 'inbound' },
+  { href: '/kitchen', label: NAV.kitchen, icon: '🍲', section: 'kitchen' },
+  { href: '/kitchen-prep', label: NAV.kitchenPrep, icon: '🥣', section: 'kitchen_prep' },
+  { href: '/rentals', label: NAV.rentals, icon: '🏠', section: 'rentals' },
+  { href: '/rentals/templates', label: NAV.templates, icon: '📋', section: 'rentals' },
+  { href: '/expenses', label: NAV.expenses, icon: '🧾', section: 'expenses' },
+  { href: '/accounting', label: NAV.accounting, icon: '📒', section: 'accounting' },
+  { href: '/cashflow', label: NAV.cashflow, icon: '💹', section: 'cashflow' },
+  { href: '/scan-table', label: NAV.scanTable, icon: '📊', section: 'scan_table' },
+  { href: '/customers', label: NAV.customers, icon: '👥', section: 'customers' },
+  { href: '/settings', label: NAV.settings, icon: '🔧', section: 'settings' },
+  { href: '/trash', label: NAV.trash, icon: '🗑️', section: 'trash' },
+  { href: '/admin', label: NAV.admin, icon: '⚙️', section: 'admin' },
 ];

@@ -13,6 +13,7 @@ import {
   type CashflowResponse,
   type LedgerEntry,
 } from '@/lib/cashflow';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY_FORM = { category: INCOME_CATEGORIES[0], txn_date: new Date().toISOString().slice(0, 10), amount: '', account: RECEIVED_ACCOUNTS[0], remarks: '' };
 
@@ -35,7 +36,7 @@ export default function CashflowPage() {
   const openForm = () => { setForm(EMPTY_FORM); setReceiptPath(''); setPreview(null); setUploadMsg(''); setError(''); setShowForm(true); };
 
   const handleVoucher = async (file: File) => {
-    setUploadMsg('Compressing…');
+    setUploadMsg(bi('Compressing…', '壓縮中…'));
     let out = file;
     try {
       const c = await compressImage(file, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg', quality: 0.65 });
@@ -48,7 +49,7 @@ export default function CashflowPage() {
     const res = await fetch('/api/other-income/upload', { method: 'POST', body: fd });
     const d = await res.json();
     if (res.ok) setReceiptPath(d.path);
-    else setUploadMsg(d.error || 'Upload failed');
+    else setUploadMsg(d.error || MSG.uploadFailed);
   };
 
   const save = async () => {
@@ -81,12 +82,12 @@ export default function CashflowPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Cash Flow &amp; Reconciliation 營運收支中央看板</h1>
+          <h1 className="page-title">{TITLE.cashflow}</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">All incoming revenue — product sales + other income — in one ledger</p>
         </div>
         <div className="page-actions">
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full sm:w-auto px-3 py-2.5 sm:py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
-          <button onClick={openForm} className="btn bg-brand-600 text-white hover:bg-brand-700">➕ Add Income 新增其他收入</button>
+          <button onClick={openForm} className="btn bg-brand-600 text-white hover:bg-brand-700">➕ {bi('Add Income', '新增其他收入')}</button>
         </div>
       </div>
 
@@ -101,7 +102,7 @@ export default function CashflowPage() {
         {!data ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : data.entries.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">No income recorded yet. Add other income or record an order payment.</div>
+          <div className="p-12 text-center text-gray-500">{MSG.noIncomeYet}</div>
         ) : (
           <table className="w-full min-w-[900px] text-sm">
             <thead>
@@ -141,7 +142,7 @@ export default function CashflowPage() {
                     {e.verified ? (
                       <button onClick={() => toggleVerify(e)} className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200">✓ Verified</button>
                     ) : (
-                      <button onClick={() => toggleVerify(e)} className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200">Pending</button>
+                      <button onClick={() => toggleVerify(e)} className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200">{BTN.pending}</button>
                     )}
                   </td>
                 </tr>
@@ -154,7 +155,7 @@ export default function CashflowPage() {
       {showForm && (
         <div className="modal-overlay overflow-y-auto">
           <div className="modal-panel my-0 sm:my-8">
-            <h2 className="text-lg font-semibold mb-4">Add Other Income 新增其他收入</h2>
+            <h2 className="text-lg font-semibold mb-4">{bi('Add Other Income', '新增其他收入')}</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
             <div className="space-y-3">
               <div><label className="block text-xs font-medium text-gray-600 mb-1">Income Category 收入類別</label>
@@ -179,8 +180,8 @@ export default function CashflowPage() {
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button onClick={save} disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Add Income'}</button>
-                <button onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+                <button onClick={save} disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{saving ? BTN.saving : bi('Add Income', '新增收入')}</button>
+                <button onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">{BTN.cancel}</button>
               </div>
             </div>
           </div>

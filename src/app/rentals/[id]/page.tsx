@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 import DebitNoteActions from '@/components/DebitNoteActions';
 import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
@@ -855,12 +856,12 @@ function RentalDetailInner() {
     fd.append('docType', 'agreement');
     const res = await fetch(`/api/rentals/leases/${leaseId}/documents`, { method: 'POST', body: fd });
     setLeaseDocUploading(false);
-    setToast(res.ok ? 'Document uploaded' : 'Upload failed');
+    setToast(res.ok ? MSG.documentUploaded : MSG.uploadFailed);
     load();
   };
 
   if (loading) return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
-  if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">Unit not found. <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">Back</button></div></AppLayout>;
+  if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">{bi('Unit not found.', '找不到單位。')} <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">{BTN.back}</button></div></AppLayout>;
 
   const { unit, currentRecord, activities, currentLease, leaseHistory, leaseDocuments, paymentLedger, viewingLease, readOnlyLease, isHistoricalView } = data;
   const rec = currentRecord;
@@ -893,7 +894,7 @@ function RentalDetailInner() {
   return (
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
-        <button onClick={() => router.push('/rentals')} className="text-sm text-brand-600 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to Rentals</button>
+        <button onClick={() => router.push('/rentals')} className="text-sm text-brand-600 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to Rentals', '返回租金管理')}</button>
         <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
       </div>
 
@@ -911,7 +912,7 @@ function RentalDetailInner() {
             href={`/rentals/${unit.id}?period=${period}`}
             className="text-sm text-brand-600 font-medium hover:underline"
           >
-            ← Back to current unit 返回現任租約
+            ← {bi('Back to current unit', '返回現任租約')}
           </Link>
         </div>
       )}
@@ -987,7 +988,7 @@ function RentalDetailInner() {
                 />
               </>
             ) : !readOnly && !isHistoricalView ? (
-              <p className="text-xs text-amber-600 self-center">Save tenant name to enable rent payment notice</p>
+              <p className="text-xs text-amber-600 self-center">{MSG.saveTenantForNotice}</p>
             ) : null}
           </div>
         </div>
@@ -1082,7 +1083,7 @@ function RentalDetailInner() {
         {!readOnly && (
         <div className="mt-4 flex justify-end">
           <button onClick={saveProfile} disabled={profileSaving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
-            {profileSaving ? 'Saving…' : 'Save Profile 儲存資料'}
+            {profileSaving ? BTN.saving : bi('Save Profile', '儲存資料')}
           </button>
         </div>
         )}
@@ -1250,7 +1251,7 @@ function RentalDetailInner() {
                     <p className="text-xs text-gray-500 whitespace-nowrap text-right">
                       {utilitySaveState === 'saving' && 'Saving… 儲存中'}
                       {utilitySaveState === 'saved' && <span className="text-green-600">Saved ✓ 已儲存</span>}
-                      {utilitySaveState === 'error' && <span className="text-red-600">Save failed</span>}
+                      {utilitySaveState === 'error' && <span className="text-red-600">{MSG.saveFailed}</span>}
                     </p>
                     {utilityCanUndo && (
                       <button
@@ -1283,7 +1284,7 @@ function RentalDetailInner() {
                 </div>
               </>
             ) : (
-              <p className="text-sm text-gray-400">No record for this period yet.</p>
+              <p className="text-sm text-gray-400">{MSG.noRecordForPeriod}</p>
             )}
           </div>
           )}
@@ -1303,7 +1304,7 @@ function RentalDetailInner() {
                   }}
                     disabled={contractEnded}
                     className="px-5 py-2.5 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
-                    📄 Send Invoice
+                    📄 {bi('Send Invoice', '發送租金單')}
                   </button>
                 )}
                 {unit.tenantId && (
@@ -1323,18 +1324,18 @@ function RentalDetailInner() {
                 {rec?.receiptRef && (
                   <Link href={`/rentals/records/${rec.id}/receipt`}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
-                    🧾 View Receipt
+                    🧾 {bi('View Receipt', '查看收據')}
                   </Link>
                 )}
                 {rec?.invoiceRef && (
                   <Link href={`/rentals/records/${rec.id}/invoice`}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
-                    🖨 View Invoice
+                    🖨 {bi('View Invoice', '查看發票')}
                   </Link>
                 )}
                 <button onClick={() => { setNoteText(''); setShowNoteModal(true); }}
                   className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
-                  📝 Add Note
+                  📝 {bi('Add Note', '新增備註')}
                 </button>
               </div>
             </div>
@@ -1383,7 +1384,7 @@ function RentalDetailInner() {
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[600px]">
             {activities.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">No activity yet.</p>
+              <p className="text-sm text-gray-400 text-center py-8">{MSG.noActivityYet}</p>
             ) : (
               activities.map((a) => (
                 <div key={a.id} className="flex gap-2">
@@ -1408,7 +1409,7 @@ function RentalDetailInner() {
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="font-semibold text-gray-900">歷任租客紀錄 Previous Tenant Records</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {isHistoricalView ? 'Viewing archived tenancy — select another row or return to current' : 'Click a completed tenancy to view read-only records'}
+              {isHistoricalView ? bi('Viewing archived tenancy — select another row or return to current', '正在查看封存租約 — 選擇其他列或返回現任租約') : bi('Click a completed tenancy to view read-only records', '點擊已完約租期以查看唯讀紀錄')}
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -1447,8 +1448,8 @@ function RentalDetailInner() {
                 {previousTenants.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">
-                      No previous tenants for this unit yet.
-                      {!currentLease && <span className="block mt-1 text-xs">Use <strong>完約 End Contract</strong> when a tenant moves out.</span>}
+                      {bi('No previous tenants for this unit yet.', '此單位尚無歷任租客。')}
+                      {!currentLease && <span className="block mt-1 text-xs">{bi('Use', '請使用')} <strong>{bi('End Contract', '完約')}</strong> {bi('when a tenant moves out.', '於租客遷出時封存租約。')}</span>}
                     </td>
                   </tr>
                 )}
@@ -1473,7 +1474,7 @@ function RentalDetailInner() {
                   onClick={() => leaseDocInputRef.current?.click()}
                   className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
                 >
-                  {leaseDocUploading ? 'Uploading…' : '+ Upload'}
+                  {leaseDocUploading ? MSG.uploading : `+ ${bi('Upload', '上傳')}`}
                 </button>
               </>
             )}
@@ -1493,7 +1494,7 @@ function RentalDetailInner() {
                   className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"
                 >
                   <span>{d.label || d.docType}</span>
-                  <span className="text-xs text-brand-600">View</span>
+                  <span className="text-xs text-brand-600">{BTN.view}</span>
                 </a>
               ))
             )}
@@ -1540,7 +1541,7 @@ function RentalDetailInner() {
             />
             <div className="flex justify-between gap-3 flex-wrap">
               <div className="flex gap-2 flex-wrap">
-                <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Preview Print View</Link>
+                <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">{bi('Preview Print View', '預覽列印')}</Link>
                 {unit.tenantId && (
                   <Link
                     href={`/billing/debit-note?tenantId=${unit.tenantId}&unitId=${unit.id}&targetPeriod=${period}&mode=single&paymentTemplate=${invoicePaymentTemplate}${invoicePaymentRemark ? `&paymentRemark=${encodeURIComponent(invoicePaymentRemark)}` : ''}`}
@@ -1806,9 +1807,9 @@ function RentalDetailInner() {
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={confirmPaid} disabled={busy || !Number(paymentForm.amount)} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
-                {busy ? 'Saving…' : 'Save & Allocate 儲存並核銷'}
+                {busy ? BTN.saving : bi('Save & Allocate', '儲存並核銷')}
               </button>
             </div>
           </div>
@@ -1819,7 +1820,7 @@ function RentalDetailInner() {
       {showEndContractModal && (
         <Modal title="End Contract 完約" onClose={() => setShowEndContractModal(false)}>
           <div className="space-y-4 text-sm">
-            <p className="text-gray-600">Close the current lease for <strong>{unit.tenantName}</strong>. Auto-invoices will stop after the lease end date.</p>
+            <p className="text-gray-600">{bi('Close the current lease for', '完結現任租約：')} <strong>{unit.tenantName}</strong>. {bi('Auto-invoices will stop after the lease end date.', '租約完結日後將停止自動發票。')}</p>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Actual move-out date 實際退租日</label>
               <input className={inp} value={endContractForm.actualEndDate} onChange={(e) => setEndContractForm({ ...endContractForm, actualEndDate: e.target.value })} placeholder="DD/MM/YYYY" />
@@ -1853,9 +1854,9 @@ function RentalDetailInner() {
               </div>
             )}
             <div className="flex justify-end gap-3 pt-2">
-              <button onClick={() => setShowEndContractModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setShowEndContractModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={submitEndContract} disabled={busy} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
-                {busy ? 'Processing…' : 'Confirm End Contract'}
+                {busy ? MSG.processing : bi('Confirm End Contract', '確認完約')}
               </button>
             </div>
           </div>
@@ -1864,12 +1865,12 @@ function RentalDetailInner() {
 
       {/* Note modal */}
       {showNoteModal && (
-        <Modal title="Log Activity Note" onClose={() => setShowNoteModal(false)}>
+        <Modal title={bi('Log Activity Note', '記錄活動備註')} onClose={() => setShowNoteModal(false)}>
           <textarea className={inp} rows={4} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="e.g. Tenant called about late payment…" />
           <div className="flex justify-end gap-3 mt-4">
-            <button onClick={() => setShowNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+            <button onClick={() => setShowNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
             <button onClick={logNote} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
-              Save Note
+              {BTN.save} {bi('Note', '備註')}
             </button>
           </div>
         </Modal>

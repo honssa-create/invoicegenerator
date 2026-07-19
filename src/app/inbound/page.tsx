@@ -5,6 +5,7 @@ import AppLayout from '@/components/AppLayout';
 import { compressImage } from '@/lib/imageCompression';
 import { inboundPhotoUrl } from '@/lib/image-url';
 import type { InboundShipment } from '@/lib/inbound';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -56,7 +57,7 @@ export default function InboundPage() {
     try {
       const res = await fetch('/api/inbound/scan', { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) { setScanMsg(''); setToast(data.error || 'Scan failed'); return; }
+      if (!res.ok) { setScanMsg(''); setToast(data.error || MSG.scanFailed); return; }
       const r = data.result;
       setPhotoPath(r.photo_path || '');
       if (r.waybill_number) setWaybill(r.waybill_number);
@@ -65,7 +66,7 @@ export default function InboundPage() {
       const found = [r.waybill_number && 'waybill', r.sender && 'sender'].filter(Boolean);
       setScanMsg(`${compressNote}${found.length ? `Extracted via ${via}: ${found.join(', ')}. Review & edit if needed.` : `No fields auto-extracted (${via}). Enter manually.`}`);
     } catch {
-      setScanMsg(''); setToast('Scan failed');
+      setScanMsg(''); setToast(MSG.scanFailed);
     } finally {
       setScanning(false);
     }
@@ -84,7 +85,7 @@ export default function InboundPage() {
     });
     setSaving(false);
     if (res.ok) { setToast('Shipment saved!'); setTimeout(() => setToast(''), 3000); resetForm(); load(); }
-    else { const d = await res.json(); setToast(d.error || 'Save failed'); setTimeout(() => setToast(''), 4000); }
+    else { const d = await res.json(); setToast(d.error || MSG.saveFailed); setTimeout(() => setToast(''), 4000); }
   };
 
   const del = async (id: number) => {
@@ -99,8 +100,8 @@ export default function InboundPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Inbound Shipments 到件紀錄</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Snap a courier label — AI reads the waybill number &amp; sender, then confirm &amp; save</p>
+          <h1 className="page-title">{TITLE.inbound}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Snap a courier label — AI reads the waybill number & sender, then confirm & save', '拍攝快遞標籤 — AI 讀取運單號及寄件人，確認後儲存')}</p>
         </div>
       </div>
 
@@ -144,7 +145,7 @@ export default function InboundPage() {
               <input type="date" value={arrival} onChange={(e) => setArrival(e.target.value)} className={inputCls} />
             </div>
             <button onClick={save} disabled={saving} className="w-full py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
-              {saving ? 'Saving…' : 'Save Shipment'}
+              {saving ? BTN.saving : bi('Save Shipment', '儲存到件')}
             </button>
           </div>
         </div>
@@ -155,7 +156,7 @@ export default function InboundPage() {
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : shipments.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">No inbound shipments recorded yet.</div>
+          <div className="p-12 text-center text-gray-500">{MSG.noInboundYet}</div>
         ) : (
           <table className="w-full min-w-[640px]">
             <thead>
@@ -179,7 +180,7 @@ export default function InboundPage() {
                   <td className="px-6 py-3 text-sm font-mono text-gray-800">{s.waybill_number || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-700">{s.sender || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-500">{s.arrival_date || '—'}</td>
-                  <td className="px-6 py-3 text-sm"><button onClick={() => del(s.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button></td>
+                  <td className="px-6 py-3 text-sm"><button onClick={() => del(s.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button></td>
                 </tr>
               ))}
             </tbody>

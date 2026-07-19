@@ -12,6 +12,7 @@ import {
   type PrepCompletionSplit,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface CompletionModalProps {
   order: PrepOrder;
@@ -76,7 +77,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
   const submit = async () => {
     setError('');
     if (splits.length === 0) {
-      setError('No flavor lines to complete — add order quantities first.');
+      setError(bi('No flavor lines to complete — add order quantities first.', '尚無口味行可完成 — 請先新增訂單數量。'));
       return;
     }
     setSubmitting(true);
@@ -92,7 +93,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
     const data = await res.json();
     setSubmitting(false);
     if (!res.ok) {
-      setError(data.error || 'Submit failed');
+      setError(data.error || MSG.submitFailed);
       return;
     }
     onCompleted(data.order);
@@ -240,7 +241,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             disabled={submitting}
             className="order-2 sm:order-1 flex-1 min-h-[56px] text-lg font-semibold rounded-xl border-2 border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50"
           >
-            Cancel 取消
+            {BTN.cancel}
           </button>
           <button
             type="button"
@@ -248,7 +249,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             disabled={submitting || splits.length === 0}
             className="order-1 sm:order-2 flex-[2] min-h-[56px] text-lg font-bold rounded-xl bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:opacity-50 shadow-lg"
           >
-            {submitting ? 'Submitting…' : 'Submit & Complete 確認完成'}
+            {submitting ? bi('Submitting…', '提交中…') : bi('Submit & Complete', '確認完成')}
           </button>
         </div>
       </div>

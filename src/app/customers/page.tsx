@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import type { Customer } from '@/lib/types';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY_FORM = { name: '', email: '', phone: '', address: '', city: '', state: '', zip: '' };
 
@@ -80,12 +81,12 @@ export default function CustomersPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Customers</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Manage your client list</p>
+          <h1 className="page-title">{TITLE.customers}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Manage your client list', '管理客戶名單')}</p>
         </div>
         <div className="page-actions">
           <button onClick={openCreate} className="btn bg-brand-600 text-white hover:bg-brand-700">
-            + Add Customer
+            + {bi('Add Customer', '新增客戶')}
           </button>
         </div>
       </div>
@@ -94,47 +95,47 @@ export default function CustomersPage() {
         <div className="modal-overlay">
           <div className="modal-panel">
             <h2 className="text-lg font-semibold mb-4">
-              {editingId ? 'Edit Customer' : 'New Customer'}
+              {editingId ? bi('Edit Customer', '編輯客戶') : bi('New Customer', '新增客戶')}
             </h2>
             {error && (
               <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>
             )}
             <form onSubmit={handleSubmit} className="space-y-3">
               <input
-                placeholder="Name *"
+                placeholder={bi('Name *', '名稱 *')}
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
               <input
-                placeholder="Email"
+                placeholder={bi('Email', '電郵')}
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
               <input
-                placeholder="Phone"
+                placeholder={bi('Phone', '電話')}
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
               <input
-                placeholder="Address"
+                placeholder={bi('Address', '地址')}
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
               <div className="grid grid-cols-3 gap-3">
                 <input
-                  placeholder="City"
+                  placeholder={bi('City', '城市')}
                   value={form.city}
                   onChange={(e) => setForm({ ...form, city: e.target.value })}
                   className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
                 />
                 <input
-                  placeholder="State"
+                  placeholder={bi('State', '州/省')}
                   value={form.state}
                   onChange={(e) => setForm({ ...form, state: e.target.value })}
                   className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
@@ -148,14 +149,14 @@ export default function CustomersPage() {
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700">
-                  {editingId ? 'Update' : 'Create'}
+                  {editingId ? BTN.update : BTN.create}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
                   className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
-                  Cancel
+                  {BTN.cancel}
                 </button>
               </div>
             </form>
@@ -170,18 +171,18 @@ export default function CustomersPage() {
           </div>
         ) : customers.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No customers yet. Add your first client to start invoicing.</p>
+            <p>{bi('No customers yet. Add your first client to start invoicing.', '尚無客戶。新增第一位客戶以開始開立發票。')}</p>
           </div>
         ) : (
           <div className="table-scroll">
           <table className="w-full min-w-[640px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3">Name</th>
-                <th className="px-6 py-3">Email</th>
-                <th className="px-6 py-3">Phone</th>
-                <th className="px-6 py-3">Location</th>
-                <th className="px-6 py-3">Actions</th>
+                <th className="px-6 py-3">{bi('Name', '名稱')}</th>
+                <th className="px-6 py-3">{bi('Email', '電郵')}</th>
+                <th className="px-6 py-3">{bi('Phone', '電話')}</th>
+                <th className="px-6 py-3">{bi('Location', '地區')}</th>
+                <th className="px-6 py-3">{bi('Actions', '操作')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -195,10 +196,10 @@ export default function CustomersPage() {
                   </td>
                   <td className="px-6 py-4 text-sm space-x-3">
                     <button onClick={() => openEdit(c)} className="text-brand-600 hover:text-brand-700 font-medium">
-                      Edit
+                      {BTN.edit}
                     </button>
                     <button onClick={() => handleDelete(c.id)} className="text-red-600 hover:text-red-700 font-medium">
-                      Delete
+                      {BTN.delete}
                     </button>
                   </td>
                 </tr>

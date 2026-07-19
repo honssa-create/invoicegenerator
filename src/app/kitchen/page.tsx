@@ -11,6 +11,7 @@ import {
   computeBatchMaterials,
   type KitchenState,
 } from '@/lib/kitchen';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 export default function KitchenPage() {
   const [state, setState] = useState<KitchenState | null>(null);
@@ -82,8 +83,8 @@ export default function KitchenPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Kitchen 智能廚房排程</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Order routing → batch brewing → two-tier inventory, all linked</p>
+          <h1 className="page-title">{TITLE.kitchen}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Order routing → batch brewing → two-tier inventory, all linked', '訂單分流 → 批次燉製 → 雙層庫存，全部連動')}</p>
         </div>
       </div>
 
@@ -131,10 +132,10 @@ export default function KitchenPage() {
           <div className="flex flex-col"><label className="text-[11px] text-gray-500 mb-1">Customer</label><input value={oCustomer} onChange={(e) => setOCustomer(e.target.value)} placeholder="WooCommerce customer" className={input} /></div>
           <div className="flex flex-col"><label className="text-[11px] text-gray-500 mb-1">Product (SKU)</label><select value={oSku} onChange={(e) => setOSku(e.target.value)} className={input}>{FINISHED_SKUS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
           <div className="flex flex-col"><label className="text-[11px] text-gray-500 mb-1">Qty (樽)</label><input type="number" min={1} value={oQty} onChange={(e) => setOQty(Number(e.target.value))} className={`${input} w-24`} /></div>
-          <button onClick={createOrder} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">Place Order (auto-route)</button>
+          <button onClick={createOrder} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{bi('Place Order (auto-route)', '下單（自動分流）')}</button>
         </div>
         {state.orders.length === 0 ? (
-          <p className="text-sm text-gray-400">No orders yet. Place one to see the stock-check routing.</p>
+          <p className="text-sm text-gray-400">{bi('No orders yet. Place one to see the stock-check routing.', '尚無訂單。建立訂單以查看庫存檢查路由。')}</p>
         ) : (
           <table className="w-full text-sm">
             <thead><tr className="text-left text-xs text-gray-500 uppercase border-b border-gray-200"><th className="py-2">Customer</th><th className="py-2">SKU</th><th className="py-2">Qty</th><th className="py-2">Status</th></tr></thead>
@@ -163,7 +164,7 @@ export default function KitchenPage() {
               <div className="flex flex-col"><label className="text-[11px] text-gray-500 mb-1">生產日期 Brewing Date</label><input type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} className={input} /></div>
               <div className="flex flex-col"><label className="text-[11px] text-gray-500 mb-1">大煲總樽數 Batch bottles</label><input type="number" min={1} value={bBottles} onChange={(e) => setBBottles(Number(e.target.value))} className={input} /></div>
             </div>
-            <button onClick={createBatch} className="w-full py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">建立燉煮批次 Create Batch (allocate raw)</button>
+            <button onClick={createBatch} className="w-full py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{bi('建立燉煮批次 Create Batch (allocate raw)', '建立燉煮批次（分配原料）')}</button>
           </div>
 
           {/* 大字報 live preview */}
@@ -182,7 +183,7 @@ export default function KitchenPage() {
 
         <div className="mt-6 space-y-3">
           {state.batches.length === 0 ? (
-            <p className="text-sm text-gray-400">No batches yet.</p>
+            <p className="text-sm text-gray-400">{bi('No batches yet.', '尚無批次。')}</p>
           ) : state.batches.map((b) => (
             <div key={b.id} className="border border-gray-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3">
               <div>
@@ -190,9 +191,9 @@ export default function KitchenPage() {
                 <p className="text-xs text-gray-500 mt-0.5">{b.materials.map((m) => `${m.name} ${m.qty}${m.unit}`).join(' · ')}</p>
               </div>
               {b.status === 'completed' ? (
-                <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">✅ Completed</span>
+                <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">✅ {bi('Completed', '已完成')}</span>
               ) : (
-                <button onClick={() => completeBatch(b.id)} className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800">完成燉製 Complete Brewing</button>
+                <button onClick={() => completeBatch(b.id)} className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800">{bi('完成燉製 Complete Brewing', '完成燉製')}</button>
               )}
             </div>
           ))}

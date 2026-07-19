@@ -18,6 +18,7 @@ import {
   type PrepCalculation,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 export default function KitchenPrepDetailPage() {
   const params = useParams();
@@ -53,7 +54,7 @@ export default function KitchenPrepDetailPage() {
     });
     const d = await res.json();
     setSaving(false);
-    if (!res.ok) { setError(d.error || 'Save failed'); return; }
+    if (!res.ok) { setError(d.error || MSG.saveFailed); return; }
     setOrder(d.order);
     setCalc(d.calculation);
   };
@@ -64,7 +65,7 @@ export default function KitchenPrepDetailPage() {
     return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
   }
   if (!order || !calc) {
-    return <AppLayout><div className="p-12 text-center text-gray-500">Prep order not found.</div></AppLayout>;
+    return <AppLayout><div className="p-12 text-center text-gray-500">{bi('Prep order not found.', '找不到備料單。')}</div></AppLayout>;
   }
 
   const flavorField = (key: 'qty_osmanthus' | 'qty_red_date' | 'qty_rock_sugar', label: string, disabled = false) => (
@@ -85,10 +86,10 @@ export default function KitchenPrepDetailPage() {
   return (
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
-        <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to schedule</button>
+        <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to schedule', '返回排程')}</button>
         <div className="page-actions w-full sm:w-auto">
           <Link href={`/kitchen-prep/${id}/print`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
-            🖨 Print Prep Sheet 列印備料單
+            🖨 {bi('Print Prep Sheet', '列印備料單')}
           </Link>
         </div>
       </div>

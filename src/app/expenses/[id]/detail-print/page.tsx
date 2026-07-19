@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import ExpenseDetailPanel from '@/components/ExpenseDetailPanel';
 import type { Expense } from '@/lib/types';
+import { BTN, bi } from '@/lib/ui-labels';
 
 export default function ExpenseDetailPrintPage() {
   const { id } = useParams();
@@ -99,7 +100,7 @@ export default function ExpenseDetailPrintPage() {
       <div className="no-print sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <div>
           <Link href="/expenses" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
-            ← Back to expenses
+            ← {bi('Back to expenses', '返回支出紀錄')}
           </Link>
           {expense && (
             <p className="text-xs text-gray-500 mt-0.5">
@@ -114,7 +115,7 @@ export default function ExpenseDetailPrintPage() {
           disabled={!expense || !allImagesReady}
           className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          🖨 Print
+          🖨 {BTN.print}
         </button>
       </div>
 

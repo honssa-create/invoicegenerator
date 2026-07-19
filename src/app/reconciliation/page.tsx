@@ -169,7 +169,7 @@ export default function ReconciliationPage() {
             onClick={syncYedpay}
             disabled={syncing || !yedpayConfigured}
             className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
-            title={yedpayConfigured ? undefined : 'Set YEDPAY_ACCESS_TOKEN and YEDPAY_USER_ID'}
+            title={yedpayConfigured ? undefined : 'Add Yedpay credentials in Settings → API Integrations'}
           >
             {syncing ? 'Syncing…' : 'Sync Yedpay Transactions'}
           </button>

@@ -25,6 +25,6 @@ export async function GET(request: Request) {
     records,
     summary,
     candidates: listMatchCandidates(ownerId),
-    yedpayConfigured: yedpayConfigured(),
+    yedpayConfigured: yedpayConfigured(ownerId),
   });
 }

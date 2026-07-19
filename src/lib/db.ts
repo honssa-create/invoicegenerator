@@ -174,6 +174,19 @@ db.exec(`
   if (!orderCols.some((c) => c.name === 'quotation_id')) {
     db.exec('ALTER TABLE orders ADD COLUMN quotation_id INTEGER');
   }
+  if (!orderCols.some((c) => c.name === 'source_platform')) {
+    db.exec("ALTER TABLE orders ADD COLUMN source_platform TEXT NOT NULL DEFAULT 'manual'");
+    db.exec("UPDATE orders SET source_platform = 'manual' WHERE source_platform IS NULL OR source_platform = ''");
+  }
+  if (!orderCols.some((c) => c.name === 'original_order_id')) {
+    db.exec('ALTER TABLE orders ADD COLUMN original_order_id TEXT');
+  }
+  if (!orderCols.some((c) => c.name === 'system_order_no')) {
+    db.exec('ALTER TABLE orders ADD COLUMN system_order_no TEXT');
+  }
+  if (!orderCols.some((c) => c.name === 'total_amount')) {
+    db.exec('ALTER TABLE orders ADD COLUMN total_amount REAL');
+  }
 }
 
 // Unified activity log shared by Orders, Invoices and Quotations (ClickUp-style feed).
@@ -216,6 +229,16 @@ try {
   }
   if (!invoiceCols.some((c) => c.name === 'last_reminder_at')) {
     db.exec('ALTER TABLE invoices ADD COLUMN last_reminder_at TEXT');
+  }
+  if (!invoiceCols.some((c) => c.name === 'source_platform')) {
+    db.exec("ALTER TABLE invoices ADD COLUMN source_platform TEXT NOT NULL DEFAULT 'manual'");
+    db.exec("UPDATE invoices SET source_platform = 'manual' WHERE source_platform IS NULL OR source_platform = ''");
+  }
+  if (!invoiceCols.some((c) => c.name === 'original_order_id')) {
+    db.exec('ALTER TABLE invoices ADD COLUMN original_order_id TEXT');
+  }
+  if (!invoiceCols.some((c) => c.name === 'system_order_no')) {
+    db.exec('ALTER TABLE invoices ADD COLUMN system_order_no TEXT');
   }
 }
 
@@ -949,6 +972,50 @@ db.exec(`
     WHERE external_id IS NOT NULL;
 `);
 
+// Centralized Order Hub — external platform sync (WooCommerce + QuickBooks).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS integration_tokens (
+    user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    realm_id TEXT,
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, provider),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS hub_order_sequences (
+    user_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    next_serial INTEGER NOT NULL DEFAULT 1001,
+    PRIMARY KEY (user_id, platform),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS integration_sync_state (
+    user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    store_key TEXT NOT NULL,
+    last_synced_at TEXT,
+    PRIMARY KEY (user_id, provider, store_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_hub_external
+    ON orders(user_id, source_platform, original_order_id)
+    WHERE original_order_id IS NOT NULL;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_system_order_no
+    ON orders(user_id, system_order_no)
+    WHERE system_order_no IS NOT NULL;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_hub_external
+    ON invoices(user_id, source_platform, original_order_id)
+    WHERE original_order_id IS NOT NULL;
+`);
+
 // Recycle bin — deleted records kept for 60 days before permanent purge.
 db.exec(`
   CREATE TABLE IF NOT EXISTS deleted_records (
@@ -1039,12 +1106,12 @@ db.exec(`
   if (permCount === 0) {
     const defaults: Record<string, Record<string, boolean>> = {
       operator: {
-        dashboard: true, quotations: true, invoices: true, orders: true, inbound: true,
+        dashboard: true, quotations: true, invoices: true, orders: true, order_hub: true, inbound: true,
         kitchen: true, kitchen_prep: true, rentals: false, expenses: true, accounting: false,
         cashflow: false, reconciliation: false, scan_table: true, customers: true, trash: false, admin: false,
       },
       accountant: {
-        dashboard: true, quotations: true, invoices: true, orders: false, inbound: false,
+        dashboard: true, quotations: true, invoices: true, orders: false, order_hub: true, inbound: false,
         kitchen: false, kitchen_prep: false, rentals: true, expenses: true, accounting: true,
         cashflow: true, reconciliation: true, scan_table: true, customers: true, trash: true, admin: false,
       },
@@ -1082,6 +1149,17 @@ db.exec(`
   );
   upsert.run('accountant', 1);
   upsert.run('operator', 0);
+}
+
+// Seed order_hub permissions for existing deployments.
+{
+  const upsert = db.prepare(
+    `INSERT INTO role_permissions (role, section, allowed) VALUES (?, 'order_hub', ?)
+     ON CONFLICT(role, section) DO NOTHING`
+  );
+  upsert.run('admin', 1);
+  upsert.run('operator', 1);
+  upsert.run('accountant', 1);
 }
 
 // Per-company debit note style templates (label / elite).

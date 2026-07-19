@@ -12,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/quotations', label: 'Quotations', icon: '📝', section: 'quotations' },
   { href: '/invoices', label: 'Invoices', icon: '📄', section: 'invoices' },
   { href: '/orders', label: 'Orders', icon: '📦', section: 'orders' },
+  { href: '/hub', label: 'Order Hub', icon: '🛰️', section: 'order_hub' },
   { href: '/inbound', label: 'Inbound', icon: '📥', section: 'inbound' },
   { href: '/kitchen', label: 'Kitchen', icon: '🍲', section: 'kitchen' },
   { href: '/kitchen-prep', label: 'Kitchen Prep', icon: '🥣', section: 'kitchen_prep' },

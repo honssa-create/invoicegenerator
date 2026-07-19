@@ -25,6 +25,7 @@ export async function middleware(request: NextRequest) {
   if (PUBLIC_PATHS.includes(pathname)) return NextResponse.next();
   if (pathname.startsWith('/api/auth/')) return NextResponse.next();
   if (pathname.startsWith('/api/cron/')) return NextResponse.next();
+  if (pathname === '/api/integrations/quickbooks/callback') return NextResponse.next();
 
   const token = request.cookies.get(COOKIE_NAME)?.value;
   if (!token) {

@@ -76,6 +76,9 @@ export function extractOrderNoFromRemarks(remarks: string): string | null {
   const inv = /\b(INV-\d{4}-\d{3,6})\b/i.exec(text);
   if (inv) return inv[1].toUpperCase();
 
+  const sys = /\b([A-Z]{2,3}-\d{3,})\b/.exec(text);
+  if (sys) return sys[1];
+
   const po = /\b(PO[#:\s-]?[A-Z0-9][A-Z0-9-]{2,})\b/i.exec(text);
   if (po) return po[1].replace(/^PO[#:\s-]?/i, '').trim() || po[1];
 
@@ -137,14 +140,17 @@ function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null 
 
   const byPo = db
     .prepare(
-      `SELECT o.id AS order_id, o.po_number AS order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
+      `SELECT o.id AS order_id, o.po_number AS order_no, o.system_order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM orders o
        LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id
-       WHERE o.user_id = ? AND LOWER(TRIM(o.po_number)) = LOWER(?)
+       WHERE o.user_id = ? AND (
+         LOWER(TRIM(o.po_number)) = LOWER(?)
+         OR LOWER(TRIM(o.system_order_no)) = LOWER(?)
+       )
        ORDER BY i.id DESC
        LIMIT 1`
     )
-    .get(userId, normalized) as
+    .get(userId, normalized, normalized) as
     | { order_id: number; order_no: string | null; invoice_id: number | null; invoice_number: string | null; invoice_status: string | null }
     | undefined;
 
@@ -154,7 +160,7 @@ function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null 
       : null;
     return {
       order_id: byPo.order_id,
-      order_no: byPo.order_no || normalized,
+      order_no: byPo.order_no || (byPo as { system_order_no?: string }).system_order_no || normalized,
       invoice_id: byPo.invoice_id,
       invoice_number: byPo.invoice_number,
       expected_amount: expected,

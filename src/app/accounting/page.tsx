@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { orderPaymentReceiptUrl } from '@/lib/image-url';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 interface Entry {
   order_id: number;
@@ -50,26 +51,26 @@ export default function AccountingPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Accounting Reconciliation 會計入帳一覽表</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">One unified view of every order payment — tick each against your bank statement</p>
+          <h1 className="page-title">{TITLE.accounting}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('One unified view of every order payment — tick each against your bank statement', '統一檢視所有訂單付款 — 與銀行對帳單逐筆核對')}</p>
         </div>
         <label className="flex items-center gap-2 text-sm text-gray-600 min-h-[44px] sm:min-h-0">
           <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
-          Show pending only
+          {bi('Show pending only', '僅顯示待核對')}
         </label>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 max-w-none sm:max-w-md">
-        <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Entries</p><p className="text-2xl font-bold">{entries.length}</p></div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Verified</p><p className="text-2xl font-bold text-green-600">{verifiedCount}</p></div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">Pending</p><p className="text-2xl font-bold text-amber-600">{entries.length - verifiedCount}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">{bi('Entries', '筆數')}</p><p className="text-2xl font-bold">{entries.length}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">{BTN.verified}</p><p className="text-2xl font-bold text-green-600">{verifiedCount}</p></div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4"><p className="text-xs text-gray-500">{BTN.pending}</p><p className="text-2xl font-bold text-amber-600">{entries.length - verifiedCount}</p></div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : shown.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">No payment entries yet. Upload a payment receipt on an order to populate this dashboard.</div>
+          <div className="p-12 text-center text-gray-500">{MSG.noPaymentEntriesYet}</div>
         ) : (
           <table className="w-full min-w-[1000px] text-sm">
             <thead>
@@ -107,9 +108,9 @@ export default function AccountingPage() {
                   <td className="px-4 py-3 font-mono text-gray-600">{e.reference || '—'}</td>
                   <td className="px-4 py-3">
                     {e.verified ? (
-                      <button onClick={() => toggleVerify(e)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200">✓ Verified</button>
+                      <button onClick={() => toggleVerify(e)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200">✓ {BTN.verified}</button>
                     ) : (
-                      <button onClick={() => toggleVerify(e)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200">Confirm Entry</button>
+                      <button onClick={() => toggleVerify(e)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200">{BTN.confirmEntry}</button>
                     )}
                   </td>
                 </tr>

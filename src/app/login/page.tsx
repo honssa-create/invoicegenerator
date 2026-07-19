@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -18,7 +19,7 @@ export default function LoginPage() {
     try {
       await login(email, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : MSG.loginFailed);
     } finally {
       setLoading(false);
     }
@@ -32,8 +33,8 @@ export default function LoginPage() {
             <span className="text-3xl">💰</span>
             <span className="font-bold text-xl">InvoiceFlow</span>
           </Link>
-          <h1 className="mt-6 text-2xl font-bold text-gray-900">Welcome back</h1>
-          <p className="mt-2 text-gray-600">Sign in to your account</p>
+          <h1 className="mt-6 text-2xl font-bold text-gray-900">{TITLE.welcomeBack}</h1>
+          <p className="mt-2 text-gray-600">{bi('Sign in to your account', '登入您的帳戶')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
@@ -45,7 +46,7 @@ export default function LoginPage() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Email', '電郵')}</label>
               <input
                 type="email"
                 value={email}
@@ -56,7 +57,7 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Password', '密碼')}</label>
               <input
                 type="password"
                 value={password}
@@ -73,13 +74,13 @@ export default function LoginPage() {
             disabled={loading}
             className="mt-6 w-full py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? BTN.signingIn : BTN.signIn}
           </button>
 
           <p className="mt-4 text-center text-sm text-gray-600">
-            Don&apos;t have an account?{' '}
+            {bi("Don't have an account?", '還沒有帳戶？')}{' '}
             <Link href="/register" className="text-brand-600 hover:text-brand-700 font-medium">
-              Sign up
+              {BTN.signUp}
             </Link>
           </p>
         </form>

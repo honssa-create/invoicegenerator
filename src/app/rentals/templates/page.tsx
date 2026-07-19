@@ -8,6 +8,7 @@ import TemplateHierarchyNav from '@/components/document-templates/TemplateHierar
 import { useAuth } from '@/components/AuthProvider';
 import type { DocumentTypeId, TemplateCompanyVariantId } from '@/lib/document-templates';
 import { isSectionReadOnly } from '@/lib/permissions';
+import { BTN, NAV, bi } from '@/lib/ui-labels';
 
 export default function RentalTemplatesPage() {
   const { user } = useAuth();
@@ -22,9 +23,9 @@ export default function RentalTemplatesPage() {
           <div className="max-w-[1600px] mx-auto space-y-6">
             <div>
               <Link href="/rentals" className="text-sm text-brand-600 font-medium">
-                ← Back to Rentals
+                ← {bi('Back to Rentals', '返回租金管理')}
               </Link>
-              <h1 className="text-xl font-bold text-gray-900 mt-2">Document Templates 文件範本</h1>
+              <h1 className="text-xl font-bold text-gray-900 mt-2">{NAV.templates}</h1>
               <p className="text-sm text-gray-500 mt-1 max-w-3xl">
                 Edit document templates with a live preview. Hierarchy: Document Type → Company Variant →
                 template details (header, payment notes, layout).

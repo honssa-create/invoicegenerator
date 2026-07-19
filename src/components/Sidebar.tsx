@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
 import { NAV_ITEMS } from './nav-items';
+import { APP, BTN } from '@/lib/ui-labels';
 
 interface SidebarProps {
   variant?: 'desktop' | 'mobile';
@@ -34,7 +35,7 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
           <span className="text-2xl">💰</span>
           <div>
             <h1 className="text-lg font-bold text-gray-900">InvoiceFlow</h1>
-            <p className="text-xs text-gray-500">Finance Manager</p>
+            <p className="text-xs text-gray-500">{APP.financeManager}</p>
           </div>
         </Link>
       </div>
@@ -75,7 +76,7 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
           }}
           className="w-full rounded-lg px-4 py-2.5 text-left text-sm text-gray-600 transition-colors hover:bg-red-50 hover:text-red-600"
         >
-          Sign out
+          {BTN.signOut}
         </button>
       </div>
     </aside>

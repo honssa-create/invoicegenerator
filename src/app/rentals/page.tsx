@@ -28,6 +28,7 @@ import {
   type UtilityBillingMode,
   type PreviousLeaseRecord,
 } from '@/lib/rentals';
+import { BTN, MSG, TITLE, NAV, bi } from '@/lib/ui-labels';
 
 interface DashboardData {
   units: RentalUnitWithRecord[];
@@ -162,7 +163,7 @@ export default function RentalsPage() {
     setBusy(false);
     if (!res.ok) { setToast('Failed to save lease'); return; }
     setUnitModal(null);
-    setToast(isEdit ? 'Lease updated' : 'New unit added');
+    setToast(isEdit ? MSG.leaseUpdated : MSG.newUnitAdded);
     load();
   };
 
@@ -172,7 +173,7 @@ export default function RentalsPage() {
     const d = await res.json();
     setBusy(false);
     if (!res.ok) {
-      setToast(d.error || 'Scheduler failed');
+      setToast(d.error || MSG.schedulerFailed);
       return;
     }
     const skipMsg = d.skipped ? ` · ${d.skipped} skipped (after lease end / inactive)` : '';
@@ -186,7 +187,7 @@ export default function RentalsPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Rental Income 租金管理</h1>
+          <h1 className="page-title">{TITLE.rentals}</h1>
           <p className="text-gray-500 mt-0.5 text-sm">
             Row overview · click a unit to manage
             {readOnly && <span className="text-amber-600 ml-2">(Read-only)</span>}
@@ -194,12 +195,12 @@ export default function RentalsPage() {
         </div>
         <div className="page-actions">
           <Link href="/rentals/templates" className="btn border border-gray-300 text-gray-700 hover:bg-gray-50">
-            Template 樣式
+            {NAV.templates}
           </Link>
           <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
-          <button onClick={runScheduler} disabled={busy || readOnly} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Run Billing</button>
+          <button onClick={runScheduler} disabled={busy || readOnly} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{bi('Run Billing', '執行出帳')}</button>
           {!readOnly && (
-            <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ Add Unit</button>
+            <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ {bi('Add Unit', '新增單位')}</button>
           )}
         </div>
       </div>
@@ -213,7 +214,7 @@ export default function RentalsPage() {
             {alerts.slice(0, 8).map((a, i) => (
               <li key={i} className="flex flex-wrap items-center gap-2">
                 <span className="flex-1 min-w-0">{a.message}</span>
-                <Link href={`/rentals/${a.unitId}?period=${period}`} className="text-xs font-medium text-brand-700 hover:underline shrink-0">View →</Link>
+                <Link href={`/rentals/${a.unitId}?period=${period}`} className="text-xs font-medium text-brand-700 hover:underline shrink-0">{BTN.view} →</Link>
               </li>
             ))}
           </ul>
@@ -269,7 +270,7 @@ export default function RentalsPage() {
                   繳費通知單 Grouped Debit Note
                 </Link>
               ) : (
-                <span className="text-xs text-amber-600">Save tenant on unit lease to enable grouped notice</span>
+                <span className="text-xs text-amber-600">{MSG.saveTenantForGroupedNotice}</span>
               )}
               <button
                 type="button"
@@ -286,7 +287,7 @@ export default function RentalsPage() {
           {loading ? (
             <div className="p-12 text-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" /></div>
           ) : units.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 text-sm">No rental units yet — add the first one.</div>
+            <div className="p-12 text-center text-gray-400 text-sm">{MSG.noRentalUnitsYet}</div>
           ) : activePanelUnits.length === 0 ? (
             <div className="p-12 text-center text-gray-400 text-sm">No active units match this filter — see history below for completed leases.</div>
           ) : (
@@ -391,7 +392,7 @@ export default function RentalsPage() {
                               onClick={() => openUnitModal(u)}
                               className="text-brand-600 hover:text-brand-700 text-xs font-medium px-2 py-1 rounded hover:bg-brand-50"
                             >
-                              Edit Lease
+                              {bi('Edit Lease', '編輯租約')}
                             </button>
                           )}
                         </div>
@@ -416,7 +417,7 @@ export default function RentalsPage() {
         <div className="overflow-x-auto">
           {previousLeases.length === 0 ? (
             <p className="p-10 text-center text-gray-400 text-sm">
-              No previous tenants yet. Use <strong>完約 End Contract</strong> on a unit to archive the tenancy here.
+              {bi('No previous tenants yet. Use', '尚無歷任租客。請在單位上使用')} <strong>{bi('End Contract', '完約')}</strong> {bi('to archive the tenancy here.', '以封存租約。')}
             </p>
           ) : (
             <table className="w-full min-w-[800px] text-sm">
@@ -580,9 +581,9 @@ export default function RentalsPage() {
               </label>
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setUnitModal(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setUnitModal(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={saveUnit} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
-                {busy ? 'Saving…' : 'Save Lease'}
+                {busy ? BTN.saving : bi('Save Lease', '儲存租約')}
               </button>
             </div>
           </div>

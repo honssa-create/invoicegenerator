@@ -9,6 +9,7 @@ import {
   type PermissionSection,
   type UserRole,
 } from '@/lib/permissions';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface AdminUser {
   id: number;
@@ -154,9 +155,9 @@ export default function AdminPage() {
   return (
     <AppLayout>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Administration 系統管理</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{TITLE.admin}</h1>
         <p className="text-gray-500 mt-1 text-sm sm:text-base">
-          Manage users, roles, and section permissions for Operator and Accountant accounts.
+          {bi('Manage users, roles, and section permissions for Operator and Accountant accounts.', '管理操作員及會計帳戶的用戶、角色及模組權限。')}
         </p>
       </div>
 
@@ -181,7 +182,7 @@ export default function AdminPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-800'
             }`}
           >
-            {t === 'users' ? '👥 Users' : '🔐 Role Permissions'}
+            {t === 'users' ? `👥 ${bi('Users', '用戶')}` : `🔐 ${bi('Role Permissions', '角色權限')}`}
           </button>
         ))}
       </div>
@@ -197,7 +198,7 @@ export default function AdminPage() {
               onClick={() => setShowCreate(true)}
               className="px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
             >
-              + Create User
+              + {bi('Create User', '建立用戶')}
             </button>
           </div>
 
@@ -239,7 +240,7 @@ export default function AdminPage() {
                         }}
                         className="text-brand-600 hover:text-brand-700 font-medium"
                       >
-                        Reset password
+                        {bi('Reset password', '重設密碼')}
                       </button>
                     </td>
                   </tr>
@@ -263,7 +264,7 @@ export default function AdminPage() {
                   disabled={busy}
                   className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50"
                 >
-                  Save {ROLE_LABELS[role]} permissions
+                  {bi('Save', '儲存')} {ROLE_LABELS[role]} {bi('permissions', '權限')}
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -290,7 +291,7 @@ export default function AdminPage() {
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
           <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl p-6 shadow-xl max-h-[92vh] overflow-y-auto">
-            <h2 className="text-lg font-semibold mb-4">Create User</h2>
+            <h2 className="text-lg font-semibold mb-4">{bi('Create User', '建立用戶')}</h2>
             <form onSubmit={createUser} className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
@@ -318,10 +319,10 @@ export default function AdminPage() {
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="submit" disabled={busy} className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50">
-                  {busy ? 'Creating…' : 'Create'}
+                  {busy ? BTN.creating : BTN.create}
                 </button>
                 <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-                  Cancel
+                  {BTN.cancel}
                 </button>
               </div>
             </form>
@@ -332,7 +333,7 @@ export default function AdminPage() {
       {resetUserId && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
           <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6 shadow-xl">
-            <h2 className="text-lg font-semibold mb-4">Reset Password</h2>
+            <h2 className="text-lg font-semibold mb-4">{bi('Reset Password', '重設密碼')}</h2>
             <p className="text-sm text-gray-600 mb-4">
               Set a new password for {users.find((u) => u.id === resetUserId)?.email}
             </p>
@@ -348,10 +349,10 @@ export default function AdminPage() {
               />
               <div className="flex gap-2">
                 <button type="submit" disabled={busy} className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50">
-                  {busy ? 'Saving…' : 'Reset password'}
+                  {busy ? BTN.saving : bi('Reset password', '重設密碼')}
                 </button>
                 <button type="button" onClick={() => setResetUserId(null)} className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700">
-                  Cancel
+                  {BTN.cancel}
                 </button>
               </div>
             </form>

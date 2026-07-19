@@ -8,6 +8,7 @@ import {
   paymentMethodLabel,
   type RentalPaymentWithAllocations,
 } from '@/lib/rentals';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface Props {
   payments: RentalPaymentWithAllocations[];
@@ -21,7 +22,7 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
   const [expanded, setExpanded] = useState<number | null>(null);
 
   if (!payments.length) {
-    return <p className="p-8 text-center text-gray-400 text-sm">No payments recorded yet</p>;
+    return <p className="p-8 text-center text-gray-400 text-sm">{MSG.noPaymentsYet}</p>;
   }
 
   return (
@@ -30,11 +31,11 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
         <tr>
           <th className="px-4 py-3 text-left w-8" />
           <th className="px-4 py-3 text-left">Paid Date 交租日</th>
-          <th className="px-4 py-3 text-left">Method / Ref</th>
-          <th className="px-4 py-3 text-right">Total 總額</th>
-          <th className="px-4 py-3 text-right">Allocated</th>
-          <th className="px-4 py-3 text-right">Unallocated</th>
-          {!readOnly && <th className="px-4 py-3 text-right">Action</th>}
+          <th className="px-4 py-3 text-left">{bi('Method / Ref', '方式 / 參考')}</th>
+          <th className="px-4 py-3 text-right">{bi('Total', '總額')}</th>
+          <th className="px-4 py-3 text-right">{bi('Allocated', '已分配')}</th>
+          <th className="px-4 py-3 text-right">{bi('Unallocated', '未分配')}</th>
+          {!readOnly && <th className="px-4 py-3 text-right">{bi('Action', '操作')}</th>}
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-100">
@@ -50,7 +51,7 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
                       type="button"
                       onClick={() => setExpanded(isOpen ? null : p.id)}
                       className="text-gray-400 hover:text-gray-700 w-6 h-6"
-                      aria-label="Toggle allocation breakdown"
+                      aria-label={bi('Toggle allocation breakdown', '展開分配明細')}
                     >
                       {isOpen ? '▼' : '▶'}
                     </button>
@@ -68,7 +69,7 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
                   <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                     {p.amountUnallocated > 0 && onAllocate && (
                       <button onClick={() => onAllocate(p.id)} className="text-brand-600 text-xs font-medium hover:underline">
-                        Allocate
+                        {MSG.allocate}
                       </button>
                     )}
                     {onDelete && (
@@ -78,7 +79,7 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
                         disabled={deletingId === p.id}
                         className="text-red-600 text-xs font-medium hover:underline disabled:opacity-50"
                       >
-                        {deletingId === p.id ? 'Deleting…' : 'Delete'}
+                        {deletingId === p.id ? BTN.deleting : BTN.delete}
                       </button>
                     )}
                   </td>

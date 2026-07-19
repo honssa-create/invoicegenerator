@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface Business {
   name: string;
@@ -39,13 +40,13 @@ export default function InvoicePrintPage() {
     <div className="min-h-screen bg-gray-100">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <Link href={`/invoices/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">
-          ← Back to invoice
+          ← {bi('Back to invoice', '返回發票')}
         </Link>
         <button
           onClick={() => window.print()}
           className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
         >
-          Print / Save as PDF
+          {BTN.printPdf}
         </button>
       </div>
 
@@ -53,7 +54,7 @@ export default function InvoicePrintPage() {
         <div className="p-12">
           <div className="flex justify-between items-start mb-12">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">INVOICE</h1>
+              <h1 className="text-3xl font-bold text-gray-900">{TITLE.invoiceDoc}</h1>
               <p className="text-lg text-brand-600 font-semibold mt-1">{invoice.invoice_number}</p>
             </div>
             <div className="text-right">
@@ -65,7 +66,7 @@ export default function InvoicePrintPage() {
 
           <div className="grid grid-cols-2 gap-12 mb-12">
             <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">Bill To</p>
+              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">{bi('Bill To', '帳單對象')}</p>
               <p className="font-semibold text-gray-900 text-lg">{invoice.customer_name}</p>
               {invoice.customer_email && <p className="text-sm text-gray-600">{invoice.customer_email}</p>}
               {invoice.customer_address && <p className="text-sm text-gray-600 mt-1">{invoice.customer_address}</p>}
@@ -78,11 +79,11 @@ export default function InvoicePrintPage() {
             <div className="text-right">
               <div className="inline-block text-left space-y-2">
                 <div className="flex justify-between gap-8">
-                  <span className="text-sm text-gray-500">Issue Date:</span>
+                  <span className="text-sm text-gray-500">{bi('Issue Date', '開立日期')}:</span>
                   <span className="text-sm font-medium">{formatDate(invoice.issue_date)}</span>
                 </div>
                 <div className="flex justify-between gap-8">
-                  <span className="text-sm text-gray-500">Due Date:</span>
+                  <span className="text-sm text-gray-500">{bi('Due Date', '到期日')}:</span>
                   <span className="text-sm font-medium">{formatDate(invoice.due_date)}</span>
                 </div>
               </div>
@@ -92,10 +93,10 @@ export default function InvoicePrintPage() {
           <table className="w-full mb-8">
             <thead>
               <tr className="border-b-2 border-gray-900">
-                <th className="text-left py-3 text-sm font-semibold uppercase tracking-wider">Description</th>
-                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">Qty</th>
-                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">Rate</th>
-                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">Amount</th>
+                <th className="text-left py-3 text-sm font-semibold uppercase tracking-wider">{bi('Description', '描述')}</th>
+                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">{bi('Qty', '數量')}</th>
+                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">{bi('Rate', '單價')}</th>
+                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">{bi('Amount', '金額')}</th>
               </tr>
             </thead>
             <tbody>
@@ -113,17 +114,17 @@ export default function InvoicePrintPage() {
           <div className="flex justify-end mb-12">
             <div className="w-72 space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Subtotal</span>
+                <span className="text-gray-500">{bi('Subtotal', '小計')}</span>
                 <span>{formatCurrency(invoice.subtotal)}</span>
               </div>
               {invoice.tax_rate > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Tax ({invoice.tax_rate}%)</span>
+                  <span className="text-gray-500">{bi('Tax', '稅項')} ({invoice.tax_rate}%)</span>
                   <span>{formatCurrency(invoice.tax_amount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-xl font-bold border-t-2 border-gray-900 pt-2">
-                <span>Total Due</span>
+                <span>{bi('Total Due', '應付總額')}</span>
                 <span>{formatCurrency(invoice.total)}</span>
               </div>
             </div>
@@ -133,13 +134,13 @@ export default function InvoicePrintPage() {
             <div className="border-t border-gray-200 pt-8 grid md:grid-cols-2 gap-8">
               {invoice.notes && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase font-semibold mb-2">Notes</p>
+                  <p className="text-xs text-gray-500 uppercase font-semibold mb-2">{bi('Notes', '備註')}</p>
                   <p className="text-sm text-gray-600">{invoice.notes}</p>
                 </div>
               )}
               {invoice.terms && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase font-semibold mb-2">Terms & Conditions</p>
+                  <p className="text-xs text-gray-500 uppercase font-semibold mb-2">{bi('Terms & Conditions', '條款及細則')}</p>
                   <p className="text-sm text-gray-600">{invoice.terms}</p>
                 </div>
               )}

@@ -41,13 +41,11 @@ export function parseHubImportDateRange(input: {
   return { ok: true, range: { dateFrom, dateTo } };
 }
 
-/** WooCommerce `after` / `before` bounds for order date_created. */
+/** WooCommerce `after` / `before` bounds for order date_created (Hong Kong time). */
 export function wooOrderCreatedBounds(range: HubImportDateRange): { after: string; before: string } {
-  const end = new Date(`${range.dateTo}T00:00:00Z`);
-  end.setUTCDate(end.getUTCDate() + 1);
   return {
-    after: `${range.dateFrom}T00:00:00`,
-    before: end.toISOString().slice(0, 19),
+    after: `${range.dateFrom}T00:00:00+08:00`,
+    before: `${range.dateTo}T23:59:59+08:00`,
   };
 }
 

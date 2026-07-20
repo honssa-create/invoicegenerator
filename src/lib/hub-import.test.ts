@@ -20,10 +20,10 @@ describe('parseHubImportDateRange', () => {
 });
 
 describe('wooOrderCreatedBounds', () => {
-  it('extends before to the start of the next day', () => {
+  it('uses Hong Kong timezone offsets', () => {
     expect(wooOrderCreatedBounds({ dateFrom: '2026-07-01', dateTo: '2026-07-19' })).toEqual({
-      after: '2026-07-01T00:00:00',
-      before: '2026-07-20T00:00:00',
+      after: '2026-07-01T00:00:00+08:00',
+      before: '2026-07-19T23:59:59+08:00',
     });
   });
 });

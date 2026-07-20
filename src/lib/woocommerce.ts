@@ -1,7 +1,9 @@
 import type { HubPlatform } from './hub';
 import { getIntegrationSettings } from './integration-settings-server';
 import { normalizeWooStoreUrl } from './woo-url';
-import { parseWooApiJson, wooApiErrorMessage } from './woo-api';
+import { parseWooApiJson, wooApiErrorMessage, wooRequestHeaders } from './woo-api';
+import type { HubImportDateRange } from './hub-import';
+import { orderCreatedInRange } from './hub-import';
 
 export interface WooStoreConfig {
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
@@ -44,11 +46,27 @@ const STORE_META: Array<{
   { platform: 'cupmoka', label: 'cupmoka.com.hk' },
 ];
 
-function authQueryParams(key: string, secret: string): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set('consumer_key', key);
-  params.set('consumer_secret', secret);
-  return params;
+async function wooApiGet(
+  store: WooStoreConfig,
+  storeUrl: string,
+  query: URLSearchParams
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const url = `${storeUrl}/wp-json/wc/v3/orders?${query.toString()}`;
+  const res = await fetch(url, {
+    headers: wooRequestHeaders(store.consumerKey, store.consumerSecret),
+    cache: 'no-store',
+    redirect: 'follow',
+  });
+  const body = await res.text();
+  return { ok: res.ok, status: res.status, body };
+}
+
+function parseWooOrderBatch(body: string, platform: string): WooOrder[] {
+  const batch = parseWooApiJson<WooOrder[]>(body, platform);
+  if (!Array.isArray(batch)) {
+    throw new Error(`${platform}: unexpected WooCommerce API response format`);
+  }
+  return batch;
 }
 
 /** Quick connectivity check — useful before full order import. */
@@ -58,18 +76,13 @@ export async function testWooStoreConnection(
   const normalized = normalizeWooStoreUrl(store.storeUrl);
   if (!normalized.ok) return { ok: false, error: normalized.error };
 
-  const params = authQueryParams(store.consumerKey, store.consumerSecret);
+  const params = new URLSearchParams();
   params.set('per_page', '1');
-  const url = `${normalized.url}/wp-json/wc/v3/orders?${params.toString()}`;
 
   try {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'InvoiceFlow-Hub/1.0' },
-      cache: 'no-store',
-    });
-    const body = await res.text();
-    if (!res.ok) return { ok: false, error: wooApiErrorMessage(res.status, body, store.platform) };
-    parseWooApiJson(body, store.platform);
+    const res = await wooApiGet(store, normalized.url, params);
+    if (!res.ok) return { ok: false, error: wooApiErrorMessage(res.status, res.body, store.platform) };
+    parseWooApiJson(res.body, store.platform);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Connection test failed' };
@@ -154,12 +167,99 @@ export function wooOrderDescription(order: WooOrder): string {
   return items || `WooCommerce order #${order.number}`;
 }
 
+async function fetchWooOrdersPaginated(
+  store: WooStoreConfig,
+  storeUrl: string,
+  options?: {
+    modifiedAfter?: string;
+    createdAfter?: string;
+    createdBefore?: string;
+    perPage?: number;
+    maxPages?: number;
+  }
+): Promise<WooOrder[]> {
+  const perPage = options?.perPage ?? 100;
+  const maxPages = options?.maxPages ?? 50;
+  const all: WooOrder[] = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const params = new URLSearchParams();
+    params.set('per_page', String(perPage));
+    params.set('page', String(page));
+    params.set('orderby', 'date');
+    params.set('order', 'asc');
+    if (options?.createdAfter) params.set('after', options.createdAfter);
+    if (options?.createdBefore) params.set('before', options.createdBefore);
+    if (options?.modifiedAfter) {
+      const iso = options.modifiedAfter.includes('T')
+        ? options.modifiedAfter
+        : `${options.modifiedAfter.replace(' ', 'T')}Z`;
+      params.set('modified_after', iso);
+    }
+
+    const res = await wooApiGet(store, storeUrl, params);
+    if (!res.ok) {
+      throw new Error(wooApiErrorMessage(res.status, res.body, store.platform));
+    }
+
+    const batch = parseWooOrderBatch(res.body, store.platform);
+    all.push(...batch);
+    if (batch.length < perPage) break;
+    page += 1;
+  }
+
+  return all;
+}
+
+async function fetchWooOrdersByLocalDateFilter(
+  store: WooStoreConfig,
+  storeUrl: string,
+  range: HubImportDateRange
+): Promise<WooOrder[]> {
+  const perPage = 100;
+  const maxPages = 50;
+  const matched: WooOrder[] = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const params = new URLSearchParams();
+    params.set('per_page', String(perPage));
+    params.set('page', String(page));
+    params.set('orderby', 'date');
+    params.set('order', 'desc');
+
+    const res = await wooApiGet(store, storeUrl, params);
+    if (!res.ok) {
+      throw new Error(wooApiErrorMessage(res.status, res.body, store.platform));
+    }
+
+    const batch = parseWooOrderBatch(res.body, store.platform);
+    if (!batch.length) break;
+
+    let reachedOlder = false;
+    for (const order of batch) {
+      if (orderCreatedInRange(order.date_created, range)) {
+        matched.push(order);
+      } else if (order.date_created.slice(0, 10) < range.dateFrom) {
+        reachedOlder = true;
+      }
+    }
+
+    if (reachedOlder || batch.length < perPage) break;
+    page += 1;
+  }
+
+  return matched;
+}
+
 export async function fetchWooOrders(
   store: WooStoreConfig,
   options?: {
     modifiedAfter?: string;
     createdAfter?: string;
     createdBefore?: string;
+    dateRange?: HubImportDateRange;
     perPage?: number;
   }
 ): Promise<WooOrder[]> {
@@ -168,52 +268,29 @@ export async function fetchWooOrders(
     throw new Error(`${store.platform}: ${normalized.error}`);
   }
 
-  const perPage = options?.perPage ?? 100;
-  const all: WooOrder[] = [];
-  let page = 1;
+  if (options?.dateRange) {
+    try {
+      return await fetchWooOrdersPaginated(store, normalized.url, {
+        createdAfter: options.createdAfter,
+        createdBefore: options.createdBefore,
+        perPage: options.perPage,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      const shouldFallback =
+        message.includes('web page instead of API data') ||
+        message.includes('returned HTML') ||
+        message.includes('invalid API response');
 
-  while (true) {
-    const params = authQueryParams(store.consumerKey, store.consumerSecret);
-    params.set('per_page', String(perPage));
-    params.set('page', String(page));
-    params.set('orderby', 'date');
-    params.set('order', 'asc');
-    if (options?.createdAfter) {
-      params.set('after', options.createdAfter);
-    } else if (options?.modifiedAfter) {
-      const iso = options.modifiedAfter.includes('T')
-        ? options.modifiedAfter
-        : `${options.modifiedAfter.replace(' ', 'T')}Z`;
-      params.set('modified_after', iso);
+      if (!shouldFallback) throw err;
+      return fetchWooOrdersByLocalDateFilter(store, normalized.url, options.dateRange);
     }
-    if (options?.createdBefore) {
-      params.set('before', options.createdBefore);
-    }
-
-    const url = `${normalized.url}/wp-json/wc/v3/orders?${params.toString()}`;
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'InvoiceFlow-Hub/1.0',
-      },
-      cache: 'no-store',
-      redirect: 'follow',
-    });
-
-    const body = await res.text();
-    if (!res.ok) {
-      throw new Error(wooApiErrorMessage(res.status, body, store.platform));
-    }
-
-    const batch = parseWooApiJson<WooOrder[]>(body, store.platform);
-    if (!Array.isArray(batch)) {
-      throw new Error(`${store.platform}: unexpected WooCommerce API response format`);
-    }
-
-    all.push(...batch);
-    if (batch.length < perPage) break;
-    page += 1;
   }
 
-  return all;
+  return fetchWooOrdersPaginated(store, normalized.url, {
+    modifiedAfter: options?.modifiedAfter,
+    createdAfter: options?.createdAfter,
+    createdBefore: options?.createdBefore,
+    perPage: options?.perPage,
+  });
 }

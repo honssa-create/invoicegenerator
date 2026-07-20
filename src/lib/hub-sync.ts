@@ -44,6 +44,7 @@ export async function syncWooStore(
       orders = await fetchWooOrders(store, {
         createdAfter: bounds.after,
         createdBefore: bounds.before,
+        dateRange,
       });
     } else {
       orders = await fetchWooOrders(store, { modifiedAfter: lastSync || undefined });

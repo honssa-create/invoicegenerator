@@ -39,6 +39,7 @@ export interface HubSyncResult {
   inserted: number;
   updated: number;
   skipped: number;
+  linked: number;
   errors: string[];
 }
 

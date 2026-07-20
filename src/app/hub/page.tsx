@@ -13,6 +13,7 @@ import {
   type HubIntegrationStatus,
   type HubOrderRow,
   type HubPlatform,
+  type HubSyncResult,
 } from '@/lib/hub';
 
 interface HubResponse {
@@ -29,6 +30,17 @@ const PLATFORM_COLORS: Record<HubPlatform, string> = {
   manual: 'bg-gray-100 text-gray-700',
 };
 
+const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'cupmoka', 'quickbooks'] as const;
+type ImportPlatform = (typeof IMPORTABLE_PLATFORMS)[number];
+
+function formatImportResult(result: HubSyncResult): string {
+  const parts = [`${result.inserted} new`, `${result.updated} updated`];
+  if (result.fetched) parts.push(`${result.fetched} fetched`);
+  if (result.linked) parts.push(`${result.linked} linked to store orders`);
+  if (result.skipped) parts.push(`${result.skipped} skipped`);
+  return parts.join(' · ');
+}
+
 export default function OrderHubPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-gray-500">Loading hub…</div>}>
@@ -41,8 +53,7 @@ function OrderHubContent() {
   const searchParams = useSearchParams();
   const [data, setData] = useState<HubResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [syncingWoo, setSyncingWoo] = useState(false);
-  const [syncingQb, setSyncingQb] = useState(false);
+  const [importing, setImporting] = useState<ImportPlatform | 'all' | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [platformFilter, setPlatformFilter] = useState<HubPlatform | 'all'>('all');
@@ -62,7 +73,9 @@ function OrderHubContent() {
     load();
     const connected = searchParams.get('connected');
     const qbError = searchParams.get('qb_error');
-    if (connected === 'quickbooks') setMessage('QuickBooks connected successfully.');
+    if (connected === 'quickbooks') {
+      setMessage('QuickBooks connected. Use Import below to pull invoices and link them to store orders.');
+    }
     if (qbError) setError(`QuickBooks OAuth error: ${qbError}`);
   }, [searchParams]);
 
@@ -84,46 +97,68 @@ function OrderHubContent() {
     return rows;
   }, [data, platformFilter, dateStart, dateEnd, search]);
 
-  const syncWoo = async () => {
-    setSyncingWoo(true);
+  const importPlatform = async (platform: ImportPlatform) => {
+    setImporting(platform);
     setError('');
     setMessage('');
-    const res = await fetch('/api/hub/sync/woocommerce', { method: 'POST' });
+    const res = await fetch(`/api/hub/import/${platform}`, { method: 'POST' });
     const d = await res.json();
-    setSyncingWoo(false);
+    setImporting(null);
     if (!res.ok) {
-      setError(d.error || 'WooCommerce sync failed');
+      setError(d.error || `${HUB_PLATFORM_LABELS[platform]} import failed`);
       return;
     }
-    const totals = (d.results || []).reduce(
-      (acc: { inserted: number; updated: number }, r: { inserted: number; updated: number }) => ({
-        inserted: acc.inserted + r.inserted,
-        updated: acc.updated + r.updated,
-      }),
-      { inserted: 0, updated: 0 }
-    );
-    setMessage(`WooCommerce sync complete: ${totals.inserted} new, ${totals.updated} updated`);
+    const result = d.result as HubSyncResult;
+    setMessage(`${HUB_PLATFORM_LABELS[platform]}: ${formatImportResult(result)}`);
+    if (result.errors.length) {
+      setError(result.errors.slice(0, 3).join(' · '));
+    }
     load();
   };
 
-  const syncQb = async () => {
-    setSyncingQb(true);
+  const importAll = async () => {
+    setImporting('all');
     setError('');
     setMessage('');
-    const res = await fetch('/api/hub/sync/quickbooks', { method: 'POST' });
-    const d = await res.json();
-    setSyncingQb(false);
-    if (!res.ok) {
-      setError(d.error || 'QuickBooks sync failed');
+    const ready = (data?.integrations || []).filter(
+      (intg) =>
+        IMPORTABLE_PLATFORMS.includes(intg.platform as ImportPlatform) &&
+        intg.configured &&
+        intg.connected
+    ) as Array<HubIntegrationStatus & { platform: ImportPlatform }>;
+
+    if (!ready.length) {
+      setImporting(null);
+      setError('No connected integrations to import. Configure API keys in Settings first.');
       return;
     }
-    const r = d.result;
-    setMessage(`QuickBooks sync: ${r.inserted} new, ${r.updated} updated (${r.fetched} fetched)`);
+
+    const summaries: string[] = [];
+    const errors: string[] = [];
+    for (const intg of ready) {
+      const res = await fetch(`/api/hub/import/${intg.platform}`, { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) {
+        errors.push(`${intg.label}: ${d.error || 'failed'}`);
+        continue;
+      }
+      summaries.push(`${intg.label}: ${formatImportResult(d.result as HubSyncResult)}`);
+    }
+
+    setImporting(null);
+    if (summaries.length) setMessage(summaries.join(' | '));
+    if (errors.length) setError(errors.join(' · '));
     load();
   };
 
   const selectCls =
     'w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
+
+  const integrationByPlatform = useMemo(() => {
+    const map = new Map<string, HubIntegrationStatus>();
+    for (const intg of data?.integrations || []) map.set(intg.platform, intg);
+    return map;
+  }, [data?.integrations]);
 
   return (
     <AppLayout>
@@ -131,27 +166,26 @@ function OrderHubContent() {
         <div>
           <h1 className="page-title">Centralized Order Hub 訂單中心</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            Sync orders from Nestiee, Honour, Cup Moka (WooCommerce) and QuickBooks — upsert only, never deleted
+            Import orders from Nestiee, Honour, Cup Moka and QuickBooks. QuickBooks invoices auto-link to matching store orders.
           </p>
         </div>
         <div className="page-actions flex flex-col sm:flex-row gap-2">
           <button
-            onClick={syncWoo}
-            disabled={syncingWoo}
+            onClick={importAll}
+            disabled={importing !== null}
             className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
           >
-            {syncingWoo ? 'Syncing WooCommerce…' : 'Sync WooCommerce'}
+            {importing === 'all' ? 'Importing all…' : 'Import All Connected'}
           </button>
-          <a href="/api/integrations/quickbooks/connect" className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 text-center">
+          <a
+            href="/api/integrations/quickbooks/connect"
+            className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 text-center"
+          >
             Connect QuickBooks
           </a>
-          <button
-            onClick={syncQb}
-            disabled={syncingQb}
-            className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {syncingQb ? 'Syncing QB…' : 'Sync QuickBooks'}
-          </button>
+          <Link href="/settings" className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 text-center">
+            API Settings
+          </Link>
         </div>
       </div>
 
@@ -166,17 +200,34 @@ function OrderHubContent() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {(data?.integrations || []).map((intg) => (
-          <div key={intg.platform} className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-900">{intg.label}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              {intg.configured ? (intg.connected ? '● Connected' : '○ Not connected') : '○ Not configured'}
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              Last sync: {intg.last_synced_at ? intg.last_synced_at.slice(0, 19) : 'Never'}
-            </p>
-          </div>
-        ))}
+        {IMPORTABLE_PLATFORMS.map((platform) => {
+          const intg = integrationByPlatform.get(platform);
+          const canImport = Boolean(intg?.configured && intg?.connected);
+          const isImporting = importing === platform;
+          return (
+            <div key={platform} className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{HUB_PLATFORM_LABELS[platform]}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {intg?.configured ? (intg.connected ? '● Connected' : '○ Not connected') : '○ Not configured'}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Last import: {intg?.last_synced_at ? intg.last_synced_at.slice(0, 19) : 'Never'}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  In hub: {data?.summary.byPlatform[platform] ?? 0}
+                </p>
+              </div>
+              <button
+                onClick={() => importPlatform(platform)}
+                disabled={!canImport || importing !== null}
+                className="btn mt-auto bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {isImporting ? 'Importing…' : canImport ? 'Import' : intg?.configured ? 'Connect first' : 'Configure in Settings'}
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <FilterBar
@@ -214,7 +265,7 @@ function OrderHubContent() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            No orders yet. Add API keys in Settings → API Integrations, then run a sync.
+            No orders yet. Connect integrations in Settings, then click Import on each platform card above.
           </div>
         ) : (
           <table className="w-full min-w-[1100px] text-sm">
@@ -227,7 +278,7 @@ function OrderHubContent() {
                 <th className="px-4 py-3">Total</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3">Invoice</th>
+                <th className="px-4 py-3">Linked Invoice</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

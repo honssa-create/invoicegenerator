@@ -1,6 +1,7 @@
 import db from './db';
 import type { HubSyncResult } from './hub';
 import {
+  findOrderForQuickBooksInvoice,
   getSyncState,
   setSyncState,
   upsertHubInvoice,
@@ -25,6 +26,7 @@ export async function syncWooStore(userId: number, store: WooStoreConfig): Promi
     inserted: 0,
     updated: 0,
     skipped: 0,
+    linked: 0,
     errors: [],
   };
 
@@ -78,6 +80,30 @@ export async function syncAllWooStores(userId: number): Promise<HubSyncResult[]>
     results.push(await syncWooStore(userId, store));
   }
   return results;
+}
+
+export async function importHubPlatform(
+  userId: number,
+  platform: 'nestiee' | 'honour' | 'cupmoka' | 'quickbooks'
+): Promise<HubSyncResult> {
+  if (platform === 'quickbooks') {
+    return syncQuickBooksInvoices(userId);
+  }
+
+  const store = getWooStoreConfigs(userId).find((s) => s.platform === platform);
+  if (!store) {
+    return {
+      platform,
+      fetched: 0,
+      inserted: 0,
+      updated: 0,
+      skipped: 0,
+      linked: 0,
+      errors: ['Store is not configured. Add API keys in Settings → API Integrations.'],
+    };
+  }
+
+  return syncWooStore(userId, store);
 }
 
 export interface QuickBooksTokenRow {
@@ -301,6 +327,7 @@ export async function syncQuickBooksInvoices(userId: number): Promise<HubSyncRes
     inserted: 0,
     updated: 0,
     skipped: 0,
+    linked: 0,
     errors: [],
   };
 
@@ -340,21 +367,53 @@ export async function syncQuickBooksInvoices(userId: number): Promise<HubSyncRes
         const total = Number(inv.TotalAmt) || 0;
         const balance = Number(inv.Balance ?? total);
         const systemNo = allocateQbSystemNo(userId, inv.Id);
+        const docNumber = inv.DocNumber || null;
+        const customerName = inv.CustomerRef?.name || 'QuickBooks Customer';
+        const txnDate = (inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+        const issueDate = txnDate;
+        const dueDate = (inv.DueDate || inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+
+        let orderId = findOrderForQuickBooksInvoice(userId, {
+          docNumber,
+          customerName,
+          totalAmount: total,
+          txnDate,
+        });
+        const wasLinked = Boolean(orderId);
+
+        if (!orderId) {
+          const orderUpsert = upsertHubOrder(userId, {
+            source_platform: 'quickbooks',
+            original_order_id: inv.Id,
+            customer_name: customerName,
+            total_amount: total,
+            status: mapQbInvoiceStatus(balance, total) === 'paid' ? '已寄出 SENT' : '製作中',
+            created_at: (inv.MetaData?.CreateTime || `${issueDate} 00:00:00`).replace('T', ' ').slice(0, 19),
+            customer_email: inv.BillEmail?.Address || null,
+            description: docNumber ? `QuickBooks invoice ${docNumber}` : `QuickBooks invoice ${systemNo}`,
+            external_po_number: docNumber,
+            raw_payload: inv as unknown as Record<string, unknown>,
+          });
+          orderId = orderUpsert.id;
+        }
+
         const upsert = upsertHubInvoice(userId, {
           source_platform: 'quickbooks',
           original_order_id: inv.Id,
           system_order_no: systemNo,
-          customer_name: inv.CustomerRef?.name || 'QuickBooks Customer',
+          customer_name: customerName,
           total_amount: total,
           status: mapQbInvoiceStatus(balance, total),
-          issue_date: (inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
-          due_date: (inv.DueDate || inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
+          issue_date: issueDate,
+          due_date: dueDate,
           customer_email: inv.BillEmail?.Address || null,
-          invoice_number: inv.DocNumber || systemNo,
+          invoice_number: docNumber || systemNo,
+          order_id: orderId,
           raw_payload: inv as unknown as Record<string, unknown>,
         });
         if (upsert.inserted) result.inserted += 1;
         else result.updated += 1;
+        if (wasLinked) result.linked += 1;
       } catch (err) {
         result.skipped += 1;
         result.errors.push(`Invoice ${inv.Id}: ${err instanceof Error ? err.message : 'upsert failed'}`);

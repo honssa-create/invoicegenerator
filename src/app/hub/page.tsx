@@ -15,6 +15,7 @@ import {
   type HubPlatform,
   type HubSyncResult,
 } from '@/lib/hub';
+import { fetchWooOrdersInBrowser } from '@/lib/woocommerce-client';
 
 interface HubResponse {
   orders: HubOrderRow[];
@@ -32,6 +33,12 @@ const PLATFORM_COLORS: Record<HubPlatform, string> = {
 
 const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'cupmoka', 'quickbooks'] as const;
 type ImportPlatform = (typeof IMPORTABLE_PLATFORMS)[number];
+const WOO_IMPORT_PLATFORMS = ['nestiee', 'honour', 'cupmoka'] as const;
+type WooImportPlatform = (typeof WOO_IMPORT_PLATFORMS)[number];
+
+function isWooImportPlatform(platform: ImportPlatform): platform is WooImportPlatform {
+  return (WOO_IMPORT_PLATFORMS as readonly string[]).includes(platform);
+}
 
 function defaultImportDateFrom(): string {
   const d = new Date();
@@ -110,6 +117,67 @@ function OrderHubContent() {
 
   const importBody = () => JSON.stringify({ date_from: importDateFrom, date_to: importDateTo });
 
+  const finishImport = (
+    platform: ImportPlatform,
+    d: { error?: string; result?: HubSyncResult; environment?: string },
+    resOk: boolean
+  ) => {
+    if (!resOk) {
+      setError(d.error || `${HUB_PLATFORM_LABELS[platform]} import failed`);
+      return;
+    }
+    const result = d.result as HubSyncResult;
+    let msg = `${HUB_PLATFORM_LABELS[platform]} (${importDateFrom} → ${importDateTo}): ${formatImportResult(result)}`;
+    if (isWooImportPlatform(platform)) {
+      msg += ' · via browser';
+    }
+    if (platform === 'quickbooks' && d.environment === 'sandbox') {
+      msg += ' — Sandbox mode imports Intuit demo/sample invoices, not your live books.';
+    }
+    setMessage(msg);
+    if (result.errors.length) {
+      setError(result.errors.slice(0, 3).join(' · '));
+    }
+    load();
+  };
+
+  const fetchAndIngestWoo = async (platform: WooImportPlatform): Promise<HubSyncResult> => {
+    const configRes = await fetch(`/api/hub/import/${platform}/woo-config`);
+    const configText = await configRes.text();
+    let config: { error?: string; storeUrl?: string; consumerKey?: string; consumerSecret?: string };
+    try {
+      config = JSON.parse(configText);
+    } catch {
+      throw new Error('Failed to load store credentials.');
+    }
+    if (!configRes.ok || !config.storeUrl || !config.consumerKey || !config.consumerSecret) {
+      throw new Error(config.error || 'Failed to load store credentials.');
+    }
+
+    const orders = await fetchWooOrdersInBrowser(
+      config.storeUrl,
+      config.consumerKey,
+      config.consumerSecret,
+      platform,
+      { dateFrom: importDateFrom, dateTo: importDateTo }
+    );
+
+    const res = await fetch(`/api/hub/import/${platform}/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date_from: importDateFrom, date_to: importDateTo, orders }),
+    });
+    const text = await res.text();
+    let d: { error?: string; result?: HubSyncResult };
+    try {
+      d = JSON.parse(text);
+    } catch {
+      throw new Error('Import failed — server returned an unexpected response.');
+    }
+    if (!res.ok) throw new Error(d.error || 'Import failed');
+    return d.result as HubSyncResult;
+  };
+
   const importPlatform = async (platform: ImportPlatform) => {
     if (!importDateFrom || !importDateTo) {
       setError('Choose an import From and To date before importing.');
@@ -124,6 +192,12 @@ function OrderHubContent() {
     setError('');
     setMessage('');
     try {
+      if (isWooImportPlatform(platform)) {
+        const result = await fetchAndIngestWoo(platform);
+        finishImport(platform, { result }, true);
+        return;
+      }
+
       const res = await fetch(`/api/hub/import/${platform}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -137,20 +211,7 @@ function OrderHubContent() {
         setError(`${HUB_PLATFORM_LABELS[platform]} import failed — server returned an unexpected response. Try again or check Railway logs.`);
         return;
       }
-      if (!res.ok) {
-        setError(d.error || `${HUB_PLATFORM_LABELS[platform]} import failed`);
-        return;
-      }
-      const result = d.result as HubSyncResult;
-      let msg = `${HUB_PLATFORM_LABELS[platform]} (${importDateFrom} → ${importDateTo}): ${formatImportResult(result)}`;
-      if (platform === 'quickbooks' && d.environment === 'sandbox') {
-        msg += ' — Sandbox mode imports Intuit demo/sample invoices, not your live books.';
-      }
-      setMessage(msg);
-      if (result.errors.length) {
-        setError(result.errors.slice(0, 3).join(' · '));
-      }
-      load();
+      finishImport(platform, d, res.ok);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${HUB_PLATFORM_LABELS[platform]} import failed`);
     } finally {
@@ -188,20 +249,30 @@ function OrderHubContent() {
     const summaries: string[] = [];
     const errors: string[] = [];
     for (const intg of ready) {
-      const res = await fetch(`/api/hub/import/${intg.platform}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: importBody(),
-      });
-      const d = await res.json();
-      if (!res.ok) {
-        errors.push(`${intg.label}: ${d.error || 'failed'}`);
-        continue;
+      try {
+        if (isWooImportPlatform(intg.platform)) {
+          const result = await fetchAndIngestWoo(intg.platform);
+          summaries.push(`${intg.label}: ${formatImportResult(result)} (browser)`);
+        } else {
+          const res = await fetch(`/api/hub/import/${intg.platform}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: importBody(),
+          });
+          const d = await res.json();
+          if (!res.ok) {
+            errors.push(`${intg.label}: ${d.error || 'failed'}`);
+            continue;
+          }
+          summaries.push(`${intg.label}: ${formatImportResult(d.result as HubSyncResult)}`);
+        }
+      } catch (err) {
+        errors.push(`${intg.label}: ${err instanceof Error ? err.message : 'failed'}`);
       }
-      summaries.push(`${intg.label}: ${formatImportResult(d.result as HubSyncResult)}`);
     }
 
     setImporting(null);
+    load();
     if (summaries.length) {
       setMessage(`Import ${importDateFrom} → ${importDateTo}: ${summaries.join(' | ')}`);
     }
@@ -253,7 +324,7 @@ function OrderHubContent() {
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
         <h2 className="text-sm font-semibold text-gray-900">Import date range 匯入日期範圍</h2>
         <p className="text-xs text-gray-500 mt-1 mb-3">
-          Only orders and invoices created within this range are imported — avoids pulling your full history at once.
+          Only orders and invoices created within this range are imported. WooCommerce stores are fetched from your browser (same path as your successful API test).
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
           <div>

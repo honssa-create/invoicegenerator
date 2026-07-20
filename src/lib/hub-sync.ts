@@ -17,6 +17,7 @@ import {
   wooOrderDescription,
   wooShippingAddress,
   type WooStoreConfig,
+  type WooOrder,
 } from './woocommerce';
 import type { HubImportDateRange } from './hub-import';
 import { wooOrderCreatedBounds } from './hub-import';
@@ -54,14 +55,39 @@ export async function syncWooStore(
     return result;
   }
 
-  result.fetched = orders.length;
+  return ingestWooOrders(userId, store.platform, orders, dateRange);
+}
+
+export function ingestWooOrders(
+  userId: number,
+  platform: WooStoreConfig['platform'],
+  orders: WooOrder[],
+  dateRange?: HubImportDateRange
+): HubSyncResult {
+  const result: HubSyncResult = {
+    platform,
+    fetched: orders.length,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    linked: 0,
+    errors: [],
+  };
+
+  const rows = dateRange
+    ? orders.filter((o) => {
+        const day = o.date_created.slice(0, 10);
+        return day >= dateRange.dateFrom && day <= dateRange.dateTo;
+      })
+    : orders;
+  result.fetched = rows.length;
   const syncedAt = new Date().toISOString();
 
   const run = db.transaction(() => {
-    for (const order of orders) {
+    for (const order of rows) {
       try {
         const upsert = upsertHubOrder(userId, {
-          source_platform: store.platform,
+          source_platform: platform,
           original_order_id: String(order.id),
           customer_name: wooCustomerName(order),
           total_amount: Number(order.total) || 0,
@@ -82,7 +108,7 @@ export async function syncWooStore(
       }
     }
     if (!dateRange) {
-      setSyncState(userId, 'woocommerce', store.platform, syncedAt);
+      setSyncState(userId, 'woocommerce', platform, syncedAt);
     }
   });
   run();

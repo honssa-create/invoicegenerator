@@ -1,6 +1,7 @@
 import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
+import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -28,6 +29,7 @@ export interface HubInvoiceUpsertInput {
   due_date: string;
   customer_email?: string | null;
   invoice_number?: string | null;
+  order_id?: number | null;
   raw_payload?: Record<string, unknown>;
 }
 
@@ -166,11 +168,34 @@ export function upsertHubOrder(
   };
 }
 
+/** Find an existing hub order to attach a QuickBooks invoice to. */
+export function findOrderForQuickBooksInvoice(
+  userId: number,
+  input: {
+    docNumber?: string | null;
+    customerName?: string | null;
+    totalAmount?: number | null;
+    txnDate?: string | null;
+  }
+): number | null {
+  const rows = db
+    .prepare(
+      `SELECT id, po_number, system_order_no, name AS customer_name, total_amount, created_at
+       FROM orders
+       WHERE user_id = ? AND source_platform != 'quickbooks'
+       ORDER BY created_at DESC`
+    )
+    .all(userId) as HubOrderMatchCandidate[];
+
+  const match = pickBestHubOrderMatch(rows, input);
+  return match?.id ?? null;
+}
+
 /** Upsert QuickBooks invoice — never deletes local rows. */
 export function upsertHubInvoice(
   userId: number,
   input: HubInvoiceUpsertInput
-): { id: number; inserted: boolean } {
+): { id: number; inserted: boolean; order_id: number | null } {
   const existing = db
     .prepare(
       `SELECT id FROM invoices
@@ -180,6 +205,7 @@ export function upsertHubInvoice(
 
   const customerId = findOrCreateCustomer(userId, input.customer_name, input.customer_email);
   const invoiceNumber = input.invoice_number?.trim() || input.system_order_no;
+  const orderId = input.order_id ?? null;
 
   if (existing) {
     db.prepare(
@@ -190,6 +216,7 @@ export function upsertHubInvoice(
          issue_date = ?,
          due_date = ?,
          notes = ?,
+         order_id = COALESCE(?, order_id),
          updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`
     ).run(
@@ -199,18 +226,22 @@ export function upsertHubInvoice(
       input.issue_date,
       input.due_date,
       `Synced from QuickBooks (ID ${input.original_order_id})`,
+      orderId,
       existing.id,
       userId
     );
-    return { id: existing.id, inserted: false };
+    const linked = db
+      .prepare('SELECT order_id FROM invoices WHERE id = ? AND user_id = ?')
+      .get(existing.id, userId) as { order_id: number | null } | undefined;
+    return { id: existing.id, inserted: false, order_id: linked?.order_id ?? orderId };
   }
 
   const result = db
     .prepare(
       `INSERT INTO invoices (
          user_id, customer_id, source_platform, original_order_id, system_order_no,
-         invoice_number, status, issue_date, due_date, notes, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+         invoice_number, status, issue_date, due_date, notes, order_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
@@ -222,7 +253,8 @@ export function upsertHubInvoice(
       input.status,
       input.issue_date,
       input.due_date,
-      `Synced from QuickBooks (ID ${input.original_order_id})`
+      `Synced from QuickBooks (ID ${input.original_order_id})`,
+      orderId
     );
 
   const invoiceId = Number(result.lastInsertRowid);
@@ -231,7 +263,7 @@ export function upsertHubInvoice(
      VALUES (?, ?, 1, ?, ?)`
   ).run(invoiceId, 'QuickBooks imported total', 1, input.total_amount, input.total_amount);
 
-  return { id: invoiceId, inserted: true };
+  return { id: invoiceId, inserted: true, order_id: orderId };
 }
 
 export function listHubOrders(userId: number): HubOrderRow[] {

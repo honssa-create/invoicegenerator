@@ -156,7 +156,12 @@ export function wooOrderDescription(order: WooOrder): string {
 
 export async function fetchWooOrders(
   store: WooStoreConfig,
-  options?: { modifiedAfter?: string; perPage?: number }
+  options?: {
+    modifiedAfter?: string;
+    createdAfter?: string;
+    createdBefore?: string;
+    perPage?: number;
+  }
 ): Promise<WooOrder[]> {
   const normalized = normalizeWooStoreUrl(store.storeUrl);
   if (!normalized.ok) {
@@ -171,13 +176,18 @@ export async function fetchWooOrders(
     const params = authQueryParams(store.consumerKey, store.consumerSecret);
     params.set('per_page', String(perPage));
     params.set('page', String(page));
-    params.set('orderby', 'modified');
+    params.set('orderby', 'date');
     params.set('order', 'asc');
-    if (options?.modifiedAfter) {
+    if (options?.createdAfter) {
+      params.set('after', options.createdAfter);
+    } else if (options?.modifiedAfter) {
       const iso = options.modifiedAfter.includes('T')
         ? options.modifiedAfter
         : `${options.modifiedAfter.replace(' ', 'T')}Z`;
       params.set('modified_after', iso);
+    }
+    if (options?.createdBefore) {
+      params.set('before', options.createdBefore);
     }
 
     const url = `${normalized.url}/wp-json/wc/v3/orders?${params.toString()}`;

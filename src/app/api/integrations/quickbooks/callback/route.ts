@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { exchangeQuickBooksCode, quickbooksRedirectUri, saveQuickBooksTokens } from '@/lib/hub-sync';
+import { getQuickBooksCredentials } from '@/lib/integration-settings-server';
+import { getPublicOrigin } from '@/lib/request-origin';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -8,7 +10,19 @@ export async function GET(request: Request) {
   const realmId = url.searchParams.get('realmId');
   const error = url.searchParams.get('error');
 
-  const redirectBase = new URL('/hub', url.origin);
+  let userId: number | null = null;
+  if (state) {
+    try {
+      const parsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: number };
+      userId = parsed.userId;
+    } catch {
+      /* handled below */
+    }
+  }
+
+  const savedRedirectUri = userId != null ? getQuickBooksCredentials(userId).redirect_uri : '';
+  const publicOrigin = getPublicOrigin(request, { savedRedirectUri });
+  const redirectBase = new URL('/hub', publicOrigin);
 
   if (error) {
     redirectBase.searchParams.set('qb_error', error);
@@ -20,17 +34,13 @@ export async function GET(request: Request) {
     return NextResponse.redirect(redirectBase);
   }
 
-  let userId: number;
-  try {
-    const parsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { userId: number };
-    userId = parsed.userId;
-  } catch {
+  if (userId == null) {
     redirectBase.searchParams.set('qb_error', 'invalid_state');
     return NextResponse.redirect(redirectBase);
   }
 
   try {
-    const redirectUri = quickbooksRedirectUri(userId, url.origin);
+    const redirectUri = quickbooksRedirectUri(userId, publicOrigin);
     const tokens = await exchangeQuickBooksCode(userId, code, redirectUri);
     saveQuickBooksTokens(userId, { ...tokens, realmId });
     redirectBase.searchParams.set('connected', 'quickbooks');

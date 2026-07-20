@@ -1,5 +1,17 @@
 /** Parse WooCommerce REST API responses safely. */
 
+export function wooBasicAuthHeader(key: string, secret: string): string {
+  return `Basic ${Buffer.from(`${key}:${secret}`).toString('base64')}`;
+}
+
+export function wooRequestHeaders(key: string, secret: string): Record<string, string> {
+  return {
+    Authorization: wooBasicAuthHeader(key, secret),
+    Accept: 'application/json',
+    'User-Agent': 'Mozilla/5.0 (compatible; InvoiceFlow/1.0; +https://invoiceflow.app)',
+  };
+}
+
 export function parseWooApiJson<T>(body: string, context: string): T {
   const trimmed = body.trim();
   if (!trimmed) {
@@ -10,7 +22,7 @@ export function parseWooApiJson<T>(body: string, context: string): T {
     throw new Error(
       `${context}: store returned a web page instead of API data${
         title ? ` (${title})` : ''
-      }. Check the store URL is correct (https://nestiee.com.hk), WooCommerce REST API is enabled, and the API key has Read permission.`
+      }. Your browser test may work while the server is blocked — check WordPress security/firewall plugins and allow server-to-server API access. Also verify Store URL and API key Read permission in Settings.`
     );
   }
   try {
@@ -32,7 +44,7 @@ export function wooApiErrorMessage(status: number, body: string, platform: strin
     /* fall through */
   }
   if (body.trim().startsWith('<')) {
-    return `${platform}: store returned HTML (${status}) — check store URL and API key permissions`;
+    return `${platform}: store returned HTML (${status}) — your server may be blocked by the store firewall; allow API access from your hosting IP`;
   }
   return `WooCommerce ${platform} API error (${status}): ${body.slice(0, 200)}`;
 }

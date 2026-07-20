@@ -1,6 +1,7 @@
 import type { HubPlatform } from './hub';
 import { getIntegrationSettings } from './integration-settings-server';
 import { normalizeWooStoreUrl } from './woo-url';
+import { parseWooApiJson, wooApiErrorMessage } from './woo-api';
 
 export interface WooStoreConfig {
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
@@ -34,11 +35,6 @@ export interface WooOrder {
   line_items?: { name: string; quantity: number }[];
 }
 
-function authHeader(key: string, secret: string): string {
-  const token = Buffer.from(`${key}:${secret}`).toString('base64');
-  return `Basic ${token}`;
-}
-
 const STORE_META: Array<{
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
   label: string;
@@ -47,6 +43,38 @@ const STORE_META: Array<{
   { platform: 'honour', label: 'honour.com.hk' },
   { platform: 'cupmoka', label: 'cupmoka.com.hk' },
 ];
+
+function authQueryParams(key: string, secret: string): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set('consumer_key', key);
+  params.set('consumer_secret', secret);
+  return params;
+}
+
+/** Quick connectivity check — useful before full order import. */
+export async function testWooStoreConnection(
+  store: WooStoreConfig
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const normalized = normalizeWooStoreUrl(store.storeUrl);
+  if (!normalized.ok) return { ok: false, error: normalized.error };
+
+  const params = authQueryParams(store.consumerKey, store.consumerSecret);
+  params.set('per_page', '1');
+  const url = `${normalized.url}/wp-json/wc/v3/orders?${params.toString()}`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'InvoiceFlow-Hub/1.0' },
+      cache: 'no-store',
+    });
+    const body = await res.text();
+    if (!res.ok) return { ok: false, error: wooApiErrorMessage(res.status, body, store.platform) };
+    parseWooApiJson(body, store.platform);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Connection test failed' };
+  }
+}
 
 export function getWooStoreConfigs(userId: number): WooStoreConfig[] {
   const settings = getIntegrationSettings(userId).woocommerce;
@@ -140,30 +168,38 @@ export async function fetchWooOrders(
   let page = 1;
 
   while (true) {
-    const params = new URLSearchParams();
+    const params = authQueryParams(store.consumerKey, store.consumerSecret);
     params.set('per_page', String(perPage));
     params.set('page', String(page));
     params.set('orderby', 'modified');
     params.set('order', 'asc');
     if (options?.modifiedAfter) {
-      params.set('modified_after', options.modifiedAfter);
+      const iso = options.modifiedAfter.includes('T')
+        ? options.modifiedAfter
+        : `${options.modifiedAfter.replace(' ', 'T')}Z`;
+      params.set('modified_after', iso);
     }
 
     const url = `${normalized.url}/wp-json/wc/v3/orders?${params.toString()}`;
     const res = await fetch(url, {
       headers: {
-        Authorization: authHeader(store.consumerKey, store.consumerSecret),
-        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent': 'InvoiceFlow-Hub/1.0',
       },
       cache: 'no-store',
+      redirect: 'follow',
     });
 
+    const body = await res.text();
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`WooCommerce ${store.platform} API error (${res.status}): ${text.slice(0, 200)}`);
+      throw new Error(wooApiErrorMessage(res.status, body, store.platform));
     }
 
-    const batch = (await res.json()) as WooOrder[];
+    const batch = parseWooApiJson<WooOrder[]>(body, store.platform);
+    if (!Array.isArray(batch)) {
+      throw new Error(`${store.platform}: unexpected WooCommerce API response format`);
+    }
+
     all.push(...batch);
     if (batch.length < perPage) break;
     page += 1;

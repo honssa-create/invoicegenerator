@@ -101,23 +101,35 @@ function OrderHubContent() {
     setImporting(platform);
     setError('');
     setMessage('');
-    const res = await fetch(`/api/hub/import/${platform}`, { method: 'POST' });
-    const d = await res.json();
-    setImporting(null);
-    if (!res.ok) {
-      setError(d.error || `${HUB_PLATFORM_LABELS[platform]} import failed`);
-      return;
+    try {
+      const res = await fetch(`/api/hub/import/${platform}`, { method: 'POST' });
+      const text = await res.text();
+      let d: { error?: string; result?: HubSyncResult; environment?: string };
+      try {
+        d = JSON.parse(text);
+      } catch {
+        setError(`${HUB_PLATFORM_LABELS[platform]} import failed — server returned an unexpected response. Try again or check Railway logs.`);
+        return;
+      }
+      if (!res.ok) {
+        setError(d.error || `${HUB_PLATFORM_LABELS[platform]} import failed`);
+        return;
+      }
+      const result = d.result as HubSyncResult;
+      let msg = `${HUB_PLATFORM_LABELS[platform]}: ${formatImportResult(result)}`;
+      if (platform === 'quickbooks' && d.environment === 'sandbox') {
+        msg += ' — Sandbox mode imports Intuit demo/sample invoices, not your live books.';
+      }
+      setMessage(msg);
+      if (result.errors.length) {
+        setError(result.errors.slice(0, 3).join(' · '));
+      }
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${HUB_PLATFORM_LABELS[platform]} import failed`);
+    } finally {
+      setImporting(null);
     }
-    const result = d.result as HubSyncResult;
-    let msg = `${HUB_PLATFORM_LABELS[platform]}: ${formatImportResult(result)}`;
-    if (platform === 'quickbooks' && d.environment === 'sandbox') {
-      msg += ' — Sandbox mode imports Intuit demo/sample invoices, not your live books.';
-    }
-    setMessage(msg);
-    if (result.errors.length) {
-      setError(result.errors.slice(0, 3).join(' · '));
-    }
-    load();
   };
 
   const importAll = async () => {

@@ -1,5 +1,6 @@
 import type { HubPlatform } from './hub';
 import { getIntegrationSettings } from './integration-settings-server';
+import { normalizeWooStoreUrl } from './woo-url';
 
 export interface WooStoreConfig {
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
@@ -54,10 +55,12 @@ export function getWooStoreConfigs(userId: number): WooStoreConfig[] {
   for (const s of STORE_META) {
     const store = settings[s.platform];
     if (store.url && store.key && store.secret) {
+      const normalized = normalizeWooStoreUrl(store.url);
+      if (!normalized.ok) continue;
       configs.push({
         platform: s.platform,
         label: s.label,
-        storeUrl: store.url.replace(/\/$/, ''),
+        storeUrl: normalized.url,
         consumerKey: store.key,
         consumerSecret: store.secret,
       });
@@ -68,6 +71,22 @@ export function getWooStoreConfigs(userId: number): WooStoreConfig[] {
 
 export function wooStoreConfigured(platform: WooStoreConfig['platform'], userId: number): boolean {
   return getWooStoreConfigs(userId).some((c) => c.platform === platform);
+}
+
+export function getWooStoreSetupIssue(
+  userId: number,
+  platform: WooStoreConfig['platform']
+): string | null {
+  const store = getIntegrationSettings(userId).woocommerce[platform];
+  if (!store.url?.trim() && !store.key?.trim() && !store.secret?.trim()) {
+    return 'not_configured';
+  }
+  if (!store.url?.trim() || !store.key?.trim() || !store.secret?.trim()) {
+    return 'Add store URL, consumer key, and consumer secret in Settings → API Integrations.';
+  }
+  const normalized = normalizeWooStoreUrl(store.url);
+  if (!normalized.ok) return normalized.error;
+  return null;
 }
 
 export function mapWooStatus(status: string): string {
@@ -111,6 +130,11 @@ export async function fetchWooOrders(
   store: WooStoreConfig,
   options?: { modifiedAfter?: string; perPage?: number }
 ): Promise<WooOrder[]> {
+  const normalized = normalizeWooStoreUrl(store.storeUrl);
+  if (!normalized.ok) {
+    throw new Error(`${store.platform}: ${normalized.error}`);
+  }
+
   const perPage = options?.perPage ?? 100;
   const all: WooOrder[] = [];
   let page = 1;
@@ -125,7 +149,7 @@ export async function fetchWooOrders(
       params.set('modified_after', options.modifiedAfter);
     }
 
-    const url = `${store.storeUrl}/wp-json/wc/v3/orders?${params.toString()}`;
+    const url = `${normalized.url}/wp-json/wc/v3/orders?${params.toString()}`;
     const res = await fetch(url, {
       headers: {
         Authorization: authHeader(store.consumerKey, store.consumerSecret),

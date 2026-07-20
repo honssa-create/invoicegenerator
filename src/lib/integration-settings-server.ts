@@ -8,6 +8,7 @@ import {
   type WooStoreSettings,
   type YedpaySettings,
 } from './integration-settings';
+import { normalizeWooStoreUrl } from './woo-url';
 
 function maskSecret(value: string | undefined): { set: boolean; hint: string } {
   if (!value?.trim()) return { set: false, hint: '' };
@@ -60,8 +61,10 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
   const pick = (dbVal: string, envVal: string) => dbVal.trim() || envVal.trim();
   const pickWoo = (db: WooStoreSettings, platform: WooPlatformKey): WooStoreSettings => {
     const env = envWoo(platform);
+    const url = pick(db.url, env.url);
+    const normalized = url ? normalizeWooStoreUrl(url) : { ok: false as const, error: '' };
     return {
-      url: pick(db.url, env.url),
+      url: normalized.ok ? normalized.url : url,
       key: pick(db.key, env.key),
       secret: pick(db.secret, env.secret),
     };
@@ -162,8 +165,16 @@ export function saveIntegrationSettings(userId: number, update: IntegrationSetti
     for (const platform of ['nestiee', 'honour', 'cupmoka'] as WooPlatformKey[]) {
       const patch = update.woocommerce[platform];
       if (!patch) continue;
+      let url = keepOrReplace(current.woocommerce[platform].url, patch.url, true);
+      if (url) {
+        const normalized = normalizeWooStoreUrl(url);
+        if (!normalized.ok) {
+          throw new Error(`${platform}: ${normalized.error}`);
+        }
+        url = normalized.url;
+      }
       next.woocommerce[platform] = {
-        url: keepOrReplace(current.woocommerce[platform].url, patch.url, true),
+        url,
         key: keepOrReplace(current.woocommerce[platform].key, patch.key),
         secret: keepOrReplace(current.woocommerce[platform].secret, patch.secret),
       };

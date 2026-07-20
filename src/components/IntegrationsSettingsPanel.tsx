@@ -175,6 +175,9 @@ export default function IntegrationsSettingsPanel({
                     placeholder="https://nestiee.com.hk"
                     className={`${inputCls} mt-1`}
                   />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Website address only — e.g. <code className="text-gray-500">https://nestiee.com.hk</code> (not an email).
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500">Consumer Key</label>
@@ -254,6 +257,15 @@ export default function IntegrationsSettingsPanel({
               <option value="sandbox">Sandbox (testing)</option>
               <option value="production">Production (live)</option>
             </select>
+            {qb.environment === 'sandbox' ? (
+              <p className="text-xs text-amber-700 mt-1">
+                Sandbox imports Intuit&apos;s demo company with sample invoices — switch to Production for your real QuickBooks data, then reconnect OAuth.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-1">
+                Use Production keys from the Intuit Developer portal and reconnect QuickBooks after switching.
+              </p>
+            )}
           </div>
         </div>
       </section>

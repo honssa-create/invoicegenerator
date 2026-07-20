@@ -109,7 +109,11 @@ function OrderHubContent() {
       return;
     }
     const result = d.result as HubSyncResult;
-    setMessage(`${HUB_PLATFORM_LABELS[platform]}: ${formatImportResult(result)}`);
+    let msg = `${HUB_PLATFORM_LABELS[platform]}: ${formatImportResult(result)}`;
+    if (platform === 'quickbooks' && d.environment === 'sandbox') {
+      msg += ' — Sandbox mode imports Intuit demo/sample invoices, not your live books.';
+    }
+    setMessage(msg);
     if (result.errors.length) {
       setError(result.errors.slice(0, 3).join(' · '));
     }
@@ -202,15 +206,28 @@ function OrderHubContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {IMPORTABLE_PLATFORMS.map((platform) => {
           const intg = integrationByPlatform.get(platform);
-          const canImport = Boolean(intg?.configured && intg?.connected);
+          const hasSetupError = Boolean(intg?.setup_error);
+          const canImport = Boolean(intg?.connected && !hasSetupError);
           const isImporting = importing === platform;
           return (
             <div key={platform} className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-3">
               <div>
                 <p className="text-sm font-medium text-gray-900">{HUB_PLATFORM_LABELS[platform]}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {intg?.configured ? (intg.connected ? '● Connected' : '○ Not connected') : '○ Not configured'}
+                  {hasSetupError
+                    ? '⚠ Setup issue'
+                    : intg?.configured
+                      ? intg.connected
+                        ? '● Connected'
+                        : '○ Not connected'
+                      : '○ Not configured'}
                 </p>
+                {platform === 'quickbooks' && intg?.environment === 'sandbox' && (
+                  <p className="text-xs text-amber-700 mt-1">Sandbox — imports demo/sample data only</p>
+                )}
+                {hasSetupError && (
+                  <p className="text-xs text-red-600 mt-1">{intg?.setup_error}</p>
+                )}
                 <p className="text-xs text-gray-400 mt-1">
                   Last import: {intg?.last_synced_at ? intg.last_synced_at.slice(0, 19) : 'Never'}
                 </p>
@@ -223,7 +240,15 @@ function OrderHubContent() {
                 disabled={!canImport || importing !== null}
                 className="btn mt-auto bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               >
-                {isImporting ? 'Importing…' : canImport ? 'Import' : intg?.configured ? 'Connect first' : 'Configure in Settings'}
+                {isImporting
+                  ? 'Importing…'
+                  : hasSetupError
+                    ? 'Fix in Settings'
+                    : canImport
+                      ? 'Import'
+                      : intg?.configured
+                        ? 'Connect first'
+                        : 'Configure in Settings'}
               </button>
             </div>
           );

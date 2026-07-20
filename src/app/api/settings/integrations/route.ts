@@ -30,6 +30,13 @@ export async function PUT(request: Request) {
   }
 
   const ownerId = getDataOwnerId(session.userId);
-  saveIntegrationSettings(ownerId, body);
+  try {
+    saveIntegrationSettings(ownerId, body);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to save settings' },
+      { status: 400 }
+    );
+  }
   return NextResponse.json({ settings: getIntegrationSettingsMasked(ownerId) });
 }

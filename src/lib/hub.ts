@@ -49,4 +49,6 @@ export interface HubIntegrationStatus {
   configured: boolean;
   connected: boolean;
   last_synced_at: string | null;
+  setup_error?: string | null;
+  environment?: 'sandbox' | 'production' | null;
 }

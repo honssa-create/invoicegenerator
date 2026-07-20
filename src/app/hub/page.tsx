@@ -33,6 +33,15 @@ const PLATFORM_COLORS: Record<HubPlatform, string> = {
 const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'cupmoka', 'quickbooks'] as const;
 type ImportPlatform = (typeof IMPORTABLE_PLATFORMS)[number];
 
+function defaultImportDateFrom(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function defaultImportDateTo(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function formatImportResult(result: HubSyncResult): string {
   const parts = [`${result.inserted} new`, `${result.updated} updated`];
   if (result.fetched) parts.push(`${result.fetched} fetched`);
@@ -57,6 +66,8 @@ function OrderHubContent() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [platformFilter, setPlatformFilter] = useState<HubPlatform | 'all'>('all');
+  const [importDateFrom, setImportDateFrom] = useState(defaultImportDateFrom);
+  const [importDateTo, setImportDateTo] = useState(defaultImportDateTo);
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [search, setSearch] = useState('');
@@ -97,12 +108,27 @@ function OrderHubContent() {
     return rows;
   }, [data, platformFilter, dateStart, dateEnd, search]);
 
+  const importBody = () => JSON.stringify({ date_from: importDateFrom, date_to: importDateTo });
+
   const importPlatform = async (platform: ImportPlatform) => {
+    if (!importDateFrom || !importDateTo) {
+      setError('Choose an import From and To date before importing.');
+      return;
+    }
+    if (importDateFrom > importDateTo) {
+      setError('Import From date cannot be after To date.');
+      return;
+    }
+
     setImporting(platform);
     setError('');
     setMessage('');
     try {
-      const res = await fetch(`/api/hub/import/${platform}`, { method: 'POST' });
+      const res = await fetch(`/api/hub/import/${platform}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: importBody(),
+      });
       const text = await res.text();
       let d: { error?: string; result?: HubSyncResult; environment?: string };
       try {
@@ -116,7 +142,7 @@ function OrderHubContent() {
         return;
       }
       const result = d.result as HubSyncResult;
-      let msg = `${HUB_PLATFORM_LABELS[platform]}: ${formatImportResult(result)}`;
+      let msg = `${HUB_PLATFORM_LABELS[platform]} (${importDateFrom} → ${importDateTo}): ${formatImportResult(result)}`;
       if (platform === 'quickbooks' && d.environment === 'sandbox') {
         msg += ' — Sandbox mode imports Intuit demo/sample invoices, not your live books.';
       }
@@ -133,6 +159,15 @@ function OrderHubContent() {
   };
 
   const importAll = async () => {
+    if (!importDateFrom || !importDateTo) {
+      setError('Choose an import From and To date before importing.');
+      return;
+    }
+    if (importDateFrom > importDateTo) {
+      setError('Import From date cannot be after To date.');
+      return;
+    }
+
     setImporting('all');
     setError('');
     setMessage('');
@@ -140,7 +175,8 @@ function OrderHubContent() {
       (intg) =>
         IMPORTABLE_PLATFORMS.includes(intg.platform as ImportPlatform) &&
         intg.configured &&
-        intg.connected
+        intg.connected &&
+        !intg.setup_error
     ) as Array<HubIntegrationStatus & { platform: ImportPlatform }>;
 
     if (!ready.length) {
@@ -152,7 +188,11 @@ function OrderHubContent() {
     const summaries: string[] = [];
     const errors: string[] = [];
     for (const intg of ready) {
-      const res = await fetch(`/api/hub/import/${intg.platform}`, { method: 'POST' });
+      const res = await fetch(`/api/hub/import/${intg.platform}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: importBody(),
+      });
       const d = await res.json();
       if (!res.ok) {
         errors.push(`${intg.label}: ${d.error || 'failed'}`);
@@ -162,7 +202,9 @@ function OrderHubContent() {
     }
 
     setImporting(null);
-    if (summaries.length) setMessage(summaries.join(' | '));
+    if (summaries.length) {
+      setMessage(`Import ${importDateFrom} → ${importDateTo}: ${summaries.join(' | ')}`);
+    }
     if (errors.length) setError(errors.join(' · '));
     load();
   };
@@ -207,6 +249,38 @@ function OrderHubContent() {
 
       {message && <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{message}</div>}
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <h2 className="text-sm font-semibold text-gray-900">Import date range 匯入日期範圍</h2>
+        <p className="text-xs text-gray-500 mt-1 mb-3">
+          Only orders and invoices created within this range are imported — avoids pulling your full history at once.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 mb-1 block">From 由</label>
+            <input
+              type="date"
+              value={importDateFrom}
+              onChange={(e) => setImportDateFrom(e.target.value)}
+              className={selectCls}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 mb-1 block">To 至</label>
+            <input
+              type="date"
+              value={importDateTo}
+              onChange={(e) => setImportDateTo(e.target.value)}
+              className={selectCls}
+            />
+          </div>
+          <div className="sm:col-span-2 lg:col-span-2">
+            <p className="text-xs text-gray-400">
+              WooCommerce uses order <strong>created</strong> date. QuickBooks uses invoice <strong>transaction</strong> date.
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard title="Total Orders 總訂單" value={String(data?.summary.total ?? 0)} icon="📦" color="bg-gray-50 text-gray-700" />

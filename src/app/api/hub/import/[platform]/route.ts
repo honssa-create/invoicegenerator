@@ -5,6 +5,7 @@ import { getDataOwnerId } from '@/lib/org-server';
 import { importHubPlatform, isQuickBooksConnected } from '@/lib/hub-sync';
 import { getWooStoreSetupIssue } from '@/lib/woocommerce';
 import { getQuickBooksCredentials } from '@/lib/integration-settings-server';
+import { parseHubImportDateRange } from '@/lib/hub-import';
 
 const PLATFORMS = ['nestiee', 'honour', 'cupmoka', 'quickbooks'] as const;
 type ImportPlatform = (typeof PLATFORMS)[number];
@@ -28,6 +29,17 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
   }
 
+  let body: { date_from?: string; date_to?: string } = {};
+  try {
+    body = await request.json();
+  } catch {
+  }
+
+  const parsedRange = parseHubImportDateRange(body);
+  if (!parsedRange.ok) {
+    return NextResponse.json({ error: parsedRange.error }, { status: 400 });
+  }
+
   const ownerId = getDataOwnerId(session.userId);
 
   if (platform === 'quickbooks') {
@@ -48,12 +60,12 @@ export async function POST(
   }
 
   try {
-    const result = await importHubPlatform(ownerId, platform);
+    const result = await importHubPlatform(ownerId, platform, parsedRange.range);
     const qbEnv = platform === 'quickbooks' ? getQuickBooksCredentials(ownerId).environment : null;
     if (result.errors.length && result.fetched === 0 && result.inserted === 0 && result.updated === 0) {
-      return NextResponse.json({ error: result.errors[0], result }, { status: 400 });
+      return NextResponse.json({ error: result.errors[0], result, date_range: parsedRange.range }, { status: 400 });
     }
-    return NextResponse.json({ result, environment: qbEnv });
+    return NextResponse.json({ result, environment: qbEnv, date_range: parsedRange.range });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Import failed' },

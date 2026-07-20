@@ -18,8 +18,14 @@ import {
   wooShippingAddress,
   type WooStoreConfig,
 } from './woocommerce';
+import type { HubImportDateRange } from './hub-import';
+import { wooOrderCreatedBounds } from './hub-import';
 
-export async function syncWooStore(userId: number, store: WooStoreConfig): Promise<HubSyncResult> {
+export async function syncWooStore(
+  userId: number,
+  store: WooStoreConfig,
+  dateRange?: HubImportDateRange
+): Promise<HubSyncResult> {
   const result: HubSyncResult = {
     platform: store.platform,
     fetched: 0,
@@ -33,7 +39,15 @@ export async function syncWooStore(userId: number, store: WooStoreConfig): Promi
   const lastSync = getSyncState(userId, 'woocommerce', store.platform);
   let orders;
   try {
-    orders = await fetchWooOrders(store, { modifiedAfter: lastSync || undefined });
+    if (dateRange) {
+      const bounds = wooOrderCreatedBounds(dateRange);
+      orders = await fetchWooOrders(store, {
+        createdAfter: bounds.after,
+        createdBefore: bounds.before,
+      });
+    } else {
+      orders = await fetchWooOrders(store, { modifiedAfter: lastSync || undefined });
+    }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : 'fetch failed');
     return result;
@@ -66,28 +80,31 @@ export async function syncWooStore(userId: number, store: WooStoreConfig): Promi
         result.errors.push(`Order ${order.id}: ${err instanceof Error ? err.message : 'upsert failed'}`);
       }
     }
-    setSyncState(userId, 'woocommerce', store.platform, syncedAt);
+    if (!dateRange) {
+      setSyncState(userId, 'woocommerce', store.platform, syncedAt);
+    }
   });
   run();
 
   return result;
 }
 
-export async function syncAllWooStores(userId: number): Promise<HubSyncResult[]> {
+export async function syncAllWooStores(userId: number, dateRange?: HubImportDateRange): Promise<HubSyncResult[]> {
   const stores = getWooStoreConfigs(userId);
   const results: HubSyncResult[] = [];
   for (const store of stores) {
-    results.push(await syncWooStore(userId, store));
+    results.push(await syncWooStore(userId, store, dateRange));
   }
   return results;
 }
 
 export async function importHubPlatform(
   userId: number,
-  platform: 'nestiee' | 'honour' | 'cupmoka' | 'quickbooks'
+  platform: 'nestiee' | 'honour' | 'cupmoka' | 'quickbooks',
+  dateRange?: HubImportDateRange
 ): Promise<HubSyncResult> {
   if (platform === 'quickbooks') {
-    return syncQuickBooksInvoices(userId);
+    return syncQuickBooksInvoices(userId, dateRange);
   }
 
   const store = getWooStoreConfigs(userId).find((s) => s.platform === platform);
@@ -103,7 +120,7 @@ export async function importHubPlatform(
     };
   }
 
-  return syncWooStore(userId, store);
+  return syncWooStore(userId, store, dateRange);
 }
 
 export interface QuickBooksTokenRow {
@@ -320,7 +337,7 @@ function allocateQbSystemNo(userId: number, qbId: string): string {
   return `${HUB_PLATFORM_PREFIX.quickbooks}-${serial}`;
 }
 
-export async function syncQuickBooksInvoices(userId: number): Promise<HubSyncResult> {
+export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImportDateRange): Promise<HubSyncResult> {
   const result: HubSyncResult = {
     platform: 'quickbooks',
     fetched: 0,
@@ -333,9 +350,14 @@ export async function syncQuickBooksInvoices(userId: number): Promise<HubSyncRes
 
   const { token, realmId } = await getValidQuickBooksAccessToken(userId);
   const lastSync = getSyncState(userId, 'quickbooks', 'invoices');
-  const query = lastSync
-    ? `select * from Invoice where MetaData.LastUpdatedTime > '${lastSync}' MAXRESULTS 1000`
-    : 'select * from Invoice MAXRESULTS 1000';
+  let query: string;
+  if (dateRange) {
+    query = `select * from Invoice where TxnDate >= '${dateRange.dateFrom}' and TxnDate <= '${dateRange.dateTo}' MAXRESULTS 1000`;
+  } else if (lastSync) {
+    query = `select * from Invoice where MetaData.LastUpdatedTime > '${lastSync}' MAXRESULTS 1000`;
+  } else {
+    query = 'select * from Invoice MAXRESULTS 1000';
+  }
 
   const url = `${quickbooksApiBase(userId)}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
@@ -419,7 +441,9 @@ export async function syncQuickBooksInvoices(userId: number): Promise<HubSyncRes
         result.errors.push(`Invoice ${inv.Id}: ${err instanceof Error ? err.message : 'upsert failed'}`);
       }
     }
-    setSyncState(userId, 'quickbooks', 'invoices', syncedAt);
+    if (!dateRange) {
+      setSyncState(userId, 'quickbooks', 'invoices', syncedAt);
+    }
   });
   run();
 

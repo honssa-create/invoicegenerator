@@ -70,7 +70,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
           `From ${q.quote_number}`,
           q.customer_email || null,
           null,
-          [q.customer_address, q.customer_city, q.customer_state, q.customer_zip].filter(Boolean).join(', ') || null,
+          q.shipping_address?.trim() ||
+            [q.customer_address, q.customer_city, q.customer_state, q.customer_zip].filter(Boolean).join(', ') ||
+            null,
           itemsSummary || null,
           q.id
         );

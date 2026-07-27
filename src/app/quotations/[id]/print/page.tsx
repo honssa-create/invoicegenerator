@@ -58,13 +58,25 @@ export default function QuotationPrintPage() {
 
           <div className="grid grid-cols-2 gap-12 mb-12">
             <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">{bi('Quote For', '報價對象')}</p>
-              <p className="font-semibold text-gray-900 text-lg">{quote.customer_name || '—'}</p>
-              {quote.customer_email && <p className="text-sm text-gray-600">{quote.customer_email}</p>}
-              {quote.customer_address && <p className="text-sm text-gray-600 mt-1">{quote.customer_address}</p>}
+              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">{bi('Invoice To', '帳單地址')}</p>
+              {quote.billing_address ? (
+                <p className="text-sm text-gray-900 whitespace-pre-wrap">{quote.billing_address}</p>
+              ) : (
+                <>
+                  <p className="font-semibold text-gray-900 text-lg">{quote.customer_name || '—'}</p>
+                  {quote.customer_email && <p className="text-sm text-gray-600">{quote.customer_email}</p>}
+                  {quote.customer_address && <p className="text-sm text-gray-600 mt-1">{quote.customer_address}</p>}
+                </>
+              )}
             </div>
-            <div className="text-right">
-              <div className="inline-block text-left space-y-2">
+            <div>
+              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">{bi('Ship To', '送貨地址')}</p>
+              {quote.shipping_address ? (
+                <p className="text-sm text-gray-900 whitespace-pre-wrap">{quote.shipping_address}</p>
+              ) : (
+                <p className="text-sm text-gray-400">—</p>
+              )}
+              <div className="mt-6 space-y-2">
                 <div className="flex justify-between gap-8"><span className="text-sm text-gray-500">{bi('Issue Date', '開立日期')}:</span><span className="text-sm font-medium">{formatDate(quote.issue_date)}</span></div>
                 {quote.valid_until && <div className="flex justify-between gap-8"><span className="text-sm text-gray-500">{bi('Valid Until', '有效期至')}:</span><span className="text-sm font-medium">{formatDate(quote.valid_until)}</span></div>}
               </div>

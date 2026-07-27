@@ -275,6 +275,40 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
 `);
 
+{
+  const quotationCols = db.prepare('PRAGMA table_info(quotations)').all() as { name: string }[];
+  const addQuotationCol = (name: string, ddl: string) => {
+    if (!quotationCols.some((c) => c.name === name)) {
+      db.exec(`ALTER TABLE quotations ADD COLUMN ${ddl}`);
+      quotationCols.push({ name });
+    }
+  };
+  addQuotationCol('billing_address', 'billing_address TEXT');
+  addQuotationCol('shipping_address', 'shipping_address TEXT');
+  addQuotationCol('email', 'email TEXT');
+  addQuotationCol('send_later', 'send_later INTEGER NOT NULL DEFAULT 0');
+  addQuotationCol('ship_via', 'ship_via TEXT');
+  addQuotationCol('shipping_date', 'shipping_date TEXT');
+  addQuotationCol('tracking_no', 'tracking_no TEXT');
+  addQuotationCol('order_no', 'order_no TEXT');
+  addQuotationCol('receipt_date', 'receipt_date TEXT');
+  addQuotationCol('currency', "currency TEXT DEFAULT 'HKD'");
+  addQuotationCol('discount_type', "discount_type TEXT DEFAULT 'percent'");
+  addQuotationCol('discount_value', 'discount_value REAL DEFAULT 0');
+  addQuotationCol('shipping_amount', 'shipping_amount REAL DEFAULT 0');
+
+  const itemCols = db.prepare('PRAGMA table_info(quotation_items)').all() as { name: string }[];
+  const addItemCol = (name: string, ddl: string) => {
+    if (!itemCols.some((c) => c.name === name)) {
+      db.exec(`ALTER TABLE quotation_items ADD COLUMN ${ddl}`);
+      itemCols.push({ name });
+    }
+  };
+  addItemCol('service_date', 'service_date TEXT');
+  addItemCol('product_service', 'product_service TEXT');
+  addItemCol('class_name', 'class_name TEXT');
+}
+
 // Other Income (non-product revenue) for the Cash Flow dashboard.
 db.exec(`
   CREATE TABLE IF NOT EXISTS other_income (

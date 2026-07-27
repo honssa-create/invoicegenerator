@@ -47,8 +47,8 @@ export const DOCUMENT_TYPES: DocumentTypeDef[] = [
     id: 'quotation',
     label: 'Quotation',
     labelZh: '報價單',
-    enabled: false,
-    description: 'Coming soon.',
+    enabled: true,
+    description: 'Customer quotation with billing/shipping addresses and line items.',
   },
   {
     id: 'invoice',
@@ -101,6 +101,19 @@ export const DEBIT_NOTE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
     shortLabel: 'Joint 聯合',
   },
 ];
+
+/** Quotation company variants (Honour Label first). */
+export const QUOTATION_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
+];
+
+export function companyVariantsForDocumentType(
+  documentType: DocumentTypeId,
+): TemplateCompanyVariantDef[] {
+  if (documentType === 'debit_note') return DEBIT_NOTE_COMPANY_VARIANTS;
+  if (documentType === 'quotation') return QUOTATION_COMPANY_VARIANTS;
+  return [];
+}
 
 export function isTemplateCompanyVariantId(value: string): value is TemplateCompanyVariantId {
   return value === 'label' || value === 'elite' || value === 'joint';

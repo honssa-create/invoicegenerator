@@ -67,6 +67,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
 | `CRON_SECRET` | Bearer token that lets an external scheduler run reminders for all users via `/api/cron/payment-reminders` | _(unset)_ |
 | `DB_PATH` | SQLite file path (use `/data/invoices.db` on Railway with a volume) | `data/invoices.db` |
+| `RESET_DB` | Set to `1` once to delete the SQLite file on boot (fresh empty DB). **Unset immediately after** and redeploy | unset |
 | `RECEIPTS_DIR` | Local receipt image folder; defaults to `{dirname(DB_PATH)}/receipts` when `DB_PATH` is set | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
 | `R2_ACCESS_KEY_ID` | R2 access key | _(unset)_ |
@@ -94,6 +95,7 @@ Set `JWT_SECRET` to a strong random string in production.
    - Mount path: `/data`
    - Set env: `DB_PATH=/data/invoices.db`
    - Receipt images are stored at `/data/receipts` automatically (same volume as the DB).
+   - To wipe the volume DB once: set `RESET_DB=1`, redeploy, confirm the app boots empty, then **unset `RESET_DB`** and redeploy again.
    - Optional override: `RECEIPTS_DIR=/data/receipts`
 
 3. **Image storage (pick one — required for production)**

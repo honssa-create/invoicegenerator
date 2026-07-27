@@ -16,6 +16,32 @@ function resolveDbPath(): string {
   return process.env.DB_PATH || defaultDbPath;
 }
 
+/**
+ * One-shot destructive reset. Set RESET_DB=1 (Railway env or local), deploy/start once,
+ * then REMOVE the env var and redeploy so it never runs again.
+ * Deletes the SQLite file (+ WAL/SHM). Schema is recreated on the next open.
+ */
+function wipeDatabaseIfRequested(dbPath: string): void {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return;
+  const flag = (process.env.RESET_DB || '').trim().toLowerCase();
+  if (flag !== '1' && flag !== 'true' && flag !== 'yes') return;
+
+  const siblings = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  for (const file of siblings) {
+    try {
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+        console.warn(`[InvoiceFlow] RESET_DB: deleted ${file}`);
+      }
+    } catch (err) {
+      console.error(`[InvoiceFlow] RESET_DB: failed to delete ${file}:`, err);
+    }
+  }
+  console.warn(
+    '[InvoiceFlow] RESET_DB wiped the SQLite database. Unset RESET_DB and redeploy so this does not run again.'
+  );
+}
+
 function initializeDatabase(): Database.Database {
   if (dbInstance) return dbInstance;
 
@@ -24,6 +50,8 @@ function initializeDatabase(): Database.Database {
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
+
+  wipeDatabaseIfRequested(dbPath);
 
   const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');

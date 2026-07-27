@@ -433,14 +433,6 @@ export default function OrderDetailPage() {
                     <option value="">— Not linked —</option>
                     {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
                   </select>
-                  <button
-                    type="button"
-                    onClick={convertToQuotation}
-                    disabled={convertingQuote}
-                    className="btn bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 w-full"
-                  >
-                    {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
-                  </button>
                 </div>
               )}
               {labeled(

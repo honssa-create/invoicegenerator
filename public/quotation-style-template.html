@@ -31,16 +31,24 @@
       --quo-color-accent: #e8a070;
       --quo-color-accent-text: #ffffff;
       --quo-color-rule: #e8a070;
+      --quo-field-bg: #fafafa;
 
       --quo-logo-max-height: 88px;
       --quo-logo-max-width: 160px;
 
-      --quo-page-padding: 48px 52px;
+      --quo-page-padding: 48px 52px 56px;
       --quo-title-size: 36px;
+      --quo-page-number-size: 11px;
+      --quo-page-number-color: #666666;
     }
     /* ========== END VARIABLES ========== */
 
     * { box-sizing: border-box; }
+
+    @page {
+      size: A4 portrait;
+      margin: 12mm 14mm 16mm 14mm;
+    }
 
     body {
       margin: 0;
@@ -63,12 +71,26 @@
     .edit-banner strong { display: block; margin-bottom: 4px; }
 
     .preview-page {
+      position: relative;
       width: 210mm;
       min-height: 297mm;
       margin: 1rem auto 2rem;
       padding: var(--quo-page-padding);
       background: white;
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    /* Screen / PDF preview page number (bottom-right). */
+    .quo-page-number {
+      position: absolute;
+      right: 52px;
+      bottom: 24px;
+      font-size: var(--quo-page-number-size);
+      line-height: 1;
+      color: var(--quo-page-number-color);
+      text-align: right;
+      pointer-events: none;
+      user-select: none;
     }
 
     .formal-quotation {
@@ -109,7 +131,7 @@
       color: var(--quo-color-text);
       outline: 1px dashed transparent;
     }
-    .quo-company-address:focus { outline: 1px dashed #ccc; background: #fafafa; }
+    .quo-company-address:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
     .quo-company-address-line1 {
       font-weight: 700;
       font-size: 13px;
@@ -170,7 +192,7 @@
       color: var(--quo-color-text);
       outline: 1px dashed transparent;
     }
-    .quo-party-body:focus { outline: 1px dashed #ccc; background: #fafafa; }
+    .quo-party-body:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
 
     .quo-meta-row {
       margin: 0 0 6px;
@@ -251,7 +273,7 @@
       white-space: pre-wrap;
       outline: 1px dashed transparent;
     }
-    .quo-message:focus { outline: 1px dashed #ccc; background: #fafafa; }
+    .quo-message:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
 
     .quo-remarks-title {
       margin: 0 0 8px;
@@ -346,7 +368,20 @@
     @media print {
       .edit-banner { display: none !important; }
       body { background: white; }
-      .preview-page { margin: 0; box-shadow: none; width: 100%; min-height: auto; }
+      .preview-page {
+        margin: 0;
+        box-shadow: none;
+        width: 100%;
+        min-height: auto;
+        padding-bottom: 40px;
+      }
+      /* Fallback for browsers that ignore @page margin boxes (e.g. Chrome): fixed bottom-right. */
+      .quo-page-number {
+        position: fixed;
+        right: 14mm;
+        bottom: 10mm;
+        z-index: 9999;
+      }
       .quo-table thead th {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -472,6 +507,8 @@
           <p class="quo-auth-label">Authorized Signature</p>
         </div>
       </footer>
+
+      <div class="quo-page-number" aria-label="Page number">1</div>
 
     </div>
   </main>

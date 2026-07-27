@@ -37,13 +37,30 @@ export default function QuotationPrintPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 12mm 14mm 16mm 14mm;
+          }
+          .quo-print-page-number {
+            position: fixed;
+            right: 14mm;
+            bottom: 10mm;
+            font-size: 11px;
+            line-height: 1;
+            color: #666;
+            z-index: 9999;
+          }
+        }
+      `}</style>
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <Link href={`/quotations/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to quotation', '返回報價單')}</Link>
         <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{BTN.printPdf}</button>
       </div>
 
-      <div className="max-w-4xl mx-auto my-8 bg-white shadow-lg rounded-lg overflow-hidden print:shadow-none print:my-0 print:rounded-none">
-        <div className="p-12">
+      <div className="max-w-4xl mx-auto my-8 bg-white shadow-lg rounded-lg overflow-hidden print:shadow-none print:my-0 print:rounded-none relative">
+        <div className="p-12 print:pb-16">
           <div className="flex justify-between items-start mb-12">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">{TITLE.quotationDoc}</h1>
@@ -118,6 +135,9 @@ export default function QuotationPrintPage() {
               {quote.terms && <div><p className="text-xs text-gray-500 uppercase font-semibold mb-2">{bi('Terms & Conditions', '條款及細則')}</p><p className="text-sm text-gray-600">{quote.terms}</p></div>}
             </div>
           )}
+        </div>
+        <div className="quo-print-page-number print:block hidden" aria-hidden="true">
+          1
         </div>
       </div>
     </div>

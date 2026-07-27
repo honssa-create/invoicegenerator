@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireApiAccess, denyReadOnlyWrite } from '@/lib/api-guard';
+import { requireApiAdmin } from '@/lib/api-guard';
 import { getDataOwnerId } from '@/lib/org-server';
 import {
   getIntegrationSettingsMasked,
@@ -8,7 +8,7 @@ import {
 import type { IntegrationSettingsUpdate } from '@/lib/integration-settings-server';
 
 export async function GET(request: Request) {
-  const session = await requireApiAccess(request, 'settings');
+  const session = await requireApiAdmin(request);
   if (session instanceof NextResponse) return session;
 
   const ownerId = getDataOwnerId(session.userId);
@@ -16,11 +16,8 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const session = await requireApiAccess(request, 'settings');
+  const session = await requireApiAdmin(request);
   if (session instanceof NextResponse) return session;
-
-  const denied = denyReadOnlyWrite(session, 'settings', request.method);
-  if (denied) return denied;
 
   let body: IntegrationSettingsUpdate;
   try {

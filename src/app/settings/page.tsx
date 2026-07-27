@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import IntegrationsSettingsPanel from '@/components/IntegrationsSettingsPanel';
 import {
   OPTION_LABELS,
@@ -28,6 +29,8 @@ const EMPTY_OPTIONS: OptionsByType = {
 };
 
 export default function SettingsPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [section, setSection] = useState<SettingsSection>('dropdowns');
   const [activeType, setActiveType] = useState<OptionType>('supplier');
   const [options, setOptions] = useState<OptionsByType>(EMPTY_OPTIONS);
@@ -38,6 +41,10 @@ export default function SettingsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin && section === 'integrations') setSection('dropdowns');
+  }, [isAdmin, section]);
 
   const load = async () => {
     setLoading(true);
@@ -170,7 +177,12 @@ export default function SettingsPage() {
         <div>
           <h1 className="page-title">{TITLE.settings}</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, Yedpay).
+            {isAdmin
+              ? bi(
+                  'Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, Yedpay).',
+                  '管理支出下拉選項及外部 API 整合（WooCommerce、QuickBooks、Yedpay）。',
+                )
+              : bi('Manage expense dropdown options.', '管理支出下拉選項。')}
           </p>
         </div>
       </div>
@@ -191,23 +203,27 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setSection('dropdowns')}
-              className={`w-full text-left px-4 py-3 text-sm border-b border-gray-100 transition-colors ${
+              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                isAdmin ? 'border-b border-gray-100' : ''
+              } ${
                 section === 'dropdowns' ? 'bg-brand-50 text-brand-800 font-semibold' : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
               Expense Dropdowns
               <span className="block text-xs font-normal text-gray-500 mt-0.5">Suppliers, reasons, platforms</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setSection('integrations')}
-              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                section === 'integrations' ? 'bg-brand-50 text-brand-800 font-semibold' : 'text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              API Integrations
-              <span className="block text-xs font-normal text-gray-500 mt-0.5">WooCommerce, QuickBooks, Yedpay</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setSection('integrations')}
+                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                  section === 'integrations' ? 'bg-brand-50 text-brand-800 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                API Integrations
+                <span className="block text-xs font-normal text-gray-500 mt-0.5">WooCommerce, QuickBooks, Yedpay</span>
+              </button>
+            )}
           </nav>
 
           {section === 'dropdowns' && (
@@ -234,7 +250,7 @@ export default function SettingsPage() {
         </aside>
 
         <section className="flex-1 min-w-0">
-          {section === 'integrations' ? (
+          {isAdmin && section === 'integrations' ? (
             <IntegrationsSettingsPanel onToast={(msg, kind) => setToast({ msg, kind })} />
           ) : (
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">

@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getDataOwnerId } from '@/lib/org-server';
 import { imageResponseForStoredPath } from '@/lib/stored-image';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const ownerId = getDataOwnerId(session.userId);
+
   const row = db
     .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId) as { fields_json: string | null } | undefined;
+    .get(params.id, ownerId) as { fields_json: string | null } | undefined;
   if (!row) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   let stored: string | undefined;

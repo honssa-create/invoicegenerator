@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrders, logActivity } from '@/lib/order-server';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  return NextResponse.json({ orders: listOrders(session.userId) });
+  const ownerId = getDataOwnerId(session.userId);
+  return NextResponse.json({ orders: listOrders(ownerId) });
 }
 
 export async function POST(request: Request) {
@@ -16,6 +19,11 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const denied = denyReadOnlyWrite(session, 'orders', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
@@ -25,7 +33,7 @@ export async function POST(request: Request) {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')`
       )
       .run(
-        session.userId,
+        ownerId,
         body.po_number?.trim() || null,
         body.name?.trim() || null,
         body.description?.trim() || null,
@@ -38,7 +46,7 @@ export async function POST(request: Request) {
       );
     const id = result.lastInsertRowid as number;
     logActivity(id, session.userId, 'activity', session.name, 'created this order');
-    return NextResponse.json({ order: getOrder(id, session.userId) }, { status: 201 });
+    return NextResponse.json({ order: getOrder(id, ownerId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }

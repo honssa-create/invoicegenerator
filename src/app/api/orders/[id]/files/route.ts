@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
+import { getDataOwnerId } from '@/lib/org-server';
 import { saveReceipt } from '@/lib/receipt';
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -12,9 +14,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const denied = denyReadOnlyWrite(session, 'orders', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+
   const order = db
     .prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   let formData: FormData;
@@ -40,7 +47,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const path = await saveReceipt(buffer, file.type, file.name);
-    insert.run(params.id, session.userId, path, file.name || null);
+    insert.run(params.id, ownerId, path, file.name || null);
   }
 
   const list = db

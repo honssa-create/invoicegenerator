@@ -5,18 +5,20 @@ import { listOrders } from '@/lib/order-server';
 import { orderTitle } from '@/lib/orders';
 import type { LedgerEntry } from '@/lib/cashflow';
 import { orderPaymentReceiptUrl, otherIncomeReceiptUrl } from '@/lib/image-url';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const ownerId = getDataOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const month = searchParams.get('month') || new Date().toISOString().slice(0, 7);
 
   const entries: LedgerEntry[] = [];
 
   // Product Sales — order payments.
-  for (const o of listOrders(session.userId)) {
+  for (const o of listOrders(ownerId)) {
     const amt = Number(o.fields.payment_amount);
     if (!Number.isFinite(amt) || amt === 0) continue;
     const date = (o.fields.payment_date as string) || o.created_at.slice(0, 10);
@@ -35,7 +37,7 @@ export async function GET(request: Request) {
   }
 
   // Other Income — manual entries.
-  const rows = db.prepare('SELECT * FROM other_income WHERE user_id = ?').all(session.userId) as {
+  const rows = db.prepare('SELECT * FROM other_income WHERE user_id = ?').all(ownerId) as {
     id: number; category: string | null; txn_date: string | null; amount: number; account: string | null; remarks: string | null; receipt_path: string | null; verified: number; created_at: string;
   }[];
   for (const r of rows) {

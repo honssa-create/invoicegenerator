@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, logActivity } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
+import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
 
 const CORE_COLUMNS = [
@@ -24,7 +26,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const order = getOrder(params.id, session.userId);
+  const ownerId = getDataOwnerId(session.userId);
+  const order = getOrder(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   return NextResponse.json({ order });
 }
@@ -35,9 +38,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const denied = denyReadOnlyWrite(session, 'orders', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+
   const existing = db
     .prepare('SELECT status, fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId) as { status: string; fields_json: string } | undefined;
+    .get(params.id, ownerId) as { status: string; fields_json: string } | undefined;
   if (!existing) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   try {
@@ -73,7 +81,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     if (setClauses.length) {
       setClauses.push("updated_at = datetime('now')");
-      values.push(params.id, session.userId);
+      values.push(params.id, ownerId);
       db.prepare(`UPDATE orders SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
     }
 
@@ -82,15 +90,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (invoiceId) {
         const invoice = db
           .prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?')
-          .get(invoiceId, session.userId);
+          .get(invoiceId, ownerId);
         if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
       }
 
       db.prepare('UPDATE invoices SET order_id = NULL, updated_at = datetime(\'now\') WHERE order_id = ? AND user_id = ?')
-        .run(params.id, session.userId);
+        .run(params.id, ownerId);
       if (invoiceId) {
         db.prepare('UPDATE invoices SET order_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
-          .run(params.id, invoiceId, session.userId);
+          .run(params.id, invoiceId, ownerId);
         logActivity(params.id, session.userId, 'activity', session.name, `linked invoice #${invoiceId}`);
       } else {
         logActivity(params.id, session.userId, 'activity', session.name, 'unlinked invoice');
@@ -102,15 +110,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (quotationId) {
         const quote = db
           .prepare('SELECT id, quote_number FROM quotations WHERE id = ? AND user_id = ?')
-          .get(quotationId, session.userId) as { id: number; quote_number: string } | undefined;
+          .get(quotationId, ownerId) as { id: number; quote_number: string } | undefined;
         if (!quote) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
         db.prepare('UPDATE orders SET quotation_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
-          .run(quotationId, params.id, session.userId);
+          .run(quotationId, params.id, ownerId);
         logActivity(params.id, session.userId, 'activity', session.name, `linked quotation ${quote.quote_number}`);
         logUnifiedActivity('quotation', quotationId, session.userId, 'activity', session.name, `linked order #${params.id}`);
       } else {
         db.prepare('UPDATE orders SET quotation_id = NULL, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
-          .run(params.id, session.userId);
+          .run(params.id, ownerId);
         logActivity(params.id, session.userId, 'activity', session.name, 'unlinked quotation');
       }
     }
@@ -120,7 +128,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       logActivity(params.id, session.userId, 'activity', session.name, `changed status to ${core.status}`);
     }
 
-    return NextResponse.json({ order: getOrder(params.id, session.userId) });
+    return NextResponse.json({ order: getOrder(params.id, ownerId) });
   } catch {
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
   }
@@ -131,7 +139,12 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  if (!trashOrder(session.userId, Number(params.id))) {
+
+  const denied = denyReadOnlyWrite(session, 'orders', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+  if (!trashOrder(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
   return NextResponse.json({ success: true, trashed: true, retention_days: 60 });

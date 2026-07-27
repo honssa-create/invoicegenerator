@@ -329,10 +329,14 @@ export function completePrepProduction(
 }
 
 /** Import a bird's-nest order (燕窩回禮燉製) into the prep schedule. */
-export function importFromOrder(userId: number, orderId: number): PrepOrder | null {
+export function importFromOrder(
+  userId: number,
+  orderId: number,
+  orderOwnerId: number = userId
+): PrepOrder | null {
   const order = db
     .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(orderId, userId) as { id: number; po_number: string | null; fields_json: string } | undefined;
+    .get(orderId, orderOwnerId) as { id: number; po_number: string | null; fields_json: string } | undefined;
   if (!order) return null;
 
   let fields: Record<string, string> = {};

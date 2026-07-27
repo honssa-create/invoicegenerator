@@ -64,7 +64,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
            VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}', ?)`
         )
         .run(
-          session.userId,
+          ownerId,
           q.quote_number,
           q.customer_name || null,
           `From ${q.quote_number}`,

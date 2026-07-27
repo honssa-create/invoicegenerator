@@ -1239,6 +1239,51 @@ db.exec(`
   }
   }
 
+  // One-time: move orders created under org child accounts into the admin data pool
+  // so getDataOwnerId scoping matches invoices.
+  {
+    const done = db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get('orders_org_owner_v1');
+    if (!done) {
+      try {
+        db.transaction(() => {
+          db.exec(`
+            UPDATE orders
+            SET user_id = (
+              SELECT u.owner_user_id FROM users u
+              WHERE u.id = orders.user_id
+                AND u.owner_user_id IS NOT NULL
+                AND u.owner_user_id != u.id
+            )
+            WHERE EXISTS (
+              SELECT 1 FROM users u
+              WHERE u.id = orders.user_id
+                AND u.owner_user_id IS NOT NULL
+                AND u.owner_user_id != u.id
+            )
+          `);
+          db.exec(`
+            UPDATE order_files
+            SET user_id = (
+              SELECT u.owner_user_id FROM users u
+              WHERE u.id = order_files.user_id
+                AND u.owner_user_id IS NOT NULL
+                AND u.owner_user_id != u.id
+            )
+            WHERE EXISTS (
+              SELECT 1 FROM users u
+              WHERE u.id = order_files.user_id
+                AND u.owner_user_id IS NOT NULL
+                AND u.owner_user_id != u.id
+            )
+          `);
+          db.prepare('INSERT OR IGNORE INTO app_migrations (key) VALUES (?)').run('orders_org_owner_v1');
+        })();
+      } catch (err) {
+        console.error('orders_org_owner_v1 migration:', err);
+      }
+    }
+  }
+
   warnIfEphemeralReceiptStorage();
   warnIfR2Misconfigured();
   dbInstance = db;

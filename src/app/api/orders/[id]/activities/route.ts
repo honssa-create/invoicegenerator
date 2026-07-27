@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { logActivity } from '@/lib/order-server';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -9,9 +11,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const denied = denyReadOnlyWrite(session, 'orders', request.method);
+  if (denied) return denied;
+
+  const ownerId = getDataOwnerId(session.userId);
+
   const order = db
     .prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   try {

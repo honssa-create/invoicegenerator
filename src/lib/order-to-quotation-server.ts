@@ -6,7 +6,7 @@ import {
   buildQuotationItemsFromOrder,
   buildQuotationNotesFromOrder,
   buildQuotationTermsFromOrder,
-  quotationValidUntilFromOrder,
+  quotationValidUntilFromIssueDate,
 } from './order-to-quotation';
 import type { Order } from './orders';
 
@@ -63,7 +63,7 @@ export function convertOrderToQuotation(
   const customerId = findOrCreateCustomerFromOrder(userId, order);
   const items = buildQuotationItemsFromOrder(order);
   const today = new Date().toISOString().slice(0, 10);
-  const validUntil = quotationValidUntilFromOrder(order);
+  const validUntil = quotationValidUntilFromIssueDate(today, 30);
   const notes = buildQuotationNotesFromOrder(order);
   const terms = buildQuotationTermsFromOrder(order);
   const quoteNumber = generateQuoteNumber(userId);

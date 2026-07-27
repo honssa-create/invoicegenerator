@@ -331,10 +331,31 @@ export default function OrderDetailPage() {
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
         <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to orders', '返回訂單')}</button>
-        <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
-          🚚 {bi('Generate Delivery Note', '產生出貨單')}
-        </Link>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={convertToQuotation}
+            disabled={convertingQuote}
+            className="btn bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 w-full sm:w-auto"
+          >
+            {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
+          </button>
+          <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
+            🚚 {bi('Generate Delivery Note', '產生出貨單')}
+          </Link>
+        </div>
       </div>
+      {quoteToast && (
+        <div
+          className={`mb-4 px-3 py-2 rounded-lg text-sm ${
+            quoteToast.kind === 'success'
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : 'bg-red-50 text-red-800 border border-red-200'
+          }`}
+        >
+          {quoteToast.text}
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)]">
         {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}
@@ -380,17 +401,6 @@ export default function OrderDetailPage() {
 
           <section className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="font-semibold text-gray-900 mb-4">Linked Records 關聯文件</h2>
-            {quoteToast && (
-              <div
-                className={`mb-4 px-3 py-2 rounded-lg text-sm ${
-                  quoteToast.kind === 'success'
-                    ? 'bg-green-50 text-green-800 border border-green-200'
-                    : 'bg-red-50 text-red-800 border border-red-200'
-                }`}
-              >
-                {quoteToast.text}
-              </div>
-            )}
             <div className="grid md:grid-cols-2 gap-5">
               {labeled(
                 'Quotation 報價單',
@@ -402,24 +412,14 @@ export default function OrderDetailPage() {
                   ) : (
                     <p className="text-sm text-gray-400">No quotation linked.</p>
                   )}
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <select
-                      value={order.quotation_id || ''}
-                      onChange={(e) => patch({ linked_quotation_id: e.target.value || null })}
-                      className={softInput}
-                    >
-                      <option value="">— Not linked —</option>
-                      {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={convertToQuotation}
-                      disabled={convertingQuote}
-                      className="px-3 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 shrink-0"
-                    >
-                      {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
-                    </button>
-                  </div>
+                  <select
+                    value={order.quotation_id || ''}
+                    onChange={(e) => patch({ linked_quotation_id: e.target.value || null })}
+                    className={softInput}
+                  >
+                    <option value="">— Not linked —</option>
+                    {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
+                  </select>
                 </div>
               )}
               {labeled(

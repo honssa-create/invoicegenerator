@@ -4,7 +4,7 @@ import {
   buildQuotationNotesFromOrder,
   parseNumericFromText,
   parseOrderDate,
-  quotationValidUntilFromOrder,
+  quotationValidUntilFromIssueDate,
 } from './order-to-quotation';
 
 describe('parseNumericFromText', () => {
@@ -74,13 +74,8 @@ describe('buildQuotationNotesFromOrder', () => {
   });
 });
 
-describe('quotationValidUntilFromOrder', () => {
-  it('prefers client delivery date', () => {
-    expect(
-      quotationValidUntilFromOrder({
-        delivery_date: '22/1',
-        fields: { client_delivery_date: '2026-05-01' },
-      })
-    ).toBe('2026-05-01');
+describe('quotationValidUntilFromIssueDate', () => {
+  it('adds 30 days to the issue date', () => {
+    expect(quotationValidUntilFromIssueDate('2026-07-27', 30)).toBe('2026-08-26');
   });
 });

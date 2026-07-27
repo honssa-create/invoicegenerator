@@ -111,16 +111,12 @@ export function buildQuotationTermsFromOrder(order: Pick<Order, 'fields'>): stri
   return terms || null;
 }
 
-export function quotationValidUntilFromOrder(
-  order: Pick<Order, 'delivery_date' | 'fields'>,
-  fallbackDays = 30
-): string {
-  const fromFields =
-    parseOrderDate(fieldStr(order.fields, 'client_delivery_date')) ||
-    parseOrderDate(fieldStr(order.fields, 'requested_delivery'));
-  const fromCore = parseOrderDate(order.delivery_date);
-  const parsed = fromFields || fromCore;
-  if (parsed) return parsed;
-
-  return new Date(Date.now() + fallbackDays * 86400000).toISOString().slice(0, 10);
+/** Valid until is always issue date + days (default 30). */
+export function quotationValidUntilFromIssueDate(issueDate: string, days = 30): string {
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(issueDate.trim())
+    ? issueDate.trim()
+    : new Date().toISOString().slice(0, 10);
+  const d = new Date(`${base}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }

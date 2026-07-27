@@ -48,6 +48,8 @@ export default function OrderDetailPage() {
   const paymentInputRef = useRef<HTMLInputElement>(null);
   const [paymentPreview, setPaymentPreview] = useState<string | null>(null);
   const [paymentScanMsg, setPaymentScanMsg] = useState('');
+  const [convertingQuote, setConvertingQuote] = useState(false);
+  const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
     fetch(`/api/orders/${id}`)
@@ -76,6 +78,28 @@ export default function OrderDetailPage() {
     if (res.ok) {
       const data = await res.json();
       if (data.order) setOrder(data.order);
+    }
+  };
+
+  const convertToQuotation = async () => {
+    setConvertingQuote(true);
+    setQuoteToast(null);
+    try {
+      const res = await fetch(`/api/orders/${id}/convert-to-quotation`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setQuoteToast({ text: data.error || 'Failed to convert order', kind: 'error' });
+        return;
+      }
+      setQuoteToast({ text: `Created quotation ${data.quote_number}`, kind: 'success' });
+      const orderRes = await fetch(`/api/orders/${id}`);
+      const orderData = await orderRes.json();
+      if (orderData.order) setOrder(orderData.order);
+      setTimeout(() => router.push(`/quotations/${data.id}`), 800);
+    } catch {
+      setQuoteToast({ text: 'Failed to convert order', kind: 'error' });
+    } finally {
+      setConvertingQuote(false);
     }
   };
 
@@ -307,10 +331,31 @@ export default function OrderDetailPage() {
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
         <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to orders', '返回訂單')}</button>
-        <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
-          🚚 {bi('Generate Delivery Note', '產生出貨單')}
-        </Link>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={convertToQuotation}
+            disabled={convertingQuote}
+            className="btn bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 w-full sm:w-auto"
+          >
+            {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
+          </button>
+          <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
+            🚚 {bi('Generate Delivery Note', '產生出貨單')}
+          </Link>
+        </div>
       </div>
+      {quoteToast && (
+        <div
+          className={`mb-4 px-3 py-2 rounded-lg text-sm ${
+            quoteToast.kind === 'success'
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : 'bg-red-50 text-red-800 border border-red-200'
+          }`}
+        >
+          {quoteToast.text}
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)]">
         {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}

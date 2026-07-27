@@ -29,7 +29,29 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { customer_id, issue_date, valid_until, tax_rate = 0, notes, terms, status = 'draft', items = [] } = body;
+    const {
+      customer_id,
+      issue_date,
+      valid_until,
+      tax_rate = 0,
+      notes,
+      terms,
+      billing_address,
+      shipping_address,
+      email,
+      send_later = false,
+      ship_via,
+      shipping_date,
+      tracking_no,
+      order_no,
+      receipt_date,
+      currency = 'HKD',
+      discount_type = 'percent',
+      discount_value = 0,
+      shipping_amount = 0,
+      status = 'draft',
+      items = [],
+    } = body;
 
     if (!issue_date) return NextResponse.json({ error: 'Issue date is required' }, { status: 400 });
 
@@ -38,8 +60,11 @@ export async function POST(request: Request) {
     const create = db.transaction(() => {
       const result = db
         .prepare(
-          `INSERT INTO quotations (user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO quotations (
+             user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms,
+             billing_address, shipping_address, email, send_later, ship_via, shipping_date, tracking_no, order_no,
+             receipt_date, currency, discount_type, discount_value, shipping_amount
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
@@ -50,17 +75,42 @@ export async function POST(request: Request) {
           valid_until?.trim() || null,
           tax_rate,
           notes?.trim() || null,
-          terms?.trim() || null
+          terms?.trim() || null,
+          billing_address?.trim() || null,
+          shipping_address?.trim() || null,
+          email?.trim() || null,
+          send_later ? 1 : 0,
+          ship_via?.trim() || null,
+          shipping_date?.trim() || null,
+          tracking_no?.trim() || null,
+          order_no?.trim() || null,
+          receipt_date?.trim() || null,
+          currency?.trim() || 'HKD',
+          discount_type === 'amount' ? 'amount' : 'percent',
+          Number(discount_value) || 0,
+          Number(shipping_amount) || 0
         );
       const qid = result.lastInsertRowid as number;
       const insertItem = db.prepare(
-        'INSERT INTO quotation_items (quotation_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, ?, ?)'
+        `INSERT INTO quotation_items (
+           quotation_id, service_date, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const item of items) {
-        if (!item.description?.trim()) continue;
+        const desc = String(item.description || item.product_service || '').trim();
+        if (!desc && !String(item.product_service || '').trim()) continue;
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unit_price) || 0;
-        insertItem.run(qid, item.description.trim(), qty, price, qty * price);
+        insertItem.run(
+          qid,
+          item.service_date?.trim() || null,
+          item.product_service?.trim() || null,
+          desc || item.product_service?.trim() || '',
+          qty,
+          price,
+          qty * price,
+          item.class_name?.trim() || null
+        );
       }
       return qid;
     });

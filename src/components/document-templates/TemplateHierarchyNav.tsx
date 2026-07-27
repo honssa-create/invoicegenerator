@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  DEBIT_NOTE_COMPANY_VARIANTS,
+  companyVariantsForDocumentType,
   DOCUMENT_TYPES,
   type DocumentTypeId,
   type TemplateCompanyVariantId,
@@ -20,6 +20,8 @@ export default function TemplateHierarchyNav({
   companyVariant,
   onCompanyVariantChange,
 }: Props) {
+  const variants = companyVariantsForDocumentType(documentType);
+
   return (
     <div className="space-y-4">
       <div>
@@ -49,13 +51,13 @@ export default function TemplateHierarchyNav({
         </div>
       </div>
 
-      {documentType === 'debit_note' && (
+      {variants.length > 0 && (
         <div>
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
             Company Variant 公司版本
           </p>
           <div className="flex flex-wrap gap-2">
-            {DEBIT_NOTE_COMPANY_VARIANTS.map((variant) => (
+            {variants.map((variant) => (
               <button
                 key={variant.id}
                 type="button"
@@ -71,7 +73,7 @@ export default function TemplateHierarchyNav({
             ))}
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            {DEBIT_NOTE_COMPANY_VARIANTS.find((v) => v.id === companyVariant)?.label}
+            {variants.find((v) => v.id === companyVariant)?.label}
           </p>
         </div>
       )}

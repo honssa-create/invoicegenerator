@@ -3,22 +3,19 @@ import { calculateQuotationTotals, type QuotationItem, type QuotationWithDetails
 
 const QUOTE_NUMBER_START = 1001001;
 
+/** Next 7-digit quotation number for this user (1001001, 1001002, …). */
 export function generateQuoteNumber(userId: number): string {
-  const row = db
-    .prepare(
-      `SELECT MAX(CAST(quote_number AS INTEGER)) as max_n
-       FROM quotations
-       WHERE user_id = ?
-         AND length(quote_number) = 7
-         AND quote_number GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9]'`
-    )
-    .get(userId) as { max_n: number | null };
+  const rows = db
+    .prepare('SELECT quote_number FROM quotations WHERE user_id = ?')
+    .all(userId) as { quote_number: string }[];
 
-  const next =
-    row.max_n != null && Number.isFinite(row.max_n) && row.max_n >= QUOTE_NUMBER_START - 1
-      ? row.max_n + 1
-      : QUOTE_NUMBER_START;
-  return String(next);
+  let max = QUOTE_NUMBER_START - 1;
+  for (const { quote_number } of rows) {
+    if (!/^\d{7}$/.test(quote_number)) continue;
+    const n = Number(quote_number);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return String(max + 1);
 }
 
 export function getQuotationWithDetails(id: number | string, userId: number): QuotationWithDetails | null {

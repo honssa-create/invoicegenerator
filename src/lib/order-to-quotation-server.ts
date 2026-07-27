@@ -6,6 +6,7 @@ import {
   buildQuotationItemsFromOrder,
   buildQuotationNotesFromOrder,
   buildQuotationTermsFromOrder,
+  parseOrderDate,
   quotationValidUntilFromIssueDate,
 } from './order-to-quotation';
 import type { Order } from './orders';
@@ -66,25 +67,56 @@ export function convertOrderToQuotation(
   const validUntil = quotationValidUntilFromIssueDate(today, 30);
   const notes = buildQuotationNotesFromOrder(order);
   const terms = buildQuotationTermsFromOrder(order);
-  const quoteNumber = generateQuoteNumber(userId);
+  const email = order.customer_email?.trim() || null;
+  const shippingAddress = order.shipping_address?.trim() || null;
+  const orderNo =
+    order.po_number?.trim() ||
+    String(order.fields.original_order_id || '').trim() ||
+    null;
+  const shippingDate =
+    parseOrderDate(order.delivery_date) ||
+    parseOrderDate(String(order.fields.客人送貨日期 || order.fields.delivery_date || '')) ||
+    null;
+  const trackingNo = String(order.fields.tracking_no || '').trim() || null;
 
   const create = db.transaction(() => {
+    // Allocate number inside the transaction so concurrent converts cannot collide.
+    const quoteNumber = generateQuoteNumber(userId);
     const result = db
       .prepare(
-        `INSERT INTO quotations (user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms)
-         VALUES (?, ?, ?, 'draft', ?, ?, 0, ?, ?)`
+        `INSERT INTO quotations (
+           user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms,
+           billing_address, shipping_address, email, order_no, shipping_date, tracking_no, currency
+         ) VALUES (?, ?, ?, 'draft', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'HKD')`
       )
-      .run(userId, customerId, quoteNumber, today, validUntil, notes, terms);
+      .run(
+        userId,
+        customerId,
+        quoteNumber,
+        today,
+        validUntil,
+        notes,
+        terms,
+        shippingAddress,
+        shippingAddress,
+        email,
+        orderNo,
+        shippingDate,
+        trackingNo
+      );
     const quotationId = Number(result.lastInsertRowid);
 
     const insertItem = db.prepare(
-      'INSERT INTO quotation_items (quotation_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, ?, ?)'
+      `INSERT INTO quotation_items (
+         quotation_id, product_service, description, quantity, unit_price, amount
+       ) VALUES (?, ?, ?, ?, ?, ?)`
     );
     for (const item of items) {
       if (!item.description.trim()) continue;
       const qty = Number(item.quantity) || 0;
       const price = Number(item.unit_price) || 0;
-      insertItem.run(quotationId, item.description.trim(), qty, price, qty * price);
+      const desc = item.description.trim();
+      insertItem.run(quotationId, desc, desc, qty, price, qty * price);
     }
 
     const mergedFields = { ...order.fields, quotation_no: quoteNumber };
@@ -93,10 +125,10 @@ export function convertOrderToQuotation(
        WHERE id = ? AND user_id = ?`
     ).run(quotationId, JSON.stringify(mergedFields), orderId, userId);
 
-    return quotationId;
+    return { quotationId, quoteNumber };
   });
 
-  const quotationId = create();
+  const { quotationId, quoteNumber } = create();
 
   logActivity(
     'order',

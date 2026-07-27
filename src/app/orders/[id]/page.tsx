@@ -86,9 +86,22 @@ export default function OrderDetailPage() {
     setQuoteToast(null);
     try {
       const res = await fetch(`/api/orders/${id}/convert-to-quotation`, { method: 'POST' });
-      const data = await res.json();
+      let data: { error?: string; quote_number?: string; id?: number } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setQuoteToast({
+          text: `Failed to convert order (HTTP ${res.status}). Try refreshing or restarting the app.`,
+          kind: 'error',
+        });
+        return;
+      }
       if (!res.ok) {
-        setQuoteToast({ text: data.error || 'Failed to convert order', kind: 'error' });
+        setQuoteToast({ text: data.error || `Failed to convert order (HTTP ${res.status})`, kind: 'error' });
+        return;
+      }
+      if (!data.id) {
+        setQuoteToast({ text: 'Failed to convert order — no quotation id returned', kind: 'error' });
         return;
       }
       setQuoteToast({ text: `Created quotation ${data.quote_number}`, kind: 'success' });
@@ -420,6 +433,14 @@ export default function OrderDetailPage() {
                     <option value="">— Not linked —</option>
                     {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
                   </select>
+                  <button
+                    type="button"
+                    onClick={convertToQuotation}
+                    disabled={convertingQuote}
+                    className="btn bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 w-full"
+                  >
+                    {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
+                  </button>
                 </div>
               )}
               {labeled(

@@ -48,6 +48,8 @@ export default function OrderDetailPage() {
   const paymentInputRef = useRef<HTMLInputElement>(null);
   const [paymentPreview, setPaymentPreview] = useState<string | null>(null);
   const [paymentScanMsg, setPaymentScanMsg] = useState('');
+  const [convertingQuote, setConvertingQuote] = useState(false);
+  const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
     fetch(`/api/orders/${id}`)
@@ -76,6 +78,28 @@ export default function OrderDetailPage() {
     if (res.ok) {
       const data = await res.json();
       if (data.order) setOrder(data.order);
+    }
+  };
+
+  const convertToQuotation = async () => {
+    setConvertingQuote(true);
+    setQuoteToast(null);
+    try {
+      const res = await fetch(`/api/orders/${id}/convert-to-quotation`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setQuoteToast({ text: data.error || 'Failed to convert order', kind: 'error' });
+        return;
+      }
+      setQuoteToast({ text: `Created quotation ${data.quote_number}`, kind: 'success' });
+      const orderRes = await fetch(`/api/orders/${id}`);
+      const orderData = await orderRes.json();
+      if (orderData.order) setOrder(orderData.order);
+      setTimeout(() => router.push(`/quotations/${data.id}`), 800);
+    } catch {
+      setQuoteToast({ text: 'Failed to convert order', kind: 'error' });
+    } finally {
+      setConvertingQuote(false);
     }
   };
 
@@ -356,6 +380,17 @@ export default function OrderDetailPage() {
 
           <section className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="font-semibold text-gray-900 mb-4">Linked Records 關聯文件</h2>
+            {quoteToast && (
+              <div
+                className={`mb-4 px-3 py-2 rounded-lg text-sm ${
+                  quoteToast.kind === 'success'
+                    ? 'bg-green-50 text-green-800 border border-green-200'
+                    : 'bg-red-50 text-red-800 border border-red-200'
+                }`}
+              >
+                {quoteToast.text}
+              </div>
+            )}
             <div className="grid md:grid-cols-2 gap-5">
               {labeled(
                 'Quotation 報價單',
@@ -367,14 +402,24 @@ export default function OrderDetailPage() {
                   ) : (
                     <p className="text-sm text-gray-400">No quotation linked.</p>
                   )}
-                  <select
-                    value={order.quotation_id || ''}
-                    onChange={(e) => patch({ linked_quotation_id: e.target.value || null })}
-                    className={softInput}
-                  >
-                    <option value="">— Not linked —</option>
-                    {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
-                  </select>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={order.quotation_id || ''}
+                      onChange={(e) => patch({ linked_quotation_id: e.target.value || null })}
+                      className={softInput}
+                    >
+                      <option value="">— Not linked —</option>
+                      {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={convertToQuotation}
+                      disabled={convertingQuote}
+                      className="px-3 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 shrink-0"
+                    >
+                      {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
+                    </button>
+                  </div>
                 </div>
               )}
               {labeled(

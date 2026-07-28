@@ -43,8 +43,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const firstName = (first?.product_service || first?.description || '').trim();
     const firstQty = first != null ? String(first.quantity ?? '') : '';
     const itemPart =
-      firstName && firstQty !== '' ? `${firstName}x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
-    const orderName = [(q.customer_name || '').trim(), itemPart].filter(Boolean).join('-');
+      firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
+    const orderName = [(q.customer_name || '').trim(), itemPart].filter(Boolean).join(' - ');
     const create = db.transaction(() => {
       const result = db
         .prepare(

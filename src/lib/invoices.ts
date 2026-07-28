@@ -21,6 +21,18 @@ export function generateInvoiceNumber(userId: number): string {
   return String(max + 1);
 }
 
+/** Invoice number = source + 1 (or the next free number if that is taken). */
+export function nextInvoiceNumberAfter(userId: number, current: string): string {
+  let n = /^\d{4,}$/.test(current.trim()) ? Number(current.trim()) + 1 : Number(generateInvoiceNumber(userId));
+  if (!Number.isFinite(n) || n < INVOICE_NUMBER_START) n = Number(generateInvoiceNumber(userId));
+
+  const exists = db.prepare('SELECT 1 FROM invoices WHERE user_id = ? AND invoice_number = ?');
+  while (exists.get(userId, String(n))) {
+    n += 1;
+  }
+  return String(n);
+}
+
 export function getInvoiceWithDetails(invoiceId: number, userId: number): InvoiceWithDetails | null {
   const invoice = db
     .prepare(

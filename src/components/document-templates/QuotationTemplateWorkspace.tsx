@@ -131,7 +131,7 @@ export default function QuotationTemplateWorkspace({ variant, readOnly }: Props)
         Honour Label quotation layout. Edit content and layout styles — preview updates instantly.
         <div className="mt-2">
           <Link
-            href="/quotation-style-template.html"
+            href="/quotation-template-sum-sign.html"
             target="_blank"
             className="font-medium text-brand-700 hover:underline"
           >
@@ -237,8 +237,8 @@ export default function QuotationTemplateWorkspace({ variant, readOnly }: Props)
 
       <p className="text-xs text-gray-500">
         {bi(
-          'Logo file: public/company-logo.png · Style HTML: public/quotation-style-template.html',
-          '標誌：public/company-logo.png · 樣式 HTML：public/quotation-style-template.html',
+          'Logo file: public/company-logo.png · Style HTML: public/quotation-template-sum-sign.html',
+          '標誌：public/company-logo.png · 樣式 HTML：public/quotation-template-sum-sign.html',
         )}
       </p>
     </div>

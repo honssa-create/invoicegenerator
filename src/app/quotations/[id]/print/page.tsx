@@ -1,22 +1,76 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { QUOTATION_STATUS_COLORS, type QuotationWithDetails } from '@/lib/quotations';
-import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import FormalQuotationDocument from '@/components/FormalQuotationDocument';
+import { quotationToFormalPreview } from '@/lib/quotation-print';
+import {
+  DEFAULT_QUOTATION_STYLE,
+  loadQuotationStyleFromStorage,
+  type QuotationStyleTemplate,
+} from '@/lib/quotation-style';
+import type { QuotationWithDetails } from '@/lib/quotations';
+import { BTN, bi } from '@/lib/ui-labels';
 
-interface Business { name: string; company_name: string | null; email: string; }
+interface Business {
+  name: string;
+  company_name: string | null;
+  email: string;
+}
+
+/** Matches the public HTML template variants. */
+type PdfLayoutMode = 'sum-sign' | 'sum' | 'sign' | 'none';
+
+const PDF_LAYOUT_STORAGE_KEY = 'quotation-pdf-layout';
+
+const PDF_LAYOUT_OPTIONS: { id: PdfLayoutMode; label: string }[] = [
+  { id: 'sum-sign', label: bi('Sum + Signature', '合計 + 簽署') },
+  { id: 'sum', label: bi('Sum only', '僅合計') },
+  { id: 'sign', label: bi('Signature only', '僅簽署') },
+  { id: 'none', label: bi('Without sum & sign', '無合計與簽署') },
+];
+
+function loadPdfLayout(): PdfLayoutMode {
+  if (typeof window === 'undefined') return 'sum-sign';
+  try {
+    const raw = localStorage.getItem(PDF_LAYOUT_STORAGE_KEY);
+    if (raw === 'sum' || raw === 'sign' || raw === 'sum-sign' || raw === 'none') return raw;
+  } catch {
+    /* ignore */
+  }
+  return 'sum-sign';
+}
 
 export default function QuotationPrintPage() {
   const { id } = useParams();
   const [quote, setQuote] = useState<QuotationWithDetails | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
+  const [style, setStyle] = useState<QuotationStyleTemplate>(DEFAULT_QUOTATION_STYLE);
+  const [layout, setLayout] = useState<PdfLayoutMode>('sum-sign');
 
   useEffect(() => {
-    fetch(`/api/quotations/${id}`).then((r) => r.json()).then((d) => { setQuote(d.quotation); setBusiness(d.business); });
+    fetch(`/api/quotations/${id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setQuote(d.quotation || null);
+        setBusiness(d.business || null);
+      });
   }, [id]);
+
+  useEffect(() => {
+    setStyle(loadQuotationStyleFromStorage('label') || DEFAULT_QUOTATION_STYLE);
+    setLayout(loadPdfLayout());
+  }, []);
+
+  const setLayoutPersist = (mode: PdfLayoutMode) => {
+    setLayout(mode);
+    try {
+      localStorage.setItem(PDF_LAYOUT_STORAGE_KEY, mode);
+    } catch {
+      /* ignore */
+    }
+  };
 
   // Log the PDF generation once per session to the activity feed.
   useEffect(() => {
@@ -31,114 +85,70 @@ export default function QuotationPrintPage() {
     }).catch(() => {});
   }, [quote, id]);
 
-  if (!quote || !business) {
-    return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>;
+  const model = useMemo(
+    () => (quote ? quotationToFormalPreview(quote, business) : null),
+    [quote, business],
+  );
+
+  const showSum = layout === 'sum-sign' || layout === 'sum';
+  const showSignature = layout === 'sum-sign' || layout === 'sign';
+
+  if (!quote || !model) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <style>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 12mm 14mm 16mm 14mm;
-          }
-          .quo-print-page-number {
-            position: fixed;
-            right: 14mm;
-            bottom: 10mm;
-            font-size: 11px;
-            line-height: 1;
-            color: #666;
-            z-index: 9999;
-          }
-        }
-      `}</style>
-      <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <Link href={`/quotations/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to quotation', '返回報價單')}</Link>
-        <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{BTN.printPdf}</button>
+    <div className="min-h-screen bg-gray-100 print:bg-white">
+      <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+        <Link href={`/quotations/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">
+          ← {bi('Back to quotation', '返回報價單')}
+        </Link>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div
+            className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
+            role="group"
+            aria-label={bi('PDF layout', 'PDF 版面')}
+          >
+            {PDF_LAYOUT_OPTIONS.map((opt) => {
+              const active = layout === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setLayoutPersist(opt.id)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    active
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => window.print()}
+            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
+          >
+            {BTN.printPdf}
+          </button>
+        </div>
       </div>
 
-      <div className="max-w-4xl mx-auto my-8 bg-white shadow-lg rounded-lg overflow-hidden print:shadow-none print:my-0 print:rounded-none relative">
-        <div className="p-12 print:pb-16">
-          <div className="flex justify-between items-start mb-12">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">{TITLE.quotationDoc}</h1>
-              <p className="text-lg text-brand-600 font-semibold mt-1">{quote.quote_number}</p>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-lg text-gray-900">{business.company_name || business.name}</p>
-              <p className="text-sm text-gray-600">{business.email}</p>
-              <span className={`inline-flex mt-2 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[quote.status]}`}>{quote.status}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-12 mb-12">
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">{bi('Invoice To', '帳單地址')}</p>
-              {quote.billing_address ? (
-                <p className="text-sm text-gray-900 whitespace-pre-wrap">{quote.billing_address}</p>
-              ) : (
-                <>
-                  <p className="font-semibold text-gray-900 text-lg">{quote.customer_name || '—'}</p>
-                  {quote.customer_email && <p className="text-sm text-gray-600">{quote.customer_email}</p>}
-                  {quote.customer_address && <p className="text-sm text-gray-600 mt-1">{quote.customer_address}</p>}
-                </>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-2">{bi('Ship To', '送貨地址')}</p>
-              {quote.shipping_address ? (
-                <p className="text-sm text-gray-900 whitespace-pre-wrap">{quote.shipping_address}</p>
-              ) : (
-                <p className="text-sm text-gray-400">—</p>
-              )}
-              <div className="mt-6 space-y-2">
-                <div className="flex justify-between gap-8"><span className="text-sm text-gray-500">{bi('Issue Date', '開立日期')}:</span><span className="text-sm font-medium">{formatDate(quote.issue_date)}</span></div>
-                {quote.valid_until && <div className="flex justify-between gap-8"><span className="text-sm text-gray-500">{bi('Valid Until', '有效期至')}:</span><span className="text-sm font-medium">{formatDate(quote.valid_until)}</span></div>}
-              </div>
-            </div>
-          </div>
-
-          <table className="w-full mb-8">
-            <thead>
-              <tr className="border-b-2 border-gray-900">
-                <th className="text-left py-3 text-sm font-semibold uppercase tracking-wider">{bi('Description', '描述')}</th>
-                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">{bi('Qty', '數量')}</th>
-                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">{bi('Rate', '單價')}</th>
-                <th className="text-right py-3 text-sm font-semibold uppercase tracking-wider">{bi('Amount', '金額')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {quote.items.map((item) => (
-                <tr key={item.id} className="border-b border-gray-100">
-                  <td className="py-4 text-sm">{item.description}</td>
-                  <td className="py-4 text-sm text-right">{item.quantity}</td>
-                  <td className="py-4 text-sm text-right">{formatCurrency(item.unit_price)}</td>
-                  <td className="py-4 text-sm text-right font-medium">{formatCurrency(item.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="flex justify-end mb-12">
-            <div className="w-72 space-y-2">
-              <div className="flex justify-between text-sm"><span className="text-gray-500">{bi('Subtotal', '小計')}</span><span>{formatCurrency(quote.subtotal)}</span></div>
-              {quote.tax_rate > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">{bi('Tax', '稅項')} ({quote.tax_rate}%)</span><span>{formatCurrency(quote.tax_amount)}</span></div>}
-              <div className="flex justify-between text-xl font-bold border-t-2 border-gray-900 pt-2"><span>{bi('Total', '總計')}</span><span>{formatCurrency(quote.total)}</span></div>
-            </div>
-          </div>
-
-          {(quote.notes || quote.terms) && (
-            <div className="border-t border-gray-200 pt-8 grid md:grid-cols-2 gap-8">
-              {quote.notes && <div><p className="text-xs text-gray-500 uppercase font-semibold mb-2">{bi('Notes', '備註')}</p><p className="text-sm text-gray-600">{quote.notes}</p></div>}
-              {quote.terms && <div><p className="text-xs text-gray-500 uppercase font-semibold mb-2">{bi('Terms & Conditions', '條款及細則')}</p><p className="text-sm text-gray-600">{quote.terms}</p></div>}
-            </div>
-          )}
-        </div>
-        <div className="quo-print-page-number print:block hidden" aria-hidden="true">
-          1
-        </div>
+      <div className="py-8 print:py-0">
+        <FormalQuotationDocument
+          model={model}
+          style={style}
+          printMode
+          showSum={showSum}
+          showSignature={showSignature}
+        />
       </div>
     </div>
   );

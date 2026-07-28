@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="ProgId" content="Word.Document" />
-  <meta name="Generator" content="InvoiceFlow Quotation Style Template" />
-  <title>Quotation Style Template — 報價單樣式範本</title>
+  <meta name="Generator" content="InvoiceFlow Quotation Template Sign" />
+  <title>Quotation Template Sign — 報價單範本（簽署）</title>
   <!--
     ====================================================================
-    QUOTATION STYLE TEMPLATE — edit this file, then upload back to Cursor
-    報價單樣式範本 — 編輯後上傳給我即可套用
+    QUOTATION TEMPLATE SIGN — edit this file, then upload back to Cursor
+    報價單範本（簽署，無合計） — 編輯後上傳給我即可套用
 
     HOW TO EDIT:
-    1. Open http://localhost:3000/quotation-style-template.html (or this file)
+    1. Open http://localhost:3000/quotation-template-sign.html (or this file)
     2. Replace company-logo.png with your company logo
     3. Edit the :root variables below for colours / spacing
     4. Save and upload back in Cursor chat
@@ -287,16 +287,19 @@
     }
     .quo-remarks li { margin-bottom: 4px; }
 
-    /* ---- Acceptance only (no company signature) ---- */
+    /* ---- Signatures ---- */
     .quo-sign {
-      display: block;
+      display: table;
       width: 100%;
       margin-top: 24px;
     }
-    .quo-sign-left {
-      display: block;
+    .quo-sign-left,
+    .quo-sign-right {
+      display: table-cell;
       width: 50%;
+      vertical-align: bottom;
     }
+    .quo-sign-right { text-align: center; }
 
     .quo-accept-label {
       margin: 0 0 28px;
@@ -308,6 +311,23 @@
       border-top: 1px solid #333;
       width: 85%;
       margin: 0;
+    }
+
+    .quo-behalf {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--quo-color-text);
+    }
+    .quo-auth-label {
+      margin: 0;
+      font-size: 12px;
+      color: var(--quo-color-text);
+    }
+    .quo-auth-line {
+      border: none;
+      border-top: 1px solid #333;
+      width: 70%;
+      margin: 72px auto 8px;
     }
 
     @media print {
@@ -429,6 +449,11 @@
         <div class="quo-sign-left">
           <p class="quo-accept-label">Accepted by &amp; Date</p>
           <hr class="quo-accept-line" />
+        </div>
+        <div class="quo-sign-right">
+          <p class="quo-behalf">For and on behalf of Honour Label Limited</p>
+          <hr class="quo-auth-line" />
+          <p class="quo-auth-label">Authorized Signature</p>
         </div>
       </footer>
 

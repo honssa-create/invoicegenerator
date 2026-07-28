@@ -102,12 +102,15 @@ export function quotationStyleToCssVars(style: QuotationStyleTemplate): Record<s
   };
 }
 
-const STORAGE_PREFIX = 'quotation-style-template:';
+const STORAGE_PREFIX = 'quotation-template-sum-sign:';
+const LEGACY_STORAGE_PREFIX = 'quotation-style-template:';
 
 export function loadQuotationStyleFromStorage(variant: string): QuotationStyleTemplate | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}${variant}`);
+    const raw =
+      localStorage.getItem(`${STORAGE_PREFIX}${variant}`) ||
+      localStorage.getItem(`${LEGACY_STORAGE_PREFIX}${variant}`);
     if (!raw) return null;
     return normalizeQuotationStyle(JSON.parse(raw) as Partial<QuotationStyleTemplate>);
   } catch {
@@ -119,3 +122,31 @@ export function saveQuotationStyleToStorage(variant: string, style: QuotationSty
   if (typeof window === 'undefined') return;
   localStorage.setItem(`${STORAGE_PREFIX}${variant}`, JSON.stringify(style));
 }
+
+export function formatQuotationMoney(amount: number, currency = 'HKD'): string {
+  const code = (currency || 'HKD').trim().toUpperCase() || 'HKD';
+  try {
+    return new Intl.NumberFormat('en-HK', {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${code} ${amount.toFixed(2)}`;
+  }
+}
+
+export function formatQuotationDate(dateStr: string | null | undefined): string {
+  if (!dateStr?.trim()) return '';
+  const raw = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}T00:00:00`).toLocaleDateString('en-GB', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  }
+  return raw;
+}
+

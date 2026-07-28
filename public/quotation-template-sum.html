@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="ProgId" content="Word.Document" />
-  <meta name="Generator" content="InvoiceFlow Quotation Style Template" />
-  <title>Quotation Style Template — 報價單樣式範本</title>
+  <meta name="Generator" content="InvoiceFlow Quotation Template Sum" />
+  <title>Quotation Template Sum — 報價單範本（合計）</title>
   <!--
     ====================================================================
-    QUOTATION STYLE TEMPLATE — edit this file, then upload back to Cursor
-    報價單樣式範本 — 編輯後上傳給我即可套用
+    QUOTATION TEMPLATE SUM — edit this file, then upload back to Cursor
+    報價單範本（合計，無公司簽署） — 編輯後上傳給我即可套用
 
     HOW TO EDIT:
-    1. Open http://localhost:3000/quotation-style-template.html (or this file)
+    1. Open http://localhost:3000/quotation-template-sum.html (or this file)
     2. Replace company-logo.png with your company logo
     3. Edit the :root variables below for colours / spacing
     4. Save and upload back in Cursor chat
@@ -252,17 +252,19 @@
       font-size: 12px;
     }
 
-    /* ---- Bottom: message / remarks (no totals) ---- */
+    /* ---- Bottom: message / remarks · totals ---- */
     .quo-bottom {
-      display: block;
+      display: table;
       width: 100%;
       margin-bottom: 40px;
     }
-    .quo-bottom-left {
-      display: block;
-      width: 100%;
-      max-width: 70%;
+    .quo-bottom-left,
+    .quo-bottom-right {
+      display: table-cell;
+      vertical-align: top;
     }
+    .quo-bottom-left { width: 58%; padding-right: 24px; }
+    .quo-bottom-right { width: 42%; }
 
     .quo-message {
       margin: 0 0 18px;
@@ -286,6 +288,39 @@
       color: var(--quo-color-text);
     }
     .quo-remarks li { margin-bottom: 4px; }
+
+    .quo-totals {
+      width: 100%;
+      max-width: 260px;
+      margin-left: auto;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .quo-totals td {
+      padding: 5px 0;
+      vertical-align: baseline;
+    }
+    .quo-totals .quo-tot-label {
+      text-align: right;
+      color: var(--quo-color-label);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding-right: 16px;
+      white-space: nowrap;
+    }
+    .quo-totals .quo-tot-value {
+      text-align: right;
+      min-width: 90px;
+      color: var(--quo-color-text);
+    }
+    .quo-totals .quo-tot-grand .quo-tot-label,
+    .quo-totals .quo-tot-grand .quo-tot-value {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--quo-color-text);
+      padding-top: 8px;
+    }
 
     /* ---- Acceptance only (no company signature) ---- */
     .quo-sign {
@@ -422,6 +457,22 @@
             <li>貨期會於簽回報價單及最終的效果圖確認後, 正式開始計算</li>
             <li>付款方式：支票,銀行轉帳及轉數快, 詳細資料將會列於invoice上</li>
           </ol>
+        </div>
+        <div class="quo-bottom-right">
+          <table class="quo-totals">
+            <tr>
+              <td class="quo-tot-label">Subtotal</td>
+              <td class="quo-tot-value">&lt;Subtotal&gt;</td>
+            </tr>
+            <tr>
+              <td class="quo-tot-label">Discount</td>
+              <td class="quo-tot-value">&lt;DiscountBeforeTax&gt;</td>
+            </tr>
+            <tr class="quo-tot-grand">
+              <td class="quo-tot-label">Total</td>
+              <td class="quo-tot-value">&lt;Total&gt;</td>
+            </tr>
+          </table>
         </div>
       </section>
 

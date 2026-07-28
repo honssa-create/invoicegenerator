@@ -116,6 +116,20 @@ export default function OrderDetailPage() {
     }
   };
 
+  const deleteOrder = async () => {
+    if (!confirm(bi(
+      'Move this order to Deleted Records? You can restore it within 60 days.',
+      '將此訂單移至已刪除紀錄？可於 60 天內還原。',
+    ))) return;
+    const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setQuoteToast({ text: data.error || bi('Failed to delete order', '刪除訂單失敗'), kind: 'error' });
+      return;
+    }
+    router.push('/orders');
+  };
+
   const setCoreLocal = (col: string, value: unknown) =>
     setOrder((o) => (o ? ({ ...o, [col]: value } as Order) : o));
   const setFieldLocal = (key: string, value: unknown) =>
@@ -356,6 +370,13 @@ export default function OrderDetailPage() {
           <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🚚 {bi('Generate Delivery Note', '產生出貨單')}
           </Link>
+          <button
+            type="button"
+            onClick={deleteOrder}
+            className="btn text-red-600 border border-red-200 hover:bg-red-50 w-full sm:w-auto"
+          >
+            {BTN.delete}
+          </button>
         </div>
       </div>
       {quoteToast && (

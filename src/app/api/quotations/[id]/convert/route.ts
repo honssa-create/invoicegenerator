@@ -57,6 +57,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   if (target === 'order') {
     const itemsSummary = q.items.map((i) => `• ${i.description} × ${i.quantity} @ ${i.unit_price}`).join('\n');
+    const first = q.items[0];
+    const firstName = (first?.product_service || first?.description || '').trim();
+    const firstQty = first != null ? String(first.quantity ?? '') : '';
+    const itemPart =
+      firstName && firstQty !== '' ? `${firstName}x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
+    const orderName = [(q.customer_name || '').trim(), itemPart].filter(Boolean).join('-');
     const create = db.transaction(() => {
       const result = db
         .prepare(
@@ -65,9 +71,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
         )
         .run(
           ownerId,
-          q.quote_number,
-          q.customer_name || null,
-          `From ${q.quote_number}`,
+          (q.order_no || '').trim() || null,
+          orderName || q.customer_name || null,
+          null,
           q.customer_email || null,
           null,
           q.shipping_address?.trim() ||

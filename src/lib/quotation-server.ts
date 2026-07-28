@@ -18,6 +18,20 @@ export function generateQuoteNumber(userId: number): string {
   return String(max + 1);
 }
 
+/** Quote number = source + 1 (or the next free number if that is taken). */
+export function nextQuoteNumberAfter(userId: number, current: string): string {
+  let n = /^\d{7}$/.test(current.trim()) ? Number(current.trim()) + 1 : Number(generateQuoteNumber(userId));
+  if (!Number.isFinite(n) || n < QUOTE_NUMBER_START) n = Number(generateQuoteNumber(userId));
+
+  const exists = db.prepare(
+    'SELECT 1 FROM quotations WHERE user_id = ? AND quote_number = ?',
+  );
+  while (exists.get(userId, String(n))) {
+    n += 1;
+  }
+  return String(n);
+}
+
 export function getQuotationWithDetails(id: number | string, userId: number): QuotationWithDetails | null {
   const quotation = db
     .prepare(

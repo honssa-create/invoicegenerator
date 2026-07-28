@@ -85,6 +85,7 @@ export default function QuotationDetailPage() {
   const [msg, setMsg] = useState('');
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [copying, setCopying] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -255,6 +256,30 @@ export default function QuotationDetailPage() {
     setTimeout(() => router.push(`/invoices/${data.id}`), 1500);
   };
 
+  const duplicate = async () => {
+    setDuplicating(true);
+    await save();
+    try {
+      const res = await fetch(`/api/quotations/${id}/duplicate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setToast({ text: data.error || bi('Failed to duplicate quotation', '複製報價單失敗'), kind: 'error' });
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      setToast({
+        text: bi(`Duplicated as ${data.quote_number}`, `已複製為 ${data.quote_number}`),
+        kind: 'success',
+      });
+      setTimeout(() => router.push(`/quotations/${data.id}`), 800);
+    } catch {
+      setToast({ text: bi('Failed to duplicate quotation', '複製報價單失敗'), kind: 'error' });
+      setTimeout(() => setToast(null), 5000);
+    } finally {
+      setDuplicating(false);
+    }
+  };
+
   const del = async () => {
     if (!confirm('Move this quotation to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/quotations/${id}`, { method: 'DELETE' });
@@ -320,6 +345,15 @@ export default function QuotationDetailPage() {
           </a>
           {!readOnly && (
             <>
+              <button
+                onClick={duplicate}
+                disabled={duplicating}
+                className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                {duplicating
+                  ? bi('Duplicating…', '複製中…')
+                  : `📄 ${bi('Duplicate', '複製報價單')}`}
+              </button>
               <button
                 onClick={copyToInvoice}
                 disabled={copying}

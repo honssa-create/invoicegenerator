@@ -33,7 +33,7 @@ export function nextInvoiceNumberAfter(userId: number, current: string): string 
   return String(n);
 }
 
-export function getInvoiceWithDetails(invoiceId: number, userId: number): InvoiceWithDetails | null {
+export function getInvoiceWithDetails(invoiceId: number | string, userId: number): InvoiceWithDetails | null {
   const invoice = db
     .prepare(
       `SELECT i.*, c.name as customer_name, c.email as customer_email,

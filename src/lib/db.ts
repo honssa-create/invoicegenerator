@@ -258,6 +258,9 @@ try {
   if (!invoiceCols.some((c) => c.name === 'last_reminder_at')) {
     db.exec('ALTER TABLE invoices ADD COLUMN last_reminder_at TEXT');
   }
+  if (!invoiceCols.some((c) => c.name === 'last_due_soon_reminder_at')) {
+    db.exec('ALTER TABLE invoices ADD COLUMN last_due_soon_reminder_at TEXT');
+  }
   if (!invoiceCols.some((c) => c.name === 'source_platform')) {
     db.exec("ALTER TABLE invoices ADD COLUMN source_platform TEXT NOT NULL DEFAULT 'manual'");
     db.exec("UPDATE invoices SET source_platform = 'manual' WHERE source_platform IS NULL OR source_platform = ''");

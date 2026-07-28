@@ -110,23 +110,6 @@ export default function InvoicesList() {
     setSearch('');
   };
 
-  const [remindering, setRemindering] = useState(false);
-  const runReminders = async () => {
-    setRemindering(true);
-    try {
-      const res = await fetch('/api/cron/payment-reminders', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        const sentCount = (data.reminders || []).filter((r: { sent: boolean }) => r.sent).length;
-        alert(`Checked invoices ≥ ${data.days} days old.\nReminders processed: ${data.processed}\nEmails actually sent: ${sentCount}${sentCount === 0 && data.processed > 0 ? '\n(No email provider configured — reminders were logged to each record\u2019s activity feed.)' : ''}`);
-      } else {
-        alert(data.error || 'Failed to run reminders');
-      }
-    } finally {
-      setRemindering(false);
-    }
-  };
-
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
@@ -138,9 +121,12 @@ export default function InvoicesList() {
         </div>
         <div className="page-actions">
           {!readOnly && (
-            <button onClick={runReminders} disabled={remindering} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
-              {remindering ? bi('Checking…', '檢查中…') : bi('⏰ Run 30-day reminders', '⏰ 執行30天催款')}
-            </button>
+            <Link
+              href="/invoices/reminders"
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              ⏰ {bi('Payment reminders', '催款郵件')}
+            </Link>
           )}
           <a href="/api/invoices/export" className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             ⬇ {BTN.exportExcel}

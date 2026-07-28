@@ -29,15 +29,12 @@ function remarksFromQuote(q: QuotationWithDetails): string[] {
 /** Map a saved quotation into the Honour Label formal print/preview model. */
 export function quotationToFormalPreview(
   q: QuotationWithDetails,
-  business?: QuotationPrintBusiness | null,
+  _business?: QuotationPrintBusiness | null,
 ): QuotationPreviewModel {
   const currency = q.currency || 'HKD';
   const money = (n: number) => formatQuotationMoney(n, currency);
 
   const companyAddressLines = [...DEFAULT_QUOTATION_PREVIEW.companyAddressLines];
-  if (business?.company_name?.trim() || business?.name?.trim()) {
-    companyAddressLines[0] = (business.company_name || business.name).trim();
-  }
 
   const items = (q.items || [])
     .filter((i) => String(i.description || i.product_service || '').trim())

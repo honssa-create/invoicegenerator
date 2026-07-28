@@ -37,8 +37,8 @@ export interface QuotationPreviewModel {
 export const DEFAULT_QUOTATION_PREVIEW: QuotationPreviewModel = {
   companyAddressLines: [
     'Honour Label Limited',
-    'Room 13, Block C, 13/F',
-    'Wah Tat Industrial Centre',
+    'Room 13, Block B, 2/F',
+    'Wah Tat Industrial Center',
     '8 Wah Sing Street, Kwai Chung',
     'honour.com.hk',
     'hello@honour.com.hk',

@@ -299,8 +299,20 @@ db.exec(`
     FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS quotation_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    original_name TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_quotations_user ON quotations(user_id);
   CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
+  CREATE INDEX IF NOT EXISTS idx_quotation_files_quotation ON quotation_files(quotation_id);
 `);
 
 {

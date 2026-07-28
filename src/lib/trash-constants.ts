@@ -9,7 +9,8 @@ export type TrashEntityType =
   | 'other_income'
   | 'inbound'
   | 'kitchen_prep'
-  | 'order_file';
+  | 'order_file'
+  | 'quotation_file';
 
 export const TRASH_ENTITY_LABELS: Record<TrashEntityType, string> = {
   expense: 'Expense 支出',
@@ -21,6 +22,7 @@ export const TRASH_ENTITY_LABELS: Record<TrashEntityType, string> = {
   inbound: 'Inbound Shipment 到件',
   kitchen_prep: 'Kitchen Prep 備料單',
   order_file: 'Order Design Proof 設計圖',
+  quotation_file: 'Quotation Attachment 報價附件',
 };
 
 export interface TrashListItem {

@@ -1,5 +1,5 @@
 import db from './db';
-import { calculateQuotationTotals, type QuotationItem, type QuotationWithDetails } from './quotations';
+import { calculateQuotationTotals, type QuotationFile, type QuotationItem, type QuotationWithDetails } from './quotations';
 
 const QUOTE_NUMBER_START = 1001001;
 
@@ -36,6 +36,10 @@ export function getQuotationWithDetails(id: number | string, userId: number): Qu
     .prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id')
     .all(id) as QuotationItem[];
 
+  const files = db
+    .prepare('SELECT id, path, original_name FROM quotation_files WHERE quotation_id = ? ORDER BY id')
+    .all(id) as QuotationFile[];
+
   const { subtotal, discountAmount, taxAmount, total } = calculateQuotationTotals(items, {
     taxRate: quotation.tax_rate as number,
     discountType: quotation.discount_type as string,
@@ -51,6 +55,7 @@ export function getQuotationWithDetails(id: number | string, userId: number): Qu
     currency: (quotation.currency as string) || 'HKD',
     send_later: Boolean(Number(quotation.send_later) || 0),
     items,
+    files,
     subtotal,
     discount_amount: discountAmount,
     tax_amount: taxAmount,

@@ -32,7 +32,7 @@ function insertRow(table: string, row: Row): void {
 }
 
 function rowExists(table: string, id: number, userId?: number): boolean {
-  if (userId != null && table !== 'invoice_items' && table !== 'quotation_items' && table !== 'expense_receipts' && table !== 'order_files') {
+  if (userId != null && table !== 'invoice_items' && table !== 'quotation_items' && table !== 'expense_receipts' && table !== 'order_files' && table !== 'quotation_files') {
     const row = db.prepare(`SELECT 1 FROM ${table} WHERE id = ? AND user_id = ?`).get(id, userId);
     return Boolean(row);
   }
@@ -123,11 +123,12 @@ function restoreOrder(userId: number, payload: { order: Row; files: Row[] }): nu
   return id;
 }
 
-function restoreQuotation(userId: number, payload: { quotation: Row; items: Row[] }): number {
+function restoreQuotation(userId: number, payload: { quotation: Row; items: Row[]; files?: Row[] }): number {
   const id = payload.quotation.id as number;
   assertNotExists('quotations', id, userId, 'Quotation');
   insertRow('quotations', payload.quotation);
   for (const item of payload.items) insertRow('quotation_items', item);
+  for (const f of payload.files || []) insertRow('quotation_files', f);
   return id;
 }
 
@@ -171,6 +172,20 @@ function restoreOrderFile(userId: number, payload: { file: Row }): number {
   return id;
 }
 
+function restoreQuotationFile(userId: number, payload: { file: Row }): number {
+  const id = payload.file.id as number;
+  const quotationId = payload.file.quotation_id as number;
+  assertNotExists('quotation_files', id, undefined, 'Quotation file');
+  const parent = db
+    .prepare('SELECT id FROM quotations WHERE id = ? AND user_id = ?')
+    .get(quotationId, userId);
+  if (!parent) {
+    throw new Error('Parent quotation no longer exists — restore the quotation first');
+  }
+  insertRow('quotation_files', payload.file);
+  return id;
+}
+
 export function restoreFromTrash(
   trashId: number,
   userId: number
@@ -203,7 +218,7 @@ export function restoreFromTrash(
         entityId = restoreOrder(userId, payload as { order: Row; files: Row[] });
         break;
       case 'quotation':
-        entityId = restoreQuotation(userId, payload as { quotation: Row; items: Row[] });
+        entityId = restoreQuotation(userId, payload as { quotation: Row; items: Row[]; files?: Row[] });
         break;
       case 'other_income':
         entityId = restoreOtherIncome(userId, payload as { income: Row });
@@ -216,6 +231,9 @@ export function restoreFromTrash(
         break;
       case 'order_file':
         entityId = restoreOrderFile(userId, payload as { file: Row });
+        break;
+      case 'quotation_file':
+        entityId = restoreQuotationFile(userId, payload as { file: Row });
         break;
       default:
         throw new Error('Unknown record type');
@@ -293,11 +311,12 @@ export function trashQuotation(userId: number, quotationId: number): boolean {
   const quotation = db.prepare('SELECT * FROM quotations WHERE id = ? AND user_id = ?').get(quotationId, userId) as Row | undefined;
   if (!quotation) return false;
   const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ?').all(quotationId) as Row[];
+  const files = db.prepare('SELECT * FROM quotation_files WHERE quotation_id = ?').all(quotationId) as Row[];
   const label = String(quotation.quote_number || `Quotation #${quotationId}`);
   const summary = [quotation.issue_date, quotation.status].filter(Boolean).join(' · ') || null;
 
   db.transaction(() => {
-    insertTrash(userId, 'quotation', quotationId, label, summary, { quotation, items });
+    insertTrash(userId, 'quotation', quotationId, label, summary, { quotation, items, files });
     db.prepare('DELETE FROM quotations WHERE id = ? AND user_id = ?').run(quotationId, userId);
   })();
   return true;
@@ -362,6 +381,27 @@ export function trashOrderFile(userId: number, fileId: number): boolean {
     insertTrash(userId, 'order_file', fileId, label, summary, { file });
     db.prepare(
       `DELETE FROM order_files WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE user_id = ?)`
+    ).run(fileId, userId);
+  })();
+  return true;
+}
+
+export function trashQuotationFile(userId: number, fileId: number): boolean {
+  const file = db
+    .prepare(
+      `SELECT f.* FROM quotation_files f
+       JOIN quotations q ON q.id = f.quotation_id
+       WHERE f.id = ? AND q.user_id = ?`,
+    )
+    .get(fileId, userId) as Row | undefined;
+  if (!file) return false;
+  const label = String(file.original_name || `File #${fileId}`);
+  const summary = `Quotation #${file.quotation_id}`;
+
+  db.transaction(() => {
+    insertTrash(userId, 'quotation_file', fileId, label, summary, { file });
+    db.prepare(
+      `DELETE FROM quotation_files WHERE id = ? AND quotation_id IN (SELECT id FROM quotations WHERE user_id = ?)`,
     ).run(fileId, userId);
   })();
   return true;

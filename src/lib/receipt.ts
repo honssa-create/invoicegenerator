@@ -39,7 +39,7 @@ export function ensureReceiptsDir() {
   receiptsDir();
 }
 
-/** Save an image to R2 (production) or local disk (dev fallback). Returns public URL or bare filename. */
+/** Save a file to R2 (production) or local disk (dev fallback). Returns public URL or bare filename. */
 export async function saveReceipt(
   buffer: Buffer,
   mimeType: string,
@@ -50,7 +50,9 @@ export async function saveReceipt(
   }
 
   ensureReceiptsDir();
-  const ext = ALLOWED_EXT[mimeType] || '.png';
+  const fromName = path.extname(originalName || '').toLowerCase();
+  const safeExt = /^\.[a-z0-9]{1,8}$/i.test(fromName) ? fromName : '';
+  const ext = ALLOWED_EXT[mimeType] || safeExt || '.bin';
   const filename = `${crypto.randomUUID()}${ext}`;
   fs.writeFileSync(path.join(receiptsDir(), filename), buffer);
   return filename;
@@ -73,6 +75,14 @@ export function receiptContentType(filename: string): string {
     '.jpeg': 'image/jpeg',
     '.webp': 'image/webp',
     '.gif': 'image/gif',
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.csv': 'text/csv',
+    '.txt': 'text/plain',
+    '.zip': 'application/zip',
   };
   return map[ext] || 'application/octet-stream';
 }

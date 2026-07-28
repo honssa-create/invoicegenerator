@@ -13,6 +13,12 @@ export interface QuotationItem {
   class_name: string | null;
 }
 
+export interface QuotationFile {
+  id: number;
+  path: string;
+  original_name: string | null;
+}
+
 export interface QuotationWithDetails {
   id: number;
   user_id: number;
@@ -46,6 +52,7 @@ export interface QuotationWithDetails {
   customer_state: string | null;
   customer_zip: string | null;
   items: QuotationItem[];
+  files: QuotationFile[];
   subtotal: number;
   discount_amount: number;
   tax_amount: number;

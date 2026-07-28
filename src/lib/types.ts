@@ -20,6 +20,7 @@ export interface Customer {
 }
 
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue';
+export type InvoiceDiscountType = 'percent' | 'amount';
 
 export interface Invoice {
   id: number;
@@ -33,6 +34,19 @@ export interface Invoice {
   tax_rate: number;
   notes: string | null;
   terms: string | null;
+  billing_address: string | null;
+  shipping_address: string | null;
+  email: string | null;
+  send_later: boolean;
+  ship_via: string | null;
+  shipping_date: string | null;
+  tracking_no: string | null;
+  order_no: string | null;
+  receipt_date: string | null;
+  currency: string | null;
+  discount_type: InvoiceDiscountType;
+  discount_value: number;
+  shipping_amount: number;
   created_at: string;
   updated_at: string;
 }
@@ -47,10 +61,19 @@ export interface LinkedOrderSummary {
 export interface InvoiceItem {
   id: number;
   invoice_id: number;
+  service_date: string | null;
+  product_service: string | null;
   description: string;
   quantity: number;
   unit_price: number;
   amount: number;
+  class_name: string | null;
+}
+
+export interface InvoiceFile {
+  id: number;
+  path: string;
+  original_name: string | null;
 }
 
 export interface InvoiceWithDetails extends Invoice {
@@ -61,7 +84,9 @@ export interface InvoiceWithDetails extends Invoice {
   customer_state: string | null;
   customer_zip: string | null;
   items: InvoiceItem[];
+  files: InvoiceFile[];
   subtotal: number;
+  discount_amount: number;
   tax_amount: number;
   total: number;
 }

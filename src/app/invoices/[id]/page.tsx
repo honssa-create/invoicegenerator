@@ -1,23 +1,57 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import { useAuth } from '@/components/AuthProvider';
-import { StatusBadge, formatCurrency } from '@/components/ui';
+import { formatCurrency, StatusBadge } from '@/components/ui';
+import { invoiceFileUrl } from '@/lib/image-url';
 import { isSectionReadOnly } from '@/lib/permissions';
-import { formatDate, calculateInvoiceTotals } from '@/lib/utils';
-import type { InvoiceWithDetails, LinkedOrderSummary } from '@/lib/types';
+import { calculateInvoiceTotals } from '@/lib/utils';
+import type {
+  Customer,
+  InvoiceDiscountType,
+  InvoiceFile,
+  InvoiceStatus,
+  InvoiceWithDetails,
+  LinkedOrderSummary,
+} from '@/lib/types';
 import { orderTitle, type Order } from '@/lib/orders';
-import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface LineItem {
+  service_date: string;
+  product_service: string;
   description: string;
   quantity: number;
   unit_price: number;
+  class_name: string;
 }
+
+const emptyLine = (): LineItem => ({
+  service_date: '',
+  product_service: '',
+  description: '',
+  quantity: 1,
+  unit_price: 0,
+  class_name: '',
+});
+
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageName(name: string | null | undefined): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(name || '');
+}
+
+const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue'] as const;
 
 export default function InvoiceDetailPage() {
   const { id } = useParams();
@@ -25,40 +59,141 @@ export default function InvoiceDetailPage() {
   const { user } = useAuth();
   const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [items, setItems] = useState<LineItem[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [linkedOrder, setLinkedOrder] = useState<LinkedOrderSummary | null>(null);
+  const [customerId, setCustomerId] = useState('');
+  const [email, setEmail] = useState('');
+  const [sendLater, setSendLater] = useState(false);
+  const [issueDate, setIssueDate] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [taxRate, setTaxRate] = useState(0);
-  const [status, setStatus] = useState('draft');
+  const [status, setStatus] = useState<InvoiceStatus>('draft');
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('');
+  const [billingAddress, setBillingAddress] = useState('');
+  const [shippingAddress, setShippingAddress] = useState('');
+  const [shipVia, setShipVia] = useState('');
+  const [shippingDate, setShippingDate] = useState('');
+  const [trackingNo, setTrackingNo] = useState('');
+  const [orderNo, setOrderNo] = useState('');
+  const [receiptDate, setReceiptDate] = useState('');
+  const [currency, setCurrency] = useState('HKD');
+  const [discountType, setDiscountType] = useState<InvoiceDiscountType>('percent');
+  const [discountValue, setDiscountValue] = useState(0);
+  const [shippingAmount, setShippingAmount] = useState(0);
+  const [items, setItems] = useState<LineItem[]>([emptyLine()]);
+  const [files, setFiles] = useState<InvoiceFile[]>([]);
+  const [uploadMsg, setUploadMsg] = useState('');
   const [saving, setSaving] = useState(false);
-  const [linkedOrder, setLinkedOrder] = useState<LinkedOrderSummary | null>(null);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [msg, setMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadInvoice = () => {
+  const load = () => {
     fetch(`/api/invoices/${id}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.invoice) {
-          setInvoice(data.invoice);
-          setItems(data.invoice.items.map((i: { description: string; quantity: number; unit_price: number }) => ({
-            description: i.description,
-            quantity: i.quantity,
-            unit_price: i.unit_price,
-          })));
-          setTaxRate(data.invoice.tax_rate);
-          setStatus(data.invoice.status);
-          setNotes(data.invoice.notes || '');
-          setTerms(data.invoice.terms || '');
-          setLinkedOrder(data.linkedOrder || null);
-        }
+      .then((r) => r.json())
+      .then((d) => {
+        const inv: InvoiceWithDetails = d.invoice;
+        if (!inv) return;
+        setInvoice(inv);
+        setLinkedOrder(d.linkedOrder || null);
+        setCustomerId(inv.customer_id ? String(inv.customer_id) : '');
+        setEmail(inv.email || inv.customer_email || '');
+        setSendLater(Boolean(inv.send_later));
+        setIssueDate(inv.issue_date);
+        setDueDate(inv.due_date);
+        setTaxRate(inv.tax_rate);
+        setStatus(inv.status);
+        setNotes(inv.notes || '');
+        setTerms(inv.terms || '');
+        setBillingAddress(inv.billing_address || '');
+        setShippingAddress(inv.shipping_address || '');
+        setShipVia(inv.ship_via || '');
+        setShippingDate(inv.shipping_date || '');
+        setTrackingNo(inv.tracking_no || '');
+        setOrderNo(inv.order_no || '');
+        setReceiptDate(inv.receipt_date || '');
+        setCurrency(inv.currency || 'HKD');
+        setDiscountType(inv.discount_type || 'percent');
+        setDiscountValue(inv.discount_value || 0);
+        setShippingAmount(inv.shipping_amount || 0);
+        setItems(
+          inv.items.length
+            ? inv.items.map((i) => ({
+                service_date: i.service_date || '',
+                product_service: i.product_service || '',
+                description: i.description || '',
+                quantity: i.quantity,
+                unit_price: i.unit_price,
+                class_name: i.class_name || '',
+              }))
+            : [emptyLine()],
+        );
+        setFiles(inv.files || []);
       });
   };
 
-  useEffect(() => { loadInvoice(); }, [id]);
   useEffect(() => {
-    fetch('/api/orders').then((r) => r.json()).then((d) => setOrders(d.orders || [])).catch(() => {});
+    load();
+  }, [id]);
+
+  useEffect(() => {
+    fetch('/api/customers')
+      .then((r) => r.json())
+      .then((d) => setCustomers(d.customers || []));
+    fetch('/api/orders')
+      .then((r) => r.json())
+      .then((d) => setOrders(d.orders || []))
+      .catch(() => {});
   }, []);
+
+  const totals = useMemo(
+    () =>
+      calculateInvoiceTotals(items, {
+        taxRate,
+        discountType,
+        discountValue,
+        shippingAmount,
+      }),
+    [items, taxRate, discountType, discountValue, shippingAmount],
+  );
+
+  const save = async () => {
+    setSaving(true);
+    const res = await fetch(`/api/invoices/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customer_id: customerId ? Number(customerId) : undefined,
+        issue_date: issueDate,
+        due_date: dueDate,
+        tax_rate: taxRate,
+        status,
+        notes,
+        terms,
+        billing_address: billingAddress,
+        shipping_address: shippingAddress,
+        email,
+        send_later: sendLater,
+        ship_via: shipVia,
+        shipping_date: shippingDate,
+        tracking_no: trackingNo,
+        order_no: orderNo,
+        receipt_date: receiptDate,
+        currency,
+        discount_type: discountType,
+        discount_value: discountValue,
+        shipping_amount: shippingAmount,
+        items: items.filter((i) => i.description.trim() || i.product_service.trim()),
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setMsg('Saved');
+      load();
+      setTimeout(() => setMsg(''), 2000);
+    }
+  };
 
   const linkOrder = async (orderId: string) => {
     await fetch(`/api/invoices/${id}`, {
@@ -66,27 +201,72 @@ export default function InvoiceDetailPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order_id: orderId ? Number(orderId) : null }),
     });
-    loadInvoice();
+    load();
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    const res = await fetch(`/api/invoices/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tax_rate: taxRate, status, notes, terms, items }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setEditing(false);
-      loadInvoice();
-    }
-  };
-
-  const handleDelete = async () => {
+  const del = async () => {
     if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     router.push('/invoices');
+  };
+
+  const uploadFiles = async (list: FileList) => {
+    if (readOnly) return;
+    const selected = Array.from(list);
+    const tooBig = selected.find((f) => f.size > MAX_ATTACHMENT_BYTES);
+    if (tooBig) {
+      setUploadMsg(
+        bi(
+          `“${tooBig.name}” is over 20 MB (${formatFileSize(tooBig.size)})`,
+          `「${tooBig.name}」超過 20 MB（${formatFileSize(tooBig.size)}）`,
+        ),
+      );
+      return;
+    }
+    if (!selected.length) return;
+
+    setUploadMsg(bi(`Uploading ${selected.length} file(s)…`, `正在上傳 ${selected.length} 個檔案…`));
+    const fd = new FormData();
+    selected.forEach((f) => fd.append('file', f));
+    try {
+      const res = await fetch(`/api/invoices/${id}/files`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadMsg(data.error || MSG.uploadFailed);
+        return;
+      }
+      setFiles(data.files || []);
+      setUploadMsg(bi('Uploaded', '已上傳'));
+      setTimeout(() => setUploadMsg(''), 2000);
+    } catch {
+      setUploadMsg(MSG.uploadFailed);
+    }
+  };
+
+  const deleteFile = async (fileId: number) => {
+    if (readOnly) return;
+    const res = await fetch(`/api/invoice-files/${fileId}`, { method: 'DELETE' });
+    if (res.ok) setFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
+  const updateItem = (i: number, field: keyof LineItem, value: string | number) =>
+    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, [field]: value } : it)));
+  const addItem = () => setItems((prev) => [...prev, emptyLine()]);
+  const clearItems = () => setItems([emptyLine()]);
+  const removeItem = (i: number) =>
+    setItems((prev) => (prev.length <= 1 ? [emptyLine()] : prev.filter((_, idx) => idx !== i)));
+
+  const applyCustomer = (nextId: string) => {
+    setCustomerId(nextId);
+    if (!nextId) return;
+    const c = customers.find((x) => String(x.id) === nextId);
+    if (!c) return;
+    if (!email.trim() && c.email) setEmail(c.email);
+    const composed = [c.name, c.address, [c.city, c.state, c.zip].filter(Boolean).join(', '), c.phone]
+      .filter(Boolean)
+      .join('\n');
+    if (!billingAddress.trim() && composed) setBillingAddress(composed);
+    if (!shippingAddress.trim() && composed) setShippingAddress(composed);
   };
 
   if (!invoice) {
@@ -99,11 +279,11 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const totals = editing ? calculateInvoiceTotals(items, taxRate) : {
-    subtotal: invoice.subtotal,
-    taxAmount: invoice.tax_amount,
-    total: invoice.total,
-  };
+  const inputCls =
+    'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-brand-500 outline-none disabled:bg-gray-50';
+  const labelCls = 'block text-xs font-medium text-gray-600 mb-1';
+  const hintCls = 'text-[11px] text-gray-400 mt-0.5';
+  const currencyLabel = currency || 'HKD';
 
   return (
     <AppLayout>
@@ -114,7 +294,7 @@ export default function InvoiceDetailPage() {
           </Link>
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             <h1 className="page-title">{invoice.invoice_number}</h1>
-            <StatusBadge status={invoice.status} />
+            <StatusBadge status={status} />
           </div>
         </div>
         <div className="page-actions">
@@ -125,173 +305,519 @@ export default function InvoiceDetailPage() {
             {BTN.printPdf}
           </Link>
           {!readOnly && (
-          <>
-          {!editing ? (
-            <button onClick={() => setEditing(true)} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
-              {BTN.edit}
-            </button>
-          ) : (
             <>
-              <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50"
+              >
                 {saving ? BTN.saving : BTN.save}
               </button>
-              <button onClick={() => setEditing(false)} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
-                {BTN.cancel}
+              <button
+                onClick={del}
+                className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50"
+              >
+                {BTN.delete}
               </button>
             </>
           )}
-          <button onClick={handleDelete} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">
-            {BTN.delete}
-          </button>
-          </>
-          )}
         </div>
       </div>
+      {msg && <div className="mb-4 text-sm text-green-700">{msg}</div>}
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="grid md:grid-cols-2 gap-6 mb-6">
+      <div className="grid xl:grid-cols-[1fr_280px] gap-6">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="p-5 border-b border-gray-100 grid lg:grid-cols-[1fr_1fr_auto] gap-4 items-start">
+            <div className="space-y-3">
               <div>
-                <p className="text-xs text-gray-500 uppercase font-medium mb-1">{bi('Bill To', '帳單對象')}</p>
-                <p className="font-semibold text-gray-900">{invoice.customer_name}</p>
-                {invoice.customer_email && <p className="text-sm text-gray-600">{invoice.customer_email}</p>}
-                {invoice.customer_address && <p className="text-sm text-gray-600">{invoice.customer_address}</p>}
-                {(invoice.customer_city || invoice.customer_state) && (
-                  <p className="text-sm text-gray-600">
-                    {[invoice.customer_city, invoice.customer_state, invoice.customer_zip].filter(Boolean).join(', ')}
-                  </p>
-                )}
+                <label className={labelCls}>{bi('Customer', '客戶')}</label>
+                <select
+                  value={customerId}
+                  onChange={(e) => applyCustomer(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                >
+                  <option value="">Choose a customer</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="text-right text-sm space-y-1">
-                <p><span className="text-gray-500">{bi('Issue Date', '開立日期')}:</span> <span className="font-medium">{formatDate(invoice.issue_date)}</span></p>
-                <p><span className="text-gray-500">{bi('Due Date', '到期日')}:</span> <span className="font-medium">{formatDate(invoice.due_date)}</span></p>
+              <div>
+                <label className={labelCls}>Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                  placeholder="customer@email.com"
+                />
+                <label className="mt-2 inline-flex items-center gap-2 text-sm text-gray-700 select-none">
+                  <input
+                    type="checkbox"
+                    checked={sendLater}
+                    onChange={(e) => setSendLater(e.target.checked)}
+                    disabled={readOnly}
+                    className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  Send later
+                </label>
               </div>
             </div>
-
-            {editing && (
-              <div className="mb-4 flex gap-4">
-                <div>
-                  <label className="text-sm text-gray-500">{bi('Status', '狀態')}</label>
-                  <select value={status} onChange={(e) => setStatus(e.target.value)}
-                    className="block mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
-                    <option value="draft">Draft</option>
-                    <option value="sent">Sent</option>
-                    <option value="paid">Paid</option>
-                    <option value="overdue">Overdue</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm text-gray-500">{bi('Tax Rate (%)', '稅率 (%)')}</label>
-                  <input type="number" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))}
-                    className="block mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-24" />
-                </div>
+            <div className="space-y-3">
+              <div>
+                <label className={labelCls}>Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as InvoiceStatus)}
+                  disabled={readOnly}
+                  className={inputCls}
+                >
+                  {INVOICE_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
+            </div>
+            <div className="text-right lg:pl-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AMOUNT</p>
+              <p className="text-3xl font-bold text-gray-900 tabular-nums mt-1">
+                {currencyLabel}{' '}
+                {totals.total.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+            </div>
+          </div>
 
-            <table className="w-full">
+          <div className="p-5 border-b border-gray-100 grid lg:grid-cols-[1.1fr_1fr] gap-6">
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>Billing address</label>
+                <textarea
+                  value={billingAddress}
+                  onChange={(e) => setBillingAddress(e.target.value)}
+                  disabled={readOnly}
+                  rows={4}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Shipping to</label>
+                <textarea
+                  value={shippingAddress}
+                  onChange={(e) => setShippingAddress(e.target.value)}
+                  disabled={readOnly}
+                  rows={4}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3 content-start">
+              <div>
+                <label className={labelCls}>{bi('Issue date', '開立日期')}</label>
+                <input
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => setIssueDate(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>{bi('Due date', '到期日')}</label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Ship via</label>
+                <input value={shipVia} onChange={(e) => setShipVia(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Shipping date</label>
+                <input
+                  type="date"
+                  value={shippingDate}
+                  onChange={(e) => setShippingDate(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Tracking no.</label>
+                <input
+                  value={trackingNo}
+                  onChange={(e) => setTrackingNo(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Order no.</label>
+                <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Receipt Date</label>
+                <input
+                  type="date"
+                  value={receiptDate}
+                  onChange={(e) => setReceiptDate(e.target.value)}
+                  disabled={readOnly}
+                  className={inputCls}
+                />
+                <p className={hintCls}>Not printed on form</p>
+              </div>
+              <div>
+                <label className={labelCls}>Currency</label>
+                <input value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={readOnly} className={inputCls} />
+                <p className={hintCls}>Not printed on form</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 border-b border-gray-100 overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-xs text-gray-500 uppercase">
-                  <th className="pb-3">{bi('Description', '描述')}</th>
-                  <th className="pb-3 text-right">{bi('Qty', '數量')}</th>
-                  <th className="pb-3 text-right">{bi('Rate', '單價')}</th>
-                  <th className="pb-3 text-right">{bi('Amount', '金額')}</th>
+                <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
+                  <th className="text-left py-2 pr-2 font-medium w-8">#</th>
+                  <th className="text-left py-2 pr-2 font-medium">Service date</th>
+                  <th className="text-left py-2 pr-2 font-medium">Product/Service</th>
+                  <th className="text-left py-2 pr-2 font-medium">Description</th>
+                  <th className="text-right py-2 pr-2 font-medium w-20">Qty</th>
+                  <th className="text-right py-2 pr-2 font-medium w-24">Rate</th>
+                  <th className="text-right py-2 pr-2 font-medium w-28">Amount ({currencyLabel})</th>
+                  <th className="text-left py-2 pr-2 font-medium w-24">Class</th>
+                  <th className="w-8" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {(editing ? items : invoice.items).map((item, i) => (
-                  <tr key={i}>
-                    <td className="py-3 text-sm">
-                      {editing ? (
-                        <input value={item.description} onChange={(e) => {
-                          const updated = [...items];
-                          updated[i] = { ...updated[i], description: e.target.value };
-                          setItems(updated);
-                        }} className="w-full px-2 py-1 border border-gray-300 rounded text-sm" />
-                      ) : (
-                        item.description
-                      )}
+              <tbody>
+                {items.map((item, i) => (
+                  <tr key={i} className="border-b border-gray-100 align-top">
+                    <td className="py-2 pr-2 text-gray-400">{i + 1}</td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="date"
+                        value={item.service_date}
+                        onChange={(e) => updateItem(i, 'service_date', e.target.value)}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
+                      />
                     </td>
-                    <td className="py-3 text-sm text-right">
-                      {editing ? (
-                        <input type="number" value={item.quantity} onChange={(e) => {
-                          const updated = [...items];
-                          updated[i] = { ...updated[i], quantity: Number(e.target.value) };
-                          setItems(updated);
-                        }} className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-right" />
-                      ) : (
-                        item.quantity
-                      )}
+                    <td className="py-2 pr-2">
+                      <input
+                        value={item.product_service}
+                        onChange={(e) => updateItem(i, 'product_service', e.target.value)}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
+                        placeholder="Product / service"
+                      />
                     </td>
-                    <td className="py-3 text-sm text-right">
-                      {editing ? (
-                        <input type="number" value={item.unit_price} onChange={(e) => {
-                          const updated = [...items];
-                          updated[i] = { ...updated[i], unit_price: Number(e.target.value) };
-                          setItems(updated);
-                        }} className="w-24 px-2 py-1 border border-gray-300 rounded text-sm text-right" />
-                      ) : (
-                        formatCurrency(item.unit_price)
-                      )}
+                    <td className="py-2 pr-2">
+                      <input
+                        value={item.description}
+                        onChange={(e) => updateItem(i, 'description', e.target.value)}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
+                        placeholder="Description"
+                      />
                     </td>
-                    <td className="py-3 text-sm text-right font-medium">
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => updateItem(i, 'quantity', Number(e.target.value))}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm text-right"
+                      />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        value={item.unit_price}
+                        onChange={(e) => updateItem(i, 'unit_price', Number(e.target.value))}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm text-right"
+                      />
+                    </td>
+                    <td className="py-2 pr-2 text-right tabular-nums pt-3">
                       {formatCurrency(item.quantity * item.unit_price)}
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        value={item.class_name}
+                        onChange={(e) => updateItem(i, 'class_name', e.target.value)}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
+                      />
+                    </td>
+                    <td className="py-2">
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(i)}
+                          className="text-gray-400 hover:text-red-600 text-sm px-1"
+                          title="Remove line"
+                        >
+                          🗑
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {!readOnly && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="px-3 py-1.5 text-sm font-medium text-brand-700 border border-brand-200 rounded-md hover:bg-brand-50"
+                >
+                  Add lines
+                </button>
+                <button
+                  type="button"
+                  onClick={clearItems}
+                  className="px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50"
+                >
+                  Clear all lines
+                </button>
+              </div>
+            )}
+          </div>
 
-            <div className="mt-6 flex justify-end">
-              <div className="w-64 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">{bi('Subtotal', '小計')}</span><span>{formatCurrency(totals.subtotal)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">{bi('Tax', '稅項')}</span><span>{formatCurrency(totals.taxAmount)}</span></div>
-                <div className="flex justify-between font-bold text-lg border-t pt-2"><span>{bi('Total', '總計')}</span><span>{formatCurrency(totals.total)}</span></div>
+          <div className="p-5 grid lg:grid-cols-[1.2fr_0.8fr] gap-6">
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>Message displayed on invoice</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  disabled={readOnly}
+                  rows={4}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Message displayed on statement</label>
+                <textarea
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  disabled={readOnly}
+                  rows={3}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <div className="space-y-2 text-sm max-w-sm ml-auto w-full">
+              <div className="flex justify-between py-1">
+                <span className="text-gray-500">Subtotal</span>
+                <span className="tabular-nums">{formatCurrency(totals.subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500 shrink-0">Discount</span>
+                <div className="flex items-center gap-1">
+                  <select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value as InvoiceDiscountType)}
+                    disabled={readOnly}
+                    className="px-2 py-1 border border-gray-300 rounded text-xs"
+                  >
+                    <option value="percent">Discount percent</option>
+                    <option value="amount">Discount amount</option>
+                  </select>
+                  <input
+                    type="number"
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(Number(e.target.value))}
+                    disabled={readOnly}
+                    className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span />
+                <span>− {formatCurrency(totals.discountAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500">Shipping</span>
+                <input
+                  type="number"
+                  value={shippingAmount}
+                  onChange={(e) => setShippingAmount(Number(e.target.value))}
+                  disabled={readOnly}
+                  className="w-28 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500">Tax rate (%)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={taxRate}
+                  onChange={(e) => setTaxRate(Number(e.target.value))}
+                  disabled={readOnly}
+                  className="w-28 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span />
+                <span>{formatCurrency(totals.taxAmount)}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-gray-200 pt-2 mt-1">
+                <span>Total</span>
+                <span className="tabular-nums">{formatCurrency(totals.total)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-base">
+                <span>Invoice Total</span>
+                <span className="tabular-nums">
+                  {currencyLabel}{' '}
+                  {totals.total.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
             </div>
           </div>
+
+          <div className="border-t border-gray-100 p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">{bi('Attachments', '附件')}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {bi('Any file type · max 20 MB each', '任意檔案類型 · 每個上限 20 MB')}
+                </p>
+                {uploadMsg && <p className="text-xs text-brand-700 mt-1">{uploadMsg}</p>}
+              </div>
+              {!readOnly && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-sm text-brand-600 hover:text-brand-700 font-medium shrink-0"
+                  >
+                    + {bi('Attach files', '附加檔案')}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files?.length) void uploadFiles(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                </>
+              )}
+            </div>
+
+            {files.length === 0 ? (
+              <div
+                onClick={() => !readOnly && fileInputRef.current?.click()}
+                className={`border-2 border-dashed border-gray-300 rounded-xl p-6 text-center text-gray-400 text-sm ${
+                  readOnly ? '' : 'cursor-pointer hover:border-brand-400 hover:bg-brand-50/40'
+                }`}
+              >
+                {bi('No attachments yet', '尚無附件')}
+                {!readOnly && (
+                  <span className="block mt-1 text-xs">
+                    {bi('Click to upload (under 20 MB each)', '點擊上傳（每個不超過 20 MB）')}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {files.map((f) => {
+                  const url = invoiceFileUrl(f);
+                  const name = f.original_name || `File #${f.id}`;
+                  return (
+                    <li
+                      key={f.id}
+                      className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2"
+                    >
+                      {isImageName(f.original_name) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={url}
+                          alt={name}
+                          className="h-10 w-10 rounded object-cover border border-gray-200 shrink-0 bg-white"
+                        />
+                      ) : (
+                        <span className="h-10 w-10 rounded bg-white border border-gray-200 flex items-center justify-center text-gray-400 text-xs shrink-0">
+                          FILE
+                        </span>
+                      )}
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 min-w-0 text-sm text-brand-700 hover:underline truncate"
+                      >
+                        {name}
+                      </a>
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => void deleteFile(f.id)}
+                          className="text-xs text-red-600 hover:text-red-700 shrink-0"
+                        >
+                          {BTN.delete}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-3">Linked Order 關聯訂單</h3>
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">
+              {bi('Linked Order', '關聯訂單')}
+            </h3>
             {linkedOrder ? (
-              <Link href={`/orders/${linkedOrder.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
-                🔗 {orderTitle(linkedOrder)}
-              </Link>
+              <div className="mb-3">
+                <Link
+                  href={`/orders/${linkedOrder.id}`}
+                  className="text-sm text-brand-700 hover:underline font-medium"
+                >
+                  {orderTitle(linkedOrder)}
+                </Link>
+              </div>
             ) : (
-              <p className="text-sm text-gray-500 mb-2">{bi('No order linked.', '尚未關聯訂單。')}</p>
+              <p className="text-xs text-gray-400 mb-3">{bi('No linked order', '尚未關聯訂單')}</p>
             )}
             {!readOnly && (
-            <select
-              value={linkedOrder?.id || ''}
-              onChange={(e) => linkOrder(e.target.value)}
-              className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-            >
-              <option value="">{bi('— Not linked —', '— 未關聯 —')}</option>
-              {orders.map((o) => <option key={o.id} value={o.id}>{orderTitle(o)}</option>)}
-            </select>
+              <select
+                value={invoice.order_id ? String(invoice.order_id) : ''}
+                onChange={(e) => void linkOrder(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">{bi('Select order…', '選擇訂單…')}</option>
+                {orders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {orderTitle(o)}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-3">{bi('Notes', '備註')}</h3>
-            {editing ? (
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            ) : (
-              <p className="text-sm text-gray-600">{invoice.notes || bi('No notes', '無備註')}</p>
-            )}
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-3">{bi('Terms', '條款')}</h3>
-            {editing ? (
-              <textarea value={terms} onChange={(e) => setTerms(e.target.value)} rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            ) : (
-              <p className="text-sm text-gray-600">{invoice.terms || bi('No terms specified', '未指定條款')}</p>
-            )}
-          </div>
-          <ActivityFeed entityType="invoice" entityId={invoice.id} className="max-h-[520px]" />
+          <ActivityFeed entityType="invoice" entityId={invoice.id} className="max-h-[700px]" />
         </div>
       </div>
     </AppLayout>

@@ -32,7 +32,7 @@ function insertRow(table: string, row: Row): void {
 }
 
 function rowExists(table: string, id: number, userId?: number): boolean {
-  if (userId != null && table !== 'invoice_items' && table !== 'quotation_items' && table !== 'expense_receipts' && table !== 'order_files' && table !== 'quotation_files') {
+  if (userId != null && table !== 'invoice_items' && table !== 'quotation_items' && table !== 'expense_receipts' && table !== 'order_files' && table !== 'quotation_files' && table !== 'invoice_files') {
     const row = db.prepare(`SELECT 1 FROM ${table} WHERE id = ? AND user_id = ?`).get(id, userId);
     return Boolean(row);
   }
@@ -95,7 +95,7 @@ function restoreExpense(userId: number, payload: { expense: Row; receipts: Row[]
   return id;
 }
 
-function restoreInvoice(userId: number, payload: { invoice: Row; items: Row[] }): number {
+function restoreInvoice(userId: number, payload: { invoice: Row; items: Row[]; files?: Row[] }): number {
   const id = payload.invoice.id as number;
   const customerId = payload.invoice.customer_id as number;
   assertNotExists('invoices', id, userId, 'Invoice');
@@ -105,6 +105,7 @@ function restoreInvoice(userId: number, payload: { invoice: Row; items: Row[] })
   }
   insertRow('invoices', payload.invoice);
   for (const item of payload.items) insertRow('invoice_items', item);
+  for (const f of payload.files || []) insertRow('invoice_files', f);
   return id;
 }
 
@@ -186,6 +187,18 @@ function restoreQuotationFile(userId: number, payload: { file: Row }): number {
   return id;
 }
 
+function restoreInvoiceFile(userId: number, payload: { file: Row }): number {
+  const id = payload.file.id as number;
+  const invoiceId = payload.file.invoice_id as number;
+  assertNotExists('invoice_files', id, undefined, 'Invoice file');
+  const parent = db.prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?').get(invoiceId, userId);
+  if (!parent) {
+    throw new Error('Parent invoice no longer exists — restore the invoice first');
+  }
+  insertRow('invoice_files', payload.file);
+  return id;
+}
+
 export function restoreFromTrash(
   trashId: number,
   userId: number
@@ -209,7 +222,7 @@ export function restoreFromTrash(
         entityId = restoreExpense(userId, payload as { expense: Row; receipts: Row[] });
         break;
       case 'invoice':
-        entityId = restoreInvoice(userId, payload as { invoice: Row; items: Row[] });
+        entityId = restoreInvoice(userId, payload as { invoice: Row; items: Row[]; files?: Row[] });
         break;
       case 'customer':
         entityId = restoreCustomer(userId, payload as { customer: Row });
@@ -234,6 +247,9 @@ export function restoreFromTrash(
         break;
       case 'quotation_file':
         entityId = restoreQuotationFile(userId, payload as { file: Row });
+        break;
+      case 'invoice_file':
+        entityId = restoreInvoiceFile(userId, payload as { file: Row });
         break;
       default:
         throw new Error('Unknown record type');
@@ -270,11 +286,12 @@ export function trashInvoice(userId: number, invoiceId: number): boolean {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ? AND user_id = ?').get(invoiceId, userId) as Row | undefined;
   if (!invoice) return false;
   const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(invoiceId) as Row[];
+  const files = db.prepare('SELECT * FROM invoice_files WHERE invoice_id = ?').all(invoiceId) as Row[];
   const label = String(invoice.invoice_number || `Invoice #${invoiceId}`);
   const summary = [invoice.issue_date, invoice.status].filter(Boolean).join(' · ') || null;
 
   db.transaction(() => {
-    insertTrash(userId, 'invoice', invoiceId, label, summary, { invoice, items });
+    insertTrash(userId, 'invoice', invoiceId, label, summary, { invoice, items, files });
     db.prepare('DELETE FROM invoices WHERE id = ? AND user_id = ?').run(invoiceId, userId);
   })();
   return true;
@@ -402,6 +419,27 @@ export function trashQuotationFile(userId: number, fileId: number): boolean {
     insertTrash(userId, 'quotation_file', fileId, label, summary, { file });
     db.prepare(
       `DELETE FROM quotation_files WHERE id = ? AND quotation_id IN (SELECT id FROM quotations WHERE user_id = ?)`,
+    ).run(fileId, userId);
+  })();
+  return true;
+}
+
+export function trashInvoiceFile(userId: number, fileId: number): boolean {
+  const file = db
+    .prepare(
+      `SELECT f.* FROM invoice_files f
+       JOIN invoices i ON i.id = f.invoice_id
+       WHERE f.id = ? AND i.user_id = ?`,
+    )
+    .get(fileId, userId) as Row | undefined;
+  if (!file) return false;
+  const label = String(file.original_name || `File #${fileId}`);
+  const summary = `Invoice #${file.invoice_id}`;
+
+  db.transaction(() => {
+    insertTrash(userId, 'invoice_file', fileId, label, summary, { file });
+    db.prepare(
+      `DELETE FROM invoice_files WHERE id = ? AND invoice_id IN (SELECT id FROM invoices WHERE user_id = ?)`,
     ).run(fileId, userId);
   })();
   return true;

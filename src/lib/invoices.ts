@@ -1,18 +1,24 @@
 import db from './db';
-import type { InvoiceItem, InvoiceWithDetails } from './types';
+import type { InvoiceFile, InvoiceItem, InvoiceWithDetails } from './types';
 import { calculateInvoiceTotals } from './utils';
 
 export { calculateInvoiceTotals, formatCurrency, formatDate, STATUS_COLORS } from './utils';
 
+const INVOICE_NUMBER_START = 1038;
+
+/** Next 4-digit invoice number for this user (1038, 1039, …). */
 export function generateInvoiceNumber(userId: number): string {
-  const year = new Date().getFullYear();
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) as count FROM invoices WHERE user_id = ? AND invoice_number LIKE ?`
-    )
-    .get(userId, `INV-${year}-%`) as { count: number };
-  const next = row.count + 1;
-  return `INV-${year}-${String(next).padStart(4, '0')}`;
+  const rows = db
+    .prepare('SELECT invoice_number FROM invoices WHERE user_id = ?')
+    .all(userId) as { invoice_number: string }[];
+
+  let max = INVOICE_NUMBER_START - 1;
+  for (const { invoice_number } of rows) {
+    if (!/^\d{4,}$/.test(invoice_number)) continue;
+    const n = Number(invoice_number);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return String(max + 1);
 }
 
 export function getInvoiceWithDetails(invoiceId: number, userId: number): InvoiceWithDetails | null {
@@ -33,12 +39,28 @@ export function getInvoiceWithDetails(invoiceId: number, userId: number): Invoic
     .prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id')
     .all(invoiceId) as InvoiceItem[];
 
-  const { subtotal, taxAmount, total } = calculateInvoiceTotals(items, invoice.tax_rate as number);
+  const files = db
+    .prepare('SELECT id, path, original_name FROM invoice_files WHERE invoice_id = ? ORDER BY id')
+    .all(invoiceId) as InvoiceFile[];
+
+  const { subtotal, discountAmount, taxAmount, total } = calculateInvoiceTotals(items, {
+    taxRate: invoice.tax_rate as number,
+    discountType: invoice.discount_type as string,
+    discountValue: invoice.discount_value as number,
+    shippingAmount: invoice.shipping_amount as number,
+  });
 
   return {
     ...(invoice as unknown as InvoiceWithDetails),
+    discount_type: (invoice.discount_type as InvoiceWithDetails['discount_type']) || 'percent',
+    discount_value: Number(invoice.discount_value) || 0,
+    shipping_amount: Number(invoice.shipping_amount) || 0,
+    currency: (invoice.currency as string) || 'HKD',
+    send_later: Boolean(Number(invoice.send_later) || 0),
     items,
+    files,
     subtotal,
+    discount_amount: discountAmount,
     tax_amount: taxAmount,
     total,
   };

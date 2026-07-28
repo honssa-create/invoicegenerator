@@ -50,6 +50,11 @@ export function quotationFileUrl(file: { id: number; path: string }): string {
   return isStoredImageUrl(file.path) ? file.path : `/api/quotation-files/${file.id}`;
 }
 
+export function invoiceFileUrl(file: { id: number; path: string }): string {
+  if (file.id > 0) return `/api/invoice-files/${file.id}`;
+  return isStoredImageUrl(file.path) ? file.path : `/api/invoice-files/${file.id}`;
+}
+
 export function orderPaymentReceiptUrl(orderId: number, storedPath: string | null | undefined): string | null {
   if (!storedPath) return null;
   return `/api/orders/${orderId}/payment-receipt`;

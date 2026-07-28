@@ -98,6 +98,7 @@ const API_PREFIXES: [string, PermissionSection][] = [
   ['/api/quotations', 'quotations'],
   ['/api/quotation-files', 'quotations'],
   ['/api/invoices', 'invoices'],
+  ['/api/invoice-files', 'invoices'],
   ['/api/orders', 'orders'],
   ['/api/hub', 'order_hub'],
   ['/api/integrations', 'order_hub'],

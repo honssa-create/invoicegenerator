@@ -268,7 +268,52 @@ try {
   if (!invoiceCols.some((c) => c.name === 'system_order_no')) {
     db.exec('ALTER TABLE invoices ADD COLUMN system_order_no TEXT');
   }
+
+  const addInvoiceCol = (name: string, ddl: string) => {
+    if (!invoiceCols.some((c) => c.name === name)) {
+      db.exec(`ALTER TABLE invoices ADD COLUMN ${ddl}`);
+      invoiceCols.push({ name });
+    }
+  };
+  addInvoiceCol('billing_address', 'billing_address TEXT');
+  addInvoiceCol('shipping_address', 'shipping_address TEXT');
+  addInvoiceCol('email', 'email TEXT');
+  addInvoiceCol('send_later', 'send_later INTEGER NOT NULL DEFAULT 0');
+  addInvoiceCol('ship_via', 'ship_via TEXT');
+  addInvoiceCol('shipping_date', 'shipping_date TEXT');
+  addInvoiceCol('tracking_no', 'tracking_no TEXT');
+  addInvoiceCol('order_no', 'order_no TEXT');
+  addInvoiceCol('receipt_date', 'receipt_date TEXT');
+  addInvoiceCol('currency', "currency TEXT DEFAULT 'HKD'");
+  addInvoiceCol('discount_type', "discount_type TEXT DEFAULT 'percent'");
+  addInvoiceCol('discount_value', 'discount_value REAL DEFAULT 0');
+  addInvoiceCol('shipping_amount', 'shipping_amount REAL DEFAULT 0');
+
+  const invoiceItemCols = db.prepare('PRAGMA table_info(invoice_items)').all() as { name: string }[];
+  const addInvoiceItemCol = (name: string, ddl: string) => {
+    if (!invoiceItemCols.some((c) => c.name === name)) {
+      db.exec(`ALTER TABLE invoice_items ADD COLUMN ${ddl}`);
+      invoiceItemCols.push({ name });
+    }
+  };
+  addInvoiceItemCol('service_date', 'service_date TEXT');
+  addInvoiceItemCol('product_service', 'product_service TEXT');
+  addInvoiceItemCol('class_name', 'class_name TEXT');
 }
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS invoice_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    original_name TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_invoice_files_invoice ON invoice_files(invoice_id);
+`);
 
 // Quotation module.
 db.exec(`

@@ -1,8 +1,28 @@
-export function calculateInvoiceTotals(items: { quantity: number; unit_price: number }[], taxRate: number) {
+export function calculateInvoiceTotals(
+  items: { quantity: number; unit_price: number }[],
+  taxRateOrOpts:
+    | number
+    | {
+        taxRate?: number;
+        discountType?: 'percent' | 'amount' | string | null;
+        discountValue?: number | null;
+        shippingAmount?: number | null;
+      } = 0,
+) {
+  const opts = typeof taxRateOrOpts === 'number' ? { taxRate: taxRateOrOpts } : taxRateOrOpts || {};
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
-  return { subtotal, taxAmount, total };
+  const discountType = opts.discountType === 'amount' ? 'amount' : 'percent';
+  const discountValue = Number(opts.discountValue) || 0;
+  const shippingAmount = Number(opts.shippingAmount) || 0;
+  const discountAmount =
+    discountType === 'amount'
+      ? Math.min(discountValue, subtotal)
+      : Math.max(0, subtotal * (discountValue / 100));
+  const afterDiscount = Math.max(0, subtotal - discountAmount);
+  const taxRate = Number(opts.taxRate) || 0;
+  const taxAmount = afterDiscount * (taxRate / 100);
+  const total = afterDiscount + taxAmount + shippingAmount;
+  return { subtotal, discountAmount, taxAmount, total };
 }
 
 export function formatCurrency(amount: number): string {

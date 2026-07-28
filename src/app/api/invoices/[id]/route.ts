@@ -16,6 +16,18 @@ function linkedOrder(orderId: number | null | undefined, ownerId: number) {
   );
 }
 
+function pushField(
+  fields: string[],
+  values: (string | number | null)[],
+  column: string,
+  value: unknown,
+  transform: (v: unknown) => string | number | null = (v) =>
+    typeof v === 'string' ? v.trim() || null : (v as string | number | null),
+) {
+  fields.push(`${column} = ?`);
+  values.push(transform(value));
+}
+
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) {
@@ -32,14 +44,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
     .prepare('SELECT name, company_name, email FROM users WHERE id = ?')
     .get(ownerId);
 
-  const orderRow = db
-    .prepare('SELECT order_id FROM invoices WHERE id = ?')
-    .get(params.id) as { order_id: number | null };
-
   return NextResponse.json({
-    invoice: { ...invoice, order_id: orderRow?.order_id ?? null },
+    invoice,
     business: user,
-    linkedOrder: linkedOrder(orderRow?.order_id, ownerId),
+    linkedOrder: linkedOrder(invoice.order_id, ownerId),
   });
 }
 
@@ -64,7 +72,30 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
   try {
     const body = await request.json();
-    const { customer_id, issue_date, due_date, tax_rate, notes, terms, status, items, order_id } = body;
+    const {
+      customer_id,
+      issue_date,
+      due_date,
+      tax_rate,
+      notes,
+      terms,
+      billing_address,
+      shipping_address,
+      email,
+      send_later,
+      ship_via,
+      shipping_date,
+      tracking_no,
+      order_no,
+      receipt_date,
+      currency,
+      discount_type,
+      discount_value,
+      shipping_amount,
+      status,
+      items,
+      order_id,
+    } = body;
 
     if (customer_id) {
       const customer = db
@@ -79,14 +110,29 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       const fields: string[] = [];
       const values: (string | number | null)[] = [];
 
-      if (customer_id !== undefined) { fields.push('customer_id = ?'); values.push(customer_id); }
-      if (issue_date !== undefined) { fields.push('issue_date = ?'); values.push(issue_date); }
-      if (due_date !== undefined) { fields.push('due_date = ?'); values.push(due_date); }
-      if (tax_rate !== undefined) { fields.push('tax_rate = ?'); values.push(tax_rate); }
-      if (notes !== undefined) { fields.push('notes = ?'); values.push(notes?.trim() || null); }
-      if (terms !== undefined) { fields.push('terms = ?'); values.push(terms?.trim() || null); }
-      if (status !== undefined) { fields.push('status = ?'); values.push(status); }
-      if (order_id !== undefined) { fields.push('order_id = ?'); values.push(order_id || null); }
+      if (customer_id !== undefined) pushField(fields, values, 'customer_id', customer_id, (v) => v as number);
+      if (issue_date !== undefined) pushField(fields, values, 'issue_date', issue_date, (v) => String(v));
+      if (due_date !== undefined) pushField(fields, values, 'due_date', due_date, (v) => String(v));
+      if (tax_rate !== undefined) pushField(fields, values, 'tax_rate', tax_rate, (v) => Number(v) || 0);
+      if (notes !== undefined) pushField(fields, values, 'notes', notes);
+      if (terms !== undefined) pushField(fields, values, 'terms', terms);
+      if (billing_address !== undefined) pushField(fields, values, 'billing_address', billing_address);
+      if (shipping_address !== undefined) pushField(fields, values, 'shipping_address', shipping_address);
+      if (email !== undefined) pushField(fields, values, 'email', email);
+      if (send_later !== undefined) pushField(fields, values, 'send_later', send_later ? 1 : 0, (v) => Number(v) || 0);
+      if (ship_via !== undefined) pushField(fields, values, 'ship_via', ship_via);
+      if (shipping_date !== undefined) pushField(fields, values, 'shipping_date', shipping_date);
+      if (tracking_no !== undefined) pushField(fields, values, 'tracking_no', tracking_no);
+      if (order_no !== undefined) pushField(fields, values, 'order_no', order_no);
+      if (receipt_date !== undefined) pushField(fields, values, 'receipt_date', receipt_date);
+      if (currency !== undefined) pushField(fields, values, 'currency', currency || 'HKD', (v) => String(v || 'HKD'));
+      if (discount_type !== undefined) {
+        pushField(fields, values, 'discount_type', discount_type === 'amount' ? 'amount' : 'percent', (v) => String(v));
+      }
+      if (discount_value !== undefined) pushField(fields, values, 'discount_value', discount_value, (v) => Number(v) || 0);
+      if (shipping_amount !== undefined) pushField(fields, values, 'shipping_amount', shipping_amount, (v) => Number(v) || 0);
+      if (status !== undefined) pushField(fields, values, 'status', status, (v) => String(v));
+      if (order_id !== undefined) pushField(fields, values, 'order_id', order_id || null, (v) => v as number | null);
 
       fields.push("updated_at = datetime('now')");
       values.push(params.id, ownerId);
@@ -98,13 +144,25 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       if (items && Array.isArray(items)) {
         db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(params.id);
         const insertItem = db.prepare(
-          `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
-           VALUES (?, ?, ?, ?, ?)`
+          `INSERT INTO invoice_items (
+             invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         );
         for (const item of items) {
+          const desc = String(item.description || item.product_service || '').trim();
+          if (!desc && !String(item.product_service || '').trim()) continue;
           const qty = Number(item.quantity) || 0;
           const price = Number(item.unit_price) || 0;
-          insertItem.run(params.id, item.description.trim(), qty, price, qty * price);
+          insertItem.run(
+            params.id,
+            item.service_date?.trim() || null,
+            item.product_service?.trim() || null,
+            desc || item.product_service?.trim() || '',
+            qty,
+            price,
+            qty * price,
+            item.class_name?.trim() || null,
+          );
         }
       }
     });
@@ -124,7 +182,10 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     }
 
     const invoice = getInvoiceWithDetails(Number(params.id), ownerId);
-    return NextResponse.json({ invoice });
+    return NextResponse.json({
+      invoice,
+      linkedOrder: linkedOrder(invoice?.order_id, ownerId),
+    });
   } catch {
     return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
   }

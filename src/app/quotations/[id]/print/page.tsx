@@ -25,10 +25,10 @@ type PdfLayoutMode = 'sum-sign' | 'sum' | 'sign' | 'none';
 const PDF_LAYOUT_STORAGE_KEY = 'quotation-pdf-layout';
 
 const PDF_LAYOUT_OPTIONS: { id: PdfLayoutMode; label: string }[] = [
-  { id: 'sum-sign', label: bi('Sum + Signature', '合計 + 簽署') },
+  { id: 'sum-sign', label: bi('Sum + Chop', '合計 + 公司章') },
   { id: 'sum', label: bi('Sum only', '僅合計') },
-  { id: 'sign', label: bi('Signature only', '僅簽署') },
-  { id: 'none', label: bi('Without sum & sign', '無合計與簽署') },
+  { id: 'sign', label: bi('Chop only', '僅公司章') },
+  { id: 'none', label: bi('Without sum & chop', '無合計與公司章') },
 ];
 
 function loadPdfLayout(): PdfLayoutMode {
@@ -91,7 +91,8 @@ export default function QuotationPrintPage() {
   );
 
   const showSum = layout === 'sum-sign' || layout === 'sum';
-  const showSignature = layout === 'sum-sign' || layout === 'sign';
+  /** Company signature block is on every HTML variant; chop only on sum-sign / sign. */
+  const showChop = layout === 'sum-sign' || layout === 'sign';
 
   if (!quote || !model) {
     return (
@@ -147,7 +148,8 @@ export default function QuotationPrintPage() {
           style={style}
           printMode
           showSum={showSum}
-          showSignature={showSignature}
+          showSignature
+          showChop={showChop}
         />
       </div>
     </div>

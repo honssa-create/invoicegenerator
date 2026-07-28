@@ -3,7 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
-import { generateInvoiceNumber } from '@/lib/invoices';
+import { createInvoiceFromQuotation } from '@/lib/quotation-to-invoice-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -29,26 +29,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (!q.customer_id) {
       return NextResponse.json({ error: 'Set a customer on the quotation before converting to an invoice' }, { status: 400 });
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-    const invoiceNumber = generateInvoiceNumber(ownerId);
 
-    const create = db.transaction(() => {
-      const result = db
-        .prepare(
-          `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
-           VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)`
-        )
-        .run(ownerId, q.customer_id, invoiceNumber, today, due, q.tax_rate, q.notes, q.terms);
-      const invId = result.lastInsertRowid as number;
-      const insertItem = db.prepare(
-        'INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, ?, ?)'
-      );
-      for (const it of q.items) insertItem.run(invId, it.description, it.quantity, it.unit_price, it.amount);
-      return { invId, invoiceNumber };
-    });
-
-    const { invId, invoiceNumber: invNo } = create();
+    const { invoiceId: invId, invoiceNumber: invNo } = createInvoiceFromQuotation(q, ownerId);
     db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
     logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to invoice ${invNo}`);
     logActivity('invoice', invId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
@@ -85,7 +67,6 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return result.lastInsertRowid as number;
     });
     const orderId = create();
-    // Give the order a proper receipt-style number is not needed; orders use their own ids.
     db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
     logActivity('quotation', params.id, session.userId, 'activity', session.name, 'converted to an order');
     logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);

@@ -70,5 +70,6 @@ export function quotationToFormalPreview(
     total: money(Number(q.total) || 0),
     companySignName: companyAddressLines[0],
     logoSrc: '/company-logo.png',
+    chopSrc: '/company-chop.png',
   };
 }

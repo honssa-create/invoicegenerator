@@ -32,6 +32,8 @@ export interface QuotationPreviewModel {
   total: string;
   companySignName?: string;
   logoSrc?: string;
+  /** Company chop image (shown with signature block when HTML templates include it). */
+  chopSrc?: string;
 }
 
 export const DEFAULT_QUOTATION_PREVIEW: QuotationPreviewModel = {
@@ -69,6 +71,7 @@ export const DEFAULT_QUOTATION_PREVIEW: QuotationPreviewModel = {
   total: '<Total>',
   companySignName: 'Honour Label Limited',
   logoSrc: '/company-logo.png',
+  chopSrc: '/company-chop.png',
 };
 
 export default function FormalQuotationDocument({
@@ -77,6 +80,10 @@ export default function FormalQuotationDocument({
   printMode = false,
   showSum = true,
   showSignature = true,
+  showChop = true,
+  documentTitle = 'QUOTATION',
+  numberLabel = 'Quotation No.',
+  remarksMode = 'list',
 }: {
   model?: QuotationPreviewModel;
   style?: QuotationStyleTemplate;
@@ -86,6 +93,14 @@ export default function FormalQuotationDocument({
   showSum?: boolean;
   /** Show company “For and on behalf of …” signature block. */
   showSignature?: boolean;
+  /** Show company chop image inside the signature block (sum-sign / sign HTML). */
+  showChop?: boolean;
+  /** Document heading (QUOTATION / INVOICE). */
+  documentTitle?: string;
+  /** Right-meta number row label. */
+  numberLabel?: string;
+  /** Quotation uses a numbered Remarks list; invoice HTML uses plain payment text. */
+  remarksMode?: 'list' | 'plain';
 }) {
   const lines = [...model.companyAddressLines];
   while (lines.length < 6) lines.push('');
@@ -169,6 +184,15 @@ export default function FormalQuotationDocument({
           max-height: var(--quo-logo-max-height);
           max-width: var(--quo-logo-max-width);
         }
+        .quo-preview-page .quo-chop {
+          display: block;
+          max-height: 88px;
+          max-width: 88px;
+          width: auto;
+          height: auto;
+          object-fit: contain;
+          margin: 8px auto 4px;
+        }
         @media print {
           @page { size: A4 portrait; margin: 10mm 12mm 14mm 12mm; }
           .quo-preview-page {
@@ -209,7 +233,7 @@ export default function FormalQuotationDocument({
       </header>
 
       <div className="mb-7">
-        <h1 className="quo-title">QUOTATION</h1>
+        <h1 className="quo-title">{documentTitle}</h1>
         <hr className="quo-rule mt-2.5" />
       </div>
 
@@ -228,7 +252,7 @@ export default function FormalQuotationDocument({
             <span className="inline-block min-w-[5.5em] text-left">{model.orderNo || '—'}</span>
           </p>
           <p className="m-0">
-            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">Quotation No.</span>
+            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">{numberLabel}</span>
             <span className="inline-block min-w-[5.5em] text-left">{model.quotationNo || '—'}</span>
           </p>
           <p className="m-0">
@@ -280,14 +304,23 @@ export default function FormalQuotationDocument({
                 </p>
               ) : null}
               {model.remarks.length > 0 ? (
-                <>
-                  <p className="m-0 mb-2 font-bold">Remarks:</p>
-                  <ol className="m-0 pl-5 leading-relaxed space-y-1" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
-                    {model.remarks.map((r, i) => (
-                      <li key={i}>{r}</li>
-                    ))}
-                  </ol>
-                </>
+                remarksMode === 'plain' ? (
+                  <p
+                    className="m-0 whitespace-pre-wrap leading-relaxed"
+                    style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}
+                  >
+                    {model.remarks.join('\n')}
+                  </p>
+                ) : (
+                  <>
+                    <p className="m-0 mb-2 font-bold">Remarks:</p>
+                    <ol className="m-0 pl-5 leading-relaxed space-y-1" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+                      {model.remarks.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ol>
+                  </>
+                )
               ) : null}
             </div>
           ) : null}
@@ -325,10 +358,21 @@ export default function FormalQuotationDocument({
         </div>
         {showSignature ? (
           <div className="text-center self-end">
-            <p className="m-0 mb-2 whitespace-pre-line" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+            <p className="m-0 mb-2.5 whitespace-pre-line" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
               {'For and on behalf of\nHonour Label Limited'}
             </p>
-            <hr className="border-0 border-t border-gray-800 w-[70%] mx-auto mt-[72px] mb-2" />
+            {showChop ? (
+              <img
+                className="quo-chop"
+                src={model.chopSrc || '/company-chop.png'}
+                alt="Company chop"
+              />
+            ) : null}
+            <hr
+              className={`border-0 border-t border-gray-800 w-[70%] mx-auto mb-2 ${
+                showChop ? 'mt-3' : 'mt-[72px]'
+              }`}
+            />
             <p className="m-0" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
               Authorized Signature
             </p>

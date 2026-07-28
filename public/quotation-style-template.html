@@ -287,16 +287,19 @@
     }
     .quo-remarks li { margin-bottom: 4px; }
 
-    /* ---- Acceptance only (no company signature) ---- */
+    /* ---- Signatures (no company chop) ---- */
     .quo-sign {
-      display: block;
+      display: table;
       width: 100%;
       margin-top: 24px;
     }
-    .quo-sign-left {
-      display: block;
+    .quo-sign-left,
+    .quo-sign-right {
+      display: table-cell;
       width: 50%;
+      vertical-align: bottom;
     }
+    .quo-sign-right { text-align: center; }
 
     .quo-accept-label {
       margin: 0 0 28px;
@@ -308,6 +311,23 @@
       border-top: 1px solid #333;
       width: 85%;
       margin: 0;
+    }
+
+    .quo-behalf {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--quo-color-text);
+    }
+    .quo-auth-label {
+      margin: 0;
+      font-size: 12px;
+      color: var(--quo-color-text);
+    }
+    .quo-auth-line {
+      border: none;
+      border-top: 1px solid #333;
+      width: 70%;
+      margin: 72px auto 8px;
     }
 
     @media print {
@@ -429,6 +449,11 @@
         <div class="quo-sign-left">
           <p class="quo-accept-label">Accepted by &amp; Date</p>
           <hr class="quo-accept-line" />
+        </div>
+        <div class="quo-sign-right">
+          <p class="quo-behalf">For and on behalf of Honour Label Limited</p>
+          <hr class="quo-auth-line" />
+          <p class="quo-auth-label">Authorized Signature</p>
         </div>
       </footer>
 

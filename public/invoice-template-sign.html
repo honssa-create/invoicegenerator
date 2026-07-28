@@ -4,18 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="ProgId" content="Word.Document" />
-  <meta name="Generator" content="InvoiceFlow Quotation Template Sum" />
-  <title>Quotation Template Sum — 報價單範本（合計）</title>
+  <meta name="Generator" content="InvoiceFlow Invoice Template Sign" />
+  <title>Invoice Template Sign — 發票範本</title>
   <!--
     ====================================================================
-    QUOTATION TEMPLATE SUM — edit this file, then upload back to Cursor
-    報價單範本（合計，無公司簽署） — 編輯後上傳給我即可套用
+    INVOICE TEMPLATE SIGN — edit this file, then upload back to Cursor
+    發票範本 — 編輯後上傳給我即可套用
 
     HOW TO EDIT:
-    1. Open http://localhost:3000/quotation-template-sum.html (or this file)
+    1. Open http://localhost:3000/invoice-template-sign.html (or this file)
     2. Replace company-logo.png with your company logo
     3. Edit the :root variables below for colours / spacing
     4. Save and upload back in Cursor chat
+
+    PLACEHOLDERS (filled when generating an invoice PDF):
+    - <refnumber> → real invoice number (e.g. 1038)
+      Used in INVOICE NO and anywhere marked data-placeholder="refnumber"
     ====================================================================
   -->
   <style>
@@ -275,19 +279,16 @@
     }
     .quo-message:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
 
-    .quo-remarks-title {
-      margin: 0 0 8px;
-      font-weight: 700;
-      font-size: 13px;
-    }
     .quo-remarks {
       margin: 0;
-      padding-left: 1.25em;
+      padding: 0;
       font-size: 12px;
       line-height: 1.55;
       color: var(--quo-color-text);
+      white-space: pre-wrap;
+      outline: 1px dashed transparent;
     }
-    .quo-remarks li { margin-bottom: 4px; }
+    .quo-remarks:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
 
     .quo-totals {
       width: 100%;
@@ -322,7 +323,7 @@
       padding-top: 8px;
     }
 
-    /* ---- Signatures (no company chop) ---- */
+    /* ---- Signatures ---- */
     .quo-sign {
       display: table;
       width: 100%;
@@ -353,6 +354,15 @@
       font-size: 12px;
       color: var(--quo-color-text);
     }
+    .quo-chop {
+      display: block;
+      max-height: 88px;
+      max-width: 88px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      margin: 8px auto 4px;
+    }
     .quo-auth-label {
       margin: 0;
       font-size: 12px;
@@ -362,7 +372,7 @@
       border: none;
       border-top: 1px solid #333;
       width: 70%;
-      margin: 72px auto 8px;
+      margin: 12px auto 8px;
     }
 
     @media print {
@@ -416,7 +426,7 @@
       </header>
 
       <div class="quo-title-wrap">
-        <h1 class="quo-title">QUOTATION</h1>
+        <h1 class="quo-title">INVOICE</h1>
         <hr class="quo-title-rule" />
       </div>
 
@@ -435,8 +445,8 @@
             <span class="quo-meta-v" contenteditable="true">&lt;custom1&gt;</span>
           </p>
           <p class="quo-meta-row">
-            <span class="quo-meta-k">QUOTATION NO</span>
-            <span class="quo-meta-v" contenteditable="true">&lt;refnumber&gt;</span>
+            <span class="quo-meta-k">INVOICE NO</span>
+            <span class="quo-meta-v" data-placeholder="refnumber" contenteditable="true">&lt;refnumber&gt;</span>
           </p>
           <p class="quo-meta-row">
             <span class="quo-meta-k">DATE</span>
@@ -470,13 +480,18 @@
       <section class="quo-bottom">
         <div class="quo-bottom-left">
           <div class="quo-message" contenteditable="true" spellcheck="false">&lt;Message&gt;</div>
-          <p class="quo-remarks-title">Remarks:</p>
-          <ol class="quo-remarks" contenteditable="true" spellcheck="false">
-            <li>請刪去不適用並安排以公司名義蓋印及簽回報價單作確認</li>
-            <li>同事會於收到簽回報價單後正式安排, 香港免一個地址運費</li>
-            <li>貨期會於簽回報價單及最終的效果圖確認後, 正式開始計算</li>
-            <li>付款方式：支票,銀行轉帳及轉數快, 詳細資料將會列於invoice上</li>
-          </ol>
+          <div class="quo-remarks" contenteditable="true" spellcheck="false">We accept both cheque payment and bank transfer
+(Please remark the Invoice No: <span data-placeholder="refnumber">&lt;refnumber&gt;</span> on the cheque or in the bank transfer note.)
+-
+Crossed cheque made payable to “Honour Label Limited”
+And mail to above address
+-
+Bank transfer detail:
+374-279610-001
+HONOUR LABEL LIMITED 
+HANG SENG BANK (bank code : 024)
+-
+</div>
         </div>
         <div class="quo-bottom-right">
           <table class="quo-totals">
@@ -503,6 +518,7 @@
         </div>
         <div class="quo-sign-right">
           <p class="quo-behalf">For and on behalf of Honour Label Limited</p>
+          <img class="quo-chop" src="company-chop.png" alt="Company chop" />
           <hr class="quo-auth-line" />
           <p class="quo-auth-label">Authorized Signature</p>
         </div>

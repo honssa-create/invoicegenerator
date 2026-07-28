@@ -305,7 +305,7 @@ export default function InvoiceDetailPage() {
             href={`/invoices/${id}/print`}
             className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
           >
-            {BTN.printPdf}
+            🧾 {bi('Generate PDF', '產生 PDF')}
           </Link>
           {!readOnly && (
             <>

@@ -92,6 +92,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       discount_type,
       discount_value,
       shipping_amount,
+      term,
       status,
       items,
       order_id,
@@ -131,6 +132,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
       if (discount_value !== undefined) pushField(fields, values, 'discount_value', discount_value, (v) => Number(v) || 0);
       if (shipping_amount !== undefined) pushField(fields, values, 'shipping_amount', shipping_amount, (v) => Number(v) || 0);
+      if (term !== undefined) pushField(fields, values, 'term', term || 'NET30', (v) => String(v || 'NET30'));
       if (status !== undefined) pushField(fields, values, 'status', status, (v) => String(v));
       if (order_id !== undefined) pushField(fields, values, 'order_id', order_id || null, (v) => v as number | null);
 

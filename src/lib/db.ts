@@ -288,6 +288,7 @@ try {
   addInvoiceCol('discount_type', "discount_type TEXT DEFAULT 'percent'");
   addInvoiceCol('discount_value', 'discount_value REAL DEFAULT 0');
   addInvoiceCol('shipping_amount', 'shipping_amount REAL DEFAULT 0');
+  addInvoiceCol('term', "term TEXT DEFAULT 'NET30'");
 
   const invoiceItemCols = db.prepare('PRAGMA table_info(invoice_items)').all() as { name: string }[];
   const addInvoiceItemCol = (name: string, ddl: string) => {

@@ -57,6 +57,7 @@ export function getInvoiceWithDetails(invoiceId: number, userId: number): Invoic
     shipping_amount: Number(invoice.shipping_amount) || 0,
     currency: (invoice.currency as string) || 'HKD',
     send_later: Boolean(Number(invoice.send_later) || 0),
+    term: (invoice.term as string) || 'NET30',
     items,
     files,
     subtotal,

@@ -67,6 +67,7 @@ export default function InvoiceDetailPage() {
   const [sendLater, setSendLater] = useState(false);
   const [issueDate, setIssueDate] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [term, setTerm] = useState('NET30');
   const [taxRate, setTaxRate] = useState(0);
   const [status, setStatus] = useState<InvoiceStatus>('draft');
   const [notes, setNotes] = useState('');
@@ -102,6 +103,7 @@ export default function InvoiceDetailPage() {
         setSendLater(Boolean(inv.send_later));
         setIssueDate(inv.issue_date);
         setDueDate(inv.due_date);
+        setTerm(inv.term || 'NET30');
         setTaxRate(inv.tax_rate);
         setStatus(inv.status);
         setNotes(inv.notes || '');
@@ -167,6 +169,7 @@ export default function InvoiceDetailPage() {
         customer_id: customerId ? Number(customerId) : undefined,
         issue_date: issueDate,
         due_date: dueDate,
+        term,
         tax_rate: taxRate,
         status,
         notes,
@@ -439,6 +442,10 @@ export default function InvoiceDetailPage() {
                   disabled={readOnly}
                   className={inputCls}
                 />
+              </div>
+              <div>
+                <label className={labelCls}>Term</label>
+                <input value={term} onChange={(e) => setTerm(e.target.value)} disabled={readOnly} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Ship via</label>

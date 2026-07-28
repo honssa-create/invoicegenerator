@@ -47,6 +47,7 @@ export interface Invoice {
   discount_type: InvoiceDiscountType;
   discount_value: number;
   shipping_amount: number;
+  term: string | null;
   created_at: string;
   updated_at: string;
 }

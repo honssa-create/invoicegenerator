@@ -12,9 +12,10 @@ import {
   ORDER_FIELDS,
   ORDER_STATUSES,
   ORDER_TYPES,
-  PAYMENT_STATUS_LABELS,
   BIRD_NEST_FLAVORS,
   computeBirdNestTotals,
+  computeOrderPaidTotal,
+  derivePaymentStatusLabel,
   STATUS_COLORS,
   orderTitle,
   isBadgeOrderType,
@@ -46,9 +47,11 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const paymentInputRef = useRef<HTMLInputElement>(null);
-  const [paymentPreview, setPaymentPreview] = useState<string | null>(null);
-  const [paymentScanMsg, setPaymentScanMsg] = useState('');
+  const payment1InputRef = useRef<HTMLInputElement>(null);
+  const payment2InputRef = useRef<HTMLInputElement>(null);
+  const payment3InputRef = useRef<HTMLInputElement>(null);
+  const [paymentPreview, setPaymentPreview] = useState<{ 1?: string; 2?: string; 3?: string }>({});
+  const [paymentScanMsg, setPaymentScanMsg] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [convertingQuote, setConvertingQuote] = useState(false);
   const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
 
@@ -176,8 +179,8 @@ export default function OrderDetailPage() {
     if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
   };
 
-  const handlePaymentReceipt = async (rawFile: File) => {
-    setPaymentScanMsg('Compressing & scanning receipt…');
+  const handlePaymentReceipt = async (rawFile: File, slot: 1 | 2 | 3) => {
+    setPaymentScanMsg((m) => ({ ...m, [slot]: 'Compressing & scanning receipt…' }));
     // Compress with the receipt rule: 1600px, quality 0.65, < 300KB. Heavy PDFs → first page image.
     let file = rawFile;
     try {
@@ -191,31 +194,54 @@ export default function OrderDetailPage() {
     } catch {
       /* fall back to original */
     }
-    setPaymentPreview(URL.createObjectURL(file));
+    setPaymentPreview((p) => ({ ...p, [slot]: URL.createObjectURL(file) }));
 
+    const prefix = slot === 1 ? 'payment' : `payment${slot}`;
     const fd = new FormData();
     fd.append('receipt', file);
     try {
       const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) { setPaymentScanMsg(data.error || MSG.scanFailed); return; }
-      const r = data.result;
-      const upd: Record<string, string> = { payment_receipt_path: r.receipt_path || '' };
-      if (r.payment_date) upd.payment_date = r.payment_date;
-      if (r.amount != null) {
-        upd.payment_amount = String(r.amount);
-        if (Number(r.amount) > 0) upd.payment_status_label = '部分付款 Partly Paid';
+      if (!res.ok) {
+        setPaymentScanMsg((m) => ({ ...m, [slot]: data.error || MSG.scanFailed }));
+        return;
       }
-      if (r.bank) upd.payment_bank = r.bank;
-      if (r.method) upd.payment_method_detail = r.method;
-      if (r.reference) upd.payment_reference = r.reference;
+      const r = data.result;
+      const bankKey = slot === 1 ? 'payment_bank' : `${prefix}_bank`;
+      const methodKey = slot === 1 ? 'payment_method_detail' : `${prefix}_method_detail`;
+      const refKey = slot === 1 ? 'payment_reference' : `${prefix}_reference`;
+      const upd: Record<string, string> = {
+        [`${prefix}_receipt_path`]: r.receipt_path || '',
+      };
+      if (r.payment_date) {
+        upd[`${prefix}_date`] = r.payment_date;
+        if (slot === 1) upd.payment1_date = r.payment_date;
+      }
+      if (r.amount != null) {
+        upd[`${prefix}_amount`] = String(r.amount);
+        if (slot === 1) upd.payment1_amount = String(r.amount);
+      }
+      if (r.bank) upd[bankKey] = r.bank;
+      if (r.method) upd[methodKey] = r.method;
+      if (r.reference) upd[refKey] = r.reference;
+      const nextFields = { ...(order?.fields || {}), ...upd };
+      const paid = computeOrderPaidTotal(nextFields);
+      const due =
+        order?.linked_invoice?.total ??
+        (order?.total_amount != null && order.total_amount > 0 ? order.total_amount : null);
+      upd.payment_status_label = derivePaymentStatusLabel(paid, due);
       setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
       patch({ fields: upd });
       const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
       const found = [r.payment_date && 'date', r.amount != null && 'amount', r.bank && 'bank', r.method && 'method', r.reference && 'ref'].filter(Boolean);
-      setPaymentScanMsg(found.length ? `Extracted via ${via}: ${found.join(', ')}. Please verify.` : `No fields auto-extracted (${via}). Enter manually.`);
+      setPaymentScanMsg((m) => ({
+        ...m,
+        [slot]: found.length
+          ? `Extracted via ${via}: ${found.join(', ')}. Please verify.`
+          : `No fields auto-extracted (${via}). Enter manually.`,
+      }));
     } catch {
-      setPaymentScanMsg(MSG.scanFailed);
+      setPaymentScanMsg((m) => ({ ...m, [slot]: MSG.scanFailed }));
     }
   };
 
@@ -261,31 +287,33 @@ export default function OrderDetailPage() {
       className={softInput}
     />
   );
-  const partialPaymentFields = (key: 'payment_amount' | 'payment1_amount', value: string) => {
-    const amount = Number(value);
+  const dueTotal =
+    order.linked_invoice?.total != null && order.linked_invoice.total > 0
+      ? order.linked_invoice.total
+      : order.total_amount != null && order.total_amount > 0
+        ? order.total_amount
+        : null;
+  const paidTotal = computeOrderPaidTotal(order.fields);
+  const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
+
+  const applyAmountAndStatus = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount', value: string) => {
     const fields: Record<string, string> = { [key]: value };
-    if (Number.isFinite(amount) && amount > 0 && fVal('payment_status_label') !== 'Full Paid') {
-      fields.payment_status_label = '部分付款 Partly Paid';
-      setFieldLocal('payment_status_label', fields.payment_status_label);
-    }
+    if (key === 'payment_amount') fields.payment1_amount = value;
+    const nextFields = { ...order.fields, ...fields };
+    const paid = computeOrderPaidTotal(nextFields);
+    fields.payment_status_label = derivePaymentStatusLabel(paid, dueTotal);
+    setFieldLocal('payment_status_label', fields.payment_status_label);
     patch({ fields });
   };
-  const paymentAmountInput = (
+  const paymentAmountInput = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount') => (
     <input
       type="number"
-      value={fVal('payment_amount')}
-      onChange={(e) => setFieldLocal('payment_amount', e.target.value)}
-      onBlur={(e) => partialPaymentFields('payment_amount', e.target.value)}
-      placeholder="0.00"
-      className={softInput}
-    />
-  );
-  const payment1AmountInput = (
-    <input
-      type="number"
-      value={fVal('payment1_amount')}
-      onChange={(e) => setFieldLocal('payment1_amount', e.target.value)}
-      onBlur={(e) => partialPaymentFields('payment1_amount', e.target.value)}
+      value={fVal(key) || (key === 'payment_amount' ? fVal('payment1_amount') : '')}
+      onChange={(e) => {
+        setFieldLocal(key, e.target.value);
+        if (key === 'payment_amount') setFieldLocal('payment1_amount', e.target.value);
+      }}
+      onBlur={(e) => applyAmountAndStatus(key, e.target.value)}
       placeholder="0.00"
       className={softInput}
     />
@@ -636,59 +664,146 @@ export default function OrderDetailPage() {
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 2</p>
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Payment Detail 付款詳情</h2>
 
-            {/* Payment receipt upload + AI scan */}
-            <div className="grid md:grid-cols-[200px_1fr] gap-5 mb-6">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
+              {readOnly('已付總額 Current Paid', paidTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}
+              {readOnly(
+                '應付金額 Amount Due',
+                dueTotal != null
+                  ? dueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                  : '—'
+              )}
               <div>
-                <div
-                  onClick={() => paymentInputRef.current?.click()}
-                  onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0]); }}
-                  onDragOver={(e) => e.preventDefault()}
-                  className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px]"
-                >
-                  <input ref={paymentInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0]); e.target.value = ''; }} />
-                  {paymentPreview || order.fields.payment_receipt_path ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={paymentPreview || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || '')) || ''}
-                      alt="Payment receipt"
-                      onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || '')) || ''); }}
-                      className="max-h-28 rounded-lg cursor-zoom-in"
-                    />
-                  ) : (
-                    <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Payment Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
-                  )}
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                  Payment Status 付款狀態
+                  <span className="text-gray-400 font-normal"> · auto</span>
+                </label>
+                <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5 text-sm font-semibold text-gray-900">
+                  {autoStatus}
                 </div>
-                {paymentScanMsg && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg}</p>}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
-                {labeled('支付日期 Payment Date', fInput('payment_date', 'date'))}
-                {labeled('銀碼 Amount', paymentAmountInput, 'auto-sets 部分付款 Partly Paid')}
-                {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                {labeled('支付方式 Payment Method', fInput('payment_method_detail', 'text', 'e.g. FPS 轉數快'))}
-                <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>
               </div>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5 border-t border-gray-100 pt-6">
-              {labeled(
-                'Payment Status 付款狀態',
-                <select
-                  value={fVal('payment_status_label')}
-                  onChange={(e) => { setFieldLocal('payment_status_label', e.target.value); patch({ fields: { payment_status_label: e.target.value } }); }}
-                  className={softInput}
-                >
-                  <option value="">—</option>
-                  {PAYMENT_STATUS_LABELS.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              )}
-              <div className="hidden lg:block" />
-              <div className="hidden lg:block" />
-              {labeled('第一次Payment 日期', fInput('payment1_date', 'date'))}
-              {labeled('第一次Payment 金額', payment1AmountInput, 'auto-sets 部分付款 Partly Paid')}
-              <div className="hidden lg:block" />
-              {labeled('第二次Payment 日期', fInput('payment2_date', 'date'))}
-              {labeled('第二次Payment 金額', fInput('payment2_amount', 'number', '0.00'))}
+            {/* First payment */}
+            <div className="rounded-xl border border-gray-200 p-5 mb-6 bg-gray-50/30">
+              <h3 className="text-sm font-semibold text-gray-800 mb-4">第一次付款 First Payment</h3>
+              <div className="grid md:grid-cols-[200px_1fr] gap-5">
+                <div>
+                  <div
+                    onClick={() => payment1InputRef.current?.click()}
+                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 1); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
+                  >
+                    <input ref={payment1InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 1); e.target.value = ''; }} />
+                    {paymentPreview[1] || order.fields.payment_receipt_path ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={paymentPreview[1] || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || ''), 1) || ''}
+                        alt="First payment receipt"
+                        onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[1] || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || ''), 1) || ''); }}
+                        className="max-h-28 rounded-lg cursor-zoom-in"
+                      />
+                    ) : (
+                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                    )}
+                  </div>
+                  {paymentScanMsg[1] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[1]}</p>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
+                  {labeled(
+                    '支付日期 Payment Date',
+                    <input
+                      type="date"
+                      value={fVal('payment_date') || fVal('payment1_date')}
+                      onChange={(e) => {
+                        setFieldLocal('payment_date', e.target.value);
+                        setFieldLocal('payment1_date', e.target.value);
+                      }}
+                      onBlur={(e) => patch({ fields: { payment_date: e.target.value, payment1_date: e.target.value } })}
+                      className={softInput}
+                    />
+                  )}
+                  {labeled('銀碼 Amount', paymentAmountInput('payment_amount'))}
+                  {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
+                  {labeled('支付方式 Payment Method', fInput('payment_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                  <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Second payment */}
+            <div className="rounded-xl border border-gray-200 p-5 mb-6 bg-gray-50/30">
+              <h3 className="text-sm font-semibold text-gray-800 mb-4">第二次付款 Second Payment</h3>
+              <div className="grid md:grid-cols-[200px_1fr] gap-5">
+                <div>
+                  <div
+                    onClick={() => payment2InputRef.current?.click()}
+                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 2); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
+                  >
+                    <input ref={payment2InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 2); e.target.value = ''; }} />
+                    {paymentPreview[2] || order.fields.payment2_receipt_path ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={paymentPreview[2] || orderPaymentReceiptUrl(order.id, String(order.fields.payment2_receipt_path || ''), 2) || ''}
+                        alt="Second payment receipt"
+                        onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[2] || orderPaymentReceiptUrl(order.id, String(order.fields.payment2_receipt_path || ''), 2) || ''); }}
+                        className="max-h-28 rounded-lg cursor-zoom-in"
+                      />
+                    ) : (
+                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                    )}
+                  </div>
+                  {paymentScanMsg[2] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[2]}</p>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
+                  {labeled('支付日期 Payment Date', fInput('payment2_date', 'date'))}
+                  {labeled('銀碼 Amount', paymentAmountInput('payment2_amount'))}
+                  {labeled('銀行 / 平台 Bank/Platform', fInput('payment2_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
+                  {labeled('支付方式 Payment Method', fInput('payment2_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                  <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment2_reference', 'text', 'Transaction / 流水號'))}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Third payment */}
+            <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/30">
+              <h3 className="text-sm font-semibold text-gray-800 mb-4">第三次付款 Third Payment</h3>
+              <div className="grid md:grid-cols-[200px_1fr] gap-5">
+                <div>
+                  <div
+                    onClick={() => payment3InputRef.current?.click()}
+                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 3); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
+                  >
+                    <input ref={payment3InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 3); e.target.value = ''; }} />
+                    {paymentPreview[3] || order.fields.payment3_receipt_path ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''}
+                        alt="Third payment receipt"
+                        onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''); }}
+                        className="max-h-28 rounded-lg cursor-zoom-in"
+                      />
+                    ) : (
+                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                    )}
+                  </div>
+                  {paymentScanMsg[3] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[3]}</p>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
+                  {labeled('支付日期 Payment Date', fInput('payment3_date', 'date'))}
+                  {labeled('銀碼 Amount', paymentAmountInput('payment3_amount'))}
+                  {labeled('銀行 / 平台 Bank/Platform', fInput('payment3_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
+                  {labeled('支付方式 Payment Method', fInput('payment3_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                  <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment3_reference', 'text', 'Transaction / 流水號'))}</div>
+                </div>
+              </div>
             </div>
           </section>
 

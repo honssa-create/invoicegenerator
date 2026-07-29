@@ -1,6 +1,7 @@
 import db from './db';
 import type { Order } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
+import { getInvoiceWithDetails } from './invoices';
 
 interface OrderRow {
   id: number;
@@ -16,6 +17,7 @@ interface OrderRow {
   notes: string | null;
   carton_count: string | null;
   quotation_id: number | null;
+  total_amount: number | null;
   fields_json: string | null;
   created_at: string;
   updated_at: string;
@@ -37,11 +39,21 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
 
   const activities = withRelations ? (getActivities('order', row.id) as Order['activities']) : [];
 
-  const linkedInvoice = withRelations
-    ? (db
-        .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
-        .get(row.id) as Order['linked_invoice'] | undefined) || null
-    : null;
+  let linkedInvoice: Order['linked_invoice'] = null;
+  if (withRelations) {
+    const invRow = db
+      .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
+      .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
+    if (invRow) {
+      const details = getInvoiceWithDetails(invRow.id, row.user_id);
+      linkedInvoice = {
+        id: invRow.id,
+        invoice_number: invRow.invoice_number,
+        status: invRow.status,
+        total: details?.total ?? null,
+      };
+    }
+  }
 
   const linkedQuotation =
     withRelations && row.quotation_id
@@ -64,6 +76,7 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
     notes: row.notes || '',
     carton_count: row.carton_count || '',
     quotation_id: row.quotation_id || null,
+    total_amount: row.total_amount != null ? Number(row.total_amount) : null,
     fields,
     files,
     activities,

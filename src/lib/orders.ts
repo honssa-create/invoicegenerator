@@ -97,6 +97,7 @@ export interface LinkedInvoice {
   id: number;
   invoice_number: string;
   status: string;
+  total?: number | null;
 }
 
 export interface LinkedQuotation {
@@ -108,6 +109,7 @@ export interface LinkedQuotation {
 export interface Order extends CoreColumns {
   id: number;
   user_id: number;
+  total_amount: number | null;
   fields: Record<string, string | boolean>;
   files: OrderFile[];
   activities: OrderActivity[];
@@ -139,7 +141,40 @@ export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cup
   honour: 'honour訂製',
 };
 
-export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'];
+export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'] as const;
+export type PaymentStatusLabel = (typeof PAYMENT_STATUS_LABELS)[number];
+
+/** Parse a free-form payment amount field into a finite number (else 0). */
+export function parsePaymentAmount(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value !== 'string' || !value.trim()) return 0;
+  const n = Number(value.replace(/,/g, '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Sum installment payments. First payment uses `payment_amount` when set,
+ * otherwise falls back to legacy `payment1_amount` (never both).
+ */
+export function computeOrderPaidTotal(fields: Record<string, string | boolean>): number {
+  const first =
+    parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
+  const second = parsePaymentAmount(fields.payment2_amount);
+  const third = parsePaymentAmount(fields.payment3_amount);
+  return Math.round((first + second + third) * 100) / 100;
+}
+
+/** Derive payment status from paid total vs optional amount due (invoice/order total). */
+export function derivePaymentStatusLabel(
+  paidTotal: number,
+  dueTotal?: number | null
+): PaymentStatusLabel {
+  if (paidTotal <= 0.009) return 'Unpaid';
+  if (dueTotal != null && Number.isFinite(dueTotal) && dueTotal > 0 && paidTotal >= dueTotal - 0.01) {
+    return 'Full Paid';
+  }
+  return '部分付款 Partly Paid';
+}
 
 export const BIRD_NEST_FLAVORS: { key: string; label: string }[] = [
   { key: 'qty_rock_sugar', label: '客人訂冰糖味 (樽)' },

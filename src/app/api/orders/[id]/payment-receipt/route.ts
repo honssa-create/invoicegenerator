@@ -15,9 +15,15 @@ export async function GET(request: Request, { params }: { params: { id: string }
     .get(params.id, ownerId) as { fields_json: string | null } | undefined;
   if (!row) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
+  const slotParam = new URL(request.url).searchParams.get('slot');
+  const slot = slotParam === '2' || slotParam === '3' ? Number(slotParam) : 1;
+  const pathKey =
+    slot === 3 ? 'payment3_receipt_path' : slot === 2 ? 'payment2_receipt_path' : 'payment_receipt_path';
+
   let stored: string | undefined;
   try {
-    stored = row.fields_json ? JSON.parse(row.fields_json).payment_receipt_path : undefined;
+    const fields = row.fields_json ? JSON.parse(row.fields_json) : {};
+    stored = fields?.[pathKey];
   } catch {
     stored = undefined;
   }

@@ -55,9 +55,15 @@ export function invoiceFileUrl(file: { id: number; path: string }): string {
   return isStoredImageUrl(file.path) ? file.path : `/api/invoice-files/${file.id}`;
 }
 
-export function orderPaymentReceiptUrl(orderId: number, storedPath: string | null | undefined): string | null {
+export function orderPaymentReceiptUrl(
+  orderId: number,
+  storedPath: string | null | undefined,
+  slot: 1 | 2 | 3 = 1
+): string | null {
   if (!storedPath) return null;
-  return `/api/orders/${orderId}/payment-receipt`;
+  return slot === 1
+    ? `/api/orders/${orderId}/payment-receipt`
+    : `/api/orders/${orderId}/payment-receipt?slot=${slot}`;
 }
 
 export function inboundPhotoUrl(shipmentId: number, storedPath: string | null | undefined): string | null {

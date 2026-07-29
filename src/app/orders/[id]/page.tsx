@@ -479,6 +479,53 @@ export default function OrderDetailPage() {
             </div>
           </section>
 
+          {/* Client / Shipping info */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="font-semibold text-gray-900 mb-4">Client / Shipping 客戶及寄送</h2>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Name 客戶</label>
+                <input value={order.name} onChange={(e) => setCoreLocal('name', e.target.value)} onBlur={(e) => patch({ core: { name: e.target.value } })} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">電話 Phone</label>
+                <input value={order.phone} onChange={(e) => setCoreLocal('phone', e.target.value)} onBlur={(e) => patch({ core: { phone: e.target.value } })} placeholder="+852…" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">E-mail</label>
+                <input value={order.customer_email} onChange={(e) => setCoreLocal('customer_email', e.target.value)} onBlur={(e) => patch({ core: { customer_email: e.target.value } })} placeholder="name@email.com" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Shipping Address 寄出地址</label>
+                <textarea value={order.shipping_address} onChange={(e) => setCoreLocal('shipping_address', e.target.value)} onBlur={(e) => patch({ core: { shipping_address: e.target.value } })} rows={3} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+              </div>
+            </div>
+          </div>
+
+          {/* BOX 3 — Shipment Detail */}
+          <section className="bg-white rounded-2xl border border-gray-200 p-8">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 3</p>
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Shipment Detail 送貨詳情</h2>
+            <div className="grid md:grid-cols-2 gap-5">
+              {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
+              {labeled('客人收件時間', fInput('receiving_time', 'text', 'e.g. 2-6pm'))}
+              {labeled('聯絡方式', fInput('contact_method', 'text', 'Phone / WhatsApp / WeChat'))}
+              {labeled('Tracking Number 運單號', fInput('tracking_no', 'text', 'e.g. SF5120793357800'))}
+              <div className="md:col-span-2">
+                {labeled(
+                  '送貨地址 Shipping Address',
+                  <textarea
+                    value={order.shipping_address}
+                    onChange={(e) => setCoreLocal('shipping_address', e.target.value)}
+                    onBlur={(e) => patch({ core: { shipping_address: e.target.value } })}
+                    rows={3}
+                    className={softInput}
+                  />
+                )}
+              </div>
+            </div>
+          </section>
+
           {/* BOX 1 — Order Detail (dynamic by Order Type) */}
           <section className="bg-white rounded-2xl border border-gray-200 p-8">
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 1</p>
@@ -644,53 +691,6 @@ export default function OrderDetailPage() {
             </div>
           </section>
 
-          {/* BOX 3 — Shipment Detail */}
-          <section className="bg-white rounded-2xl border border-gray-200 p-8">
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 3</p>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Shipment Detail 送貨詳情</h2>
-            <div className="grid md:grid-cols-2 gap-5">
-              {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
-              {labeled('客人收件時間', fInput('receiving_time', 'text', 'e.g. 2-6pm'))}
-              {labeled('聯絡方式', fInput('contact_method', 'text', 'Phone / WhatsApp / WeChat'))}
-              {labeled('Tracking Number 運單號', fInput('tracking_no', 'text', 'e.g. SF5120793357800'))}
-              <div className="md:col-span-2">
-                {labeled(
-                  '送貨地址 Shipping Address',
-                  <textarea
-                    value={order.shipping_address}
-                    onChange={(e) => setCoreLocal('shipping_address', e.target.value)}
-                    onBlur={(e) => patch({ core: { shipping_address: e.target.value } })}
-                    rows={3}
-                    className={softInput}
-                  />
-                )}
-              </div>
-            </div>
-          </section>
-
-          {/* Client / Shipping info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Client / Shipping 客戶及寄送</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Name 客戶</label>
-                <input value={order.name} onChange={(e) => setCoreLocal('name', e.target.value)} onBlur={(e) => patch({ core: { name: e.target.value } })} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">電話 Phone</label>
-                <input value={order.phone} onChange={(e) => setCoreLocal('phone', e.target.value)} onBlur={(e) => patch({ core: { phone: e.target.value } })} placeholder="+852…" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">E-mail</label>
-                <input value={order.customer_email} onChange={(e) => setCoreLocal('customer_email', e.target.value)} onBlur={(e) => patch({ core: { customer_email: e.target.value } })} placeholder="name@email.com" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Shipping Address 寄出地址</label>
-                <textarea value={order.shipping_address} onChange={(e) => setCoreLocal('shipping_address', e.target.value)} onBlur={(e) => patch({ core: { shipping_address: e.target.value } })} rows={3} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-            </div>
-          </div>
-
           {/* Visual assets / image grid */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-4">
@@ -717,21 +717,6 @@ export default function OrderDetailPage() {
               </div>
             )}
           </div>
-
-          {/* Structured custom fields — for 訂製襟章 this lives inside Box 1. */}
-          {orderType !== '訂製襟章' && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h2>
-              <div className="divide-y divide-gray-100">
-                {ORDER_FIELDS.map((f) => (
-                  <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
-                    <div className="text-sm text-gray-500">{f.label}</div>
-                    <div>{renderField(f)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}

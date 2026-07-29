@@ -185,7 +185,7 @@ async function main() {
   const sqliteTables = new Set(await listSqliteTables());
   const ordered = [
     ...TABLE_ORDER.filter((t) => sqliteTables.has(t)),
-    ...[...sqliteTables].filter((t) => t !== 'sqlite_sequence' && !TABLE_ORDER.includes(t)),
+    ...Array.from(sqliteTables).filter((t) => t !== 'sqlite_sequence' && !TABLE_ORDER.includes(t)),
   ];
 
   console.log(`SSL: ${useSsl ? 'on' : 'off'}; batch size: ${BATCH_SIZE}`);

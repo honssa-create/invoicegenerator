@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import {
   PERMISSION_SECTIONS,
   ROLE_LABELS,
@@ -18,11 +19,13 @@ interface AdminUser {
   company_name: string | null;
   role: UserRole;
   created_at: string;
+  child_user_count: number;
 }
 
 type Tab = 'users' | 'permissions';
 
 export default function AdminPage() {
+  const { user: currentUser, logout } = useAuth();
   const [tab, setTab] = useState<Tab>('users');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [matrix, setMatrix] = useState<Record<UserRole, Record<PermissionSection, boolean>> | null>(null);
@@ -41,6 +44,11 @@ export default function AdminPage() {
 
   const [resetUserId, setResetUserId] = useState<number | null>(null);
   const [resetPassword, setResetPassword] = useState('');
+
+  const [deleteUser, setDeleteUser] = useState<AdminUser | null>(null);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+
+  const adminCount = users.filter((u) => u.role === 'admin').length;
 
   const loadUsers = () =>
     fetch('/api/admin/users')
@@ -121,6 +129,33 @@ export default function AdminPage() {
     setToast({ msg: 'Password reset successfully', kind: 'success' });
     setResetUserId(null);
     setResetPassword('');
+  };
+
+  const submitDeleteUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleteUser) return;
+    if ((deleteUser.child_user_count ?? 0) > 0) return;
+    if (deleteConfirmEmail.trim().toLowerCase() !== deleteUser.email.toLowerCase()) {
+      setToast({ msg: bi('Email does not match', '電郵不符'), kind: 'error' });
+      return;
+    }
+    setBusy(true);
+    const res = await fetch(`/api/admin/users/${deleteUser.id}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setToast({ msg: data.error || bi('Failed to delete user', '刪除用戶失敗'), kind: 'error' });
+      return;
+    }
+    const deletedSelf = currentUser?.id === deleteUser.id;
+    setDeleteUser(null);
+    setDeleteConfirmEmail('');
+    if (deletedSelf) {
+      await logout();
+      return;
+    }
+    setToast({ msg: bi('User deleted', '用戶已刪除'), kind: 'success' });
+    loadUsers();
   };
 
   const togglePermission = (role: UserRole, section: PermissionSection, allowed: boolean) => {
@@ -233,15 +268,33 @@ export default function AdminPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{u.created_at?.slice(0, 10)}</td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => {
-                          setResetUserId(u.id);
-                          setResetPassword('');
-                        }}
-                        className="text-brand-600 hover:text-brand-700 font-medium"
-                      >
-                        {bi('Reset password', '重設密碼')}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={() => {
+                            setResetUserId(u.id);
+                            setResetPassword('');
+                          }}
+                          className="text-brand-600 hover:text-brand-700 font-medium"
+                        >
+                          {bi('Reset password', '重設密碼')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={u.role === 'admin' && adminCount <= 1}
+                          title={
+                            u.role === 'admin' && adminCount <= 1
+                              ? bi('Cannot delete the last admin', '不可刪除最後一位管理員')
+                              : undefined
+                          }
+                          onClick={() => {
+                            setDeleteUser(u);
+                            setDeleteConfirmEmail('');
+                          }}
+                          className="text-red-600 hover:text-red-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {bi('Delete', '刪除')}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -356,6 +409,102 @@ export default function AdminPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6 shadow-xl">
+            <h2 className="text-lg font-semibold mb-2 text-red-700">{bi('Delete User', '刪除用戶')}</h2>
+            {(deleteUser.child_user_count ?? 0) > 0 ? (
+              <>
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  {bi(
+                    'Cannot delete while other users belong to this account. Remove or reassign those users first.',
+                    '仍有其他用戶隸屬此帳戶，無法刪除。請先刪除或重新指派那些用戶。'
+                  )}
+                  <span className="mt-1 block text-amber-800">
+                    {bi('Linked users', '隸屬用戶')}: {deleteUser.child_user_count}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mb-4">
+                  {bi('User', '用戶')}: <span className="font-medium text-gray-900">{deleteUser.name}</span>
+                  {' · '}
+                  <span className="font-mono text-gray-800">{deleteUser.email}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteUser(null);
+                    setDeleteConfirmEmail('');
+                  }}
+                  className="w-full py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                >
+                  {BTN.cancel}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-700 mb-2">
+                  {bi(
+                    'This permanently deletes the account and cannot be undone.',
+                    '此操作會永久刪除帳戶，無法還原。'
+                  )}
+                </p>
+                <p className="text-sm text-gray-600 mb-4">
+                  {bi('User', '用戶')}: <span className="font-medium text-gray-900">{deleteUser.name}</span>
+                  {' · '}
+                  <span className="font-mono text-gray-800">{deleteUser.email}</span>
+                  {currentUser?.id === deleteUser.id && (
+                    <span className="block mt-2 text-amber-700">
+                      {bi(
+                        'You are deleting your own account. You will be signed out afterwards.',
+                        '您正在刪除自己的帳戶，完成後將會登出。'
+                      )}
+                    </span>
+                  )}
+                </p>
+                <form onSubmit={submitDeleteUser} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      {bi('Type the email to confirm', '輸入電郵以確認')}
+                    </label>
+                    <input
+                      required
+                      type="email"
+                      autoComplete="off"
+                      placeholder={deleteUser.email}
+                      value={deleteConfirmEmail}
+                      onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                      className={inp}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={
+                        busy ||
+                        deleteConfirmEmail.trim().toLowerCase() !== deleteUser.email.toLowerCase()
+                      }
+                      className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {busy ? BTN.saving : bi('Delete permanently', '永久刪除')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteUser(null);
+                        setDeleteConfirmEmail('');
+                      }}
+                      className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700"
+                    >
+                      {BTN.cancel}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

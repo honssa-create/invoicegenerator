@@ -20,7 +20,7 @@ export async function requireApiSession(
 export async function requireApiAdmin(request: Request): Promise<SessionPayload | NextResponse> {
   const session = await requireApiSession(request);
   if (session instanceof NextResponse) return session;
-  if (!requireAdmin(session.userId)) {
+  if (!(await requireAdmin(session.userId))) {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
   return session;

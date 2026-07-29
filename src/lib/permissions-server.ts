@@ -47,6 +47,20 @@ export async function requireAdmin(userId: number): Promise<boolean> {
   return await getUserRole(userId) === 'admin';
 }
 
+export async function countAdmins(): Promise<number> {
+  const row = (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'admin'").get()) as {
+    c: number;
+  };
+  return Number(row?.c ?? 0);
+}
+
+export async function countChildUsers(ownerUserId: number): Promise<number> {
+  const row = (await db
+    .prepare('SELECT COUNT(*) as c FROM users WHERE owner_user_id = ?')
+    .get(ownerUserId)) as { c: number };
+  return Number(row?.c ?? 0);
+}
+
 export async function seedRolePermissionsIfEmpty(): Promise<void> {
   const count = (await db.prepare('SELECT COUNT(*) as c FROM role_permissions').get() as { c: number }).c;
   if (count > 0) return;
@@ -101,16 +115,35 @@ export interface UserRow {
   company_name: string | null;
   role: UserRole;
   created_at: string;
+  child_user_count: number;
 }
 
 export async function listUsers(): Promise<UserRow[]> {
-  return await db
-    .prepare('SELECT id, email, name, company_name, role, created_at FROM users ORDER BY name')
-    .all() as UserRow[];
+  const rows = (await db
+    .prepare(
+      `SELECT u.id, u.email, u.name, u.company_name, u.role, u.created_at,
+              (SELECT COUNT(*) FROM users c WHERE c.owner_user_id = u.id) AS child_user_count
+       FROM users u
+       ORDER BY u.name`
+    )
+    .all()) as Array<Omit<UserRow, 'child_user_count'> & { child_user_count: number | string }>;
+  return rows.map((r) => ({
+    ...r,
+    child_user_count: Number(r.child_user_count ?? 0),
+  }));
 }
 
 export async function getUserById(id: number): Promise<UserRow | undefined> {
-  return await db
-    .prepare('SELECT id, email, name, company_name, role, created_at FROM users WHERE id = ?')
-    .get(id) as UserRow | undefined;
+  const row = (await db
+    .prepare(
+      `SELECT u.id, u.email, u.name, u.company_name, u.role, u.created_at,
+              (SELECT COUNT(*) FROM users c WHERE c.owner_user_id = u.id) AS child_user_count
+       FROM users u
+       WHERE u.id = ?`
+    )
+    .get(id)) as
+    | (Omit<UserRow, 'child_user_count'> & { child_user_count: number | string })
+    | undefined;
+  if (!row) return undefined;
+  return { ...row, child_user_count: Number(row.child_user_count ?? 0) };
 }

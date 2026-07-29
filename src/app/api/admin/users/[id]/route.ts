@@ -2,7 +2,38 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { requireApiAdmin } from '@/lib/api-guard';
 import { USER_ROLES, type UserRole } from '@/lib/permissions';
-import { getUserById } from '@/lib/permissions-server';
+import { countAdmins, countChildUsers, getUserById } from '@/lib/permissions-server';
+
+export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
+  const session = await requireApiAdmin(_request);
+  if (session instanceof NextResponse) return session;
+
+  const userId = Number(params.id);
+  if (!Number.isFinite(userId)) {
+    return NextResponse.json({ error: 'Invalid user id' }, { status: 400 });
+  }
+
+  const existing = await getUserById(userId);
+  if (!existing) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  if (existing.role === 'admin' && (await countAdmins()) <= 1) {
+    return NextResponse.json({ error: 'Cannot delete the last admin' }, { status: 400 });
+  }
+
+  if ((await countChildUsers(userId)) > 0) {
+    return NextResponse.json(
+      { error: 'Cannot delete while other users belong to this account' },
+      { status: 400 }
+    );
+  }
+
+  await db.transaction(async () => {
+    await db.prepare('UPDATE expenses SET created_by_user_id = NULL WHERE created_by_user_id = ?').run(userId);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  });
+
+  return NextResponse.json({ success: true, id: userId });
+}
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   const session = await requireApiAdmin(request);

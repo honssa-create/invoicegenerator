@@ -14,7 +14,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
-    const userCount = (await db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }).c;
+    const userCount = Number(
+      (await db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number | string })?.c ?? 0
+    );
     if (userCount > 0) {
       return NextResponse.json(
         { error: 'Public registration is disabled. Ask an administrator to create your account.' },

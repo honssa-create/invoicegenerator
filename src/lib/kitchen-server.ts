@@ -11,7 +11,9 @@ import {
 
 // Seed the two-tier inventory the first time a user opens the kitchen.
 export async function ensureSeed(userId: number) {
-  const finishedCount = (await db.prepare('SELECT COUNT(*) c FROM kitchen_finished WHERE user_id = ?').get(userId) as { c: number }).c;
+  const finishedCount = Number(
+    (await db.prepare('SELECT COUNT(*) c FROM kitchen_finished WHERE user_id = ?').get(userId) as { c: number | string })?.c ?? 0
+  );
   if (finishedCount === 0) {
     const insF = db.prepare('INSERT OR IGNORE INTO kitchen_finished (user_id, sku, quantity) VALUES (?, ?, ?)');
     // Seed one SKU with stock so the "in-stock" path is demoable.
@@ -19,7 +21,9 @@ export async function ensureSeed(userId: number) {
       for (const sku of FINISHED_SKUS) await insF.run(userId, sku, sku === skuOf('45ml', '冰糖') ? 10 : 0);
     });
   }
-  const rawCount = (await db.prepare('SELECT COUNT(*) c FROM kitchen_raw WHERE user_id = ?').get(userId) as { c: number }).c;
+  const rawCount = Number(
+    (await db.prepare('SELECT COUNT(*) c FROM kitchen_raw WHERE user_id = ?').get(userId) as { c: number | string })?.c ?? 0
+  );
   if (rawCount === 0) {
     const insR = db.prepare('INSERT OR IGNORE INTO kitchen_raw (user_id, name, unit, total_stock, allocated_stock) VALUES (?, ?, ?, ?, 0)');
     await db.transaction(async () => {

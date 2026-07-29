@@ -1,5 +1,5 @@
-import path from 'path';
 import { isR2Configured } from './r2';
+import fs from 'fs';
 
 /** How receipt binaries survive deploys: R2 URL, mounted volume, or ephemeral container disk. */
 export type ReceiptStorageMode = 'r2' | 'volume' | 'ephemeral';
@@ -10,12 +10,7 @@ export function getReceiptStorageMode(): ReceiptStorageMode {
 
   if (process.env.RECEIPTS_DIR?.trim()) return 'volume';
 
-  const dbPath = process.env.DB_PATH?.trim();
-  if (dbPath) {
-    if (path.isAbsolute(dbPath) && dbPath.startsWith('/data/')) return 'volume';
-    const defaultDataDb = path.join(process.cwd(), 'data', 'invoices.db');
-    if (path.resolve(dbPath) !== path.resolve(defaultDataDb)) return 'volume';
-  }
+  if (fs.existsSync('/data/receipts') || fs.existsSync('/data')) return 'volume';
 
   return 'ephemeral';
 }
@@ -25,7 +20,7 @@ export function isReceiptStoragePersistent(): boolean {
 }
 
 /**
- * Production deploys without R2 or a mounted DB_PATH lose container-local files.
+ * Production deploys without R2 or a mounted receipts volume lose container-local files.
  * Imported links should keep the remote URL instead of saving to ephemeral disk.
  */
 export function shouldKeepRemoteUrlInsteadOfEphemeralSave(): boolean {
@@ -42,6 +37,6 @@ export function warnIfEphemeralReceiptStorage(): void {
   ephemeralWarningLogged = true;
   console.warn(
     '[InvoiceFlow] Receipt files are stored on the container filesystem and will be lost on redeploy. ' +
-      'Configure R2_* env vars or set DB_PATH on a Railway volume (receipts co-locate to /data/receipts).',
+      'Configure R2_* env vars or set RECEIPTS_DIR=/data/receipts on a Railway volume.',
   );
 }

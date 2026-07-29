@@ -14,7 +14,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
-    const userCount = (db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }).c;
+    const userCount = (await db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }).c;
     if (userCount > 0) {
       return NextResponse.json(
         { error: 'Public registration is disabled. Ask an administrator to create your account.' },
@@ -22,13 +22,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (existing) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     const passwordHash = await hashPassword(password);
-    const result = db
+    const result = await db
       .prepare(
         'INSERT INTO users (email, password_hash, name, company_name, role) VALUES (?, ?, ?, ?, ?)'
       )

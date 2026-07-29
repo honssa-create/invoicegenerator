@@ -8,9 +8,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const row = db
+  const row = await db
     .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId) as { fields_json: string | null } | undefined;
   if (!row) return NextResponse.json({ error: 'Order not found' }, { status: 404 });

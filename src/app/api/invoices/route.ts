@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
 
@@ -26,8 +26,8 @@ export async function GET(request: Request) {
 
   query += ' ORDER BY created_at DESC';
 
-  const rows = db.prepare(query).all(...queryParams) as { id: number }[];
-  const invoices = rows.map((r) => getInvoiceWithDetails(r.id, ownerId)).filter(Boolean);
+  const rows = await db.prepare(query).all(...queryParams) as { id: number }[];
+  const invoices = (await Promise.all(rows.map((r) => getInvoiceWithDetails(r.id, ownerId)))).filter(Boolean);
 
   return NextResponse.json({ invoices });
 }
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const customer = db
+    const customer = await db
       .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
       .get(customer_id, ownerId);
 
@@ -75,10 +75,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'At least one line item is required' }, { status: 400 });
     }
 
-    const invoiceNumber = generateInvoiceNumber(ownerId);
+    const invoiceNumber = await generateInvoiceNumber(ownerId);
 
-    const createInvoice = db.transaction(() => {
-      const result = db
+    const invoiceId = await db.transaction(async () => {
+      const result = await db
         .prepare(
           `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -104,15 +104,14 @@ export async function POST(request: Request) {
       for (const item of items) {
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unit_price) || 0;
-        insertItem.run(invoiceId, item.description.trim(), qty, price, qty * price);
+        await insertItem.run(invoiceId, item.description.trim(), qty, price, qty * price);
       }
 
       return invoiceId;
     });
 
-    const invoiceId = createInvoice();
-    logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
-    const invoice = getInvoiceWithDetails(invoiceId, ownerId);
+    await logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
+    const invoice = await getInvoiceWithDetails(invoiceId, ownerId);
 
     return NextResponse.json({ invoice }, { status: 201 });
   } catch {

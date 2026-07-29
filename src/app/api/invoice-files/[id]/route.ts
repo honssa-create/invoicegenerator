@@ -12,9 +12,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const row = db
+  const row = await db
     .prepare(
       `SELECT f.path, f.original_name FROM invoice_files f
        JOIN invoices i ON i.id = f.invoice_id
@@ -41,8 +41,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  if (!trashInvoiceFile(ownerId, Number(params.id))) {
+  const ownerId = await getDataOwnerId(session.userId);
+  if (!await trashInvoiceFile(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 });
   }
   return NextResponse.json({ success: true, trashed: true, retention_days: 60 });

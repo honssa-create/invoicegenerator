@@ -10,7 +10,7 @@ async function runSync(userId: number | null) {
     query += ' WHERE id = ?';
     params.push(userId);
   }
-  const users = db.prepare(query).all(...params) as { id: number }[];
+  const users = await db.prepare(query).all(...params) as { id: number }[];
 
   const results: { user_id: number; fetched: number; imported: number; matched: number; skipped: number; error?: string }[] = [];
 

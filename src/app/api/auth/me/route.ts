@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const user = db
+  const user = await db
     .prepare('SELECT id, email, name, company_name, role, created_at FROM users WHERE id = ?')
     .get(session.userId) as {
     id: number;
@@ -25,8 +25,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  const role = getUserRole(session.userId);
-  const permissions = getPermissionsListForRole(role);
+  const role = await getUserRole(session.userId);
+  const permissions = await getPermissionsListForRole(role);
 
   const fresh = await createSessionForUserId(session.userId);
   if (fresh) await setSessionCookie(fresh.token);

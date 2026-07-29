@@ -28,14 +28,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: 'invoice_id is required' }, { status: 400 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
-  const existing = getReconciliationRecord(ownerId, recordId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const existing = await getReconciliationRecord(ownerId, recordId);
   if (!existing) return NextResponse.json({ error: 'Record not found' }, { status: 404 });
   if (existing.status === 'Matched') {
     return NextResponse.json({ error: 'Record is already matched' }, { status: 400 });
   }
 
-  const updated = manualMatchRecord(ownerId, recordId, invoiceId, session.name);
+  const updated = await manualMatchRecord(ownerId, recordId, invoiceId, session.name);
   if (!updated) return NextResponse.json({ error: 'Could not match record' }, { status: 400 });
 
   return NextResponse.json({ record: updated });

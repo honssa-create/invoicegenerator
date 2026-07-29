@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'tenantId and positive amount required' }, { status: 400 });
     }
 
-    const ownerId = rentalOwnerId(session.userId);
+    const ownerId = await rentalOwnerId(session.userId);
     let allocations = Array.isArray(body.allocations)
       ? (body.allocations as { chargeItemId: number; amount: number }[])
           .map((a) => ({
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       : [];
 
     if (!allocations.length && (periodAllocations.length || body.autoAllocate)) {
-      allocations = prepareAdvancePaymentAllocations(ownerId, tenantId, {
+      allocations = await prepareAdvancePaymentAllocations(ownerId, tenantId, {
         amount,
         unitIds: Array.isArray(body.unitIds) ? body.unitIds.map(Number).filter(Boolean) : undefined,
         periodAllocations: periodAllocations.length ? periodAllocations : undefined,
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     }
 
     if (allocations.length) {
-      const result = recordTenantPaymentWithAllocations(ownerId, {
+      const result = await recordTenantPaymentWithAllocations(ownerId, {
         tenantId,
         paymentDate,
         amount,
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 201 });
     }
 
-    const payment = createRentalPayment(ownerId, {
+    const payment = await createRentalPayment(ownerId, {
       tenantId,
       paymentDate,
       amount,

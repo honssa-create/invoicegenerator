@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const { overdueDays, dueSoonDays, candidates } = listReminderCandidates(ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const { overdueDays, dueSoonDays, candidates } = await listReminderCandidates(ownerId);
   return NextResponse.json({ overdueDays, dueSoonDays, days: overdueDays, candidates });
 }

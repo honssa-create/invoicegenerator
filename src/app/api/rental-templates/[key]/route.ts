@@ -11,10 +11,10 @@ export async function PATCH(
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
   try {
     const body = await request.json();
-    const template = updateRentalTemplate(ownerId, params.key, {
+    const template = await updateRentalTemplate(ownerId, params.key, {
       name: body.name,
       paymentInstructions: body.paymentInstructions,
       footerRemark: body.footerRemark,

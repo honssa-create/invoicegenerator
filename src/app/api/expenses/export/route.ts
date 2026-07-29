@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const createdTo = parseExpenseExportDate(searchParams.get('created_to'));
   const fundingSource = parseExpenseExportFundingSource(searchParams.get('funding_source'));
 
-  const { sql, params } = expenseWhereClause(session);
+  const { sql, params } = await expenseWhereClause(session);
   const conditions = [`e.${sql}`];
   const queryParams: (string | number)[] = [...params];
 
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     queryParams.push(fundingSource);
   }
 
-  const expenses = db
+  const expenses = await db
     .prepare(
       `SELECT e.*, (SELECT COUNT(*) FROM expense_receipts r WHERE r.expense_id = e.id) as receipt_count
        FROM expenses e

@@ -33,8 +33,8 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
-  const issue = getWooStoreSetupIssue(ownerId, platform);
+  const ownerId = await getDataOwnerId(session.userId);
+  const issue = await getWooStoreSetupIssue(ownerId, platform);
   if (issue === 'not_configured') {
     return NextResponse.json({ error: 'Store is not configured.' }, { status: 400 });
   }
@@ -42,7 +42,7 @@ export async function GET(
     return NextResponse.json({ error: issue }, { status: 400 });
   }
 
-  const store = getIntegrationSettings(ownerId).woocommerce[platform];
+  const store = (await getIntegrationSettings(ownerId)).woocommerce[platform];
   const normalized = normalizeWooStoreUrl(store.url);
   if (!normalized.ok) {
     return NextResponse.json({ error: normalized.error }, { status: 400 });

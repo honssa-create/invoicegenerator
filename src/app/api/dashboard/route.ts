@@ -10,13 +10,13 @@ export async function GET(request: Request) {
   }
 
   const totalInvoices = (
-    db.prepare('SELECT COUNT(*) as count FROM invoices WHERE user_id = ?').get(session.userId) as {
+    await db.prepare('SELECT COUNT(*) as count FROM invoices WHERE user_id = ?').get(session.userId) as {
       count: number;
     }
   ).count;
 
   const totalRevenue = (
-    db
+    await db
       .prepare(
         `SELECT COALESCE(SUM(ii.amount), 0) as subtotal
          FROM invoices i
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       .get(session.userId) as { subtotal: number }
   ).subtotal;
 
-  const pendingInvoices = db
+  const pendingInvoices = await db
     .prepare(
       `SELECT i.id FROM invoices i WHERE i.user_id = ? AND i.status IN ('sent', 'overdue')`
     )
@@ -34,35 +34,35 @@ export async function GET(request: Request) {
 
   let pendingAmount = 0;
   for (const inv of pendingInvoices) {
-    const details = getInvoiceWithDetails(inv.id, session.userId);
+    const details = await getInvoiceWithDetails(inv.id, session.userId);
     if (details) pendingAmount += details.total;
   }
 
   const overdueCount = (
-    db
+    await db
       .prepare(
         `SELECT COUNT(*) as count FROM invoices WHERE user_id = ? AND status = 'overdue'`
       )
       .get(session.userId) as { count: number }
   ).count;
 
-  const recentIds = db
+  const recentIds = await db
     .prepare(
       `SELECT id FROM invoices WHERE user_id = ? ORDER BY created_at DESC LIMIT 5`
     )
     .all(session.userId) as { id: number }[];
 
-  const recentInvoices = recentIds
-    .map((r) => getInvoiceWithDetails(r.id, session.userId))
-    .filter(Boolean);
+  const recentInvoices = (await Promise.all(
+    recentIds.map((r) => getInvoiceWithDetails(r.id, session.userId))
+  )).filter(Boolean);
 
   const customerCount = (
-    db.prepare('SELECT COUNT(*) as count FROM customers WHERE user_id = ?').get(session.userId) as {
+    await db.prepare('SELECT COUNT(*) as count FROM customers WHERE user_id = ?').get(session.userId) as {
       count: number;
     }
   ).count;
 
-  const expenseTotals = db
+  const expenseTotals = await db
     .prepare(
       `SELECT
          COUNT(*) as count,

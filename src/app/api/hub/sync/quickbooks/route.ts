@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'order_hub', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
   if (!isQuickBooksConnected(ownerId)) {
     return NextResponse.json({ error: 'QuickBooks is not connected. Connect OAuth first.' }, { status: 400 });
   }

@@ -16,9 +16,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const invoice = db
+  const invoice = await db
     .prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId);
   if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
@@ -46,10 +46,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const path = await saveReceipt(buffer, file.type || 'application/octet-stream', file.name);
-    insert.run(params.id, ownerId, path, file.name || null);
+    await insert.run(params.id, ownerId, path, file.name || null);
   }
 
-  const list = db
+  const list = await db
     .prepare('SELECT id, path, original_name FROM invoice_files WHERE invoice_id = ? ORDER BY id')
     .all(params.id);
   return NextResponse.json({ files: list }, { status: 201 });

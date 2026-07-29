@@ -6,7 +6,7 @@ import { getRentDocument } from '@/lib/rental-server';
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const doc = getRentDocument(params.id, rentalOwnerId(session.userId));
+  const doc = await getRentDocument(params.id, await rentalOwnerId(session.userId));
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json(doc);
 }

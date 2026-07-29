@@ -6,7 +6,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const result = completeBatch(session.userId, params.id);
+  const result = await completeBatch(session.userId, params.id);
   if ('error' in result) return NextResponse.json(result, { status: 400 });
-  return NextResponse.json({ ...result, state: getState(session.userId) });
+  return NextResponse.json({ ...result, state: await getState(session.userId) });
 }

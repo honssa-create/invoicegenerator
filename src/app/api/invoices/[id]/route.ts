@@ -7,10 +7,10 @@ import { getDataOwnerId } from '@/lib/org-server';
 import { trashInvoice } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
 
-function linkedOrder(orderId: number | null | undefined, ownerId: number) {
+async function linkedOrder(orderId: number | null | undefined, ownerId: number) {
   if (!orderId) return null;
   return (
-    db
+    await db
       .prepare('SELECT id, po_number, name, description FROM orders WHERE id = ? AND user_id = ?')
       .get(orderId, ownerId) || null
   );
@@ -34,20 +34,20 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
-  const invoice = getInvoiceWithDetails(Number(params.id), ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const invoice = await getInvoiceWithDetails(Number(params.id), ownerId);
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }
 
-  const user = db
+  const user = await db
     .prepare('SELECT name, company_name, email FROM users WHERE id = ?')
     .get(ownerId);
 
   return NextResponse.json({
     invoice,
     business: user,
-    linkedOrder: linkedOrder(invoice.order_id, ownerId),
+    linkedOrder: await linkedOrder(invoice.order_id, ownerId),
   });
 }
 
@@ -60,9 +60,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const existing = db
+  const existing = await db
     .prepare('SELECT id, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId) as { id: number; status: string; order_id: number | null } | undefined;
 
@@ -99,7 +99,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     } = body;
 
     if (customer_id) {
-      const customer = db
+      const customer = await db
         .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
         .get(customer_id, ownerId);
       if (!customer) {
@@ -107,7 +107,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
     }
 
-    const updateInvoice = db.transaction(() => {
+    await db.transaction(async () => {
       const fields: string[] = [];
       const values: (string | number | null)[] = [];
 
@@ -140,11 +140,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       values.push(params.id, ownerId);
 
       if (fields.length > 1) {
-        db.prepare(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+        await db.prepare(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
       }
 
       if (items && Array.isArray(items)) {
-        db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(params.id);
+        await db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(params.id);
         const insertItem = db.prepare(
           `INSERT INTO invoice_items (
              invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
@@ -155,7 +155,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
           if (!desc && !String(item.product_service || '').trim()) continue;
           const qty = Number(item.quantity) || 0;
           const price = Number(item.unit_price) || 0;
-          insertItem.run(
+          await insertItem.run(
             params.id,
             item.service_date?.trim() || null,
             item.product_service?.trim() || null,
@@ -169,24 +169,22 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
     });
 
-    updateInvoice();
-
     if (status !== undefined && status !== existing.status) {
-      logActivity('invoice', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
+      await logActivity('invoice', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
     }
     if (order_id !== undefined && (order_id || null) !== existing.order_id) {
       if (order_id) {
-        logActivity('invoice', params.id, session.userId, 'activity', session.name, `linked to order #${order_id}`);
-        logActivity('order', order_id, session.userId, 'activity', session.name, `linked invoice #${params.id}`);
+        await logActivity('invoice', params.id, session.userId, 'activity', session.name, `linked to order #${order_id}`);
+        await logActivity('order', order_id, session.userId, 'activity', session.name, `linked invoice #${params.id}`);
       } else {
-        logActivity('invoice', params.id, session.userId, 'activity', session.name, 'unlinked from order');
+        await logActivity('invoice', params.id, session.userId, 'activity', session.name, 'unlinked from order');
       }
     }
 
-    const invoice = getInvoiceWithDetails(Number(params.id), ownerId);
+    const invoice = await getInvoiceWithDetails(Number(params.id), ownerId);
     return NextResponse.json({
       invoice,
-      linkedOrder: linkedOrder(invoice?.order_id, ownerId),
+      linkedOrder: await linkedOrder(invoice?.order_id, ownerId),
     });
   } catch {
     return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
@@ -202,8 +200,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  if (!trashInvoice(ownerId, Number(params.id))) {
+  const ownerId = await getDataOwnerId(session.userId);
+  if (!await trashInvoice(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }
 

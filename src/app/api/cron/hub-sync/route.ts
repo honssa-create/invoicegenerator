@@ -13,7 +13,7 @@ async function runHubSyncForOwner(ownerId: number) {
     errors: string[];
   } = { user_id: ownerId, errors: [] };
 
-  if (getWooStoreConfigs(ownerId).length) {
+  if ((await getWooStoreConfigs(ownerId)).length) {
     try {
       result.woocommerce = await syncAllWooStores(ownerId);
     } catch (err) {
@@ -21,7 +21,7 @@ async function runHubSyncForOwner(ownerId: number) {
     }
   }
 
-  if (isQuickBooksConnected(ownerId)) {
+  if (await isQuickBooksConnected(ownerId)) {
     try {
       result.quickbooks = await syncQuickBooksInvoices(ownerId);
     } catch (err) {
@@ -38,11 +38,11 @@ async function handle(request: Request) {
 
   let ownerId: number;
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
-    ownerId = resolveHubOwnerUserId();
+    ownerId = await resolveHubOwnerUserId();
   } else {
     const session = await getSessionFromRequest(request);
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    ownerId = getDataOwnerId(session.userId);
+    ownerId = await getDataOwnerId(session.userId);
   }
 
   const result = await runHubSyncForOwner(ownerId);

@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const savedRedirectUri = userId != null ? getQuickBooksCredentials(userId).redirect_uri : '';
+  const savedRedirectUri = userId != null ? (await getQuickBooksCredentials(userId)).redirect_uri : '';
   const publicOrigin = getPublicOrigin(request, { savedRedirectUri });
   const redirectBase = new URL('/hub', publicOrigin);
 
@@ -40,9 +40,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const redirectUri = quickbooksRedirectUri(userId, publicOrigin);
+    const redirectUri = await quickbooksRedirectUri(userId, publicOrigin);
     const tokens = await exchangeQuickBooksCode(userId, code, redirectUri);
-    saveQuickBooksTokens(userId, { ...tokens, realmId });
+    await saveQuickBooksTokens(userId, { ...tokens, realmId });
     redirectBase.searchParams.set('connected', 'quickbooks');
     return NextResponse.redirect(redirectBase);
   } catch (err) {

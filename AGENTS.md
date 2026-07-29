@@ -2,32 +2,32 @@
 
 ## Cursor Cloud specific instructions
 
-InvoiceFlow is a single **Next.js 14 (App Router)** app backed by a local **SQLite** file via `better-sqlite3`. There are no other services to run.
+InvoiceFlow is a single **Next.js 14 (App Router)** app backed by **PostgreSQL** via `pg` (`DATABASE_URL`). Local Postgres: `npm run db:up` (Docker Compose).
 
 ### Running / building / testing
-- Dev server: `npm run dev` (serves http://localhost:3000). This is the command to use during development. If pages return 500 or JS/CSS 404, run `npm run dev:clean` (deletes `.next` then starts dev — `npm run build` while dev is running can corrupt the cache).
-- Build: `npm run build` — also runs TypeScript type-checking, so it doubles as the type check.
+- Dev server: `npm run dev` (serves http://localhost:3000). Requires `DATABASE_URL` in `.env.local` (e.g. `postgresql://invoiceflow:invoiceflow@127.0.0.1:5432/invoiceflow`). If pages return 500 or JS/CSS 404, run `npm run dev:clean` (deletes `.next` then starts dev — `npm run build` while dev is running can corrupt the cache).
+- Build: `npm run build` — also runs TypeScript type-checking, so it doubles as the type check. Schema is not applied during `next build`.
 - Production run: `npm start` (only after a build; not needed for development).
-- Test: `npm test` runs Vitest unit tests (receipt URL resolution, import URL parsing, storage persistence).
+- Test: `npm test` runs Vitest unit tests (needs `DATABASE_URL` for DB-backed tests).
 - Lint: `npm run lint` is **not configured** in this repo — `next lint` will prompt interactively to create an ESLint config. There is no committed ESLint config, so treat lint as unavailable unless you intentionally add one.
 - Manual UI/API verification is still recommended for full flows.
+- One-time SQLite → Postgres import: `DATABASE_URL=… SQLITE_PATH=/path/to/invoices.db npm run db:migrate-sqlite` (`better-sqlite3` is a devDependency for this script only).
 
 ### Non-obvious notes
-- The SQLite schema is created automatically on first import of `src/lib/db.ts` (tables + indexes via `CREATE TABLE IF NOT EXISTS`). No migration step is required.
-- The database file lives at `data/invoices.db` (WAL mode). It is gitignored (`data/*.db*`); only `data/.gitkeep` is tracked. Delete `data/invoices.db*` to reset all users/data.
-- `better-sqlite3` is a native module and is marked as an external server package in `next.config.js`; if you change Node versions, reinstall dependencies so its native binding is rebuilt.
+- Schema lives in [`src/lib/pg-schema.sql`](src/lib/pg-schema.sql); applied on first DB use via [`src/lib/db.ts`](src/lib/db.ts) (`CREATE TABLE IF NOT EXISTS`). Queries use async `await db.prepare(…).get/all/run` and `await db.transaction(async () => …)` (`?` placeholders are converted to `$n`).
+- On Railway: attach a Postgres plugin and set `DATABASE_URL`. Receipts stay on a volume (`RECEIPTS_DIR` / former `/data/receipts`) or R2 — not in Postgres. `DB_PATH` is no longer used for the app database.
 - Auth uses JWT session cookies (`jose`) + bcrypt (`bcryptjs`). `JWT_SECRET` is optional in dev (falls back to a dev default); set it for production.
 - Data is isolated per user; every API route scopes queries by the authenticated `user_id`.
 
 ### Expenses / receipt scanning / Excel export
 - Receipt scanning (`POST /api/expenses/scan`, `src/lib/receipt.ts`) prefers OpenAI vision when `OPENAI_API_KEY` is set, otherwise falls back to **tesseract.js OCR**. On the first OCR call, tesseract.js downloads its language model (~15 MB) from a CDN and caches it, so the first scan needs network access and is slower than later ones. Set `OCR_LANGS` (default `eng`, e.g. `eng+chi_tra+chi_sim`) to add languages — extra languages trigger additional one-time model downloads. Neither key nor extra languages are required for the feature to work.
-- Uploaded receipt images are stored on disk at `data/receipts/` (gitignored) when R2 is not configured, or in **Cloudflare R2** when `R2_*` env vars are set (`saveReceipt` stores a public URL in the DB). On Railway, set `DB_PATH=/data/invoices.db` on a mounted volume so receipts auto-save to `/data/receipts` (same volume as SQLite). **Redeploy wipes the container filesystem** — without R2 or a co-located volume path, DB rows keep `receipt_path` filenames but files disappear. Imported image links store `expense_receipts.source_url` as a preview fallback; production without R2/volume keeps the remote URL as `path` instead of ephemeral disk.
+- Uploaded receipt images are stored on disk at `data/receipts/` (gitignored) when R2 is not configured, or in **Cloudflare R2** when `R2_*` env vars are set (`saveReceipt` stores a public URL in the DB). On Railway, set `RECEIPTS_DIR=/data/receipts` on a mounted volume (or use R2). **Redeploy wipes the container filesystem** — without R2 or a volume path, DB rows keep `receipt_path` filenames but files disappear. Imported image links store `expense_receipts.source_url` as a preview fallback; production without R2/volume keeps the remote URL as `path` instead of ephemeral disk.
 - Excel export (`GET /api/invoices/export`, `GET /api/expenses/export`) streams a real `.xlsx` built with `exceljs`. `tesseract.js` and `exceljs` are listed in `next.config.js` `serverComponentsExternalPackages` and must stay there.
-- Each expense has an auto-generated sequential `receipt_no` (`EXP-<year>-NNNN`), assigned in the `expenses` POST route. `src/lib/db.ts` runs a startup migration that `ALTER TABLE`s the `receipt_no` column onto pre-existing databases and backfills numbers for old rows (idempotent — only fills NULL/empty values). Keep DB-touching code (like the number generator) out of `src/lib/expenses.ts`, which is imported by client components; server-only DB logic belongs in API routes or `src/lib/*` modules that are never imported client-side.
+- Expense ID / receipt numbers are assigned in API routes via `assignExpenseNumbersAtomic` in `src/lib/expense-server.ts`. Keep DB-touching code out of client-imported modules like `src/lib/expenses.ts`.
 - The print view is a dedicated page at `/expenses/print?ids=1,2,3` (`src/app/expenses/print/`). It uses Tailwind `print:` variants; `globals.css` forces `print-color-adjust: exact` so the colored receipt-number header prints. Each selected receipt image is headed by its `receipt_no`.
 - Multiple receipts per expense live in the `expense_receipts` table (one row per image). `src/lib/db.ts` backfills a legacy single `expenses.receipt_path` into it once; `receipt_path` is still kept as the "primary" (first) image. Serve any receipt image via `GET /api/receipts/[id]` (ownership checked by joining to `expenses.user_id`). The list/detail APIs attach a `receipts: {id, path}[]` array via `attachReceipts` in `src/lib/expense-server.ts` (server-only DB helpers — do not import into client components).
 - Dropdown options (payment method / expense reason / platform) are user-managed: built-in defaults live in `DEFAULT_OPTIONS` (`src/lib/expenses.ts`, client-safe) and custom additions are stored per-user in the `expense_options` table. `GET/POST /api/expense-options` returns the merged (defaults + custom) lists. `category` is now free-form text (the old CHECK-free column already allowed this); `CATEGORY_LABELS`/`categoryLabel` only map legacy English values to friendly labels. The reusable searchable "type-to-add" dropdown is `src/components/TagSelect.tsx`.
-- Note: this project uses `better-sqlite3` (not Prisma). Requests mentioning "Prisma schema" map to the SQL migrations in `src/lib/db.ts`.
+- Note: this project uses PostgreSQL via `pg` (not Prisma). Requests mentioning "Prisma schema" map to [`src/lib/pg-schema.sql`](src/lib/pg-schema.sql) and the async helpers in [`src/lib/db.ts`](src/lib/db.ts).
 
 ### Inbound Shipment Tracker (到件紀錄)
 - Module at `/inbound` with `inbound_shipments` table (waybill_number, sender, arrival_date, photo_path). `POST /api/inbound/scan` uploads a courier-label photo and extracts the **waybill number** and **sender** via Google Gemini (`GEMINI_API_KEY`, model `GEMINI_MODEL`) with a tesseract-OCR + regex fallback (SF-style/long-digit waybill, `寄件人/sender` line). The form pre-fills those two fields, defaults Arrival Date to today, and is fully editable before Save. Photos are stored via `saveReceipt` (`data/receipts/`) and served auth-scoped at `GET /api/inbound-files/[id]`.

@@ -10,8 +10,8 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const orders = listOrders(ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const orders = await listOrders(ownerId);
   const entries = orders
     .filter((o) => PAYMENT_KEYS.some((k) => o.fields[k] !== undefined && String(o.fields[k]).trim() !== ''))
     .map((o) => ({

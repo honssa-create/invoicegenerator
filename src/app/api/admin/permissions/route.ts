@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (session instanceof NextResponse) return session;
 
   return NextResponse.json({
-    matrix: getPermissionMatrix(),
+    matrix: await getPermissionMatrix(),
     sections: PERMISSION_SECTIONS,
     roles: USER_ROLES.filter((r) => r !== 'admin'),
     role_labels: ROLE_LABELS,
@@ -34,10 +34,10 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
-    saveRolePermissions(role, permissions);
+    await saveRolePermissions(role, permissions);
     await refreshSessionCookie(session.userId);
 
-    return NextResponse.json({ matrix: getPermissionMatrix() });
+    return NextResponse.json({ matrix: await getPermissionMatrix() });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to save permissions';
     return NextResponse.json({ error: message }, { status: 400 });

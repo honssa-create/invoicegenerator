@@ -67,8 +67,8 @@ function hydrate(row: PrepRow): PrepOrder {
   };
 }
 
-function nextOrderCode(userId: number): string {
-  const row = db
+async function nextOrderCode(userId: number): Promise<string> {
+  const row = await db
     .prepare(
       `SELECT order_code FROM kitchen_prep_orders
        WHERE user_id = ? AND order_code LIKE 'PREP-%'
@@ -83,8 +83,8 @@ function nextOrderCode(userId: number): string {
   return `PREP-${String(n).padStart(4, '0')}`;
 }
 
-export function listPrepOrders(userId: number): PrepOrder[] {
-  const rows = db
+export async function listPrepOrders(userId: number): Promise<PrepOrder[]> {
+  const rows = await db
     .prepare(
       `SELECT * FROM kitchen_prep_orders WHERE user_id = ?
        ORDER BY stewing_date ASC, id ASC`
@@ -93,14 +93,14 @@ export function listPrepOrders(userId: number): PrepOrder[] {
   return rows.map(hydrate);
 }
 
-export function getPrepOrder(id: number | string, userId: number): PrepOrder | null {
-  const row = db
+export async function getPrepOrder(id: number | string, userId: number): Promise<PrepOrder | null> {
+  const row = await db
     .prepare('SELECT * FROM kitchen_prep_orders WHERE id = ? AND user_id = ?')
     .get(id, userId) as PrepRow | undefined;
   return row ? hydrate(row) : null;
 }
 
-export function createPrepOrder(
+export async function createPrepOrder(
   userId: number,
   input: {
     stewing_date: string;
@@ -114,7 +114,7 @@ export function createPrepOrder(
     notes?: string | null;
     status?: PrepStatus;
   }
-): PrepOrder {
+): Promise<PrepOrder> {
   const capacity = input.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? 0);
   const qtyRed = isRedDateAllowed(capacity) ? Math.max(0, input.qty_red_date ?? 0) : 0;
@@ -127,7 +127,7 @@ export function createPrepOrder(
   });
   if (validationErr) throw new Error(validationErr);
 
-  const res = db
+  const res = await db
     .prepare(
       `INSERT INTO kitchen_prep_orders
          (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
@@ -136,7 +136,7 @@ export function createPrepOrder(
     )
     .run(
       userId,
-      input.order_code?.trim() || nextOrderCode(userId),
+      input.order_code?.trim() || await nextOrderCode(userId),
       input.linked_order_id ?? null,
       input.stewing_date,
       input.order_type,
@@ -147,7 +147,7 @@ export function createPrepOrder(
       qtyRock,
       input.notes?.trim() || null
     );
-  return getPrepOrder(Number(res.lastInsertRowid), userId)!;
+  return (await getPrepOrder(Number(res.lastInsertRowid), userId))!;
 }
 
 export interface PrepCapacityLine {
@@ -157,7 +157,7 @@ export interface PrepCapacityLine {
   qty_rock_sugar?: number;
 }
 
-export function createPrepOrdersBatch(
+export async function createPrepOrdersBatch(
   userId: number,
   input: {
     stewing_date: string;
@@ -168,7 +168,7 @@ export function createPrepOrdersBatch(
     status?: PrepStatus;
     lines: PrepCapacityLine[];
   }
-): PrepOrder[] {
+): Promise<PrepOrder[]> {
   const baseCode = input.order_code?.trim();
   const created: PrepOrder[] = [];
 
@@ -186,11 +186,11 @@ export function createPrepOrdersBatch(
     if (baseCode) {
       orderCode = input.lines.length > 1 ? `${baseCode}-${line.capacity}` : baseCode;
     } else if (input.lines.length > 1) {
-      orderCode = `${nextOrderCode(userId)}-${line.capacity}`;
+      orderCode = `${await nextOrderCode(userId)}-${line.capacity}`;
     }
 
     created.push(
-      createPrepOrder(userId, {
+      await createPrepOrder(userId, {
         stewing_date: input.stewing_date,
         order_type: input.order_type,
         capacity: line.capacity,
@@ -208,7 +208,7 @@ export function createPrepOrdersBatch(
   return created;
 }
 
-export function updatePrepOrder(
+export async function updatePrepOrder(
   id: number | string,
   userId: number,
   input: Partial<{
@@ -221,8 +221,8 @@ export function updatePrepOrder(
     qty_rock_sugar: number;
     notes: string | null;
   }>
-): PrepOrder | null {
-  const existing = getPrepOrder(id, userId);
+): Promise<PrepOrder | null> {
+  const existing = await getPrepOrder(id, userId);
   if (!existing) return null;
 
   const capacity = input.capacity ?? existing.capacity;
@@ -239,7 +239,7 @@ export function updatePrepOrder(
   });
   if (validationErr) throw new Error(validationErr);
 
-  db.prepare(
+  await db.prepare(
     `UPDATE kitchen_prep_orders SET
        stewing_date = ?, order_type = ?, capacity = ?, status = ?,
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?, notes = ?,
@@ -257,14 +257,14 @@ export function updatePrepOrder(
     id,
     userId
   );
-  return getPrepOrder(id, userId);
+  return await getPrepOrder(id, userId);
 }
 
-export function deletePrepOrder(id: number | string, userId: number): boolean {
-  return trashKitchenPrep(userId, Number(id));
+export async function deletePrepOrder(id: number | string, userId: number): Promise<boolean> {
+  return await trashKitchenPrep(userId, Number(id));
 }
 
-export function completePrepProduction(
+export async function completePrepProduction(
   id: number | string,
   userId: number,
   operatorName: string,
@@ -273,8 +273,8 @@ export function completePrepProduction(
     completion_remarks?: string | null;
     splits?: PrepCompletionSplit[];
   }
-): PrepOrder | null {
-  const existing = getPrepOrder(id, userId);
+): Promise<PrepOrder | null> {
+  const existing = await getPrepOrder(id, userId);
   if (!existing) return null;
   if (existing.status === 'completed') return null;
 
@@ -300,7 +300,7 @@ export function completePrepProduction(
 
   const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;
 
-  db.prepare(
+  await db.prepare(
     `UPDATE kitchen_prep_orders SET
        status = 'completed',
        expected_yield = ?,
@@ -322,19 +322,19 @@ export function completePrepProduction(
   );
 
   if (existing.linked_order_id) {
-    logActivity('order', existing.linked_order_id, userId, 'activity', operatorName, activityBody);
+    await logActivity('order', existing.linked_order_id, userId, 'activity', operatorName, activityBody);
   }
 
-  return getPrepOrder(id, userId);
+  return await getPrepOrder(id, userId);
 }
 
 /** Import a bird's-nest order (燕窩回禮燉製 / Nestiee 燕窩訂單) into the prep schedule. */
-export function importFromOrder(
+export async function importFromOrder(
   userId: number,
   orderId: number,
   orderOwnerId: number = userId
-): PrepOrder | null {
-  const order = db
+): Promise<PrepOrder | null> {
+  const order = await db
     .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, orderOwnerId) as { id: number; po_number: string | null; fields_json: string } | undefined;
   if (!order) return null;
@@ -355,7 +355,7 @@ export function importFromOrder(
     fields.production_date || fields.client_delivery_date || new Date().toISOString().slice(0, 10);
   const isWedding = Boolean(fields.big_day) || fields.order_subtype === 'wedding';
 
-  return createPrepOrder(userId, {
+  return await createPrepOrder(userId, {
     stewing_date: stewingDate,
     order_type: isWedding ? 'wedding' : 'daily',
     capacity: '45g',

@@ -28,16 +28,16 @@ interface YedpayListResponse {
   };
 }
 
-export function yedpayConfigured(userId?: number): boolean {
+export async function yedpayConfigured(userId?: number): Promise<boolean> {
   if (userId) {
-    const creds = getYedpayCredentials(userId);
+    const creds = await getYedpayCredentials(userId);
     return Boolean(creds.access_token && creds.user_id);
   }
   return Boolean(process.env.YEDPAY_ACCESS_TOKEN && process.env.YEDPAY_USER_ID);
 }
 
-function resolveCreds(userId: number) {
-  const creds = getYedpayCredentials(userId);
+async function resolveCreds(userId: number) {
+  const creds = await getYedpayCredentials(userId);
   const token = creds.access_token || process.env.YEDPAY_ACCESS_TOKEN;
   const yedpayUserId = creds.user_id || process.env.YEDPAY_USER_ID;
   if (!token || !yedpayUserId) throw new Error('Yedpay is not configured');
@@ -49,7 +49,7 @@ export async function fetchYedpayTransactions(
   userId: number,
   options?: { since?: string; limit?: number }
 ): Promise<YedpayTransaction[]> {
-  const { token, yedpayUserId } = resolveCreds(userId);
+  const { token, yedpayUserId } = await resolveCreds(userId);
 
   const limit = options?.limit ?? 50;
   const all: YedpayTransaction[] = [];

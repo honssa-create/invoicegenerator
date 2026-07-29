@@ -15,9 +15,9 @@ export async function POST(
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
 
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
   const leaseId = Number(params.id);
-  const lease = getLeaseById(leaseId, ownerId);
+  const lease = await getLeaseById(leaseId, ownerId);
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   const form = await request.formData();
@@ -38,19 +38,19 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = rentalOwnerId(session.userId);
-  const lease = getLeaseById(params.id, ownerId);
+  const ownerId = await rentalOwnerId(session.userId);
+  const lease = await getLeaseById(params.id, ownerId);
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   const { searchParams } = new URL(request.url);
   const docId = searchParams.get('docId');
   if (!docId) {
     const { getLeaseDocuments } = await import('@/lib/rental-lease-server');
-    return NextResponse.json({ documents: getLeaseDocuments(lease.id, ownerId) });
+    return NextResponse.json({ documents: await getLeaseDocuments(lease.id, ownerId) });
   }
 
   const { getLeaseDocuments } = await import('@/lib/rental-lease-server');
-  const docs = getLeaseDocuments(lease.id, ownerId);
+  const docs = await getLeaseDocuments(lease.id, ownerId);
   const doc = docs.find((d) => d.id === Number(docId));
   if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 

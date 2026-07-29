@@ -12,8 +12,8 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'order_hub', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const stores = getWooStoreConfigs(ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const stores = await getWooStoreConfigs(ownerId);
   if (!stores.length) {
     return NextResponse.json(
       { error: 'No WooCommerce stores configured. Add API keys in Settings → API Integrations.' },

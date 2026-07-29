@@ -8,10 +8,10 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
   return NextResponse.json({
     configured: quickbooksConfigured(ownerId),
     connected: isQuickBooksConnected(ownerId),
-    last_synced_at: getSyncState(ownerId, 'quickbooks', 'invoices'),
+    last_synced_at: await getSyncState(ownerId, 'quickbooks', 'invoices'),
   });
 }

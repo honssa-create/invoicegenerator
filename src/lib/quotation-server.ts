@@ -4,10 +4,10 @@ import { calculateQuotationTotals, type QuotationFile, type QuotationItem, type 
 const QUOTE_NUMBER_START = 1001001;
 
 /** Next 7-digit quotation number for this user (1001001, 1001002, …). */
-export function generateQuoteNumber(userId: number): string {
-  const rows = db
+export async function generateQuoteNumber(userId: number): Promise<string> {
+  const rows = (await db
     .prepare('SELECT quote_number FROM quotations WHERE user_id = ?')
-    .all(userId) as { quote_number: string }[];
+    .all(userId)) as { quote_number: string }[];
 
   let max = QUOTE_NUMBER_START - 1;
   for (const { quote_number } of rows) {
@@ -19,21 +19,26 @@ export function generateQuoteNumber(userId: number): string {
 }
 
 /** Quote number = source + 1 (or the next free number if that is taken). */
-export function nextQuoteNumberAfter(userId: number, current: string): string {
-  let n = /^\d{7}$/.test(current.trim()) ? Number(current.trim()) + 1 : Number(generateQuoteNumber(userId));
-  if (!Number.isFinite(n) || n < QUOTE_NUMBER_START) n = Number(generateQuoteNumber(userId));
+export async function nextQuoteNumberAfter(userId: number, current: string): Promise<string> {
+  let n = /^\d{7}$/.test(current.trim())
+    ? Number(current.trim()) + 1
+    : Number(await generateQuoteNumber(userId));
+  if (!Number.isFinite(n) || n < QUOTE_NUMBER_START) n = Number(await generateQuoteNumber(userId));
 
   const exists = db.prepare(
     'SELECT 1 FROM quotations WHERE user_id = ? AND quote_number = ?',
   );
-  while (exists.get(userId, String(n))) {
+  while (await exists.get(userId, String(n))) {
     n += 1;
   }
   return String(n);
 }
 
-export function getQuotationWithDetails(id: number | string, userId: number): QuotationWithDetails | null {
-  const quotation = db
+export async function getQuotationWithDetails(
+  id: number | string,
+  userId: number
+): Promise<QuotationWithDetails | null> {
+  const quotation = (await db
     .prepare(
       `SELECT q.*, c.name as customer_name, c.email as customer_email,
               c.address as customer_address, c.city as customer_city,
@@ -42,17 +47,17 @@ export function getQuotationWithDetails(id: number | string, userId: number): Qu
        LEFT JOIN customers c ON c.id = q.customer_id
        WHERE q.id = ? AND q.user_id = ?`
     )
-    .get(id, userId) as Record<string, unknown> | undefined;
+    .get(id, userId)) as Record<string, unknown> | undefined;
 
   if (!quotation) return null;
 
-  const items = db
+  const items = (await db
     .prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id')
-    .all(id) as QuotationItem[];
+    .all(id)) as QuotationItem[];
 
-  const files = db
+  const files = (await db
     .prepare('SELECT id, path, original_name FROM quotation_files WHERE quotation_id = ? ORDER BY id')
-    .all(id) as QuotationFile[];
+    .all(id)) as QuotationFile[];
 
   const { subtotal, discountAmount, taxAmount, total } = calculateQuotationTotals(items, {
     taxRate: quotation.tax_rate as number,

@@ -11,8 +11,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
-  const q = getQuotationWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const q = await getQuotationWithDetails(params.id, ownerId);
   if (!q) {
     return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
@@ -56,7 +56,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   XLSX.utils.book_append_sheet(wb, ws, 'Quotation');
   const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-  logActivity('quotation', params.id, session.userId, 'activity', session.name, 'exported quotation to Excel');
+  await logActivity('quotation', params.id, session.userId, 'activity', session.name, 'exported quotation to Excel');
 
   return new Response(buffer, {
     headers: {

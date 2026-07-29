@@ -10,8 +10,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { sql, params: whereParams } = expenseWhereClause(session);
-  const row = db
+  const { sql, params: whereParams } = await expenseWhereClause(session);
+  const row = await db
     .prepare(
       `SELECT r.path, r.source_url FROM expense_receipts r
        JOIN expenses e ON e.id = r.expense_id

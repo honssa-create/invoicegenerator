@@ -17,9 +17,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const order = db
+  const order = await db
     .prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
@@ -47,10 +47,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const path = await saveReceipt(buffer, file.type, file.name);
-    insert.run(params.id, ownerId, path, file.name || null);
+    await insert.run(params.id, ownerId, path, file.name || null);
   }
 
-  const list = db
+  const list = await db
     .prepare('SELECT id, path, original_name FROM order_files WHERE order_id = ? ORDER BY id')
     .all(params.id);
   return NextResponse.json({ files: list }, { status: 201 });

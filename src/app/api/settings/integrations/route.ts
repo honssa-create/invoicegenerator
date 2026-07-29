@@ -11,8 +11,8 @@ export async function GET(request: Request) {
   const session = await requireApiAdmin(request);
   if (session instanceof NextResponse) return session;
 
-  const ownerId = getDataOwnerId(session.userId);
-  return NextResponse.json({ settings: getIntegrationSettingsMasked(ownerId) });
+  const ownerId = await getDataOwnerId(session.userId);
+  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
 }
 
 export async function PUT(request: Request) {
@@ -26,14 +26,14 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
   try {
-    saveIntegrationSettings(ownerId, body);
+    await saveIntegrationSettings(ownerId, body);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to save settings' },
       { status: 400 }
     );
   }
-  return NextResponse.json({ settings: getIntegrationSettingsMasked(ownerId) });
+  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
 }

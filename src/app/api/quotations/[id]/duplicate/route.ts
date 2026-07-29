@@ -14,15 +14,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const source = getQuotationWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const source = await getQuotationWithDetails(params.id, ownerId);
   if (!source) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
-  const quoteNumber = nextQuoteNumberAfter(ownerId, source.quote_number);
+  const quoteNumber = await nextQuoteNumberAfter(ownerId, source.quote_number);
 
   try {
-    const newId = db.transaction(() => {
-      const result = db
+    const newId = await db.transaction(async () => {
+      const result = await db
         .prepare(
           `INSERT INTO quotations (
              user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms,
@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const item of source.items) {
-        insertItem.run(
+        await insertItem.run(
           qid,
           item.service_date,
           item.product_service,
@@ -77,13 +77,13 @@ export async function POST(request: Request, { params }: { params: { id: string 
         'INSERT INTO quotation_files (quotation_id, user_id, path, original_name) VALUES (?, ?, ?, ?)',
       );
       for (const f of source.files || []) {
-        insertFile.run(qid, ownerId, f.path, f.original_name);
+        await insertFile.run(qid, ownerId, f.path, f.original_name);
       }
 
       return qid;
-    })();
+    });
 
-    logActivity(
+    await logActivity(
       'quotation',
       params.id,
       session.userId,
@@ -91,7 +91,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       session.name,
       `duplicated as ${quoteNumber}`,
     );
-    logActivity(
+    await logActivity(
       'quotation',
       newId,
       session.userId,
@@ -101,7 +101,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     );
 
     return NextResponse.json(
-      { id: newId, quote_number: quoteNumber, quotation: getQuotationWithDetails(newId, ownerId) },
+      { id: newId, quote_number: quoteNumber, quotation: await getQuotationWithDetails(newId, ownerId) },
       { status: 201 },
     );
   } catch {

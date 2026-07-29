@@ -6,7 +6,7 @@ import { PREP_CAPACITIES, PREP_ORDER_TYPES, validatePrepFlavorQtys } from '@/lib
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  return NextResponse.json({ orders: listPrepOrders(session.userId) });
+  return NextResponse.json({ orders: await listPrepOrders(session.userId) });
 }
 
 export async function POST(request: Request) {
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'At least one valid capacity line is required' }, { status: 400 });
       }
 
-      const orders = createPrepOrdersBatch(session.userId, {
+      const orders = await createPrepOrdersBatch(session.userId, {
         stewing_date: body.stewing_date,
         order_type,
         linked_order_id: body.linked_order_id ?? null,
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: validationErr }, { status: 400 });
     }
 
-    const order = createPrepOrder(session.userId, {
+    const order = await createPrepOrder(session.userId, {
       stewing_date: body.stewing_date,
       order_type,
       capacity,

@@ -11,11 +11,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const quotation = getQuotationWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const quotation = await getQuotationWithDetails(params.id, ownerId);
   if (!quotation) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
-  const business = db.prepare('SELECT name, company_name, email FROM users WHERE id = ?').get(ownerId);
+  const business = await db.prepare('SELECT name, company_name, email FROM users WHERE id = ?').get(ownerId);
   return NextResponse.json({ quotation, business });
 }
 
@@ -38,9 +38,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const existing = db
+  const existing = await db
     .prepare('SELECT id, status FROM quotations WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId) as { id: number; status: string } | undefined;
   if (!existing) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
@@ -71,7 +71,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       items,
     } = body;
 
-    const update = db.transaction(() => {
+    await db.transaction(async () => {
       const fields: string[] = [];
       const values: (string | number | null)[] = [];
       if (customer_id !== undefined) pushField(fields, values, 'customer_id', customer_id || null, (v) => v as number | null);
@@ -99,10 +99,10 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       fields.push("updated_at = datetime('now')");
       values.push(params.id, ownerId);
       if (fields.length > 1) {
-        db.prepare(`UPDATE quotations SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+        await db.prepare(`UPDATE quotations SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
       }
       if (items && Array.isArray(items)) {
-        db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(params.id);
+        await db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(params.id);
         const insertItem = db.prepare(
           `INSERT INTO quotation_items (
              quotation_id, service_date, product_service, description, quantity, unit_price, amount, class_name
@@ -113,7 +113,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
           if (!desc && !String(item.product_service || '').trim()) continue;
           const qty = Number(item.quantity) || 0;
           const price = Number(item.unit_price) || 0;
-          insertItem.run(
+          await insertItem.run(
             params.id,
             item.service_date?.trim() || null,
             item.product_service?.trim() || null,
@@ -126,13 +126,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         }
       }
     });
-    update();
-
     if (status !== undefined && status !== existing.status) {
-      logActivity('quotation', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
+      await logActivity('quotation', params.id, session.userId, 'activity', session.name, `updated Status to ${status}`);
     }
 
-    return NextResponse.json({ quotation: getQuotationWithDetails(params.id, ownerId) });
+    return NextResponse.json({ quotation: await getQuotationWithDetails(params.id, ownerId) });
   } catch {
     return NextResponse.json({ error: 'Failed to update quotation' }, { status: 500 });
   }
@@ -145,8 +143,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  if (!trashQuotation(ownerId, Number(params.id))) {
+  const ownerId = await getDataOwnerId(session.userId);
+  if (!await trashQuotation(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
   }
   return NextResponse.json({ success: true, trashed: true, retention_days: 60 });

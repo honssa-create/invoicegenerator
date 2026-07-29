@@ -7,10 +7,10 @@ import { currentBillingPeriod } from '@/lib/rentals';
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const period = searchParams.get('period') || currentBillingPeriod();
-  return NextResponse.json(listRentalDashboard(ownerId, period));
+  return NextResponse.json(await listRentalDashboard(ownerId, period));
 }
 
 export async function POST(request: Request) {
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (denied) return denied;
   try {
     const body = await request.json();
-    const unit = createRentalUnit(rentalOwnerId(session.userId), body);
+    const unit = await createRentalUnit(await rentalOwnerId(session.userId), body);
     return NextResponse.json({ unit }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create rental unit' }, { status: 500 });

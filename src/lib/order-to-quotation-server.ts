@@ -11,7 +11,7 @@ import {
 } from './order-to-quotation';
 import type { Order } from './orders';
 
-function findOrCreateCustomerFromOrder(userId: number, order: Order): number {
+async function findOrCreateCustomerFromOrder(userId: number, order: Order): Promise<number> {
   const name = order.name?.trim() || 'Unknown Customer';
   const email = order.customer_email?.trim() || null;
   const phone = order.phone?.trim() || null;
@@ -20,21 +20,21 @@ function findOrCreateCustomerFromOrder(userId: number, order: Order): number {
   let customerId: number | undefined;
 
   if (email) {
-    const byEmail = db
+    const byEmail = await db
       .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(email) = LOWER(?)')
       .get(userId, email) as { id: number } | undefined;
     customerId = byEmail?.id;
   }
 
   if (!customerId && name) {
-    const byName = db
+    const byName = await db
       .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(name) = LOWER(?)')
       .get(userId, name) as { id: number } | undefined;
     customerId = byName?.id;
   }
 
   if (customerId) {
-    db.prepare(
+    await db.prepare(
       `UPDATE customers SET
          phone = COALESCE(?, phone),
          address = COALESCE(?, address),
@@ -44,7 +44,7 @@ function findOrCreateCustomerFromOrder(userId: number, order: Order): number {
     return customerId;
   }
 
-  const result = db
+  const result = await db
     .prepare(
       `INSERT INTO customers (user_id, name, email, phone, address)
        VALUES (?, ?, ?, ?, ?)`
@@ -53,15 +53,15 @@ function findOrCreateCustomerFromOrder(userId: number, order: Order): number {
   return Number(result.lastInsertRowid);
 }
 
-export function convertOrderToQuotation(
+export async function convertOrderToQuotation(
   userId: number,
   orderId: number,
   authorName = 'System'
-): { quotationId: number; quoteNumber: string } {
-  const order = getOrder(orderId, userId);
+): Promise<{ quotationId: number; quoteNumber: string }> {
+  const order = await getOrder(orderId, userId);
   if (!order) throw new Error('Order not found');
 
-  const customerId = findOrCreateCustomerFromOrder(userId, order);
+  const customerId = await findOrCreateCustomerFromOrder(userId, order);
   const items = buildQuotationItemsFromOrder(order);
   const today = new Date().toISOString().slice(0, 10);
   const validUntil = quotationValidUntilFromIssueDate(today, 30);
@@ -79,10 +79,10 @@ export function convertOrderToQuotation(
     null;
   const trackingNo = String(order.fields.tracking_no || '').trim() || null;
 
-  const create = db.transaction(() => {
+  const { quotationId, quoteNumber } = await db.transaction(async () => {
     // Allocate number inside the transaction so concurrent converts cannot collide.
-    const quoteNumber = generateQuoteNumber(userId);
-    const result = db
+    const quoteNumber = await generateQuoteNumber(userId);
+    const result = await db
       .prepare(
         `INSERT INTO quotations (
            user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms,
@@ -116,11 +116,11 @@ export function convertOrderToQuotation(
       const qty = Number(item.quantity) || 0;
       const price = Number(item.unit_price) || 0;
       const desc = item.description.trim();
-      insertItem.run(quotationId, desc, desc, qty, price, qty * price);
+      await insertItem.run(quotationId, desc, desc, qty, price, qty * price);
     }
 
     const mergedFields = { ...order.fields, quotation_no: quoteNumber };
-    db.prepare(
+    await db.prepare(
       `UPDATE orders SET quotation_id = ?, fields_json = ?, updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`
     ).run(quotationId, JSON.stringify(mergedFields), orderId, userId);
@@ -128,9 +128,7 @@ export function convertOrderToQuotation(
     return { quotationId, quoteNumber };
   });
 
-  const { quotationId, quoteNumber } = create();
-
-  logActivity(
+  await logActivity(
     'order',
     orderId,
     userId,
@@ -138,7 +136,7 @@ export function convertOrderToQuotation(
     authorName,
     `converted to quotation ${quoteNumber}`
   );
-  logActivity(
+  await logActivity(
     'quotation',
     quotationId,
     userId,
@@ -150,6 +148,6 @@ export function convertOrderToQuotation(
   return { quotationId, quoteNumber };
 }
 
-export function getQuotationAfterOrderConversion(userId: number, quotationId: number) {
+export async function getQuotationAfterOrderConversion(userId: number, quotationId: number) {
   return getQuotationWithDetails(quotationId, userId);
 }

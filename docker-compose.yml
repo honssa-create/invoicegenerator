@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: invoiceflow
+      POSTGRES_PASSWORD: invoiceflow
+      POSTGRES_DB: invoiceflow
+    volumes:
+      - invoiceflow_pg:/var/lib/postgresql/data
+
+volumes:
+  invoiceflow_pg:

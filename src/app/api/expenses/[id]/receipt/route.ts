@@ -10,8 +10,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { sql, params: whereParams } = expenseWhereClause(session);
-  const expense = db
+  const { sql, params: whereParams } = await expenseWhereClause(session);
+  const expense = await db
     .prepare(`SELECT receipt_path FROM expenses WHERE id = ? AND ${sql}`)
     .get(params.id, ...whereParams) as { receipt_path: string | null } | undefined;
 

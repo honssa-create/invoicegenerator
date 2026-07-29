@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const customers = db
+  const customers = await db
     .prepare('SELECT * FROM customers WHERE user_id = ? ORDER BY name')
     .all(session.userId);
 
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
     }
 
-    const result = db
+    const result = await db
       .prepare(
         `INSERT INTO customers (user_id, name, email, phone, address, city, state, zip)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
         zip?.trim() || null
       );
 
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);
+    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);
     return NextResponse.json({ customer }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 });

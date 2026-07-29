@@ -89,8 +89,8 @@ export async function testWooStoreConnection(
   }
 }
 
-export function getWooStoreConfigs(userId: number): WooStoreConfig[] {
-  const settings = getIntegrationSettings(userId).woocommerce;
+export async function getWooStoreConfigs(userId: number): Promise<WooStoreConfig[]> {
+  const settings = (await getIntegrationSettings(userId)).woocommerce;
   const configs: WooStoreConfig[] = [];
 
   for (const s of STORE_META) {
@@ -110,15 +110,15 @@ export function getWooStoreConfigs(userId: number): WooStoreConfig[] {
   return configs;
 }
 
-export function wooStoreConfigured(platform: WooStoreConfig['platform'], userId: number): boolean {
-  return getWooStoreConfigs(userId).some((c) => c.platform === platform);
+export async function wooStoreConfigured(platform: WooStoreConfig['platform'], userId: number): Promise<boolean> {
+  return (await getWooStoreConfigs(userId)).some((c) => c.platform === platform);
 }
 
-export function getWooStoreSetupIssue(
+export async function getWooStoreSetupIssue(
   userId: number,
   platform: WooStoreConfig['platform']
-): string | null {
-  const store = getIntegrationSettings(userId).woocommerce[platform];
+): Promise<string | null> {
+  const store = (await getIntegrationSettings(userId)).woocommerce[platform];
   if (!store.url?.trim() && !store.key?.trim() && !store.secret?.trim()) {
     return 'not_configured';
   }

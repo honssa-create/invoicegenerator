@@ -7,7 +7,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    const result = restoreFromTrash(Number(params.id), session.userId);
+    const result = await restoreFromTrash(Number(params.id), session.userId);
     return NextResponse.json({
       success: true,
       entity_type: result.entity_type,

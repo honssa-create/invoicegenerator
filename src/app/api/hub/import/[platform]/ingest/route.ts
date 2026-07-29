@@ -45,8 +45,8 @@ export async function POST(
     return NextResponse.json({ error: 'orders array is required' }, { status: 400 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
-  const issue = getWooStoreSetupIssue(ownerId, platform);
+  const ownerId = await getDataOwnerId(session.userId);
+  const issue = await getWooStoreSetupIssue(ownerId, platform);
   if (issue === 'not_configured') {
     return NextResponse.json({ error: 'Store is not configured.' }, { status: 400 });
   }
@@ -54,7 +54,7 @@ export async function POST(
     return NextResponse.json({ error: issue }, { status: 400 });
   }
 
-  const result = ingestWooOrders(ownerId, platform, body.orders, parsedRange.range);
+  const result = await ingestWooOrders(ownerId, platform, body.orders, parsedRange.range);
   if (result.errors.length && result.fetched === 0 && result.inserted === 0 && result.updated === 0) {
     return NextResponse.json({ error: result.errors[0], result, date_range: parsedRange.range }, { status: 400 });
   }

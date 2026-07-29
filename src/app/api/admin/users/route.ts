@@ -9,7 +9,7 @@ import { getDataOwnerId } from '@/lib/org-server';
 export async function GET(request: Request) {
   const session = await requireApiAdmin(request);
   if (session instanceof NextResponse) return session;
-  return NextResponse.json({ users: listUsers(), roles: USER_ROLES, role_labels: ROLE_LABELS });
+  return NextResponse.json({ users: await listUsers(), roles: USER_ROLES, role_labels: ROLE_LABELS });
 }
 
 export async function POST(request: Request) {
@@ -27,14 +27,14 @@ export async function POST(request: Request) {
     }
     const userRole: UserRole = USER_ROLES.includes(role) ? role : 'operator';
 
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
     if (existing) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     const passwordHash = await hashPassword(password);
-    const ownerId = getDataOwnerId(session.userId);
-    const result = db
+    const ownerId = await getDataOwnerId(session.userId);
+    const result = await db
       .prepare(
         'INSERT INTO users (email, password_hash, name, company_name, role, owner_user_id) VALUES (?, ?, ?, ?, ?, ?)'
       )
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
       );
 
     const userId = result.lastInsertRowid as number;
-    const user = listUsers().find((u) => u.id === userId);
+    const user = (await listUsers()).find((u) => u.id === userId);
     return NextResponse.json({ user }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });

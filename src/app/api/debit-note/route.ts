@@ -18,7 +18,7 @@ function parseUnitIds(searchParams: URLSearchParams): number[] | undefined {
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
 
   const tenantId = searchParams.get('tenant_id') || searchParams.get('tenantId');
@@ -65,14 +65,14 @@ export async function GET(request: Request) {
 
   try {
     if (format === 'matrix') {
-      const matrix = buildRentPaymentNoticeMatrix(Number(tenantId), ownerId, targetPeriod, query);
+      const matrix = await buildRentPaymentNoticeMatrix(Number(tenantId), ownerId, targetPeriod, query);
       if (!matrix) {
         return NextResponse.json({ error: 'Tenant or unit not found' }, { status: 404 });
       }
       return NextResponse.json(matrix);
     }
 
-    const doc = buildFormalDebitNote(Number(tenantId), ownerId, targetPeriod, query);
+    const doc = await buildFormalDebitNote(Number(tenantId), ownerId, targetPeriod, query);
     if (!doc) {
       return NextResponse.json({ error: 'Tenant or unit not found' }, { status: 404 });
     }

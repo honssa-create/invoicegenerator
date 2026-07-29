@@ -16,9 +16,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const quotation = db
+  const quotation = await db
     .prepare('SELECT id FROM quotations WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId);
   if (!quotation) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
@@ -46,10 +46,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const path = await saveReceipt(buffer, file.type || 'application/octet-stream', file.name);
-    insert.run(params.id, ownerId, path, file.name || null);
+    await insert.run(params.id, ownerId, path, file.name || null);
   }
 
-  const list = db
+  const list = await db
     .prepare('SELECT id, path, original_name FROM quotation_files WHERE quotation_id = ? ORDER BY id')
     .all(params.id);
   return NextResponse.json({ files: list }, { status: 201 });

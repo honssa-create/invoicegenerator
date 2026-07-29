@@ -109,8 +109,8 @@ function rowToRecord(row: Record<string, unknown>): ReconciliationRecord {
   };
 }
 
-export function listReconciliationRecords(userId: number): ReconciliationRecord[] {
-  const rows = db
+export async function listReconciliationRecords(userId: number): Promise<ReconciliationRecord[]> {
+  const rows = await db
     .prepare(
       `SELECT r.*, i.invoice_number
        FROM reconciliation_records r
@@ -122,8 +122,8 @@ export function listReconciliationRecords(userId: number): ReconciliationRecord[
   return rows.map(rowToRecord);
 }
 
-export function getReconciliationRecord(userId: number, id: number): ReconciliationRecord | null {
-  const row = db
+export async function getReconciliationRecord(userId: number, id: number): Promise<ReconciliationRecord | null> {
+  const row = await db
     .prepare(
       `SELECT r.*, i.invoice_number
        FROM reconciliation_records r
@@ -134,11 +134,11 @@ export function getReconciliationRecord(userId: number, id: number): Reconciliat
   return row ? rowToRecord(row) : null;
 }
 
-function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null {
+async function findOrderByOrderNo(userId: number, orderNo: string): Promise<OrderMatch | null> {
   const normalized = orderNo.trim();
   if (!normalized) return null;
 
-  const byPo = db
+  const byPo = await db
     .prepare(
       `SELECT o.id AS order_id, o.po_number AS order_no, o.system_order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM orders o
@@ -156,7 +156,7 @@ function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null 
 
   if (byPo) {
     const expected = byPo.invoice_id
-      ? getInvoiceWithDetails(byPo.invoice_id, userId)?.total ?? null
+      ? (await getInvoiceWithDetails(byPo.invoice_id, userId))?.total ?? null
       : null;
     return {
       order_id: byPo.order_id,
@@ -167,7 +167,7 @@ function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null 
     };
   }
 
-  const byInvoice = db
+  const byInvoice = await db
     .prepare(
       `SELECT o.id AS order_id, o.po_number AS order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM invoices i
@@ -180,7 +180,7 @@ function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null 
     | undefined;
 
   if (byInvoice) {
-    const expected = getInvoiceWithDetails(byInvoice.invoice_id, userId)?.total ?? null;
+    const expected = (await getInvoiceWithDetails(byInvoice.invoice_id, userId))?.total ?? null;
     return {
       order_id: byInvoice.order_id || 0,
       order_no: byInvoice.order_no || normalized,
@@ -193,19 +193,19 @@ function findOrderByOrderNo(userId: number, orderNo: string): OrderMatch | null 
   return null;
 }
 
-function findSecondaryMatch(
+async function findSecondaryMatch(
   userId: number,
   grossAmount: number,
   paymentMethod: PaymentMethod,
   depositTime: string
-): OrderMatch | null {
+): Promise<OrderMatch | null> {
   const dt = parseDateTime(depositTime);
   if (!dt) return null;
 
   const windowStart = new Date(dt.getTime() - 24 * 60 * 60 * 1000);
   const windowEnd = new Date(dt.getTime() + 24 * 60 * 60 * 1000);
 
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT o.id AS order_id, o.po_number AS order_no, o.fields_json,
               i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
@@ -247,7 +247,7 @@ function findSecondaryMatch(
     const methodOk = hints.some((h) => paymentOption.includes(h));
 
     const invoiceTotal = row.invoice_id
-      ? getInvoiceWithDetails(row.invoice_id, userId)?.total ?? null
+      ? (await getInvoiceWithDetails(row.invoice_id, userId))?.total ?? null
       : null;
     const compareAmount = invoiceTotal ?? (Number.isFinite(paymentAmount) && paymentAmount > 0 ? paymentAmount : null);
     if (compareAmount === null || !amountsClose(compareAmount, grossAmount)) continue;
@@ -279,19 +279,19 @@ function resolveStatus(grossAmount: number, expected: number | null): Reconcilia
   return amountsClose(grossAmount, expected) ? 'Matched' : 'Discrepancy';
 }
 
-function applyMatchToInvoiceAndOrder(
+async function applyMatchToInvoiceAndOrder(
   userId: number,
   recordId: number,
   match: OrderMatch,
   input: ReconciliationInput,
   status: ReconciliationStatus,
   actorName = 'System'
-): void {
+): Promise<void> {
   const depositTime = toIsoDateTime(input.deposit_time);
   const fee = input.transaction_fee ?? 0;
   const net = netAmount(input.gross_amount, fee);
 
-  db.prepare(
+  await db.prepare(
     `UPDATE reconciliation_records
      SET order_no = ?, order_id = ?, invoice_id = ?, status = ?, matched_at = datetime('now'), updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
@@ -305,10 +305,10 @@ function applyMatchToInvoiceAndOrder(
   );
 
   if (match.invoice_id && status === 'Matched') {
-    db.prepare(
+    await db.prepare(
       `UPDATE invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ? AND user_id = ? AND status != 'paid'`
     ).run(match.invoice_id, userId);
-    logActivity(
+    await logActivity(
       'invoice',
       match.invoice_id,
       userId,
@@ -319,7 +319,7 @@ function applyMatchToInvoiceAndOrder(
   }
 
   if (match.order_id) {
-    const existing = db
+    const existing = await db
       .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
       .get(match.order_id, userId) as { fields_json: string } | undefined;
     if (existing) {
@@ -337,12 +337,12 @@ function applyMatchToInvoiceAndOrder(
         payment_verified: status === 'Matched',
         payment_status_label: status === 'Matched' ? 'Full Paid' : fields.payment_status_label,
       };
-      db.prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`).run(
+      await db.prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`).run(
         JSON.stringify(merged),
         match.order_id,
         userId
       );
-      logActivity(
+      await logActivity(
         'order',
         match.order_id,
         userId,
@@ -354,12 +354,12 @@ function applyMatchToInvoiceAndOrder(
   }
 }
 
-export function insertReconciliationRecord(userId: number, input: ReconciliationInput): number {
+export async function insertReconciliationRecord(userId: number, input: ReconciliationInput): Promise<number> {
   const fee = input.transaction_fee ?? 0;
   const net = netAmount(input.gross_amount, fee);
   const depositTime = toIsoDateTime(input.deposit_time);
 
-  const result = db
+  const result = await db
     .prepare(
       `INSERT INTO reconciliation_records
        (user_id, order_no, deposit_time, gross_amount, payment_method, status, transaction_fee, net_amount,
@@ -382,45 +382,45 @@ export function insertReconciliationRecord(userId: number, input: Reconciliation
   return Number(result.lastInsertRowid);
 }
 
-function recordExistsByExternalId(userId: number, externalId: string): boolean {
-  const row = db
+async function recordExistsByExternalId(userId: number, externalId: string): Promise<boolean> {
+  const row = await db
     .prepare('SELECT 1 FROM reconciliation_records WHERE user_id = ? AND external_id = ?')
     .get(userId, externalId);
   return Boolean(row);
 }
 
-export function attemptAutoMatch(userId: number, recordId: number, input: ReconciliationInput): ReconciliationStatus {
+export async function attemptAutoMatch(userId: number, recordId: number, input: ReconciliationInput): Promise<ReconciliationStatus> {
   const orderNo =
     input.order_no?.trim() ||
     (input.remarks ? extractOrderNoFromRemarks(input.remarks) : null);
 
   let match: OrderMatch | null = null;
-  if (orderNo) match = findOrderByOrderNo(userId, orderNo);
-  if (!match) match = findSecondaryMatch(userId, input.gross_amount, input.payment_method, input.deposit_time);
+  if (orderNo) match = await findOrderByOrderNo(userId, orderNo);
+  if (!match) match = await findSecondaryMatch(userId, input.gross_amount, input.payment_method, input.deposit_time);
 
   if (!match) return 'Unmatched';
 
   const status = resolveStatus(input.gross_amount, match.expected_amount);
-  applyMatchToInvoiceAndOrder(userId, recordId, match, input, status);
+  await applyMatchToInvoiceAndOrder(userId, recordId, match, input, status);
   return status;
 }
 
-export function manualMatchRecord(
+export async function manualMatchRecord(
   userId: number,
   recordId: number,
   invoiceId: number,
   actorName: string
-): ReconciliationRecord | null {
-  const record = getReconciliationRecord(userId, recordId);
+): Promise<ReconciliationRecord | null> {
+  const record = await getReconciliationRecord(userId, recordId);
   if (!record) return null;
 
-  const invoice = getInvoiceWithDetails(invoiceId, userId);
+  const invoice = await getInvoiceWithDetails(invoiceId, userId);
   if (!invoice) return null;
 
   let orderNo = record.order_no;
   let orderId = invoice.order_id || 0;
   if (invoice.order_id) {
-    const orderRow = db
+    const orderRow = await db
       .prepare('SELECT id, po_number FROM orders WHERE id = ? AND user_id = ?')
       .get(invoice.order_id, userId) as { id: number; po_number: string | null } | undefined;
     if (orderRow) {
@@ -438,7 +438,7 @@ export function manualMatchRecord(
   };
 
   const status = resolveStatus(record.gross_amount, invoice.total);
-  applyMatchToInvoiceAndOrder(
+  await applyMatchToInvoiceAndOrder(
     userId,
     recordId,
     match,
@@ -455,11 +455,11 @@ export function manualMatchRecord(
     actorName
   );
 
-  return getReconciliationRecord(userId, recordId);
+  return await getReconciliationRecord(userId, recordId);
 }
 
-export function listMatchCandidates(userId: number): MatchCandidate[] {
-  const rows = db
+export async function listMatchCandidates(userId: number): Promise<MatchCandidate[]> {
+  const rows = await db
     .prepare(
       `SELECT o.id AS order_id, o.po_number AS order_no, o.name AS customer_name,
               i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
@@ -477,15 +477,15 @@ export function listMatchCandidates(userId: number): MatchCandidate[] {
     invoice_status: string;
   }[];
 
-  return rows.map((r) => ({
+  return await Promise.all(rows.map(async (r) => ({
     order_id: r.order_id || 0,
     order_no: r.order_no || '',
     invoice_id: r.invoice_id,
     invoice_number: r.invoice_number,
-    invoice_total: getInvoiceWithDetails(r.invoice_id, userId)?.total ?? null,
+    invoice_total: (await getInvoiceWithDetails(r.invoice_id, userId))?.total ?? null,
     invoice_status: r.invoice_status,
     customer_name: r.customer_name,
-  }));
+  })));
 }
 
 function yedpayTxnToInput(txn: YedpayTransaction): ReconciliationInput {
@@ -510,11 +510,11 @@ export async function syncYedpayForUser(userId: number): Promise<{
   matched: number;
   skipped: number;
 }> {
-  if (!yedpayConfigured(userId)) {
+  if (!(await yedpayConfigured(userId))) {
     throw new Error('Yedpay is not configured — add credentials in Settings → API Integrations');
   }
 
-  const sinceRow = db
+  const sinceRow = await db
     .prepare(
       `SELECT MAX(deposit_time) AS last FROM reconciliation_records WHERE user_id = ? AND source = 'yedpay'`
     )
@@ -528,41 +528,39 @@ export async function syncYedpayForUser(userId: number): Promise<{
   let matched = 0;
   let skipped = 0;
 
-  const run = db.transaction(() => {
+  await db.transaction(async () => {
     for (const txn of transactions) {
       if (txn.status !== 'paid') {
         skipped += 1;
         continue;
       }
-      if (recordExistsByExternalId(userId, txn.id)) {
+      if (await recordExistsByExternalId(userId, txn.id)) {
         skipped += 1;
         continue;
       }
 
       const input = yedpayTxnToInput(txn);
-      const id = insertReconciliationRecord(userId, input);
+      const id = await insertReconciliationRecord(userId, input);
       imported += 1;
-      const status = attemptAutoMatch(userId, id, input);
+      const status = await attemptAutoMatch(userId, id, input);
       if (status === 'Matched' || status === 'Discrepancy') matched += 1;
     }
   });
-  run();
-
   return { fetched: transactions.length, imported, matched, skipped };
 }
 
-export function importBankStatementRows(
+export async function importBankStatementRows(
   userId: number,
   paymentMethod: PaymentMethod,
   rows: ReconciliationInput[]
-): { imported: number; matched: number; skipped: number } {
+): Promise<{ imported: number; matched: number; skipped: number }> {
   let imported = 0;
   let matched = 0;
   let skipped = 0;
 
-  const run = db.transaction(() => {
+  await db.transaction(async () => {
     for (const row of rows) {
-      if (row.external_id && recordExistsByExternalId(userId, row.external_id)) {
+      if (row.external_id && await recordExistsByExternalId(userId, row.external_id)) {
         skipped += 1;
         continue;
       }
@@ -572,13 +570,11 @@ export function importBankStatementRows(
         transaction_fee: 0,
         source: 'bank_upload',
       };
-      const id = insertReconciliationRecord(userId, input);
+      const id = await insertReconciliationRecord(userId, input);
       imported += 1;
-      const status = attemptAutoMatch(userId, id, input);
+      const status = await attemptAutoMatch(userId, id, input);
       if (status === 'Matched' || status === 'Discrepancy') matched += 1;
     }
   });
-  run();
-
   return { imported, matched, skipped };
 }

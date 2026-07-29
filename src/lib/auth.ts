@@ -38,12 +38,12 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export async function buildSessionPayload(userId: number): Promise<SessionPayload | null> {
-  const row = db
+  const row = await db
     .prepare('SELECT id, email, name FROM users WHERE id = ?')
     .get(userId) as { id: number; email: string; name: string } | undefined;
   if (!row) return null;
-  const role = getUserRole(userId);
-  const permissions = getPermissionsListForRole(role);
+  const role = await getUserRole(userId);
+  const permissions = await getPermissionsListForRole(role);
   return { userId: row.id, email: row.email, name: row.name, role, permissions };
 }
 
@@ -75,7 +75,7 @@ export async function verifyToken(token: string): Promise<SessionPayload | null>
 export async function createSessionForUserId(userId: number): Promise<{ token: string; user: AuthUser } | null> {
   const session = await buildSessionPayload(userId);
   if (!session) return null;
-  const row = db
+  const row = await db
     .prepare('SELECT id, email, name, company_name, role FROM users WHERE id = ?')
     .get(userId) as {
     id: number;
@@ -92,7 +92,7 @@ export async function createSessionForUserId(userId: number): Promise<{ token: s
       email: row.email,
       name: row.name,
       company_name: row.company_name,
-      role: getUserRole(userId),
+      role: await getUserRole(userId),
       permissions: session.permissions,
     },
   };

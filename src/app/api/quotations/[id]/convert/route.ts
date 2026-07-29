@@ -14,8 +14,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const q = getQuotationWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const q = await getQuotationWithDetails(params.id, ownerId);
   if (!q) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
   let target: string;
@@ -30,10 +30,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Set a customer on the quotation before converting to an invoice' }, { status: 400 });
     }
 
-    const { invoiceId: invId, invoiceNumber: invNo } = createInvoiceFromQuotation(q, ownerId);
-    db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
-    logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to invoice ${invNo}`);
-    logActivity('invoice', invId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
+    const { invoiceId: invId, invoiceNumber: invNo } = await createInvoiceFromQuotation(q, ownerId);
+    await db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
+    await logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to invoice ${invNo}`);
+    await logActivity('invoice', invId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
     return NextResponse.json({ target: 'invoice', id: invId });
   }
 
@@ -45,8 +45,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const itemPart =
       firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
     const orderName = [(q.customer_name || '').trim(), itemPart].filter(Boolean).join(' - ');
-    const create = db.transaction(() => {
-      const result = db
+    const orderId = await db.transaction(async () => {
+      const result = await db
         .prepare(
           `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json, quotation_id)
            VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}', ?)`
@@ -66,10 +66,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
         );
       return result.lastInsertRowid as number;
     });
-    const orderId = create();
-    db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
-    logActivity('quotation', params.id, session.userId, 'activity', session.name, 'converted to an order');
-    logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
+    await db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
+    await logActivity('quotation', params.id, session.userId, 'activity', session.name, 'converted to an order');
+    await logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
     return NextResponse.json({ target: 'order', id: orderId });
   }
 

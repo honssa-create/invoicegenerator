@@ -14,9 +14,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
-  const order = db
+  const order = await db
     .prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
@@ -25,9 +25,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const { body } = await request.json();
     const text = typeof body === 'string' ? body.trim() : '';
     if (!text) return NextResponse.json({ error: 'Comment cannot be empty' }, { status: 400 });
-    logActivity(params.id, session.userId, 'comment', session.name, text);
+    await logActivity(params.id, session.userId, 'comment', session.name, text);
 
-    const activities = db
+    const activities = await db
       .prepare(
         'SELECT id, kind, author, body, created_at FROM order_activities WHERE order_id = ? ORDER BY created_at ASC, id ASC'
       )

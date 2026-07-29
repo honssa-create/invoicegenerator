@@ -34,8 +34,8 @@ function userFilter(userId: number | null, params: (number | string)[]): string 
   return ' AND i.user_id = ?';
 }
 
-function toCandidate(row: ReminderRow, type: ReminderType, daysOffset: number): ReminderCandidate {
-  const details = getInvoiceWithDetails(row.id, row.user_id);
+async function toCandidate(row: ReminderRow, type: ReminderType, daysOffset: number): Promise<ReminderCandidate> {
+  const details = await getInvoiceWithDetails(row.id, row.user_id);
   const total = details?.total ?? 0;
   const to = row.order_email || row.customer_email || null;
   return {
@@ -54,14 +54,14 @@ function toCandidate(row: ReminderRow, type: ReminderType, daysOffset: number): 
  * When `userId` is null, returns candidates for every user (cron mode).
  * Optional `types` limits which kinds are returned (default: both).
  */
-export function listReminderCandidates(
+export async function listReminderCandidates(
   userId: number | null,
   types: ReminderType[] = ['overdue', 'due_soon'],
-): {
+): Promise<{
   overdueDays: number;
   dueSoonDays: number;
   candidates: ReminderCandidate[];
-} {
+}> {
   const overdueDays = reminderCooldownDays();
   const dueSoonDays = DUE_SOON_DAYS;
   const wantOverdue = types.includes('overdue');
@@ -85,9 +85,9 @@ export function listReminderCandidates(
         AND (i.last_reminder_at IS NULL OR julianday('now') - julianday(i.last_reminder_at) >= ?)
         ${userFilter(userId, params)}
       ORDER BY i.due_date ASC`;
-    const rows = db.prepare(query).all(...params) as Array<ReminderRow & { days_past_due: number }>;
+    const rows = await db.prepare(query).all(...params) as Array<ReminderRow & { days_past_due: number }>;
     for (const row of rows) {
-      candidates.push(toCandidate(row, 'overdue', Math.max(0, Number(row.days_past_due) || 0)));
+      candidates.push(await toCandidate(row, 'overdue', Math.max(0, Number(row.days_past_due) || 0)));
     }
   }
 
@@ -109,9 +109,9 @@ export function listReminderCandidates(
         AND i.last_due_soon_reminder_at IS NULL
         ${userFilter(userId, params)}
       ORDER BY i.due_date ASC`;
-    const rows = db.prepare(query).all(...params) as Array<ReminderRow & { days_until_due: number }>;
+    const rows = await db.prepare(query).all(...params) as Array<ReminderRow & { days_until_due: number }>;
     for (const row of rows) {
-      candidates.push(toCandidate(row, 'due_soon', Math.max(0, Number(row.days_until_due) || 0)));
+      candidates.push(await toCandidate(row, 'due_soon', Math.max(0, Number(row.days_until_due) || 0)));
     }
   }
 

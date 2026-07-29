@@ -14,8 +14,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const inv = getInvoiceWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const inv = await getInvoiceWithDetails(params.id, ownerId);
   if (!inv) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 
   let target: string;
@@ -39,8 +39,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
   const orderName = [(inv.customer_name || '').trim(), itemPart].filter(Boolean).join(' - ');
 
-  const orderId = db.transaction(() => {
-    const result = db
+  const orderId = await db.transaction(async () => {
+    const result = await db
       .prepare(
         `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json)
          VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}')`,
@@ -61,15 +61,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     // Link the invoice to the new order when it has no linked order yet.
     if (!inv.order_id) {
-      db.prepare(
+      await db.prepare(
         "UPDATE invoices SET order_id = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
       ).run(oid, params.id, ownerId);
     }
 
     return oid;
-  })();
+  });
 
-  logActivity('invoice', params.id, session.userId, 'activity', session.name, 'converted to an order');
-  logActivity('order', orderId, session.userId, 'activity', session.name, `created from invoice ${inv.invoice_number}`);
+  await logActivity('invoice', params.id, session.userId, 'activity', session.name, 'converted to an order');
+  await logActivity('order', orderId, session.userId, 'activity', session.name, `created from invoice ${inv.invoice_number}`);
   return NextResponse.json({ target: 'order', id: orderId });
 }

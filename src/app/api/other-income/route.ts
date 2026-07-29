@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ error: 'Enter a valid amount' }, { status: 400 });
     }
-    const res = db
+    const res = await db
       .prepare(
         `INSERT INTO other_income (user_id, category, txn_date, amount, account, remarks, receipt_path)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
         body.remarks?.trim() || null,
         body.receipt_path?.trim() || null
       );
-    const income = db.prepare('SELECT * FROM other_income WHERE id = ?').get(res.lastInsertRowid);
+    const income = await db.prepare('SELECT * FROM other_income WHERE id = ?').get(res.lastInsertRowid);
     return NextResponse.json({ income }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to add income' }, { status: 500 });

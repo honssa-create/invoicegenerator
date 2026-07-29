@@ -10,7 +10,7 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const targetPeriod =
     searchParams.get('target_period') ||
@@ -20,7 +20,7 @@ export async function GET(
   const paidLookbackRaw = searchParams.get('paid_lookback');
   const paidLookbackMonths = paidLookbackRaw ? Number(paidLookbackRaw) : undefined;
 
-  const matrix = buildRentPaymentNoticeMatrix(params.id, ownerId, targetPeriod, {
+  const matrix = await buildRentPaymentNoticeMatrix(params.id, ownerId, targetPeriod, {
     fromPeriod: from,
     paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
   });

@@ -14,15 +14,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const source = getInvoiceWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const source = await getInvoiceWithDetails(params.id, ownerId);
   if (!source) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 
-  const invoiceNumber = nextInvoiceNumberAfter(ownerId, source.invoice_number);
+  const invoiceNumber = await nextInvoiceNumberAfter(ownerId, source.invoice_number);
 
   try {
-    const newId = db.transaction(() => {
-      const result = db
+    const newId = await db.transaction(async () => {
+      const result = await db
         .prepare(
           `INSERT INTO invoices (
              user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms,
@@ -62,7 +62,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const item of source.items) {
-        insertItem.run(
+        await insertItem.run(
           invId,
           item.service_date,
           item.product_service,
@@ -78,13 +78,13 @@ export async function POST(request: Request, { params }: { params: { id: string 
         'INSERT INTO invoice_files (invoice_id, user_id, path, original_name) VALUES (?, ?, ?, ?)',
       );
       for (const f of source.files || []) {
-        insertFile.run(invId, ownerId, f.path, f.original_name);
+        await insertFile.run(invId, ownerId, f.path, f.original_name);
       }
 
       return invId;
-    })();
+    });
 
-    logActivity(
+    await logActivity(
       'invoice',
       params.id,
       session.userId,
@@ -92,7 +92,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       session.name,
       `duplicated as ${invoiceNumber}`,
     );
-    logActivity(
+    await logActivity(
       'invoice',
       newId,
       session.userId,
@@ -102,7 +102,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     );
 
     return NextResponse.json(
-      { id: newId, invoice_number: invoiceNumber, invoice: getInvoiceWithDetails(newId, ownerId) },
+      { id: newId, invoice_number: invoiceNumber, invoice: await getInvoiceWithDetails(newId, ownerId) },
       { status: 201 },
     );
   } catch {

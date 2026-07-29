@@ -10,8 +10,8 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const ownerId = getDataOwnerId(session.userId);
-  return NextResponse.json({ orders: listOrders(ownerId) });
+  const ownerId = await getDataOwnerId(session.userId);
+  return NextResponse.json({ orders: await listOrders(ownerId) });
 }
 
 export async function POST(request: Request) {
@@ -23,11 +23,11 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
-    const result = db
+    const result = await db
       .prepare(
         `INSERT INTO orders (user_id, po_number, name, description, status, delivery_date, customer_email, phone, shipping_address, notes, fields_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')`
@@ -45,8 +45,8 @@ export async function POST(request: Request) {
         body.notes?.trim() || null
       );
     const id = result.lastInsertRowid as number;
-    logActivity(id, session.userId, 'activity', session.name, 'created this order');
-    return NextResponse.json({ order: getOrder(id, ownerId) }, { status: 201 });
+    await logActivity(id, session.userId, 'activity', session.name, 'created this order');
+    return NextResponse.json({ order: await getOrder(id, ownerId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }

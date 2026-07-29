@@ -10,7 +10,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    const user = db
+    const user = await db
       .prepare('SELECT id, email, password_hash, name, company_name, role FROM users WHERE email = ?')
       .get(email.toLowerCase().trim()) as {
       id: number;

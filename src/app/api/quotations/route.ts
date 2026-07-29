@@ -10,11 +10,11 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const rows = db
+  const ownerId = await getDataOwnerId(session.userId);
+  const rows = await db
     .prepare('SELECT id FROM quotations WHERE user_id = ? ORDER BY created_at DESC')
     .all(ownerId) as { id: number }[];
-  const quotations = rows.map((r) => getQuotationWithDetails(r.id, ownerId)).filter(Boolean);
+  const quotations = (await Promise.all(rows.map((r) => getQuotationWithDetails(r.id, ownerId)))).filter(Boolean);
   return NextResponse.json({ quotations });
 }
 
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
@@ -55,10 +55,10 @@ export async function POST(request: Request) {
 
     if (!issue_date) return NextResponse.json({ error: 'Issue date is required' }, { status: 400 });
 
-    const quoteNumber = generateQuoteNumber(ownerId);
+    const quoteNumber = await generateQuoteNumber(ownerId);
 
-    const create = db.transaction(() => {
-      const result = db
+    const qid = await db.transaction(async () => {
+      const result = await db
         .prepare(
           `INSERT INTO quotations (
              user_id, customer_id, quote_number, status, issue_date, valid_until, tax_rate, notes, terms,
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
         if (!desc && !String(item.product_service || '').trim()) continue;
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unit_price) || 0;
-        insertItem.run(
+        await insertItem.run(
           qid,
           item.service_date?.trim() || null,
           item.product_service?.trim() || null,
@@ -115,9 +115,8 @@ export async function POST(request: Request) {
       return qid;
     });
 
-    const qid = create();
-    logActivity('quotation', qid, session.userId, 'activity', session.name, `created this quotation (${quoteNumber})`);
-    return NextResponse.json({ quotation: getQuotationWithDetails(qid, ownerId) }, { status: 201 });
+    await logActivity('quotation', qid, session.userId, 'activity', session.name, `created this quotation (${quoteNumber})`);
+    return NextResponse.json({ quotation: await getQuotationWithDetails(qid, ownerId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create quotation' }, { status: 500 });
   }

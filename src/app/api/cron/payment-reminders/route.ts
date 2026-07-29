@@ -8,7 +8,7 @@ import { listReminderCandidates } from '@/lib/payment-reminders-server';
 
 /** Cron auto-sends overdue reminders only (due-soon is preview/send from UI). */
 async function runReminders(userId: number | null) {
-  const { overdueDays, candidates } = listReminderCandidates(userId, ['overdue']);
+  const { overdueDays, candidates } = await listReminderCandidates(userId, ['overdue']);
   const results: { invoice: string; email: string | null; sent: boolean; provider: string }[] = [];
   const today = new Date().toISOString().slice(0, 10);
   const markReminded = db.prepare("UPDATE invoices SET last_reminder_at = datetime('now') WHERE id = ?");
@@ -20,12 +20,12 @@ async function runReminders(userId: number | null) {
       result = { sent: r.sent, provider: r.provider };
     }
 
-    markReminded.run(inv.id);
+    await markReminded.run(inv.id);
 
     const msg = `[System] Automated overdue payment reminder email ${inv.to ? `sent to ${inv.to}` : '(no client email on file)'} on ${today}`;
-    logActivity('invoice', inv.id, inv.user_id, 'activity', 'System', msg);
+    await logActivity('invoice', inv.id, inv.user_id, 'activity', 'System', msg);
     if (inv.order_id) {
-      logActivity('order', inv.order_id, inv.user_id, 'activity', 'System', msg);
+      await logActivity('order', inv.order_id, inv.user_id, 'activity', 'System', msg);
     }
 
     results.push({ invoice: inv.invoice_number, email: inv.to, ...result });

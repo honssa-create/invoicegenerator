@@ -9,37 +9,37 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
   const { searchParams } = new URL(request.url);
   const type = searchParams.get('type') as EntityType | null;
   const id = searchParams.get('id');
   if (!type || !TYPES.includes(type) || !id) {
     return NextResponse.json({ error: 'type and id are required' }, { status: 400 });
   }
-  if (!entityBelongsToUser(type, id, ownerId)) {
+  if (!await entityBelongsToUser(type, id, ownerId)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  return NextResponse.json({ activities: getActivities(type, id) });
+  return NextResponse.json({ activities: await getActivities(type, id) });
 }
 
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
   try {
     const { type, id, body } = await request.json();
     if (!TYPES.includes(type) || !id) {
       return NextResponse.json({ error: 'type and id are required' }, { status: 400 });
     }
-    if (!entityBelongsToUser(type, id, ownerId)) {
+    if (!await entityBelongsToUser(type, id, ownerId)) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     const text = typeof body === 'string' ? body.trim() : '';
     if (!text) return NextResponse.json({ error: 'Comment cannot be empty' }, { status: 400 });
-    logActivity(type, id, session.userId, 'comment', session.name, text);
-    return NextResponse.json({ activities: getActivities(type, id) }, { status: 201 });
+    await logActivity(type, id, session.userId, 'comment', session.name, text);
+    return NextResponse.json({ activities: await getActivities(type, id) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to add comment' }, { status: 500 });
   }

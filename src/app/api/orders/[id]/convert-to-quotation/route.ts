@@ -17,15 +17,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const deniedQuotations = denyReadOnlyWrite(session, 'quotations', request.method);
   if (deniedQuotations) return deniedQuotations;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
   try {
-    const { quotationId, quoteNumber } = convertOrderToQuotation(
+    const { quotationId, quoteNumber } = await convertOrderToQuotation(
       ownerId,
       Number(params.id),
       session.name
     );
-    const quotation = getQuotationAfterOrderConversion(ownerId, quotationId);
+    const quotation = await getQuotationAfterOrderConversion(ownerId, quotationId);
     return NextResponse.json({ id: quotationId, quote_number: quoteNumber, quotation }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to convert order';

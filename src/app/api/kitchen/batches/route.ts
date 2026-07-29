@@ -15,13 +15,13 @@ export async function POST(request: Request) {
     if (!Number(body.bottle_count) || Number(body.bottle_count) < 1) {
       return NextResponse.json({ error: 'Enter a batch bottle count' }, { status: 400 });
     }
-    const batch = createBatch(session.userId, {
+    const batch = await createBatch(session.userId, {
       flavor: body.flavor,
       capacity: body.capacity,
       brewing_date: body.brewing_date,
       bottle_count: Number(body.bottle_count),
     });
-    return NextResponse.json({ batch, state: getState(session.userId) }, { status: 201 });
+    return NextResponse.json({ batch, state: await getState(session.userId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create batch' }, { status: 500 });
   }

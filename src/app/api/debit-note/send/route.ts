@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
 
   try {
     const body = await request.json();
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'unitId is required when mode is single' }, { status: 400 });
     }
 
-    const doc = buildFormalDebitNote(tenantId, ownerId, targetPeriod, {
+    const doc = await buildFormalDebitNote(tenantId, ownerId, targetPeriod, {
       fromPeriod: body.fromPeriod || body.from,
       paidLookbackMonths: body.paidLookbackMonths ?? body.paid_lookback,
       mode,

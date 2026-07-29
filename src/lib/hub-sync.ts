@@ -37,7 +37,7 @@ export async function syncWooStore(
     errors: [],
   };
 
-  const lastSync = getSyncState(userId, 'woocommerce', store.platform);
+  const lastSync = await getSyncState(userId, 'woocommerce', store.platform);
   let orders;
   try {
     if (dateRange) {
@@ -55,15 +55,15 @@ export async function syncWooStore(
     return result;
   }
 
-  return ingestWooOrders(userId, store.platform, orders, dateRange);
+  return await ingestWooOrders(userId, store.platform, orders, dateRange);
 }
 
-export function ingestWooOrders(
+export async function ingestWooOrders(
   userId: number,
   platform: WooStoreConfig['platform'],
   orders: WooOrder[],
   dateRange?: HubImportDateRange
-): HubSyncResult {
+): Promise<HubSyncResult> {
   const result: HubSyncResult = {
     platform,
     fetched: orders.length,
@@ -83,10 +83,10 @@ export function ingestWooOrders(
   result.fetched = rows.length;
   const syncedAt = new Date().toISOString();
 
-  const run = db.transaction(() => {
+  await db.transaction(async () => {
     for (const order of rows) {
       try {
-        const upsert = upsertHubOrder(userId, {
+        const upsert = await upsertHubOrder(userId, {
           source_platform: platform,
           original_order_id: String(order.id),
           customer_name: wooCustomerName(order),
@@ -108,16 +108,14 @@ export function ingestWooOrders(
       }
     }
     if (!dateRange) {
-      setSyncState(userId, 'woocommerce', platform, syncedAt);
+      await setSyncState(userId, 'woocommerce', platform, syncedAt);
     }
   });
-  run();
-
   return result;
 }
 
 export async function syncAllWooStores(userId: number, dateRange?: HubImportDateRange): Promise<HubSyncResult[]> {
-  const stores = getWooStoreConfigs(userId);
+  const stores = await getWooStoreConfigs(userId);
   const results: HubSyncResult[] = [];
   for (const store of stores) {
     results.push(await syncWooStore(userId, store, dateRange));
@@ -131,10 +129,10 @@ export async function importHubPlatform(
   dateRange?: HubImportDateRange
 ): Promise<HubSyncResult> {
   if (platform === 'quickbooks') {
-    return syncQuickBooksInvoices(userId, dateRange);
+    return await syncQuickBooksInvoices(userId, dateRange);
   }
 
-  const store = getWooStoreConfigs(userId).find((s) => s.platform === platform);
+  const store = (await getWooStoreConfigs(userId)).find((s) => s.platform === platform);
   if (!store) {
     return {
       platform,
@@ -147,7 +145,7 @@ export async function importHubPlatform(
     };
   }
 
-  return syncWooStore(userId, store, dateRange);
+  return await syncWooStore(userId, store, dateRange);
 }
 
 export interface QuickBooksTokenRow {
@@ -158,31 +156,31 @@ export interface QuickBooksTokenRow {
   realm_id: string;
 }
 
-export function quickbooksConfigured(userId: number): boolean {
-  const creds = getQuickBooksCredentials(userId);
+export async function quickbooksConfigured(userId: number): Promise<boolean> {
+  const creds = await getQuickBooksCredentials(userId);
   return Boolean(creds.client_id && creds.client_secret);
 }
 
-export function quickbooksRedirectUri(userId: number, requestOrigin?: string): string {
-  const fromSettings = getQuickBooksCredentials(userId).redirect_uri.trim();
+export async function quickbooksRedirectUri(userId: number, requestOrigin?: string): Promise<string> {
+  const fromSettings = (await getQuickBooksCredentials(userId)).redirect_uri.trim();
   if (fromSettings) return fromSettings;
   if (process.env.QUICKBOOKS_REDIRECT_URI) return process.env.QUICKBOOKS_REDIRECT_URI;
   const base = requestOrigin || process.env.APP_URL || 'http://localhost:3000';
   return `${base.replace(/\/$/, '')}/api/integrations/quickbooks/callback`;
 }
 
-export function quickbooksApiBase(userId: number): string {
-  const env = getQuickBooksCredentials(userId).environment;
+export async function quickbooksApiBase(userId: number): Promise<string> {
+  const env = (await getQuickBooksCredentials(userId)).environment;
   return env === 'production'
     ? 'https://quickbooks.api.intuit.com'
     : 'https://sandbox-quickbooks.api.intuit.com';
 }
 
-export function getQuickBooksAuthUrl(userId: number, requestOrigin?: string): string {
-  const creds = getQuickBooksCredentials(userId);
+export async function getQuickBooksAuthUrl(userId: number, requestOrigin?: string): Promise<string> {
+  const creds = await getQuickBooksCredentials(userId);
   if (!creds.client_id) throw new Error('QuickBooks Client ID is not configured');
 
-  const redirectUri = quickbooksRedirectUri(userId, requestOrigin);
+  const redirectUri = await quickbooksRedirectUri(userId, requestOrigin);
   const state = Buffer.from(JSON.stringify({ userId })).toString('base64url');
   const params = new URLSearchParams({
     client_id: creds.client_id,
@@ -194,12 +192,12 @@ export function getQuickBooksAuthUrl(userId: number, requestOrigin?: string): st
   return `https://appcenter.intuit.com/connect/oauth2?${params.toString()}`;
 }
 
-export function saveQuickBooksTokens(
+export async function saveQuickBooksTokens(
   userId: number,
   tokens: { access_token: string; refresh_token: string; expires_in: number; realmId: string }
-): void {
+): Promise<void> {
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
-  db.prepare(
+  await db.prepare(
     `INSERT INTO integration_tokens (user_id, provider, access_token, refresh_token, expires_at, realm_id, updated_at)
      VALUES (?, 'quickbooks', ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(user_id, provider) DO UPDATE SET
@@ -211,8 +209,8 @@ export function saveQuickBooksTokens(
   ).run(userId, tokens.access_token, tokens.refresh_token, expiresAt, tokens.realmId);
 }
 
-export function getQuickBooksTokens(userId: number): QuickBooksTokenRow | null {
-  const row = db
+export async function getQuickBooksTokens(userId: number): Promise<QuickBooksTokenRow | null> {
+  const row = await db
     .prepare(
       `SELECT user_id, access_token, refresh_token, expires_at, realm_id
        FROM integration_tokens WHERE user_id = ? AND provider = 'quickbooks'`
@@ -221,8 +219,8 @@ export function getQuickBooksTokens(userId: number): QuickBooksTokenRow | null {
   return row || null;
 }
 
-export function isQuickBooksConnected(userId: number): boolean {
-  return Boolean(getQuickBooksTokens(userId)?.refresh_token);
+export async function isQuickBooksConnected(userId: number): Promise<boolean> {
+  return Boolean((await getQuickBooksTokens(userId))?.refresh_token);
 }
 
 export async function exchangeQuickBooksCode(
@@ -230,7 +228,7 @@ export async function exchangeQuickBooksCode(
   code: string,
   redirectUri: string
 ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-  const creds = getQuickBooksCredentials(userId);
+  const creds = await getQuickBooksCredentials(userId);
   if (!creds.client_id || !creds.client_secret) throw new Error('QuickBooks credentials not configured');
 
   const basic = Buffer.from(`${creds.client_id}:${creds.client_secret}`).toString('base64');
@@ -267,7 +265,7 @@ export async function exchangeQuickBooksCode(
 }
 
 async function refreshQuickBooksAccessToken(userId: number, row: QuickBooksTokenRow): Promise<string> {
-  const creds = getQuickBooksCredentials(userId);
+  const creds = await getQuickBooksCredentials(userId);
   if (!creds.client_id || !creds.client_secret) throw new Error('QuickBooks credentials not configured');
 
   const basic = Buffer.from(`${creds.client_id}:${creds.client_secret}`).toString('base64');
@@ -296,7 +294,7 @@ async function refreshQuickBooksAccessToken(userId: number, row: QuickBooksToken
     throw new Error(json.error || 'QuickBooks token refresh failed — reconnect OAuth');
   }
 
-  saveQuickBooksTokens(userId, {
+  await saveQuickBooksTokens(userId, {
     access_token: json.access_token,
     refresh_token: json.refresh_token || row.refresh_token,
     expires_in: json.expires_in || 3600,
@@ -306,7 +304,7 @@ async function refreshQuickBooksAccessToken(userId: number, row: QuickBooksToken
 }
 
 export async function getValidQuickBooksAccessToken(userId: number): Promise<{ token: string; realmId: string }> {
-  const row = getQuickBooksTokens(userId);
+  const row = await getQuickBooksTokens(userId);
   if (!row) throw new Error('QuickBooks is not connected');
 
   const expires = new Date(row.expires_at).getTime();
@@ -335,8 +333,8 @@ function mapQbInvoiceStatus(balance: number, total: number): 'draft' | 'sent' | 
   return 'sent';
 }
 
-function allocateQbSystemNo(userId: number, qbId: string): string {
-  const existing = db
+async function allocateQbSystemNo(userId: number, qbId: string): Promise<string> {
+  const existing = await db
     .prepare(
       `SELECT system_order_no FROM invoices
        WHERE user_id = ? AND source_platform = 'quickbooks' AND original_order_id = ?`
@@ -344,18 +342,18 @@ function allocateQbSystemNo(userId: number, qbId: string): string {
     .get(userId, qbId) as { system_order_no: string | null } | undefined;
   if (existing?.system_order_no) return existing.system_order_no;
 
-  const row = db
+  const row = await db
     .prepare("SELECT next_serial FROM hub_order_sequences WHERE user_id = ? AND platform = 'quickbooks'")
     .get(userId) as { next_serial: number } | undefined;
   let serial = row?.next_serial ?? 1001;
   if (!row) {
-    db.prepare('INSERT INTO hub_order_sequences (user_id, platform, next_serial) VALUES (?, ?, ?)').run(
+    await db.prepare('INSERT INTO hub_order_sequences (user_id, platform, next_serial) VALUES (?, ?, ?)').run(
       userId,
       'quickbooks',
       serial + 1
     );
   } else {
-    db.prepare('UPDATE hub_order_sequences SET next_serial = ? WHERE user_id = ? AND platform = ?').run(
+    await db.prepare('UPDATE hub_order_sequences SET next_serial = ? WHERE user_id = ? AND platform = ?').run(
       serial + 1,
       userId,
       'quickbooks'
@@ -376,7 +374,7 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
   };
 
   const { token, realmId } = await getValidQuickBooksAccessToken(userId);
-  const lastSync = getSyncState(userId, 'quickbooks', 'invoices');
+  const lastSync = await getSyncState(userId, 'quickbooks', 'invoices');
   let query: string;
   if (dateRange) {
     query = `select * from Invoice where TxnDate >= '${dateRange.dateFrom}' and TxnDate <= '${dateRange.dateTo}' MAXRESULTS 1000`;
@@ -386,7 +384,7 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
     query = 'select * from Invoice MAXRESULTS 1000';
   }
 
-  const url = `${quickbooksApiBase(userId)}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
+  const url = `${await quickbooksApiBase(userId)}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -410,19 +408,19 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
   result.fetched = invoices.length;
   const syncedAt = new Date().toISOString();
 
-  const run = db.transaction(() => {
+  await db.transaction(async () => {
     for (const inv of invoices) {
       try {
         const total = Number(inv.TotalAmt) || 0;
         const balance = Number(inv.Balance ?? total);
-        const systemNo = allocateQbSystemNo(userId, inv.Id);
+        const systemNo = await allocateQbSystemNo(userId, inv.Id);
         const docNumber = inv.DocNumber || null;
         const customerName = inv.CustomerRef?.name || 'QuickBooks Customer';
         const txnDate = (inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
         const issueDate = txnDate;
         const dueDate = (inv.DueDate || inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
 
-        let orderId = findOrderForQuickBooksInvoice(userId, {
+        let orderId = await findOrderForQuickBooksInvoice(userId, {
           docNumber,
           customerName,
           totalAmount: total,
@@ -431,7 +429,7 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
         const wasLinked = Boolean(orderId);
 
         if (!orderId) {
-          const orderUpsert = upsertHubOrder(userId, {
+          const orderUpsert = await upsertHubOrder(userId, {
             source_platform: 'quickbooks',
             original_order_id: inv.Id,
             customer_name: customerName,
@@ -446,7 +444,7 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
           orderId = orderUpsert.id;
         }
 
-        const upsert = upsertHubInvoice(userId, {
+        const upsert = await upsertHubInvoice(userId, {
           source_platform: 'quickbooks',
           original_order_id: inv.Id,
           system_order_no: systemNo,
@@ -469,10 +467,8 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
       }
     }
     if (!dateRange) {
-      setSyncState(userId, 'quickbooks', 'invoices', syncedAt);
+      await setSyncState(userId, 'quickbooks', 'invoices', syncedAt);
     }
   });
-  run();
-
   return result;
 }

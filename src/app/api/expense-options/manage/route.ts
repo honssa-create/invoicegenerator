@@ -8,8 +8,8 @@ export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'settings');
   if (session instanceof NextResponse) return session;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const options = listManagedOptions(ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const options = await listManagedOptions(ownerId);
 
   return NextResponse.json({
     options,

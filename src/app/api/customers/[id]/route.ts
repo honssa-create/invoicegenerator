@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const customer = db
+  const customer = await db
     .prepare('SELECT * FROM customers WHERE id = ? AND user_id = ?')
     .get(params.id, session.userId);
 
@@ -26,7 +26,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const existing = db
+  const existing = await db
     .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
     .get(params.id, session.userId);
 
@@ -41,7 +41,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
     }
 
-    db.prepare(
+    await db.prepare(
       `UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, city = ?, state = ?, zip = ?
        WHERE id = ? AND user_id = ?`
     ).run(
@@ -56,7 +56,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       session.userId
     );
 
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(params.id);
+    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(params.id);
     return NextResponse.json({ customer });
   } catch {
     return NextResponse.json({ error: 'Failed to update customer' }, { status: 500 });
@@ -70,7 +70,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   }
 
   const invoiceCount = (
-    db
+    await db
       .prepare('SELECT COUNT(*) as count FROM invoices WHERE customer_id = ? AND user_id = ?')
       .get(params.id, session.userId) as { count: number }
   ).count;
@@ -82,7 +82,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     );
   }
 
-  if (!trashCustomer(session.userId, Number(params.id))) {
+  if (!await trashCustomer(session.userId, Number(params.id))) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
   }
 

@@ -7,8 +7,8 @@ export { calculateInvoiceTotals, formatCurrency, formatDate, STATUS_COLORS } fro
 const INVOICE_NUMBER_START = 1038;
 
 /** Next 4-digit invoice number for this user (1038, 1039, …). */
-export function generateInvoiceNumber(userId: number): string {
-  const rows = db
+export async function generateInvoiceNumber(userId: number): Promise<string> {
+  const rows = await db
     .prepare('SELECT invoice_number FROM invoices WHERE user_id = ?')
     .all(userId) as { invoice_number: string }[];
 
@@ -22,19 +22,19 @@ export function generateInvoiceNumber(userId: number): string {
 }
 
 /** Invoice number = source + 1 (or the next free number if that is taken). */
-export function nextInvoiceNumberAfter(userId: number, current: string): string {
-  let n = /^\d{4,}$/.test(current.trim()) ? Number(current.trim()) + 1 : Number(generateInvoiceNumber(userId));
-  if (!Number.isFinite(n) || n < INVOICE_NUMBER_START) n = Number(generateInvoiceNumber(userId));
+export async function nextInvoiceNumberAfter(userId: number, current: string): Promise<string> {
+  let n = /^\d{4,}$/.test(current.trim()) ? Number(current.trim()) + 1 : Number(await generateInvoiceNumber(userId));
+  if (!Number.isFinite(n) || n < INVOICE_NUMBER_START) n = Number(await generateInvoiceNumber(userId));
 
   const exists = db.prepare('SELECT 1 FROM invoices WHERE user_id = ? AND invoice_number = ?');
-  while (exists.get(userId, String(n))) {
+  while (await exists.get(userId, String(n))) {
     n += 1;
   }
   return String(n);
 }
 
-export function getInvoiceWithDetails(invoiceId: number | string, userId: number): InvoiceWithDetails | null {
-  const invoice = db
+export async function getInvoiceWithDetails(invoiceId: number | string, userId: number): Promise<InvoiceWithDetails | null> {
+  const invoice = await db
     .prepare(
       `SELECT i.*, c.name as customer_name, c.email as customer_email,
               c.address as customer_address, c.city as customer_city,
@@ -47,11 +47,11 @@ export function getInvoiceWithDetails(invoiceId: number | string, userId: number
 
   if (!invoice) return null;
 
-  const items = db
+  const items = await db
     .prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id')
     .all(invoiceId) as InvoiceItem[];
 
-  const files = db
+  const files = await db
     .prepare('SELECT id, path, original_name FROM invoice_files WHERE invoice_id = ? ORDER BY id')
     .all(invoiceId) as InvoiceFile[];
 

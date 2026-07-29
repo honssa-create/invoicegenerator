@@ -9,7 +9,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (session instanceof NextResponse) return session;
 
   const userId = Number(params.id);
-  const existing = getUserById(userId);
+  const existing = await getUserById(userId);
   if (!existing) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   const body = await request.json();
@@ -44,7 +44,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   }
 
   values.push(userId);
-  db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  await db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
 
-  return NextResponse.json({ user: getUserById(userId) });
+  return NextResponse.json({ user: await getUserById(userId) });
 }

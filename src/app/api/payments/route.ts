@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'allocations array with billing_item_id and allocated_amount required' }, { status: 400 });
     }
 
-    const result = recordTenantPaymentWithAllocations(rentalOwnerId(session.userId), {
+    const result = await recordTenantPaymentWithAllocations(await rentalOwnerId(session.userId), {
       tenantId,
       paymentDate,
       amount,

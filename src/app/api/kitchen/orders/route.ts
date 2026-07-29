@@ -12,13 +12,13 @@ export async function POST(request: Request) {
     if (!FINISHED_SKUS.includes(body.sku)) {
       return NextResponse.json({ error: 'Invalid SKU' }, { status: 400 });
     }
-    const order = createDailyOrder(session.userId, {
+    const order = await createDailyOrder(session.userId, {
       customer: body.customer,
       sku: body.sku,
       quantity: Number(body.quantity),
       source: body.source,
     });
-    return NextResponse.json({ order, state: getState(session.userId) }, { status: 201 });
+    return NextResponse.json({ order, state: await getState(session.userId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }

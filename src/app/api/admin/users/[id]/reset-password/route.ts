@@ -9,7 +9,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (session instanceof NextResponse) return session;
 
   const userId = Number(params.id);
-  if (!getUserById(userId)) {
+  if (!await getUserById(userId)) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   }
 
   const passwordHash = await hashPassword(password);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId);
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId);
 
   return NextResponse.json({ success: true });
 }

@@ -7,7 +7,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const existing = getPrepOrder(params.id, session.userId);
+  const existing = await getPrepOrder(params.id, session.userId);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (existing.status === 'completed') {
     return NextResponse.json({ error: 'This prep order is already completed' }, { status: 400 });
@@ -27,7 +27,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         }))
       : undefined;
 
-    const order = completePrepProduction(params.id, session.userId, session.name, {
+    const order = await completePrepProduction(params.id, session.userId, session.name, {
       actual_yield: actualYield,
       completion_remarks: body.completion_remarks ?? null,
       splits,

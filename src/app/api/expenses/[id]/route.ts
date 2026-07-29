@@ -24,15 +24,15 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { sql, params: whereParams } = expenseWhereClause(session);
-  const expense = db
+  const { sql, params: whereParams } = await expenseWhereClause(session);
+  const expense = await db
     .prepare(`SELECT * FROM expenses WHERE id = ? AND ${sql}`)
     .get(params.id, ...whereParams) as Expense | undefined;
 
   if (!expense) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
-  attachReceipts([expense]);
+  await attachReceipts([expense]);
   return NextResponse.json({ expense });
 }
 
@@ -42,19 +42,19 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!canAccessExpense(session, Number(params.id))) {
+  if (!await canAccessExpense(session, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
 
   try {
     const body = await request.json();
     const category = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : 'other';
     const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'paid';
-    const amount_hkd = normalizeNumber(body.amount_hkd);
-    const amount_rmb = normalizeNumber(body.amount_rmb);
-    const receiptPaths = receiptPathsFromBody(body);
+    const amount_hkd = await normalizeNumber(body.amount_hkd);
+    const amount_rmb = await normalizeNumber(body.amount_rmb);
+    const receiptPaths = await receiptPathsFromBody(body);
 
     if (amount_hkd === null && amount_rmb === null) {
       return NextResponse.json({ error: 'Enter an amount in HKD or RMB' }, { status: 400 });
@@ -72,8 +72,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
     const expenseId = Number(params.id);
 
-    const update = db.transaction(() => {
-      const existing = db
+    await db.transaction(async () => {
+      const existing = await db
         .prepare(
           'SELECT batch_id, receipt_no, payment_method, funding_source, paid_date FROM expenses WHERE id = ? AND user_id = ?',
         )
@@ -93,7 +93,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       let receiptNo = existing.receipt_no;
 
       if (!batchId || !receiptNo) {
-        const assigned = assignExpenseNumbersAtomic(ownerId, paidDate, { fundingSource });
+        const assigned = await assignExpenseNumbersAtomic(ownerId, paidDate, { fundingSource });
         batchId = assigned.batchId;
         receiptNo = assigned.receiptNo;
       } else {
@@ -105,18 +105,18 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         let newPrefix = '';
         try {
           if (prevFunding && prevPaid) {
-            oldPrefix = receiptNumberPrefix(prevPaid, prevFunding);
+            oldPrefix = await receiptNumberPrefix(prevPaid, prevFunding);
           }
-          newPrefix = receiptNumberPrefix(paidDate, fundingSource);
+          newPrefix = await receiptNumberPrefix(paidDate, fundingSource);
         } catch {
-          newPrefix = receiptNumberPrefix(paidDate, fundingSource);
+          newPrefix = await receiptNumberPrefix(paidDate, fundingSource);
         }
         if (!oldPrefix || oldPrefix !== newPrefix) {
-          receiptNo = reissueReceiptNumberAtomic(ownerId, expenseId, paidDate, fundingSource);
+          receiptNo = await reissueReceiptNumberAtomic(ownerId, expenseId, paidDate, fundingSource);
         }
       }
 
-      db.prepare(
+      await db.prepare(
         `UPDATE expenses SET
            category = ?, merchant = ?, supplier_input = ?, amount_hkd = ?, amount_rmb = ?, paid_date = ?,
            order_no = ?, platform = ?, payment_method = ?, payment_channel = ?, funding_source = ?, card_last4 = ?,
@@ -147,20 +147,18 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         ownerId,
       );
 
-      db.prepare('DELETE FROM expense_receipts WHERE expense_id = ? AND user_id = ?').run(
+      await db.prepare('DELETE FROM expense_receipts WHERE expense_id = ? AND user_id = ?').run(
         params.id,
         ownerId,
       );
       const insertReceipt = db.prepare(
         'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
       );
-      for (const p of receiptPaths) insertReceipt.run(params.id, ownerId, p, null);
+      for (const p of receiptPaths) await insertReceipt.run(params.id, ownerId, p, null);
     });
 
-    update.immediate();
-
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(params.id) as Expense;
-    attachReceipts([expense]);
+    const expense = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(params.id) as Expense;
+    await attachReceipts([expense]);
     return NextResponse.json({ expense });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to update expense';
@@ -174,7 +172,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!trashExpense(session, Number(params.id))) {
+  if (!await trashExpense(session, Number(params.id))) {
     return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
   }
   return NextResponse.json({ success: true, trashed: true, retention_days: 60 });

@@ -23,7 +23,7 @@ interface OrderRow {
   updated_at: string;
 }
 
-function hydrate(row: OrderRow, withRelations: boolean): Order {
+async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   let fields: Record<string, string | boolean> = {};
   try {
     fields = row.fields_json ? JSON.parse(row.fields_json) : {};
@@ -32,20 +32,20 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
   }
 
   const files = withRelations
-    ? (db
+    ? (await db
         .prepare('SELECT id, path, original_name FROM order_files WHERE order_id = ? ORDER BY id')
         .all(row.id) as Order['files'])
     : [];
 
-  const activities = withRelations ? (getActivities('order', row.id) as Order['activities']) : [];
+  const activities = withRelations ? (await getActivities('order', row.id) as Order['activities']) : [];
 
   let linkedInvoice: Order['linked_invoice'] = null;
   if (withRelations) {
-    const invRow = db
+    const invRow = await db
       .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
       .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
     if (invRow) {
-      const details = getInvoiceWithDetails(invRow.id, row.user_id);
+      const details = await getInvoiceWithDetails(invRow.id, row.user_id);
       linkedInvoice = {
         id: invRow.id,
         invoice_number: invRow.invoice_number,
@@ -57,7 +57,7 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
 
   const linkedQuotation =
     withRelations && row.quotation_id
-      ? (db
+      ? (await db
           .prepare('SELECT id, quote_number, status FROM quotations WHERE id = ? AND user_id = ?')
           .get(row.quotation_id, row.user_id) as Order['linked_quotation'] | undefined) || null
       : null;
@@ -87,26 +87,26 @@ function hydrate(row: OrderRow, withRelations: boolean): Order {
   };
 }
 
-export function getOrder(id: number | string, userId: number): Order | null {
-  const row = db
+export async function getOrder(id: number | string, userId: number): Promise<Order | null> {
+  const row = await db
     .prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?')
     .get(id, userId) as OrderRow | undefined;
-  return row ? hydrate(row, true) : null;
+  return row ? await hydrate(row, true) : null;
 }
 
-export function listOrders(userId: number): Order[] {
-  const rows = db
+export async function listOrders(userId: number): Promise<Order[]> {
+  const rows = await db
     .prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY updated_at DESC, id DESC')
     .all(userId) as OrderRow[];
-  return rows.map((r) => hydrate(r, false));
+  return await Promise.all(rows.map(async (r) => await hydrate(r, false)));
 }
 
-export function logActivity(
+export async function logActivity(
   orderId: number | string,
   userId: number,
   kind: 'comment' | 'activity',
   author: string,
   body: string
 ) {
-  logActivityUnified('order', orderId, userId, kind, author, body);
+  await logActivityUnified('order', orderId, userId, kind, author, body);
 }

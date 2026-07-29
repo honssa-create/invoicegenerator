@@ -160,7 +160,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Could not parse the file' }, { status: 400 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session.userId);
   const errors: string[] = [];
   const receiptWarnings: ReceiptFetchWarning[] = [];
   const seenInBatch = new Set<string>();
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
       skipped++;
       continue;
     }
-    const existing = db
+    const existing = await db
       .prepare(
         `SELECT 1 FROM expenses
          WHERE user_id = ? AND IFNULL(paid_date, '') = ?
@@ -280,20 +280,21 @@ export async function POST(request: Request) {
     'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
   );
 
-  const persist = db.transaction(() => {
+  try {
+    await db.transaction(async () => {
     for (const row of candidates) {
-      if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
-      if (syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
-      if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
-      if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
+      if (await syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
+      if (await syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
+      if (await syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
+      if (row.merchant && await syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
       const fundingSource = (legacyPaymentToFundingSource(row.paymentMethod) || 'cash') as FundingSourceId;
-      const { batchId: reportBatchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
+      const { batchId: reportBatchId, receiptNo } = await assignExpenseNumbersAtomic(ownerId, row.date!, {
         fundingSource,
       });
 
       const primaryPath = row.receiptRefs[0]?.path || null;
-      const result = insertExpense.run(
+      const result = await insertExpense.run(
         ownerId,
         session.userId,
         receiptNo,
@@ -317,14 +318,11 @@ export async function POST(request: Request) {
       );
       const expenseId = result.lastInsertRowid as number;
       for (const ref of row.receiptRefs) {
-        insertReceipt.run(expenseId, ownerId, ref.path, ref.sourceUrl ?? null);
+        await insertReceipt.run(expenseId, ownerId, ref.path, ref.sourceUrl ?? null);
       }
       imported++;
     }
-  });
-
-  try {
-    persist.immediate();
+    });
   } catch {
     return NextResponse.json({ error: 'Import failed while saving rows' }, { status: 500 });
   }

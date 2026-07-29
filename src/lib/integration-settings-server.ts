@@ -34,8 +34,8 @@ function parseSettings(json: string | null | undefined): IntegrationSettings {
   }
 }
 
-export function getIntegrationSettings(userId: number): IntegrationSettings {
-  const row = db
+export async function getIntegrationSettings(userId: number): Promise<IntegrationSettings> {
+  const row = await db
     .prepare('SELECT settings_json FROM integration_settings WHERE user_id = ?')
     .get(userId) as { settings_json: string } | undefined;
   const dbSettings = parseSettings(row?.settings_json);
@@ -92,15 +92,15 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
 }
 
 /** Raw DB settings only (for saving merges, without env overlay). */
-function getRawIntegrationSettings(userId: number): IntegrationSettings {
-  const row = db
+async function getRawIntegrationSettings(userId: number): Promise<IntegrationSettings> {
+  const row = await db
     .prepare('SELECT settings_json FROM integration_settings WHERE user_id = ?')
     .get(userId) as { settings_json: string } | undefined;
   return parseSettings(row?.settings_json);
 }
 
-export function getIntegrationSettingsMasked(userId: number): IntegrationSettingsMasked {
-  const s = getIntegrationSettings(userId);
+export async function getIntegrationSettingsMasked(userId: number): Promise<IntegrationSettingsMasked> {
+  const s = await getIntegrationSettings(userId);
   const maskWoo = (store: WooStoreSettings) => {
     const key = maskSecret(store.key);
     const secret = maskSecret(store.secret);
@@ -152,8 +152,8 @@ function keepOrReplace(current: string, incoming: string | undefined | null, cle
   return trimmed;
 }
 
-export function saveIntegrationSettings(userId: number, update: IntegrationSettingsUpdate): IntegrationSettings {
-  const current = getRawIntegrationSettings(userId);
+export async function saveIntegrationSettings(userId: number, update: IntegrationSettingsUpdate): Promise<IntegrationSettings> {
+  const current = await getRawIntegrationSettings(userId);
 
   const next: IntegrationSettings = {
     woocommerce: { ...current.woocommerce },
@@ -197,19 +197,19 @@ export function saveIntegrationSettings(userId: number, update: IntegrationSetti
     };
   }
 
-  db.prepare(
+  await db.prepare(
     `INSERT INTO integration_settings (user_id, settings_json, updated_at)
      VALUES (?, ?, datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = datetime('now')`
   ).run(userId, JSON.stringify(next));
 
-  return getIntegrationSettings(userId);
+  return await getIntegrationSettings(userId);
 }
 
-export function getQuickBooksCredentials(userId: number): QuickBooksSettings {
-  return getIntegrationSettings(userId).quickbooks;
+export async function getQuickBooksCredentials(userId: number): Promise<QuickBooksSettings> {
+  return (await getIntegrationSettings(userId)).quickbooks;
 }
 
-export function getYedpayCredentials(userId: number): YedpaySettings {
-  return getIntegrationSettings(userId).yedpay;
+export async function getYedpayCredentials(userId: number): Promise<YedpaySettings> {
+  return (await getIntegrationSettings(userId)).yedpay;
 }

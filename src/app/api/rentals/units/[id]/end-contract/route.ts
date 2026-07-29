@@ -14,12 +14,12 @@ export async function POST(
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
 
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session.userId);
   const unitId = Number(params.id);
   const body = await request.json();
 
   try {
-    const outstanding = unitOutstandingTotal(unitId, ownerId);
+    const outstanding = await unitOutstandingTotal(unitId, ownerId);
     if (outstanding > 0 && !body.forceEnd) {
       return NextResponse.json({
         error: `Outstanding balance ${formatMoney(outstanding)} — settle or pass forceEnd: true`,
@@ -27,7 +27,7 @@ export async function POST(
       }, { status: 400 });
     }
 
-    const result = endRentalContract(ownerId, unitId, {
+    const result = await endRentalContract(ownerId, unitId, {
       actualEndDate: body.actualEndDate,
       endReason: body.endReason,
       depositRefund: body.depositRefund,
@@ -36,12 +36,14 @@ export async function POST(
       startNewLease: body.startNewLease,
     });
 
-    logRentalActivity(
-      ownerId, unitId, 'Contract Ended',
-      `${result.endedLease.tenantName} · ${result.endedLease.actualEndDate || result.endedLease.leaseEndDate}`,
-    );
+    if (result.endedLease) {
+      await logRentalActivity(
+        ownerId, unitId, 'Contract Ended',
+        `${result.endedLease.tenantName} · ${result.endedLease.actualEndDate || result.endedLease.leaseEndDate}`,
+      );
+    }
     if (result.newLease) {
-      logRentalActivity(ownerId, unitId, 'New Lease Started', result.newLease.tenantName);
+      await logRentalActivity(ownerId, unitId, 'New Lease Started', result.newLease.tenantName);
     }
 
     return NextResponse.json(result);

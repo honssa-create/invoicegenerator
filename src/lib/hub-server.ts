@@ -34,21 +34,21 @@ export interface HubInvoiceUpsertInput {
   raw_payload?: Record<string, unknown>;
 }
 
-function allocateSystemOrderNo(userId: number, platform: Exclude<HubPlatform, 'manual'>): string {
+async function allocateSystemOrderNo(userId: number, platform: Exclude<HubPlatform, 'manual'>): Promise<string> {
   const prefix = HUB_PLATFORM_PREFIX[platform];
-  const row = db
+  const row = await db
     .prepare('SELECT next_serial FROM hub_order_sequences WHERE user_id = ? AND platform = ?')
     .get(userId, platform) as { next_serial: number } | undefined;
 
   let serial = row?.next_serial ?? 1001;
   if (!row) {
-    db.prepare('INSERT INTO hub_order_sequences (user_id, platform, next_serial) VALUES (?, ?, ?)').run(
+    await db.prepare('INSERT INTO hub_order_sequences (user_id, platform, next_serial) VALUES (?, ?, ?)').run(
       userId,
       platform,
       serial + 1
     );
   } else {
-    db.prepare('UPDATE hub_order_sequences SET next_serial = ? WHERE user_id = ? AND platform = ?').run(
+    await db.prepare('UPDATE hub_order_sequences SET next_serial = ? WHERE user_id = ? AND platform = ?').run(
       serial + 1,
       userId,
       platform
@@ -58,36 +58,36 @@ function allocateSystemOrderNo(userId: number, platform: Exclude<HubPlatform, 'm
   return `${prefix}-${serial}`;
 }
 
-function findOrCreateCustomer(
+async function findOrCreateCustomer(
   userId: number,
   name: string,
   email?: string | null
-): number {
+): Promise<number> {
   const trimmedEmail = email?.trim() || null;
   if (trimmedEmail) {
-    const byEmail = db
+    const byEmail = await db
       .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(email) = LOWER(?)')
       .get(userId, trimmedEmail) as { id: number } | undefined;
     if (byEmail) return byEmail.id;
   }
 
-  const byName = db
+  const byName = await db
     .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(name) = LOWER(?)')
     .get(userId, name.trim()) as { id: number } | undefined;
   if (byName) return byName.id;
 
-  const result = db
+  const result = await db
     .prepare('INSERT INTO customers (user_id, name, email) VALUES (?, ?, ?)')
     .run(userId, name.trim() || 'Unknown Customer', trimmedEmail);
   return Number(result.lastInsertRowid);
 }
 
 /** Upsert external order — never deletes local rows. */
-export function upsertHubOrder(
+export async function upsertHubOrder(
   userId: number,
   input: HubOrderUpsertInput
-): { id: number; inserted: boolean; system_order_no: string } {
-  const existing = db
+): Promise<{ id: number; inserted: boolean; system_order_no: string }> {
+  const existing = await db
     .prepare(
       `SELECT id, system_order_no, fields_json FROM orders
        WHERE user_id = ? AND source_platform = ? AND original_order_id = ?`
@@ -111,7 +111,7 @@ export function upsertHubOrder(
   if (mappedType) fields.order_type = mappedType;
 
   if (existing) {
-    db.prepare(
+    await db.prepare(
       `UPDATE orders SET
          name = ?,
          status = ?,
@@ -144,8 +144,8 @@ export function upsertHubOrder(
     };
   }
 
-  const systemOrderNo = allocateSystemOrderNo(userId, input.source_platform);
-  const result = db
+  const systemOrderNo = await allocateSystemOrderNo(userId, input.source_platform);
+  const result = await db
     .prepare(
       `INSERT INTO orders (
          user_id, source_platform, original_order_id, system_order_no,
@@ -178,7 +178,7 @@ export function upsertHubOrder(
 }
 
 /** Find an existing hub order to attach a QuickBooks invoice to. */
-export function findOrderForQuickBooksInvoice(
+export async function findOrderForQuickBooksInvoice(
   userId: number,
   input: {
     docNumber?: string | null;
@@ -186,8 +186,8 @@ export function findOrderForQuickBooksInvoice(
     totalAmount?: number | null;
     txnDate?: string | null;
   }
-): number | null {
-  const rows = db
+): Promise<number | null> {
+  const rows = await db
     .prepare(
       `SELECT id, po_number, system_order_no, name AS customer_name, total_amount, created_at
        FROM orders
@@ -201,23 +201,23 @@ export function findOrderForQuickBooksInvoice(
 }
 
 /** Upsert QuickBooks invoice — never deletes local rows. */
-export function upsertHubInvoice(
+export async function upsertHubInvoice(
   userId: number,
   input: HubInvoiceUpsertInput
-): { id: number; inserted: boolean; order_id: number | null } {
-  const existing = db
+): Promise<{ id: number; inserted: boolean; order_id: number | null }> {
+  const existing = await db
     .prepare(
       `SELECT id FROM invoices
        WHERE user_id = ? AND source_platform = ? AND original_order_id = ?`
     )
     .get(userId, input.source_platform, input.original_order_id) as { id: number } | undefined;
 
-  const customerId = findOrCreateCustomer(userId, input.customer_name, input.customer_email);
+  const customerId = await findOrCreateCustomer(userId, input.customer_name, input.customer_email);
   const invoiceNumber = input.invoice_number?.trim() || input.system_order_no;
   const orderId = input.order_id ?? null;
 
   if (existing) {
-    db.prepare(
+    await db.prepare(
       `UPDATE invoices SET
          customer_id = ?,
          invoice_number = ?,
@@ -239,13 +239,13 @@ export function upsertHubInvoice(
       existing.id,
       userId
     );
-    const linked = db
+    const linked = await db
       .prepare('SELECT order_id FROM invoices WHERE id = ? AND user_id = ?')
       .get(existing.id, userId) as { order_id: number | null } | undefined;
     return { id: existing.id, inserted: false, order_id: linked?.order_id ?? orderId };
   }
 
-  const result = db
+  const result = await db
     .prepare(
       `INSERT INTO invoices (
          user_id, customer_id, source_platform, original_order_id, system_order_no,
@@ -267,7 +267,7 @@ export function upsertHubInvoice(
     );
 
   const invoiceId = Number(result.lastInsertRowid);
-  db.prepare(
+  await db.prepare(
     `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
      VALUES (?, ?, 1, ?, ?)`
   ).run(invoiceId, 'QuickBooks imported total', 1, input.total_amount, input.total_amount);
@@ -275,8 +275,8 @@ export function upsertHubInvoice(
   return { id: invoiceId, inserted: true, order_id: orderId };
 }
 
-export function listHubOrders(userId: number): HubOrderRow[] {
-  const rows = db
+export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
+  const rows = await db
     .prepare(
       `SELECT o.id, o.source_platform, o.original_order_id, o.system_order_no,
               o.name AS customer_name, o.total_amount, o.status, o.po_number,
@@ -305,8 +305,8 @@ export function listHubOrders(userId: number): HubOrderRow[] {
   }));
 }
 
-export function getSyncState(userId: number, provider: string, storeKey: string): string | null {
-  const row = db
+export async function getSyncState(userId: number, provider: string, storeKey: string): Promise<string | null> {
+  const row = await db
     .prepare(
       `SELECT last_synced_at FROM integration_sync_state
        WHERE user_id = ? AND provider = ? AND store_key = ?`
@@ -315,8 +315,8 @@ export function getSyncState(userId: number, provider: string, storeKey: string)
   return row?.last_synced_at ?? null;
 }
 
-export function setSyncState(userId: number, provider: string, storeKey: string, syncedAt: string): void {
-  db.prepare(
+export async function setSyncState(userId: number, provider: string, storeKey: string, syncedAt: string): Promise<void> {
+  await db.prepare(
     `INSERT INTO integration_sync_state (user_id, provider, store_key, last_synced_at)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id, provider, store_key)
@@ -324,16 +324,16 @@ export function setSyncState(userId: number, provider: string, storeKey: string,
   ).run(userId, provider, storeKey, syncedAt);
 }
 
-export function resolveHubOwnerUserId(): number {
+export async function resolveHubOwnerUserId(): Promise<number> {
   const configured = Number(process.env.HUB_OWNER_USER_ID);
   if (Number.isFinite(configured) && configured > 0) return configured;
 
-  const admin = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get() as
+  const admin = await db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get() as
     | { id: number }
     | undefined;
   if (admin) return admin.id;
 
-  const anyUser = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number } | undefined;
+  const anyUser = await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number } | undefined;
   if (!anyUser) throw new Error('No users in database — register an account first');
   return anyUser.id;
 }

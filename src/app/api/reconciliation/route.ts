@@ -8,8 +8,8 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const records = listReconciliationRecords(ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const records = await listReconciliationRecords(ownerId);
 
   const summary = {
     total: records.length,
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     records,
     summary,
-    candidates: listMatchCandidates(ownerId),
-    yedpayConfigured: yedpayConfigured(ownerId),
+    candidates: await listMatchCandidates(ownerId),
+    yedpayConfigured: await yedpayConfigured(ownerId),
   });
 }

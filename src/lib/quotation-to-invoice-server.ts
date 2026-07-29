@@ -16,17 +16,17 @@ function addDaysIso(isoDate: string, days: number): string {
  * discount/shipping, rich line items, and attachment file refs.
  * Caller must ensure quote.customer_id is set.
  */
-export function createInvoiceFromQuotation(
+export async function createInvoiceFromQuotation(
   quote: QuotationWithDetails,
   ownerId: number,
-): { invoiceId: number; invoiceNumber: string } {
+): Promise<{ invoiceId: number; invoiceNumber: string }> {
   const today = new Date().toISOString().slice(0, 10);
   const issueDate = (quote.issue_date || '').trim() || today;
   const dueDate = (quote.valid_until || '').trim() || addDaysIso(issueDate, 30);
-  const invoiceNumber = generateInvoiceNumber(ownerId);
+  const invoiceNumber = await generateInvoiceNumber(ownerId);
 
-  return db.transaction(() => {
-    const result = db
+  return await db.transaction(async () => {
+    const result = await db
       .prepare(
         `INSERT INTO invoices (
            user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms,
@@ -65,7 +65,7 @@ export function createInvoiceFromQuotation(
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const it of quote.items) {
-      insertItem.run(
+      await insertItem.run(
         invoiceId,
         it.service_date,
         it.product_service,
@@ -81,9 +81,9 @@ export function createInvoiceFromQuotation(
       'INSERT INTO invoice_files (invoice_id, user_id, path, original_name) VALUES (?, ?, ?, ?)',
     );
     for (const f of quote.files || []) {
-      insertFile.run(invoiceId, ownerId, f.path, f.original_name);
+      await insertFile.run(invoiceId, ownerId, f.path, f.original_name);
     }
 
     return { invoiceId, invoiceNumber };
-  })();
+  });
 }

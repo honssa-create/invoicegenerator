@@ -15,8 +15,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const quote = getQuotationWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const quote = await getQuotationWithDetails(params.id, ownerId);
   if (!quote) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
   if (!quote.customer_id) {
@@ -26,10 +26,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     );
   }
 
-  const { invoiceId, invoiceNumber: invNo } = createInvoiceFromQuotation(quote, ownerId);
+  const { invoiceId, invoiceNumber: invNo } = await createInvoiceFromQuotation(quote, ownerId);
 
-  logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted Quotation ${quote.quote_number} to a new Invoice`);
-  logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created by copying quotation ${quote.quote_number}`);
+  await logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted Quotation ${quote.quote_number} to a new Invoice`);
+  await logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created by copying quotation ${quote.quote_number}`);
 
   return NextResponse.json({ id: invoiceId, invoice_number: invNo }, { status: 201 });
 }

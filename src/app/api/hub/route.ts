@@ -11,33 +11,33 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const orders = listHubOrders(ownerId);
+  const ownerId = await getDataOwnerId(session.userId);
+  const orders = await listHubOrders(ownerId);
 
-  const integrations: HubIntegrationStatus[] = HUB_PLATFORMS.filter((p) => p !== 'manual').map((platform) => {
+  const integrations: HubIntegrationStatus[] = await Promise.all(HUB_PLATFORMS.filter((p) => p !== 'manual').map(async (platform) => {
     if (platform === 'quickbooks') {
-      const qb = getQuickBooksCredentials(ownerId);
+      const qb = await getQuickBooksCredentials(ownerId);
       return {
         platform,
         label: HUB_PLATFORM_LABELS[platform],
-        configured: quickbooksConfigured(ownerId),
-        connected: isQuickBooksConnected(ownerId),
-        last_synced_at: getSyncState(ownerId, 'quickbooks', 'invoices'),
+        configured: await quickbooksConfigured(ownerId),
+        connected: await isQuickBooksConnected(ownerId),
+        last_synced_at: await getSyncState(ownerId, 'quickbooks', 'invoices'),
         environment: qb.environment,
       };
     }
-    const setupIssue = getWooStoreSetupIssue(ownerId, platform);
-    const wooConfigured = getWooStoreConfigs(ownerId).some((s) => s.platform === platform);
+    const setupIssue = await getWooStoreSetupIssue(ownerId, platform);
+    const wooConfigured = (await getWooStoreConfigs(ownerId)).some((s) => s.platform === platform);
     const hasPartialConfig = setupIssue !== 'not_configured';
     return {
       platform,
       label: HUB_PLATFORM_LABELS[platform],
       configured: hasPartialConfig,
       connected: wooConfigured,
-      last_synced_at: getSyncState(ownerId, 'woocommerce', platform),
+      last_synced_at: await getSyncState(ownerId, 'woocommerce', platform),
       setup_error: setupIssue && setupIssue !== 'not_configured' ? setupIssue : null,
     };
-  });
+  }));
 
   const byPlatform = Object.fromEntries(
     HUB_PLATFORMS.map((p) => [p, orders.filter((o) => o.source_platform === p).length])

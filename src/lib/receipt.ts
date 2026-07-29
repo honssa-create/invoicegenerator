@@ -13,16 +13,15 @@ const ALLOWED_EXT: Record<string, string> = {
 };
 
 /**
- * Receipt files directory. Co-located with SQLite when DB_PATH is set (Railway volume).
- * Override with RECEIPTS_DIR. Production should prefer R2 (see saveReceipt).
+ * Receipt files directory. Prefer RECEIPTS_DIR; on Railway use /data/receipts when present.
+ * Production should prefer R2 (see saveReceipt).
  */
 export function resolveReceiptsDir(): string {
   if (process.env.RECEIPTS_DIR?.trim()) {
     return process.env.RECEIPTS_DIR.trim();
   }
-  const dbPath = process.env.DB_PATH?.trim();
-  if (dbPath && process.env.NEXT_PHASE !== 'phase-production-build') {
-    return path.join(path.dirname(dbPath), 'receipts');
+  if (process.env.NEXT_PHASE !== 'phase-production-build' && fs.existsSync('/data')) {
+    return '/data/receipts';
   }
   return path.join(process.cwd(), 'data', 'receipts');
 }

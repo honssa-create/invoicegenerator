@@ -22,8 +22,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const body = await request.json();
     const value = typeof body.value === 'string' ? body.value : '';
-    const ownerId = getDataOwnerId(session.userId);
-    const result = updateManagedOption(ownerId, id, value);
+    const ownerId = await getDataOwnerId(session.userId);
+    const result = await updateManagedOption(ownerId, id, value);
 
     if (!result.option) {
       return NextResponse.json({ error: result.error || 'Failed to update option' }, { status: 400 });
@@ -31,7 +31,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return NextResponse.json({
       option: result.option,
-      options: listManagedOptions(ownerId),
+      options: await listManagedOptions(ownerId),
     });
   } catch {
     return NextResponse.json({ error: 'Failed to update option' }, { status: 500 });
@@ -49,14 +49,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
 
   try {
-    const ownerId = getDataOwnerId(session.userId);
-    const result = deleteManagedOption(ownerId, id);
+    const ownerId = await getDataOwnerId(session.userId);
+    const result = await deleteManagedOption(ownerId, id);
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error || 'Failed to delete option' }, { status: 404 });
     }
 
-    return NextResponse.json({ options: listManagedOptions(ownerId) });
+    return NextResponse.json({ options: await listManagedOptions(ownerId) });
   } catch {
     return NextResponse.json({ error: 'Failed to delete option' }, { status: 500 });
   }

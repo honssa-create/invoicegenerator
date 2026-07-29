@@ -17,8 +17,8 @@ describe('receipt storage mode', () => {
     expect(isReceiptStoragePersistent()).toBe(true);
   });
 
-  it('detects Railway volume via DB_PATH', async () => {
-    vi.stubEnv('DB_PATH', '/data/invoices.db');
+  it('detects Railway volume via RECEIPTS_DIR', async () => {
+    vi.stubEnv('RECEIPTS_DIR', '/data/receipts');
     vi.stubEnv('R2_ENDPOINT', '');
     const { getReceiptStorageMode, isReceiptStoragePersistent } = await import('./receipt-storage');
     expect(getReceiptStorageMode()).toBe('volume');
@@ -26,7 +26,7 @@ describe('receipt storage mode', () => {
   });
 
   it('treats default data/ path as ephemeral', async () => {
-    vi.stubEnv('DB_PATH', '');
+    vi.stubEnv('RECEIPTS_DIR', '');
     vi.stubEnv('R2_ENDPOINT', '');
     const { getReceiptStorageMode, shouldKeepRemoteUrlInsteadOfEphemeralSave } = await import(
       './receipt-storage'

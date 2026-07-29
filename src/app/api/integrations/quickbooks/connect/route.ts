@@ -9,9 +9,9 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = getDataOwnerId(session.userId);
-  const savedRedirectUri = getQuickBooksCredentials(ownerId).redirect_uri;
+  const ownerId = await getDataOwnerId(session.userId);
+  const savedRedirectUri = (await getQuickBooksCredentials(ownerId)).redirect_uri;
   const origin = getPublicOrigin(request, { savedRedirectUri });
-  const url = getQuickBooksAuthUrl(ownerId, origin);
+  const url = await getQuickBooksAuthUrl(ownerId, origin);
   return NextResponse.redirect(url);
 }

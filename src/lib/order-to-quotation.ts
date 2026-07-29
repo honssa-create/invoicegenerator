@@ -1,4 +1,11 @@
-import { BIRD_NEST_FLAVORS, isBadgeOrderType, isBirdNestOrderType, orderTitle, type Order } from './orders';
+import {
+  BIRD_NEST_FLAVORS,
+  isBadgeOrderType,
+  isBirdNestOrderType,
+  orderTitle,
+  parseHonourLines,
+  type Order,
+} from './orders';
 
 export interface QuotationLineDraft {
   description: string;
@@ -65,6 +72,27 @@ export function buildQuotationItemsFromOrder(
   }
 
   if (isBadgeOrderType(orderType)) {
+    const lines = parseHonourLines(f);
+    const fromLines = lines
+      .map((line) => {
+        const qty = parseNumericFromText(line.quantity);
+        const price = parseNumericFromText(line.unit_price);
+        const style = line.style.trim();
+        if (!style && qty <= 0 && price <= 0) return null;
+        const desc =
+          [order.description?.trim(), style].filter(Boolean).join(' — ') ||
+          style ||
+          orderType;
+        return {
+          description: desc,
+          quantity: qty || 1,
+          unit_price: price || unitPrice,
+        };
+      })
+      .filter((item): item is QuotationLineDraft => item != null);
+
+    if (fromLines.length) return fromLines;
+
     const style = fieldStr(f, 'badge_style');
     const qty =
       fieldNum(f, 'badge_quantity') ||

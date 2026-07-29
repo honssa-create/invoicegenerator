@@ -77,7 +77,95 @@ export const ORDER_FIELDS: OrderFieldDef[] = [
   { key: 'shipping_method', label: 'Shipping 寄出方式', type: 'select', options: ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] },
   { key: 'other_craft', label: '其他加工', type: 'text' },
   { key: 'carton_count', label: 'Number of Cartons / 箱數', type: 'text', col: 'carton_count', placeholder: 'e.g. 5' },
+  { key: 'extra_actions', label: '額外動作', type: 'textarea' },
 ];
+
+/** Honour / honour-en line items stored as JSON in fields.honour_lines. */
+export interface HonourLineItem {
+  style: string;
+  quantity: string;
+  unit_price: string;
+}
+
+export function emptyHonourLine(): HonourLineItem {
+  return { style: '', quantity: '', unit_price: '' };
+}
+
+function fieldAsString(fields: Record<string, string | boolean>, key: string): string {
+  const v = fields[key];
+  if (typeof v === 'boolean') return v ? 'yes' : '';
+  return String(v ?? '').trim();
+}
+
+/** Parse honour_lines JSON; seed one row from legacy badge_style / badge_quantity when empty. */
+export function parseHonourLines(fields: Record<string, string | boolean>): HonourLineItem[] {
+  const raw = fields.honour_lines;
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((row) => {
+          const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+          return {
+            style: String(r.style ?? ''),
+            quantity: String(r.quantity ?? ''),
+            unit_price: String(r.unit_price ?? ''),
+          };
+        });
+      }
+    } catch {
+      /* fall through to legacy seed */
+    }
+  }
+  const style = fieldAsString(fields, 'badge_style');
+  const quantity = fieldAsString(fields, 'badge_quantity');
+  if (style || quantity) {
+    return [{ style, quantity, unit_price: '' }];
+  }
+  return [emptyHonourLine()];
+}
+
+export function serializeHonourLines(lines: HonourLineItem[]): string {
+  return JSON.stringify(
+    lines.map((l) => ({
+      style: String(l.style ?? ''),
+      quantity: String(l.quantity ?? ''),
+      unit_price: String(l.unit_price ?? ''),
+    }))
+  );
+}
+
+export function computeHonourLineTotals(lines: HonourLineItem[]): {
+  totalQuantity: number;
+  totalAmount: number;
+} {
+  let totalQuantity = 0;
+  let totalAmount = 0;
+  for (const line of lines) {
+    const qty = Number(String(line.quantity).replace(/,/g, ''));
+    const price = Number(String(line.unit_price).replace(/,/g, ''));
+    const q = Number.isFinite(qty) ? qty : 0;
+    const p = Number.isFinite(price) ? price : 0;
+    totalQuantity += q;
+    totalAmount += q * p;
+  }
+  return {
+    totalQuantity: Math.round(totalQuantity * 100) / 100,
+    totalAmount: Math.round(totalAmount * 100) / 100,
+  };
+}
+
+/** Derived fields kept in sync for delivery-note / legacy readers. */
+export function honourLinesDerivedFields(lines: HonourLineItem[]): Record<string, string> {
+  const { totalQuantity } = computeHonourLineTotals(lines);
+  const first = lines[0];
+  return {
+    honour_lines: serializeHonourLines(lines),
+    badge_style: first?.style ?? '',
+    badge_quantity: first?.quantity ?? (totalQuantity ? String(totalQuantity) : ''),
+    qty_ordered: totalQuantity ? String(totalQuantity) : '',
+  };
+}
 
 export interface OrderFile {
   id: number;
@@ -129,7 +217,7 @@ export const ORDER_TYPES = [
 ] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
-/** Badge-style custom orders share the same detail fields (style, qty, proofs, custom fields). */
+/** Badge-style custom orders (honour訂製 / honour en訂製) share the curated Order Detail form. */
 export const BADGE_ORDER_TYPES = ['honour訂製', 'honour en訂製'] as const;
 export type BadgeOrderType = (typeof BADGE_ORDER_TYPES)[number];
 export function isBadgeOrderType(t: string): t is BadgeOrderType {

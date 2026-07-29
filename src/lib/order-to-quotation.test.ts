@@ -23,7 +23,7 @@ describe('parseOrderDate', () => {
 });
 
 describe('buildQuotationItemsFromOrder', () => {
-  it('maps badge orders', () => {
+  it('maps badge orders from legacy badge fields', () => {
     const items = buildQuotationItemsFromOrder({
       description: '4款亞加力',
       name: 'Jane',
@@ -39,6 +39,25 @@ describe('buildQuotationItemsFromOrder', () => {
     expect(items[0].description).toContain('亞加力雙面');
     expect(items[0].quantity).toBe(100);
     expect(items[0].unit_price).toBe(12.5);
+  });
+
+  it('maps honour_lines into multiple quotation items', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: 'Custom badges',
+      name: 'Jane',
+      po_number: 'PO-2',
+      fields: {
+        order_type: 'honour en訂製',
+        honour_lines: JSON.stringify([
+          { style: 'Acrylic A', quantity: '50', unit_price: '8' },
+          { style: 'Acrylic B', quantity: '20', unit_price: '12.5' },
+        ]),
+        supplier_price: '1',
+      },
+    });
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ description: 'Custom badges — Acrylic A', quantity: 50, unit_price: 8 });
+    expect(items[1]).toMatchObject({ description: 'Custom badges — Acrylic B', quantity: 20, unit_price: 12.5 });
   });
 
   it('maps bird nest flavors', () => {

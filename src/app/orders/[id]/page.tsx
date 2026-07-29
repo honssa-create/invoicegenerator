@@ -19,14 +19,18 @@ import {
   computeBirdNestTotals,
   computeBirdNestActualTotal,
   computeOrderPaidTotal,
+  computeHonourLineTotals,
   derivePaymentStatusLabel,
+  emptyHonourLine,
+  honourLinesDerivedFields,
   normalizeOrderPaymentMethod,
+  parseHonourLines,
   STATUS_COLORS,
   orderTitle,
   isBadgeOrderType,
   isBirdNestOrderType,
+  type HonourLineItem,
   type Order,
-  type OrderFieldDef,
 } from '@/lib/orders';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
@@ -239,9 +243,18 @@ export default function OrderDetailPage() {
       if (r.reference) upd[refKey] = r.reference;
       const nextFields = { ...(order?.fields || {}), ...upd };
       const paid = computeOrderPaidTotal(nextFields);
+      const orderType = String(order?.fields?.order_type || '');
+      const honourDue =
+        isBadgeOrderType(orderType) && order
+          ? computeHonourLineTotals(parseHonourLines(nextFields)).totalAmount
+          : 0;
       const due =
         order?.linked_invoice?.total ??
-        (order?.total_amount != null && order.total_amount > 0 ? order.total_amount : null);
+        (honourDue > 0
+          ? honourDue
+          : order?.total_amount != null && order.total_amount > 0
+            ? order.total_amount
+            : null);
       upd.payment_status_label = derivePaymentStatusLabel(paid, due);
       setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
       patch({ fields: upd });
@@ -285,8 +298,6 @@ export default function OrderDetailPage() {
     );
   }
 
-  const cellCls = 'w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 rounded px-2 py-1 text-sm outline-none transition-colors';
-
   // Helpers for the structured section boxes (values stored in fields_json).
   const softInput = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-colors';
   const fVal = (k: string) => (order.fields[k] as string) ?? '';
@@ -300,12 +311,19 @@ export default function OrderDetailPage() {
       className={softInput}
     />
   );
+  const orderType = fVal('order_type');
+  const honourLines = isBadgeOrderType(orderType) ? parseHonourLines(order.fields) : [];
+  const honourTotals = computeHonourLineTotals(honourLines);
+  const honourDue =
+    isBadgeOrderType(orderType) && honourTotals.totalAmount > 0 ? honourTotals.totalAmount : null;
   const dueTotal =
     order.linked_invoice?.total != null && order.linked_invoice.total > 0
       ? order.linked_invoice.total
-      : order.total_amount != null && order.total_amount > 0
-        ? order.total_amount
-        : null;
+      : honourDue != null
+        ? honourDue
+        : order.total_amount != null && order.total_amount > 0
+          ? order.total_amount
+          : null;
   const paidTotal = computeOrderPaidTotal(order.fields);
   const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
 
@@ -400,55 +418,39 @@ export default function OrderDetailPage() {
       <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{value}</p>
     </div>
   );
-  const orderType = fVal('order_type');
   const bn = computeBirdNestTotals(order.fields);
 
-  const renderField = (f: OrderFieldDef) => {
-    const value = f.col ? (order[f.col] as string) : order.fields[f.key];
-    if (f.type === 'checkbox') {
-      return (
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => { setFieldLocal(f.key, e.target.checked); patch({ fields: { [f.key]: e.target.checked } }); }}
-          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-        />
-      );
-    }
-    if (f.type === 'select') {
-      const commit = (val: string) => (f.col ? (setCoreLocal(f.col, val), patch({ core: { [f.col]: val } })) : (setFieldLocal(f.key, val), patch({ fields: { [f.key]: val } })));
-      return (
-        <select value={(value as string) || ''} onChange={(e) => commit(e.target.value)} className={cellCls}>
-          <option value="">—</option>
-          {f.options?.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-      );
-    }
-    const commitText = (val: string) => (f.col ? patch({ core: { [f.col]: val } }) : patch({ fields: { [f.key]: val } }));
-    const onChange = (val: string) => (f.col ? setCoreLocal(f.col, val) : setFieldLocal(f.key, val));
-    if (f.type === 'textarea') {
-      return (
-        <textarea value={(value as string) || ''} rows={4} onChange={(e) => onChange(e.target.value)} onBlur={(e) => commitText(e.target.value)} placeholder={f.placeholder} className={`${cellCls} resize-y whitespace-pre-wrap`} />
-      );
-    }
-    return (
-      <input value={(value as string) || ''} onChange={(e) => onChange(e.target.value)} onBlur={(e) => commitText(e.target.value)} placeholder={f.placeholder} className={cellCls} />
+  const setHonourLinesLocal = (lines: HonourLineItem[]) => {
+    const derived = honourLinesDerivedFields(lines);
+    const { totalAmount } = computeHonourLineTotals(lines);
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            fields: { ...prev.fields, ...derived },
+            total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
+          }
+        : prev
     );
   };
 
-  const fieldsBox = (
-    <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/40">
-      <h3 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h3>
-      <div className="divide-y divide-gray-100">
-        {ORDER_FIELDS.map((f) => (
-          <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
-            <div className="text-sm text-gray-500">{f.label}</div>
-            <div>{renderField(f)}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  const commitHonourLines = (lines: HonourLineItem[]) => {
+    const derived = honourLinesDerivedFields(lines);
+    const { totalAmount } = computeHonourLineTotals(lines);
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            fields: { ...prev.fields, ...derived },
+            total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
+          }
+        : prev
+    );
+    patch({
+      fields: derived,
+      ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
+    });
+  };
 
   return (
     <AppLayout>
@@ -515,7 +517,17 @@ export default function OrderDetailPage() {
                 )
               ); })()}
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{orderTitle(order)}</h1>
+            <div className="flex items-start justify-between gap-4">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 min-w-0">{orderTitle(order)}</h1>
+              <div className="text-right shrink-0">
+                <p className="text-[11px] uppercase tracking-wide text-gray-400">{bi('Total', '總額')}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 tabular-nums leading-tight">
+                  {dueTotal != null
+                    ? `$${dueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </p>
+              </div>
+            </div>
             <input
               value={order.description}
               onChange={(e) => setCoreLocal('description', e.target.value)}
@@ -609,6 +621,24 @@ export default function OrderDetailPage() {
               {labeled('Tracking Number 運單號', fInput('tracking_no', 'text', 'e.g. SF5120793357800'))}
               <div className="md:col-span-2">
                 {labeled(
+                  'Shipping Method 寄出方式',
+                  <select
+                    value={fVal('shipping_method')}
+                    onChange={(e) => {
+                      setFieldLocal('shipping_method', e.target.value);
+                      patch({ fields: { shipping_method: e.target.value } });
+                    }}
+                    className={softInput}
+                  >
+                    <option value="">—</option>
+                    {(ORDER_FIELDS.find((f) => f.key === 'shipping_method')?.options || []).map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div className="md:col-span-2">
+                {labeled(
                   '送貨地址 Shipping Address',
                   <textarea
                     value={order.shipping_address}
@@ -627,9 +657,19 @@ export default function OrderDetailPage() {
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 1</p>
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Order Detail 訂單詳情</h2>
 
-            <div className="max-w-sm mb-8">
+            <div className="grid md:grid-cols-2 gap-5 mb-8">
               {labeled(
-                'Order Type 訂單類型',
+                'PO# 訂單號碼',
+                <input
+                  value={order.po_number}
+                  onChange={(e) => setCoreLocal('po_number', e.target.value)}
+                  onBlur={(e) => patch({ core: { po_number: e.target.value } })}
+                  placeholder="e.g. PO-1001"
+                  className={softInput}
+                />
+              )}
+              {labeled(
+                'Order Type 訂單種類',
                 <select
                   value={orderType}
                   onChange={(e) => { setFieldLocal('order_type', e.target.value); patch({ fields: { order_type: e.target.value } }); }}
@@ -642,25 +682,160 @@ export default function OrderDetailPage() {
             </div>
 
             {isBadgeOrderType(orderType) && (
-              <div className="space-y-6">
-                <div className="grid md:grid-cols-2 gap-5">
-                  {labeled('Badge Style 襟章款式', fInput('badge_style', 'text', 'e.g. 亞加力雙面'))}
-                  {labeled('Quantity 數量', fInput('badge_quantity', 'number', 'e.g. 100'))}
-                </div>
+              <div className="space-y-8">
+                {/* Line items */}
                 <div>
-                  <p className="text-xs font-medium text-gray-500 mb-2">Image Preview 圖片預覽</p>
-                  {order.files.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {order.files.map((f) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={f.id} src={orderFileUrl(f)} alt="preview" onClick={() => setLightbox(orderFileUrl(f))} className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400">Upload proofs in the “Design Proofs” section below.</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700">Items 款式明細</h3>
+                    <button
+                      type="button"
+                      onClick={() => commitHonourLines([...honourLines, emptyHonourLine()])}
+                      className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                    >
+                      + Add row
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {honourLines.map((line, index) => (
+                      <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px_auto] gap-3 items-end">
+                        {labeled(
+                          index === 0 ? 'Style 款式' : '\u00a0',
+                          <input
+                            value={line.style}
+                            onChange={(e) => {
+                              const next = honourLines.map((l, i) => (i === index ? { ...l, style: e.target.value } : l));
+                              setHonourLinesLocal(next);
+                            }}
+                            onBlur={(e) => {
+                              const next = honourLines.map((l, i) => (i === index ? { ...l, style: e.target.value } : l));
+                              commitHonourLines(next);
+                            }}
+                            placeholder="e.g. 亞加力雙面"
+                            className={softInput}
+                          />
+                        )}
+                        {labeled(
+                          index === 0 ? 'Quantity 數量' : '\u00a0',
+                          <input
+                            type="number"
+                            value={line.quantity}
+                            onChange={(e) => {
+                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: e.target.value } : l));
+                              setHonourLinesLocal(next);
+                            }}
+                            onBlur={(e) => {
+                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: e.target.value } : l));
+                              commitHonourLines(next);
+                            }}
+                            placeholder="0"
+                            className={softInput}
+                          />
+                        )}
+                        {labeled(
+                          index === 0 ? 'Amount per 單價' : '\u00a0',
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                            <input
+                              type="number"
+                              value={line.unit_price}
+                              onChange={(e) => {
+                                const next = honourLines.map((l, i) => (i === index ? { ...l, unit_price: e.target.value } : l));
+                                setHonourLinesLocal(next);
+                              }}
+                              onBlur={(e) => {
+                                const next = honourLines.map((l, i) => (i === index ? { ...l, unit_price: e.target.value } : l));
+                                commitHonourLines(next);
+                              }}
+                              placeholder="0.00"
+                              className={`${softInput} pl-7`}
+                            />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          disabled={honourLines.length <= 1}
+                          onClick={() => commitHonourLines(honourLines.filter((_, i) => i !== index))}
+                          className="mb-0.5 text-sm text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed px-2 py-2"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-5 mt-4 max-w-lg">
+                    {readOnly('total quantity 總數量', honourTotals.totalQuantity)}
+                    {readOnly(
+                      'total amount $',
+                      honourTotals.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    )}
+                  </div>
+                </div>
+
+                {/* Platform */}
+                <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
+                  <h3 className="text-sm font-semibold text-gray-700">Platform 下單平台</h3>
+                  <div className="grid md:grid-cols-2 gap-5">
+                    {labeled('platform 下單平台', fInput('order_from', 'text', 'e.g. honour.com.hk'))}
+                    {labeled('payment option 下單時付款選項', fInput('payment_option', 'text', 'e.g. yedpay'))}
+                  </div>
+                </div>
+
+                {/* Craft & packaging */}
+                <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
+                  <h3 className="text-sm font-semibold text-gray-700">Craft & Packaging 工藝與包裝</h3>
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {labeled('加工工藝', fInput('craft', 'text', 'e.g. 亞加力-單面'))}
+                    {labeled('電鍍色', fInput('plating_color', 'text'))}
+                    {labeled('背扣', fInput('clasp', 'text', 'e.g. 四節圓圈'))}
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {labeled('內部包裝處理', fInput('internal_pack', 'text', 'e.g. 不需要'))}
+                    {labeled('交貨包裝', fInput('pack_required', 'text', 'e.g. OPP 獨立包裝'))}
+                    {labeled('其他加工', fInput('other_craft', 'text'))}
+                  </div>
+                </div>
+
+                {/* Supplier */}
+                <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
+                  <h3 className="text-sm font-semibold text-gray-700">Supplier 供應商</h3>
+                  <div className="max-w-md">
+                    {labeled('供應商', fInput('supplier', 'text', 'e.g. 亞加力-和夫'))}
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {labeled('單價 ($)', fInput('supplier_price', 'text', 'e.g. rmb 4.2'))}
+                    {labeled('模費/印刷費 ($)', fInput('mould_print_fee', 'text'))}
+                    {labeled('生產數量', fInput('supplier_qty', 'text'))}
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {labeled('出貨包裝', fInput('supplier_pack', 'text', 'e.g. OPP獨立包裝'))}
+                    {labeled('寄出日期', fInput('supplier_ship_date', 'text', 'e.g. 15/1/26'))}
+                    {labeled(
+                      '箱數',
+                      <input
+                        value={order.carton_count}
+                        onChange={(e) => setCoreLocal('carton_count', e.target.value)}
+                        onBlur={(e) => patch({ core: { carton_count: e.target.value } })}
+                        placeholder="e.g. 5"
+                        className={softInput}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Extra actions */}
+                <div className="border-t border-dashed border-gray-200 pt-6">
+                  {labeled(
+                    '額外動作',
+                    <textarea
+                      value={fVal('extra_actions')}
+                      onChange={(e) => setFieldLocal('extra_actions', e.target.value)}
+                      onBlur={(e) => patch({ fields: { extra_actions: e.target.value } })}
+                      rows={3}
+                      placeholder="Extra actions / notes…"
+                      className={softInput}
+                    />
                   )}
                 </div>
-                {fieldsBox}
               </div>
             )}
 

@@ -19,6 +19,7 @@ const CORE_COLUMNS = [
   'notes',
   'carton_count',
   'quotation_id',
+  'total_amount',
 ];
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {

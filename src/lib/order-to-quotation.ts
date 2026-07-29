@@ -1,4 +1,4 @@
-import { BIRD_NEST_FLAVORS, orderTitle, type Order } from './orders';
+import { BIRD_NEST_FLAVORS, isBadgeOrderType, orderTitle, type Order } from './orders';
 
 export interface QuotationLineDraft {
   description: string;
@@ -64,13 +64,13 @@ export function buildQuotationItemsFromOrder(
     if (items.length) return items;
   }
 
-  if (orderType === '訂製襟章') {
+  if (isBadgeOrderType(orderType)) {
     const style = fieldStr(f, 'badge_style');
     const qty =
       fieldNum(f, 'badge_quantity') ||
       parseNumericFromText(fieldStr(f, 'qty_ordered')) ||
       1;
-    const desc = [order.description?.trim(), style].filter(Boolean).join(' — ') || '訂製襟章';
+    const desc = [order.description?.trim(), style].filter(Boolean).join(' — ') || orderType;
     return [{ description: desc, quantity: qty, unit_price: unitPrice }];
   }
 

@@ -17,6 +17,7 @@ import {
   computeBirdNestTotals,
   STATUS_COLORS,
   orderTitle,
+  isBadgeOrderType,
   type Order,
   type OrderFieldDef,
 } from '@/lib/orders';
@@ -545,7 +546,7 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            {orderType === '訂製襟章' && (
+            {isBadgeOrderType(orderType) && (
               <div className="space-y-6">
                 <div className="grid md:grid-cols-2 gap-5">
                   {labeled('Badge Style 襟章款式', fInput('badge_style', 'text', 'e.g. 亞加力雙面'))}

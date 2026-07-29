@@ -118,8 +118,26 @@ export interface Order extends CoreColumns {
 }
 
 // Dynamic Order Type + the bird's-nest reactive production formulas.
-export const ORDER_TYPES = ['訂製襟章', '燕窩回禮燉製'] as const;
+export const ORDER_TYPES = [
+  '燕窩回禮燉製',
+  'honour訂製',
+  'honour en訂製',
+  'Nestiee 燕窩訂單',
+  'Cupmoka',
+] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
+
+/** Badge-style custom orders share the same detail fields (style, qty, proofs, custom fields). */
+export const BADGE_ORDER_TYPES = ['honour訂製', 'honour en訂製'] as const;
+export type BadgeOrderType = (typeof BADGE_ORDER_TYPES)[number];
+export function isBadgeOrderType(t: string): t is BadgeOrderType {
+  return (BADGE_ORDER_TYPES as readonly string[]).includes(t);
+}
+
+/** Default order_type when ingesting from a WooCommerce store platform. */
+export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
+  honour: 'honour訂製',
+};
 
 export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'];
 

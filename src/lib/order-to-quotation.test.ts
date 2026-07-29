@@ -29,7 +29,7 @@ describe('buildQuotationItemsFromOrder', () => {
       name: 'Jane',
       po_number: 'PO-1',
       fields: {
-        order_type: '訂製襟章',
+        order_type: 'honour訂製',
         badge_style: '亞加力雙面',
         badge_quantity: '100',
         supplier_price: 'rmb 12.5',

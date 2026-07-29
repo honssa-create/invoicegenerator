@@ -2,6 +2,7 @@ import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
 import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
+import { WOO_PLATFORM_ORDER_TYPE } from './orders';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -88,18 +89,26 @@ export function upsertHubOrder(
 ): { id: number; inserted: boolean; system_order_no: string } {
   const existing = db
     .prepare(
-      `SELECT id, system_order_no FROM orders
+      `SELECT id, system_order_no, fields_json FROM orders
        WHERE user_id = ? AND source_platform = ? AND original_order_id = ?`
     )
     .get(userId, input.source_platform, input.original_order_id) as
-    | { id: number; system_order_no: string | null }
+    | { id: number; system_order_no: string | null; fields_json: string | null }
     | undefined;
 
-  const fields: Record<string, unknown> = {
-    order_from: input.source_platform,
-    external_sync: true,
-  };
+  let fields: Record<string, unknown> = {};
+  if (existing?.fields_json) {
+    try {
+      fields = JSON.parse(existing.fields_json) || {};
+    } catch {
+      fields = {};
+    }
+  }
+  fields.order_from = input.source_platform;
+  fields.external_sync = true;
   if (input.raw_payload) fields.external_payload = input.raw_payload;
+  const mappedType = WOO_PLATFORM_ORDER_TYPE[input.source_platform as keyof typeof WOO_PLATFORM_ORDER_TYPE];
+  if (mappedType) fields.order_type = mappedType;
 
   if (existing) {
     db.prepare(

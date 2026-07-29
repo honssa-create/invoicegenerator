@@ -1373,6 +1373,40 @@ db.exec(`
     }
   }
 
+  // One-time: retire 訂製襟章 → honour訂製; tag honour.com.hk hub orders as honour訂製.
+  {
+    const done = db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get('order_type_honour_dingzhi_v1');
+    if (!done) {
+      try {
+        db.transaction(() => {
+          const rows = db
+            .prepare(`SELECT id, source_platform, fields_json FROM orders`)
+            .all() as { id: number; source_platform: string; fields_json: string | null }[];
+          const update = db.prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ?`);
+          for (const row of rows) {
+            let fields: Record<string, unknown> = {};
+            try {
+              fields = row.fields_json ? JSON.parse(row.fields_json) : {};
+            } catch {
+              fields = {};
+            }
+            const prev = typeof fields.order_type === 'string' ? fields.order_type : '';
+            let next = prev;
+            if (prev === '訂製襟章' || row.source_platform === 'honour') {
+              next = 'honour訂製';
+            }
+            if (next === prev) continue;
+            fields.order_type = next;
+            update.run(JSON.stringify(fields), row.id);
+          }
+          db.prepare('INSERT OR IGNORE INTO app_migrations (key) VALUES (?)').run('order_type_honour_dingzhi_v1');
+        })();
+      } catch (err) {
+        console.error('order_type_honour_dingzhi_v1 migration:', err);
+      }
+    }
+  }
+
   warnIfEphemeralReceiptStorage();
   warnIfR2Misconfigured();
   dbInstance = db;

@@ -25,7 +25,7 @@ interface AdminUser {
 type Tab = 'users' | 'permissions';
 
 export default function AdminPage() {
-  const { user: currentUser, logout } = useAuth();
+  const { user: currentUser, logout, refreshUser } = useAuth();
   const [tab, setTab] = useState<Tab>('users');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [matrix, setMatrix] = useState<Record<UserRole, Record<PermissionSection, boolean>> | null>(null);
@@ -44,6 +44,9 @@ export default function AdminPage() {
 
   const [resetUserId, setResetUserId] = useState<number | null>(null);
   const [resetPassword, setResetPassword] = useState('');
+
+  const [editUser, setEditUser] = useState<AdminUser | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', email: '' });
 
   const [deleteUser, setDeleteUser] = useState<AdminUser | null>(null);
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
@@ -129,6 +132,29 @@ export default function AdminPage() {
     setToast({ msg: 'Password reset successfully', kind: 'success' });
     setResetUserId(null);
     setResetPassword('');
+  };
+
+  const submitEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editUser) return;
+    setBusy(true);
+    const res = await fetch(`/api/admin/users/${editUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editForm.name, email: editForm.email }),
+    });
+    const data = await res.json();
+    setBusy(false);
+    if (!res.ok) {
+      setToast({ msg: data.error || bi('Failed to update user', '更新用戶失敗'), kind: 'error' });
+      return;
+    }
+    setToast({ msg: bi('User updated', '用戶已更新'), kind: 'success' });
+    setEditUser(null);
+    await loadUsers();
+    if (currentUser?.id === editUser.id) {
+      await refreshUser();
+    }
   };
 
   const submitDeleteUser = async (e: React.FormEvent) => {
@@ -270,6 +296,16 @@ export default function AdminPage() {
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <button
+                          type="button"
+                          onClick={() => {
+                            setEditUser(u);
+                            setEditForm({ name: u.name, email: u.email });
+                          }}
+                          className="text-brand-600 hover:text-brand-700 font-medium"
+                        >
+                          {bi('Edit', '編輯')}
+                        </button>
+                        <button
                           onClick={() => {
                             setResetUserId(u.id);
                             setResetPassword('');
@@ -405,6 +441,55 @@ export default function AdminPage() {
                   {busy ? BTN.saving : bi('Reset password', '重設密碼')}
                 </button>
                 <button type="button" onClick={() => setResetUserId(null)} className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700">
+                  {BTN.cancel}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6 shadow-xl">
+            <h2 className="text-lg font-semibold mb-4">{bi('Edit User', '編輯用戶')}</h2>
+            <form onSubmit={submitEditUser} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  {bi('Name', '名稱')} *
+                </label>
+                <input
+                  required
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  className={inp}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  {bi('Email', '電郵')} *
+                </label>
+                <input
+                  required
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  className={inp}
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {busy ? BTN.saving : BTN.save}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditUser(null)}
+                  className="px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700"
+                >
                   {BTN.cancel}
                 </button>
               </div>

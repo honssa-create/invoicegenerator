@@ -44,14 +44,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (!existing) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   const body = await request.json();
-  const { role, name, company_name } = body;
+  const { role, name, company_name, email } = body;
 
   if (userId === session.userId && role && role !== 'admin') {
     return NextResponse.json({ error: 'You cannot remove your own admin role' }, { status: 400 });
   }
 
   const fields: string[] = [];
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
 
   if (role !== undefined) {
     if (!USER_ROLES.includes(role)) {
@@ -64,6 +64,20 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!name?.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     fields.push('name = ?');
     values.push(name.trim());
+  }
+  if (email !== undefined) {
+    const normalized = String(email).toLowerCase().trim();
+    if (!normalized || !normalized.includes('@')) {
+      return NextResponse.json({ error: 'A valid email is required' }, { status: 400 });
+    }
+    const taken = await db
+      .prepare('SELECT id FROM users WHERE email = ? AND id != ?')
+      .get(normalized, userId);
+    if (taken) {
+      return NextResponse.json({ error: 'Email already in use' }, { status: 409 });
+    }
+    fields.push('email = ?');
+    values.push(normalized);
   }
   if (company_name !== undefined) {
     fields.push('company_name = ?');

@@ -1,4 +1,4 @@
-import { BIRD_NEST_FLAVORS, isBadgeOrderType, orderTitle, type Order } from './orders';
+import { BIRD_NEST_FLAVORS, isBadgeOrderType, isBirdNestOrderType, orderTitle, type Order } from './orders';
 
 export interface QuotationLineDraft {
   description: string;
@@ -53,7 +53,7 @@ export function buildQuotationItemsFromOrder(
   const orderType = fieldStr(f, 'order_type');
   const unitPrice = parseNumericFromText(fieldStr(f, 'supplier_price'));
 
-  if (orderType === '燕窩回禮燉製') {
+  if (isBirdNestOrderType(orderType)) {
     const items: QuotationLineDraft[] = [];
     for (const flavor of BIRD_NEST_FLAVORS) {
       const qty = fieldNum(f, flavor.key);

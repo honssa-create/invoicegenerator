@@ -58,6 +58,24 @@ describe('buildQuotationItemsFromOrder', () => {
     expect(items[0].quantity).toBe(10);
     expect(items[1].quantity).toBe(5);
   });
+
+  it('maps Nestiee bird nest flavors like 燕窩回禮燉製', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: '',
+      name: '',
+      po_number: '',
+      fields: {
+        order_type: 'Nestiee 燕窩訂單',
+        qty_rock_sugar: '3',
+        qty_osmanthus: '7',
+        qty_red_date: '2',
+        supplier_price: '50',
+      },
+    });
+    expect(items).toHaveLength(3);
+    expect(items.map((i) => i.quantity)).toEqual([3, 7, 2]);
+    expect(items[0].unit_price).toBe(50);
+  });
 });
 
 describe('buildQuotationNotesFromOrder', () => {

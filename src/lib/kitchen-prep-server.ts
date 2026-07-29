@@ -328,7 +328,7 @@ export function completePrepProduction(
   return getPrepOrder(id, userId);
 }
 
-/** Import a bird's-nest order (燕窩回禮燉製) into the prep schedule. */
+/** Import a bird's-nest order (燕窩回禮燉製 / Nestiee 燕窩訂單) into the prep schedule. */
 export function importFromOrder(
   userId: number,
   orderId: number,

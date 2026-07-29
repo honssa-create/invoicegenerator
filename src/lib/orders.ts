@@ -136,6 +136,13 @@ export function isBadgeOrderType(t: string): t is BadgeOrderType {
   return (BADGE_ORDER_TYPES as readonly string[]).includes(t);
 }
 
+/** Bird's-nest stewing orders share dates, flavor qty, and production formulas. */
+export const BIRD_NEST_ORDER_TYPES = ['燕窩回禮燉製', 'Nestiee 燕窩訂單'] as const;
+export type BirdNestOrderType = (typeof BIRD_NEST_ORDER_TYPES)[number];
+export function isBirdNestOrderType(t: string): t is BirdNestOrderType {
+  return (BIRD_NEST_ORDER_TYPES as readonly string[]).includes(t);
+}
+
 /** Default order_type when ingesting from a WooCommerce store platform. */
 export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
   honour: 'honour訂製',
@@ -217,12 +224,38 @@ export const BIRD_NEST_FLAVORS: { key: string; label: string }[] = [
   { key: 'qty_red_date', label: '客人訂紅棗味 (樽)' },
 ];
 
+/** Nestiee: actual production bottles per flavor (mirrors client qty fields). */
+export const BIRD_NEST_ACTUAL_FLAVORS: { key: string; label: string }[] = [
+  { key: 'actual_qty_rock_sugar', label: '實際生產冰糖味 (樽)' },
+  { key: 'actual_qty_osmanthus', label: '實際生產桂花味 (樽)' },
+  { key: 'actual_qty_red_date', label: '實際生產紅棗味 (樽)' },
+];
+
+export function computeBirdNestActualTotal(fields: Record<string, string | boolean>): number {
+  const n = (k: string) => {
+    const v = fields[k];
+    const num = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const effective = (actualKey: string, clientKey: string) => {
+    const raw = fields[actualKey];
+    const hasActual = raw !== undefined && String(raw).trim() !== '';
+    return hasActual ? n(actualKey) : n(clientKey);
+  };
+  return (
+    effective('actual_qty_rock_sugar', 'qty_rock_sugar') +
+    effective('actual_qty_osmanthus', 'qty_osmanthus') +
+    effective('actual_qty_red_date', 'qty_red_date')
+  );
+}
+
 // Grams of 燕餅 per production bottle (capacity label).
 export const BIRD_CAKE_GRAMS_PER_BOTTLE = 0.8;
 
 export interface BirdNestTotals {
   totalOrdered: number; // 客人訂總數量
-  productionBottles: number; // 總生產樽數
+  actualProductionBottles: number; // 實際生產總數量
+  productionBottles: number; // used for packing formulas (= actualProductionBottles)
   birdCakeGrams: number; // 燕餅 (g)
   roundTag: number; // 圓形tag
   sticker: number; // 貼紙
@@ -230,7 +263,7 @@ export interface BirdNestTotals {
   weddingLogoTag: number; // Wedding Logo Tag
 }
 
-// Pure reactive formula: derive totals + packing-checklist counts from the raw fields.
+// Pure reactive formula: packing checklist counts from 實際生產樽數 (falls back to client qty).
 export function computeBirdNestTotals(fields: Record<string, string | boolean>): BirdNestTotals {
   const n = (k: string) => {
     const v = fields[k];
@@ -238,11 +271,12 @@ export function computeBirdNestTotals(fields: Record<string, string | boolean>):
     return Number.isFinite(num) ? num : 0;
   };
   const totalOrdered = n('qty_rock_sugar') + n('qty_osmanthus') + n('qty_red_date');
-  const hasProd = fields.production_bottles !== undefined && String(fields.production_bottles).trim() !== '';
-  const productionBottles = hasProd ? n('production_bottles') : totalOrdered;
+  const actualProductionBottles = computeBirdNestActualTotal(fields);
+  const productionBottles = actualProductionBottles;
   const birdCakeGrams = Math.round(productionBottles * BIRD_CAKE_GRAMS_PER_BOTTLE * 100) / 100;
   return {
     totalOrdered,
+    actualProductionBottles,
     productionBottles,
     birdCakeGrams,
     roundTag: productionBottles,

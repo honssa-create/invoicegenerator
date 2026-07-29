@@ -15,13 +15,16 @@ import {
   ORDER_PAYMENT_METHODS,
   ORDER_PAYMENT_METHOD_OTHER,
   BIRD_NEST_FLAVORS,
+  BIRD_NEST_ACTUAL_FLAVORS,
   computeBirdNestTotals,
+  computeBirdNestActualTotal,
   computeOrderPaidTotal,
   derivePaymentStatusLabel,
   normalizeOrderPaymentMethod,
   STATUS_COLORS,
   orderTitle,
   isBadgeOrderType,
+  isBirdNestOrderType,
   type Order,
   type OrderFieldDef,
 } from '@/lib/orders';
@@ -661,7 +664,7 @@ export default function OrderDetailPage() {
               </div>
             )}
 
-            {orderType === '燕窩回禮燉製' && (
+            {isBirdNestOrderType(orderType) && (
               <div className="space-y-8">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">Dates 日期</h3>
@@ -704,9 +707,37 @@ export default function OrderDetailPage() {
                 </div>
 
                 <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">實際生產樽數</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
+                    {BIRD_NEST_ACTUAL_FLAVORS.map((f, i) => {
+                      const clientKey = BIRD_NEST_FLAVORS[i].key;
+                      const raw = fVal(f.key);
+                      // Default to client qty until this field is explicitly set.
+                      const display = raw !== '' ? raw : fVal(clientKey);
+                      return (
+                        <div key={f.key}>
+                          {labeled(
+                            f.label,
+                            <input
+                              type="number"
+                              value={display}
+                              onChange={(e) => setFieldLocal(f.key, e.target.value)}
+                              onBlur={(e) => patch({ fields: { [f.key]: e.target.value } })}
+                              placeholder="0"
+                              className={softInput}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    {readOnly('實際生產總數量', computeBirdNestActualTotal(order.fields))}
+                  </div>
+                </div>
+
+                <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">Inventory & Production 本地模擬計算</h3>
                   <div className="max-w-xs mb-4">
-                    {labeled('總生產樽數', fInput('production_bottles', 'number', `default ${bn.totalOrdered}`), 'defaults to 客人訂總數量')}
+                    {readOnly('總生產樽數', bn.productionBottles)}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                     {readOnly('燕餅 (g)', `${bn.birdCakeGrams} g`)}
@@ -715,7 +746,7 @@ export default function OrderDetailPage() {
                     {readOnly('金繩', bn.goldString)}
                     {readOnly('Wedding Logo Tag', bn.weddingLogoTag)}
                   </div>
-                  <p className="text-xs text-gray-400 mt-3">Auto-derived from 總生產樽數 (= {bn.productionBottles}) to simplify Tracy’s packing checklist. 燕餅 = 樽數 × {`${0.8}`}g.</p>
+                  <p className="text-xs text-gray-400 mt-3">Auto-derived from 實際生產樽數 (= {bn.productionBottles}) to simplify Tracy’s packing checklist. 燕餅 = 樽數 × {`${0.8}`}g.</p>
                 </div>
               </div>
             )}

@@ -139,6 +139,7 @@ export function isBadgeOrderType(t: string): t is BadgeOrderType {
 /** Default order_type when ingesting from a WooCommerce store platform. */
 export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
   honour: 'honour訂製',
+  nestiee: 'Nestiee 燕窩訂單',
 };
 
 export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'] as const;

@@ -1407,6 +1407,35 @@ db.exec(`
     }
   }
 
+  // One-time: tag nestiee.com.hk hub orders as Nestiee 燕窩訂單.
+  {
+    const done = db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get('order_type_nestiee_v1');
+    if (!done) {
+      try {
+        db.transaction(() => {
+          const rows = db
+            .prepare(`SELECT id, fields_json FROM orders WHERE source_platform = 'nestiee'`)
+            .all() as { id: number; fields_json: string | null }[];
+          const update = db.prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ?`);
+          for (const row of rows) {
+            let fields: Record<string, unknown> = {};
+            try {
+              fields = row.fields_json ? JSON.parse(row.fields_json) : {};
+            } catch {
+              fields = {};
+            }
+            if (fields.order_type === 'Nestiee 燕窩訂單') continue;
+            fields.order_type = 'Nestiee 燕窩訂單';
+            update.run(JSON.stringify(fields), row.id);
+          }
+          db.prepare('INSERT OR IGNORE INTO app_migrations (key) VALUES (?)').run('order_type_nestiee_v1');
+        })();
+      } catch (err) {
+        console.error('order_type_nestiee_v1 migration:', err);
+      }
+    }
+  }
+
   warnIfEphemeralReceiptStorage();
   warnIfR2Misconfigured();
   dbInstance = db;

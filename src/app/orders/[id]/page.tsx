@@ -16,19 +16,31 @@ import {
   ORDER_PAYMENT_METHOD_OTHER,
   BIRD_NEST_FLAVORS,
   BIRD_NEST_ACTUAL_FLAVORS,
+  WEDDING_GIFT_BOTTLE_CAPACITIES,
+  WEDDING_GIFT_CLIENT_FLAVORS,
+  WEDDING_GIFT_ACTUAL_FLAVORS,
+  WEDDING_GIFT_MATERIAL_FIELDS,
+  WEDDING_GIFT_PACK_BOW_FIELDS,
+  WEDDING_GIFT_PACK_BAG_FIELDS,
+  WEDDING_GIFT_PACK_CARTON_FIELDS,
+  WEDDING_GIFT_PACK_CAPACITIES,
+  WEDDING_GIFT_PACK_FLAVORS,
   computeBirdNestTotals,
   computeBirdNestActualTotal,
   computeOrderPaidTotal,
   computeHonourLineTotals,
+  computeWeddingGiftTotal,
   derivePaymentStatusLabel,
   emptyHonourLine,
   honourLinesDerivedFields,
   normalizeOrderPaymentMethod,
   parseHonourLines,
+  weddingGiftFoilStickerKey,
+  weddingGiftRoundTagKey,
   STATUS_COLORS,
   orderTitle,
   isBadgeOrderType,
-  isBirdNestOrderType,
+  isWeddingGiftOrderType,
   type HonourLineItem,
   type Order,
 } from '@/lib/orders';
@@ -248,13 +260,17 @@ export default function OrderDetailPage() {
         isBadgeOrderType(orderType) && order
           ? computeHonourLineTotals(parseHonourLines(nextFields)).totalAmount
           : 0;
+      const weddingDue =
+        isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(nextFields) : 0;
       const due =
         order?.linked_invoice?.total ??
         (honourDue > 0
           ? honourDue
-          : order?.total_amount != null && order.total_amount > 0
-            ? order.total_amount
-            : null);
+          : weddingDue > 0
+            ? weddingDue
+            : order?.total_amount != null && order.total_amount > 0
+              ? order.total_amount
+              : null);
       upd.payment_status_label = derivePaymentStatusLabel(paid, due);
       setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
       patch({ fields: upd });
@@ -316,14 +332,18 @@ export default function OrderDetailPage() {
   const honourTotals = computeHonourLineTotals(honourLines);
   const honourDue =
     isBadgeOrderType(orderType) && honourTotals.totalAmount > 0 ? honourTotals.totalAmount : null;
+  const weddingGiftTotal = isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(order.fields) : 0;
+  const weddingDue = weddingGiftTotal > 0 ? weddingGiftTotal : null;
   const dueTotal =
     order.linked_invoice?.total != null && order.linked_invoice.total > 0
       ? order.linked_invoice.total
       : honourDue != null
         ? honourDue
-        : order.total_amount != null && order.total_amount > 0
-          ? order.total_amount
-          : null;
+        : weddingDue != null
+          ? weddingDue
+          : order.total_amount != null && order.total_amount > 0
+            ? order.total_amount
+            : null;
   const paidTotal = computeOrderPaidTotal(order.fields);
   const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
 
@@ -451,6 +471,68 @@ export default function OrderDetailPage() {
       ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
     });
   };
+
+  const syncWeddingGiftTotalAmount = (fieldsPatch: Record<string, string> = {}) => {
+    const nextFields = { ...order.fields, ...fieldsPatch };
+    const total = computeWeddingGiftTotal(nextFields);
+    if (total > 0) {
+      setOrder((prev) => (prev ? { ...prev, total_amount: total } : prev));
+      patch({ fields: fieldsPatch, core: { total_amount: total } });
+    } else if (Object.keys(fieldsPatch).length) {
+      patch({ fields: fieldsPatch });
+    }
+  };
+
+  const weddingGiftQtyInput = (key: string) => (
+    <input
+      type="number"
+      value={fVal(key)}
+      onChange={(e) => setFieldLocal(key, e.target.value)}
+      onBlur={(e) => syncWeddingGiftTotalAmount({ [key]: e.target.value })}
+      placeholder="0"
+      className={softInput}
+    />
+  );
+
+  const packQtyMatrix = (
+    title: string,
+    keyFor: (capacityId: string, flavorId: string) => string
+  ) => (
+    <div className="overflow-x-auto rounded-xl border border-gray-200">
+      <table className="w-full min-w-[420px] text-sm">
+        <thead>
+          <tr className="bg-gray-50/80 border-b border-gray-200">
+            <th className="text-left font-semibold text-gray-700 px-3 py-2.5 whitespace-nowrap">{title}</th>
+            {WEDDING_GIFT_PACK_CAPACITIES.map((c) => (
+              <th key={c.id} className="font-medium text-gray-500 px-2 py-2.5 text-center">{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {WEDDING_GIFT_PACK_FLAVORS.map((flavor) => (
+            <tr key={flavor.id} className="border-b border-gray-100 last:border-0">
+              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{flavor.label}</td>
+              {WEDDING_GIFT_PACK_CAPACITIES.map((cap) => {
+                const key = keyFor(cap.id, flavor.id);
+                return (
+                  <td key={cap.id} className="px-2 py-1.5">
+                    <input
+                      type="number"
+                      value={fVal(key)}
+                      onChange={(e) => setFieldLocal(key, e.target.value)}
+                      onBlur={(e) => patch({ fields: { [key]: e.target.value } })}
+                      placeholder="0"
+                      className={`${softInput} text-center`}
+                    />
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <AppLayout>
@@ -587,9 +669,9 @@ export default function OrderDetailPage() {
             </div>
           </section>
 
-          {/* Client / Shipping info */}
+          {/* Client info */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Client / Shipping 客戶及寄送</h2>
+            <h2 className="font-semibold text-gray-900 mb-4">Client 客戶</h2>
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Name 客戶</label>
@@ -602,10 +684,6 @@ export default function OrderDetailPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">E-mail</label>
                 <input value={order.customer_email} onChange={(e) => setCoreLocal('customer_email', e.target.value)} onBlur={(e) => patch({ core: { customer_email: e.target.value } })} placeholder="name@email.com" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Shipping Address 寄出地址</label>
-                <textarea value={order.shipping_address} onChange={(e) => setCoreLocal('shipping_address', e.target.value)} onBlur={(e) => patch({ core: { shipping_address: e.target.value } })} rows={3} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
               </div>
             </div>
           </div>
@@ -839,7 +917,157 @@ export default function OrderDetailPage() {
               </div>
             )}
 
-            {isBirdNestOrderType(orderType) && (
+            {isWeddingGiftOrderType(orderType) && (
+              <div className="space-y-8">
+                {/* Section 1 — 客人訂購數量 */}
+                <div className="space-y-5">
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {labeled(
+                      'Big Day',
+                      <input
+                        type="date"
+                        value={fVal('big_day')}
+                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
+                        onBlur={(e) => {
+                          const v = e.target.value;
+                          const upd: Record<string, string> = { big_day: v };
+                          if (v && !fVal('expiry_date')) {
+                            const d = new Date(v);
+                            d.setDate(d.getDate() + 28);
+                            const iso = d.toISOString().slice(0, 10);
+                            upd.expiry_date = iso;
+                            setFieldLocal('expiry_date', iso);
+                          }
+                          patch({ fields: upd });
+                        }}
+                        className={softInput}
+                      />
+                    )}
+                    {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
+                    {labeled('生產日期', fInput('production_date', 'date'))}
+                  </div>
+
+                  <h3 className="text-sm font-semibold text-gray-700">客人訂購數量</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
+                    {WEDDING_GIFT_CLIENT_FLAVORS.map((f) => (
+                      <div key={f.key}>{labeled(f.label, weddingGiftQtyInput(f.key))}</div>
+                    ))}
+                    {readOnly('客人訂購總數', bn.totalOrdered)}
+                  </div>
+
+                  <div className="grid md:grid-cols-3 gap-5 items-end">
+                    {labeled(
+                      '單樽容量',
+                      <select
+                        value={fVal('bottle_capacity')}
+                        onChange={(e) => {
+                          setFieldLocal('bottle_capacity', e.target.value);
+                          patch({ fields: { bottle_capacity: e.target.value } });
+                        }}
+                        className={softInput}
+                      >
+                        <option value="">—</option>
+                        {WEDDING_GIFT_BOTTLE_CAPACITIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    )}
+                    {labeled(
+                      '單樽價格',
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={fVal('unit_bottle_price')}
+                          onChange={(e) => setFieldLocal('unit_bottle_price', e.target.value)}
+                          onBlur={(e) => syncWeddingGiftTotalAmount({ unit_bottle_price: e.target.value })}
+                          placeholder="0.00"
+                          className={`${softInput} pl-7`}
+                        />
+                      </div>
+                    )}
+                    {readOnly(
+                      '總金額',
+                      `$${weddingGiftTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    )}
+                  </div>
+                </div>
+
+                {/* Section 2 — 實際生產 / 材料 / 包裝 */}
+                <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
+                  <h3 className="text-sm font-semibold text-gray-700">實際生產樽數</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
+                    {WEDDING_GIFT_ACTUAL_FLAVORS.map((f) => {
+                      const raw = fVal(f.key);
+                      const display = raw !== '' ? raw : fVal(f.clientKey);
+                      return (
+                        <div key={f.key}>
+                          {labeled(
+                            f.label,
+                            <input
+                              type="number"
+                              value={display}
+                              onChange={(e) => setFieldLocal(f.key, e.target.value)}
+                              onBlur={(e) => patch({ fields: { [f.key]: e.target.value } })}
+                              placeholder="0"
+                              className={softInput}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    {readOnly('實際生產總數量', computeBirdNestActualTotal(order.fields))}
+                  </div>
+
+                  <h3 className="text-sm font-semibold text-gray-700">材料</h3>
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {WEDDING_GIFT_MATERIAL_FIELDS.slice(0, 3).map((f) => (
+                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
+                    ))}
+                  </div>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+                    {WEDDING_GIFT_MATERIAL_FIELDS.slice(3).map((f) => (
+                      <div key={f.key}>
+                        {labeled(
+                          f.label,
+                          <input
+                            type="number"
+                            step={f.step || '1'}
+                            value={fVal(f.key)}
+                            onChange={(e) => setFieldLocal(f.key, e.target.value)}
+                            onBlur={(e) => patch({ fields: { [f.key]: e.target.value } })}
+                            placeholder="0"
+                            className={softInput}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <h3 className="text-sm font-semibold text-gray-700">包裝(蝴蝶結紗袋)</h3>
+                  <div className="grid md:grid-cols-2 gap-5">
+                    {WEDDING_GIFT_PACK_BOW_FIELDS.map((f) => (
+                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
+                    ))}
+                  </div>
+                  {packQtyMatrix('圓形tag', weddingGiftRoundTagKey)}
+                  {packQtyMatrix('長方形燙金貼紙', weddingGiftFoilStickerKey)}
+                  <div className="grid md:grid-cols-3 gap-5">
+                    {WEDDING_GIFT_PACK_BAG_FIELDS.map((f) => (
+                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
+                    ))}
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-5">
+                    {WEDDING_GIFT_PACK_CARTON_FIELDS.map((f) => (
+                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {orderType === 'Nestiee 燕窩訂單' && (
               <div className="space-y-8">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">Dates 日期</h3>
@@ -887,7 +1115,6 @@ export default function OrderDetailPage() {
                     {BIRD_NEST_ACTUAL_FLAVORS.map((f, i) => {
                       const clientKey = BIRD_NEST_FLAVORS[i].key;
                       const raw = fVal(f.key);
-                      // Default to client qty until this field is explicitly set.
                       const display = raw !== '' ? raw : fVal(clientKey);
                       return (
                         <div key={f.key}>

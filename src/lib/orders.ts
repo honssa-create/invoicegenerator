@@ -312,6 +312,89 @@ export const BIRD_NEST_FLAVORS: { key: string; label: string }[] = [
   { key: 'qty_red_date', label: '客人訂紅棗味 (樽)' },
 ];
 
+/** Short labels for 燕窩回禮燉製 Order Detail flavor inputs. */
+export const WEDDING_GIFT_CLIENT_FLAVORS: { key: string; label: string }[] = [
+  { key: 'qty_rock_sugar', label: '冰糖味' },
+  { key: 'qty_osmanthus', label: '桂花味' },
+  { key: 'qty_red_date', label: '紅棗味' },
+];
+
+export const WEDDING_GIFT_ACTUAL_FLAVORS: { key: string; label: string; clientKey: string }[] = [
+  { key: 'actual_qty_rock_sugar', label: '冰糖味', clientKey: 'qty_rock_sugar' },
+  { key: 'actual_qty_osmanthus', label: '桂花味', clientKey: 'qty_osmanthus' },
+  { key: 'actual_qty_red_date', label: '紅棗味', clientKey: 'qty_red_date' },
+];
+
+export const WEDDING_GIFT_BOTTLE_CAPACITIES = ['25g', '45g', '75g'] as const;
+export type WeddingGiftBottleCapacity = (typeof WEDDING_GIFT_BOTTLE_CAPACITIES)[number];
+
+export const WEDDING_GIFT_ORDER_TYPE = '燕窩回禮燉製' as const;
+
+export function isWeddingGiftOrderType(t: string): boolean {
+  return t === WEDDING_GIFT_ORDER_TYPE;
+}
+
+export const WEDDING_GIFT_MATERIAL_FIELDS: { key: string; label: string; step?: string }[] = [
+  { key: 'mat_bird_cake', label: '燕餅(0.8g)' },
+  { key: 'mat_bottle_25ml', label: '玻璃樽(25mL)' },
+  { key: 'mat_bottle_45ml', label: '玻璃樽(45mL)' },
+  { key: 'mat_osmanthus', label: '桂花(0.13g)', step: '0.01' },
+  { key: 'mat_red_date', label: '紅棗(1.8g)', step: '0.01' },
+  { key: 'mat_rock_sugar', label: '冰糖(3.57g)', step: '0.01' },
+  { key: 'mat_slab_sugar', label: '片糖(5.03g)', step: '0.01' },
+];
+
+/** Packing matrices: capacities × flavors are independent (any combo can have a qty). */
+export const WEDDING_GIFT_PACK_CAPACITIES = [
+  { id: '25', label: '25g' },
+  { id: '45', label: '45g' },
+  { id: '75', label: '75g' },
+] as const;
+
+export const WEDDING_GIFT_PACK_FLAVORS = [
+  { id: 'rock_sugar', label: '冰糖味' },
+  { id: 'osmanthus', label: '桂花味' },
+  { id: 'red_date', label: '紅棗味' },
+] as const;
+
+export function weddingGiftRoundTagKey(capacityId: string, flavorId: string): string {
+  return `pack_round_tag_${capacityId}_${flavorId}`;
+}
+
+export function weddingGiftFoilStickerKey(capacityId: string, flavorId: string): string {
+  return `pack_foil_sticker_${capacityId}_${flavorId}`;
+}
+
+export const WEDDING_GIFT_PACK_BOW_FIELDS: { key: string; label: string }[] = [
+  { key: 'pack_bow_qty', label: '數量' },
+  { key: 'pack_wedding_logo_tag', label: 'wedding logo tag' },
+];
+
+export const WEDDING_GIFT_PACK_BAG_FIELDS: { key: string; label: string }[] = [
+  { key: 'pack_ribbon_bag_small', label: '絲帶袋(小)' },
+  { key: 'pack_ribbon_bag_large', label: '絲帶袋(大)' },
+  { key: 'pack_gold_string', label: '金繩' },
+];
+
+export const WEDDING_GIFT_PACK_CARTON_FIELDS: { key: string; label: string }[] = [
+  { key: 'pack_carton_small', label: '紙箱(細)' },
+  { key: 'pack_carton_large', label: '紙箱(大)' },
+];
+
+/** 總金額 = 單樽價格 × 客人訂購總數. */
+export function computeWeddingGiftTotal(fields: Record<string, string | boolean>): number {
+  const n = (k: string) => {
+    const v = fields[k];
+    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+    if (typeof v !== 'string' || !v.trim()) return 0;
+    const num = Number(v.replace(/,/g, '').replace(/[^\d.-]/g, ''));
+    return Number.isFinite(num) ? num : 0;
+  };
+  const totalOrdered = n('qty_rock_sugar') + n('qty_osmanthus') + n('qty_red_date');
+  const unitPrice = n('unit_bottle_price');
+  return Math.round(unitPrice * totalOrdered * 100) / 100;
+}
+
 /** Nestiee: actual production bottles per flavor (mirrors client qty fields). */
 export const BIRD_NEST_ACTUAL_FLAVORS: { key: string; label: string }[] = [
   { key: 'actual_qty_rock_sugar', label: '實際生產冰糖味 (樽)' },

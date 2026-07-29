@@ -765,8 +765,8 @@ export default function OrderDetailPage() {
                   <div className="grid md:grid-cols-2 gap-5 mt-4 max-w-lg">
                     {readOnly('total quantity 總數量', honourTotals.totalQuantity)}
                     {readOnly(
-                      'total amount $',
-                      honourTotals.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      'total amount 總金額',
+                      `$${honourTotals.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     )}
                   </div>
                 </div>

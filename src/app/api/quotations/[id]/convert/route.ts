@@ -38,9 +38,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   }
 
   if (target === 'order') {
-    const itemsSummary = q.items.map((i) => `• ${i.description} × ${i.quantity} @ ${i.unit_price}`).join('\n');
+    const itemsSummary = q.items.map((i) => `• ${i.product_service || ''} × ${i.quantity} @ $${i.unit_price}`).join('\n');
     const first = q.items[0];
-    const firstName = (first?.product_service || first?.description || '').trim();
+    const firstName = (first?.product_service || '').trim();
     const firstQty = first != null ? String(first.quantity ?? '') : '';
     const itemPart =
       firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');

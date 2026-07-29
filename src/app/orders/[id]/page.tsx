@@ -917,15 +917,41 @@ export default function OrderDetailPage() {
                 Click to upload product design proofs (images or PDF — heavy PDFs are auto-compressed to page images)
               </div>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                {order.files.map((f) => (
-                  <div key={f.id} className="relative group">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={orderFileUrl(f)} alt={f.original_name || 'proof'} onClick={() => setLightbox(orderFileUrl(f))} className="h-20 w-full object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
-                    <button onClick={() => deleteFile(f.id)} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100" aria-label="Delete image">×</button>
-                  </div>
-                ))}
-              </div>
+              <ul className="space-y-2">
+                {order.files.map((f) => {
+                  const url = orderFileUrl(f);
+                  const name = f.original_name || `Image #${f.id}`;
+                  return (
+                    <li
+                      key={f.id}
+                      className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt={name}
+                        onClick={() => setLightbox(url)}
+                        className="h-14 w-14 rounded-md object-cover border border-gray-200 shrink-0 bg-white cursor-zoom-in hover:ring-2 hover:ring-brand-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLightbox(url)}
+                        className="flex-1 min-w-0 text-left text-sm text-brand-700 hover:underline truncate"
+                      >
+                        {name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteFile(f.id)}
+                        className="text-xs text-red-600 hover:text-red-700 font-medium shrink-0 px-2 py-1"
+                        aria-label="Delete image"
+                      >
+                        {BTN.delete}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         </div>

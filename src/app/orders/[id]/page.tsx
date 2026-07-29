@@ -12,10 +12,13 @@ import {
   ORDER_FIELDS,
   ORDER_STATUSES,
   ORDER_TYPES,
+  ORDER_PAYMENT_METHODS,
+  ORDER_PAYMENT_METHOD_OTHER,
   BIRD_NEST_FLAVORS,
   computeBirdNestTotals,
   computeOrderPaidTotal,
   derivePaymentStatusLabel,
+  normalizeOrderPaymentMethod,
   STATUS_COLORS,
   orderTitle,
   isBadgeOrderType,
@@ -222,7 +225,14 @@ export default function OrderDetailPage() {
         if (slot === 1) upd.payment1_amount = String(r.amount);
       }
       if (r.bank) upd[bankKey] = r.bank;
-      if (r.method) upd[methodKey] = r.method;
+      if (r.method) {
+        const normalized = normalizeOrderPaymentMethod(r.method);
+        if (normalized.method) upd[methodKey] = normalized.method;
+        if (normalized.note) {
+          const noteKey = slot === 1 ? 'payment_method_note' : `${prefix}_method_note`;
+          upd[noteKey] = normalized.note;
+        }
+      }
       if (r.reference) upd[refKey] = r.reference;
       const nextFields = { ...(order?.fields || {}), ...upd };
       const paid = computeOrderPaidTotal(nextFields);
@@ -318,6 +328,60 @@ export default function OrderDetailPage() {
       className={softInput}
     />
   );
+  const paymentMethodFields = (slot: 1 | 2 | 3) => {
+    const methodKey = slot === 1 ? 'payment_method_detail' : `payment${slot}_method_detail`;
+    const noteKey = slot === 1 ? 'payment_method_note' : `payment${slot}_method_note`;
+    const raw = fVal(methodKey);
+    const known = (ORDER_PAYMENT_METHODS as readonly string[]).includes(raw);
+    const selectValue = known ? raw : raw ? ORDER_PAYMENT_METHOD_OTHER : '';
+    const showNote = selectValue === ORDER_PAYMENT_METHOD_OTHER;
+    const noteValue = fVal(noteKey) || (!known && raw ? raw : '');
+    return (
+      <>
+        {labeled(
+          '支付方式 Payment Method',
+          <select
+            value={selectValue}
+            onChange={(e) => {
+              const v = e.target.value;
+              const fields: Record<string, string> = { [methodKey]: v };
+              if (v !== ORDER_PAYMENT_METHOD_OTHER) fields[noteKey] = '';
+              else if (!known && raw && !fVal(noteKey)) fields[noteKey] = raw;
+              setFieldLocal(methodKey, v);
+              if (fields[noteKey] !== undefined) setFieldLocal(noteKey, fields[noteKey]);
+              patch({ fields });
+            }}
+            className={softInput}
+          >
+            <option value="">—</option>
+            {ORDER_PAYMENT_METHODS.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        )}
+        {showNote && (
+          <div className="sm:col-span-2">
+            {labeled(
+              '備註 Remarks',
+              <input
+                value={noteValue}
+                onChange={(e) => setFieldLocal(noteKey, e.target.value)}
+                onBlur={(e) => {
+                  const fields: Record<string, string> = { [noteKey]: e.target.value };
+                  if (!known && raw && selectValue === ORDER_PAYMENT_METHOD_OTHER) {
+                    fields[methodKey] = ORDER_PAYMENT_METHOD_OTHER;
+                  }
+                  patch({ fields });
+                }}
+                placeholder="請註明其他支付方式…"
+                className={softInput}
+              />
+            )}
+          </div>
+        )}
+      </>
+    );
+  };
   const labeled = (label: string, node: React.ReactNode, hint?: string) => (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1.5">
@@ -726,7 +790,7 @@ export default function OrderDetailPage() {
                   )}
                   {labeled('銀碼 Amount', paymentAmountInput('payment_amount'))}
                   {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                  {labeled('支付方式 Payment Method', fInput('payment_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                  {paymentMethodFields(1)}
                   <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>
                 </div>
               </div>
@@ -763,7 +827,7 @@ export default function OrderDetailPage() {
                   {labeled('支付日期 Payment Date', fInput('payment2_date', 'date'))}
                   {labeled('銀碼 Amount', paymentAmountInput('payment2_amount'))}
                   {labeled('銀行 / 平台 Bank/Platform', fInput('payment2_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                  {labeled('支付方式 Payment Method', fInput('payment2_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                  {paymentMethodFields(2)}
                   <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment2_reference', 'text', 'Transaction / 流水號'))}</div>
                 </div>
               </div>
@@ -800,7 +864,7 @@ export default function OrderDetailPage() {
                   {labeled('支付日期 Payment Date', fInput('payment3_date', 'date'))}
                   {labeled('銀碼 Amount', paymentAmountInput('payment3_amount'))}
                   {labeled('銀行 / 平台 Bank/Platform', fInput('payment3_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                  {labeled('支付方式 Payment Method', fInput('payment3_method_detail', 'text', 'e.g. FPS 轉數快'))}
+                  {paymentMethodFields(3)}
                   <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment3_reference', 'text', 'Transaction / 流水號'))}</div>
                 </div>
               </div>

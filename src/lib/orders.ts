@@ -145,6 +145,40 @@ export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cup
 export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'] as const;
 export type PaymentStatusLabel = (typeof PAYMENT_STATUS_LABELS)[number];
 
+export const ORDER_PAYMENT_METHODS = [
+  'FPS',
+  'Payme',
+  'Yedpay 信用卡',
+  'Yedpay Alipay',
+  '現金',
+  '其他(請備註)',
+] as const;
+export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
+export const ORDER_PAYMENT_METHOD_OTHER: OrderPaymentMethod = '其他(請備註)';
+
+/** Map free-text / OCR method strings onto the fixed payment-method options. */
+export function normalizeOrderPaymentMethod(raw: string | null | undefined): {
+  method: OrderPaymentMethod | '';
+  note: string;
+} {
+  const text = String(raw || '').trim();
+  if (!text) return { method: '', note: '' };
+  if ((ORDER_PAYMENT_METHODS as readonly string[]).includes(text)) {
+    return { method: text as OrderPaymentMethod, note: '' };
+  }
+  const lower = text.toLowerCase();
+  if (/轉數快|\bfps\b/.test(lower)) return { method: 'FPS', note: '' };
+  if (/pay\s*me|payme/.test(lower)) return { method: 'Payme', note: '' };
+  if (/yedpay/.test(lower) && /(信用卡|credit|visa|master|card)/.test(lower)) {
+    return { method: 'Yedpay 信用卡', note: '' };
+  }
+  if (/yedpay/.test(lower) && /(alipay|支付寶|支付宝)/.test(lower)) {
+    return { method: 'Yedpay Alipay', note: '' };
+  }
+  if (/現金|cash/.test(lower)) return { method: '現金', note: '' };
+  return { method: ORDER_PAYMENT_METHOD_OTHER, note: text };
+}
+
 /** Parse a free-form payment amount field into a finite number (else 0). */
 export function parsePaymentAmount(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;

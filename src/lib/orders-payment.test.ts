@@ -41,3 +41,17 @@ describe('derivePaymentStatusLabel', () => {
     expect(derivePaymentStatusLabel(100.005, 100)).toBe('Full Paid');
   });
 });
+
+describe('normalizeOrderPaymentMethod', () => {
+  it('maps known OCR strings and falls back to 其他', async () => {
+    const { normalizeOrderPaymentMethod } = await import('./orders');
+    expect(normalizeOrderPaymentMethod('FPS 轉數快').method).toBe('FPS');
+    expect(normalizeOrderPaymentMethod('PayMe').method).toBe('Payme');
+    expect(normalizeOrderPaymentMethod('Yedpay 信用卡').method).toBe('Yedpay 信用卡');
+    expect(normalizeOrderPaymentMethod('現金').method).toBe('現金');
+    expect(normalizeOrderPaymentMethod('Cheque')).toEqual({
+      method: '其他(請備註)',
+      note: 'Cheque',
+    });
+  });
+});

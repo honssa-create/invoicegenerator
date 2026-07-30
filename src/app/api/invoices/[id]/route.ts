@@ -9,11 +9,35 @@ import { logActivity } from '@/lib/activity';
 
 async function linkedOrder(orderId: number | null | undefined, ownerId: number) {
   if (!orderId) return null;
-  return (
-    await db
-      .prepare('SELECT id, po_number, name, description FROM orders WHERE id = ? AND user_id = ?')
-      .get(orderId, ownerId) || null
-  );
+  const row = (await db
+    .prepare(
+      'SELECT id, po_number, name, description, fields_json FROM orders WHERE id = ? AND user_id = ?',
+    )
+    .get(orderId, ownerId)) as
+    | {
+        id: number;
+        po_number: string | null;
+        name: string | null;
+        description: string | null;
+        fields_json: string | null;
+      }
+    | undefined;
+  if (!row) return null;
+
+  let fields: Record<string, string | boolean> = {};
+  try {
+    fields = row.fields_json ? (JSON.parse(row.fields_json) as Record<string, string | boolean>) : {};
+  } catch {
+    fields = {};
+  }
+
+  return {
+    id: row.id,
+    po_number: row.po_number,
+    name: row.name,
+    description: row.description,
+    fields,
+  };
 }
 
 function pushField(

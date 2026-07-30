@@ -54,8 +54,8 @@ export const DOCUMENT_TYPES: DocumentTypeDef[] = [
     id: 'invoice',
     label: 'Invoice',
     labelZh: '發票',
-    enabled: false,
-    description: 'Coming soon.',
+    enabled: true,
+    description: 'Customer invoice — standard, deposit, and balance layouts.',
   },
   {
     id: 'delivery_note',
@@ -107,11 +107,17 @@ export const QUOTATION_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
   { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
 ];
 
+/** Invoice company variants (Honour Label first). */
+export const INVOICE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
+];
+
 export function companyVariantsForDocumentType(
   documentType: DocumentTypeId,
 ): TemplateCompanyVariantDef[] {
   if (documentType === 'debit_note') return DEBIT_NOTE_COMPANY_VARIANTS;
   if (documentType === 'quotation') return QUOTATION_COMPANY_VARIANTS;
+  if (documentType === 'invoice') return INVOICE_COMPANY_VARIANTS;
   return [];
 }
 

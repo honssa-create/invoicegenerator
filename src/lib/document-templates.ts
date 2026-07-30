@@ -61,8 +61,8 @@ export const DOCUMENT_TYPES: DocumentTypeDef[] = [
     id: 'delivery_note',
     label: 'Delivery Note',
     labelZh: '出貨單',
-    enabled: false,
-    description: 'Coming soon.',
+    enabled: true,
+    description: 'Delivery note — with or without company chop.',
   },
   {
     id: 'purchase_order',
@@ -112,12 +112,18 @@ export const INVOICE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
   { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
 ];
 
+/** Delivery note company variants (Honour Label first). */
+export const DELIVERY_NOTE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
+];
+
 export function companyVariantsForDocumentType(
   documentType: DocumentTypeId,
 ): TemplateCompanyVariantDef[] {
   if (documentType === 'debit_note') return DEBIT_NOTE_COMPANY_VARIANTS;
   if (documentType === 'quotation') return QUOTATION_COMPANY_VARIANTS;
   if (documentType === 'invoice') return INVOICE_COMPANY_VARIANTS;
+  if (documentType === 'delivery_note') return DELIVERY_NOTE_COMPANY_VARIANTS;
   return [];
 }
 

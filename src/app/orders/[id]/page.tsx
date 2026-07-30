@@ -33,6 +33,9 @@ import {
   derivePaymentStatusLabel,
   emptyHonourLine,
   honourLinesDerivedFields,
+  normalizeWeddingGiftBottleCapacity,
+  computeWeddingGiftMaterials,
+  computeWeddingGiftPacking,
   normalizeOrderPaymentMethod,
   parseHonourLines,
   weddingGiftFoilStickerKey,
@@ -317,12 +320,24 @@ export default function OrderDetailPage() {
   // Helpers for the structured section boxes (values stored in fields_json).
   const softInput = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-colors';
   const fVal = (k: string) => (order.fields[k] as string) ?? '';
+  /** Clamp typed quantity to ≥ 0 (empty stays empty). */
+  const nonNeg = (value: string): string => {
+    if (value.trim() === '') return '';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value;
+    return n < 0 ? '0' : value;
+  };
   const fInput = (key: string, type = 'text', placeholder = '') => (
     <input
       type={type}
+      min={type === 'number' ? 0 : undefined}
       value={fVal(key)}
-      onChange={(e) => setFieldLocal(key, e.target.value)}
-      onBlur={(e) => patch({ fields: { [key]: e.target.value } })}
+      onChange={(e) => setFieldLocal(key, type === 'number' ? nonNeg(e.target.value) : e.target.value)}
+      onBlur={(e) => {
+        const v = type === 'number' ? nonNeg(e.target.value) : e.target.value;
+        if (type === 'number' && v !== e.target.value) setFieldLocal(key, v);
+        patch({ fields: { [key]: v } });
+      }}
       placeholder={placeholder}
       className={softInput}
     />
@@ -483,12 +498,39 @@ export default function OrderDetailPage() {
     }
   };
 
+  /** Recalc 材料 + 包裝 from capacity / flavor qtys; keeps fields editable afterward. */
+  const syncWeddingGiftDerived = (fieldsPatch: Record<string, string> = {}) => {
+    const nextFields = { ...order.fields, ...fieldsPatch };
+    const materials = computeWeddingGiftMaterials(nextFields);
+    const packing = computeWeddingGiftPacking(nextFields);
+    const derived = { ...fieldsPatch, ...materials, ...packing };
+    const total = computeWeddingGiftTotal(nextFields);
+    setOrder((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        fields: { ...prev.fields, ...derived },
+        ...(total > 0 ? { total_amount: total } : {}),
+      };
+    });
+    if (total > 0) {
+      patch({ fields: derived, core: { total_amount: total } });
+    } else {
+      patch({ fields: derived });
+    }
+  };
+
   const weddingGiftQtyInput = (key: string) => (
     <input
       type="number"
+      min={0}
       value={fVal(key)}
-      onChange={(e) => setFieldLocal(key, e.target.value)}
-      onBlur={(e) => syncWeddingGiftTotalAmount({ [key]: e.target.value })}
+      onChange={(e) => setFieldLocal(key, nonNeg(e.target.value))}
+      onBlur={(e) => {
+        const v = nonNeg(e.target.value);
+        setFieldLocal(key, v);
+        syncWeddingGiftDerived({ [key]: v });
+      }}
       placeholder="0"
       className={softInput}
     />
@@ -518,9 +560,14 @@ export default function OrderDetailPage() {
                   <td key={cap.id} className="px-2 py-1.5">
                     <input
                       type="number"
+                      min={0}
                       value={fVal(key)}
-                      onChange={(e) => setFieldLocal(key, e.target.value)}
-                      onBlur={(e) => patch({ fields: { [key]: e.target.value } })}
+                      onChange={(e) => setFieldLocal(key, nonNeg(e.target.value))}
+                      onBlur={(e) => {
+                        const v = nonNeg(e.target.value);
+                        setFieldLocal(key, v);
+                        patch({ fields: { [key]: v } });
+                      }}
                       placeholder="0"
                       className={`${softInput} text-center`}
                     />
@@ -796,13 +843,15 @@ export default function OrderDetailPage() {
                           index === 0 ? 'Quantity 數量' : '\u00a0',
                           <input
                             type="number"
+                            min={0}
                             value={line.quantity}
                             onChange={(e) => {
-                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: e.target.value } : l));
+                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: nonNeg(e.target.value) } : l));
                               setHonourLinesLocal(next);
                             }}
                             onBlur={(e) => {
-                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: e.target.value } : l));
+                              const v = nonNeg(e.target.value);
+                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: v } : l));
                               commitHonourLines(next);
                             }}
                             placeholder="0"
@@ -959,10 +1008,10 @@ export default function OrderDetailPage() {
                     {labeled(
                       '單樽容量',
                       <select
-                        value={fVal('bottle_capacity')}
+                        value={normalizeWeddingGiftBottleCapacity(fVal('bottle_capacity'))}
                         onChange={(e) => {
                           setFieldLocal('bottle_capacity', e.target.value);
-                          patch({ fields: { bottle_capacity: e.target.value } });
+                          syncWeddingGiftDerived({ bottle_capacity: e.target.value });
                         }}
                         className={softInput}
                       >
@@ -1007,9 +1056,14 @@ export default function OrderDetailPage() {
                             f.label,
                             <input
                               type="number"
+                              min={0}
                               value={display}
-                              onChange={(e) => setFieldLocal(f.key, e.target.value)}
-                              onBlur={(e) => patch({ fields: { [f.key]: e.target.value } })}
+                              onChange={(e) => setFieldLocal(f.key, nonNeg(e.target.value))}
+                              onBlur={(e) => {
+                                const v = nonNeg(e.target.value);
+                                setFieldLocal(f.key, v);
+                                syncWeddingGiftDerived({ [f.key]: v });
+                              }}
                               placeholder="0"
                               className={softInput}
                             />
@@ -1033,10 +1087,15 @@ export default function OrderDetailPage() {
                           f.label,
                           <input
                             type="number"
+                            min={0}
                             step={f.step || '1'}
                             value={fVal(f.key)}
-                            onChange={(e) => setFieldLocal(f.key, e.target.value)}
-                            onBlur={(e) => patch({ fields: { [f.key]: e.target.value } })}
+                            onChange={(e) => setFieldLocal(f.key, nonNeg(e.target.value))}
+                            onBlur={(e) => {
+                              const v = nonNeg(e.target.value);
+                              setFieldLocal(f.key, v);
+                              patch({ fields: { [f.key]: v } });
+                            }}
                             placeholder="0"
                             className={softInput}
                           />
@@ -1122,9 +1181,14 @@ export default function OrderDetailPage() {
                             f.label,
                             <input
                               type="number"
+                              min={0}
                               value={display}
-                              onChange={(e) => setFieldLocal(f.key, e.target.value)}
-                              onBlur={(e) => patch({ fields: { [f.key]: e.target.value } })}
+                              onChange={(e) => setFieldLocal(f.key, nonNeg(e.target.value))}
+                              onBlur={(e) => {
+                                const v = nonNeg(e.target.value);
+                                setFieldLocal(f.key, v);
+                                patch({ fields: { [f.key]: v } });
+                              }}
                               placeholder="0"
                               className={softInput}
                             />

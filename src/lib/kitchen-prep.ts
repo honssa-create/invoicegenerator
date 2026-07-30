@@ -87,6 +87,41 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
       slabSugar: 0,
     },
   },
+  '75g': {
+    osmanthus: {
+      birdNest: 1.7,
+      flavorIngredient: 0.191,
+      rockSugar: 0,
+      slabSugar: 7.64,
+    },
+    red_date: {
+      birdNest: 1.7,
+      flavorIngredient: 0.191,
+      rockSugar: 5.41,
+      slabSugar: 0,
+    },
+    rock_sugar: {
+      birdNest: 1.75,
+      flavorIngredient: 54.1,
+      rockSugar: 54.1,
+      slabSugar: 0,
+    },
+  },
+  '75g_big_belly': {
+    osmanthus: {
+      birdNest: 2.1,
+      flavorIngredient: 0.191,
+      rockSugar: 0,
+      slabSugar: 7.64,
+    },
+    red_date: null, // disabled for 75g big belly
+    rock_sugar: {
+      birdNest: 2.1,
+      flavorIngredient: 54.1,
+      rockSugar: 54.1,
+      slabSugar: 0,
+    },
+  },
 };
 
 /** @deprecated Use CAPACITY_FLAVOR_FORMULAS — kept for reference / 45g flat view. */
@@ -211,7 +246,7 @@ export interface PrepCalculation {
 }
 
 export function isRedDateAllowed(capacity: PrepCapacity): boolean {
-  return capacity !== '25g';
+  return capacity !== '25g' && capacity !== '75g_big_belly';
 }
 
 export function isCapacityFormulaReady(capacity: PrepCapacity): boolean {
@@ -333,6 +368,12 @@ export function formulaSummaryForCapacity(capacity: PrepCapacity): string {
   }
   if (capacity === '45g') {
     return '45g: 桂花 → 片糖 5.03g | 紅棗/冰糖 → 冰糖 3.57g (no 片糖 in 紅棗 & 冰糖; no 冰糖 in 桂花)';
+  }
+  if (capacity === '75g') {
+    return '75g 高身樽: 冰糖 → 燕餅 1.75g · 冰糖 54.1g | 桂花 → 燕餅 1.7g · 片糖 7.64g · 桂花 0.191g | 紅棗 → 燕餅 1.7g · 冰糖 5.41g · 紅棗 0.191g';
+  }
+  if (capacity === '75g_big_belly') {
+    return '75g 大肚樽: 冰糖 → 燕餅 2.1g · 冰糖 54.1g | 桂花 → 燕餅 2.1g · 片糖 7.64g · 桂花 0.191g (紅棗 disabled)';
   }
   return `${PREP_CAPACITY_LABELS[capacity]} formula pending configuration`;
 }

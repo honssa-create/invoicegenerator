@@ -1,3 +1,10 @@
+import {
+  getFlavorFormula,
+  isRedDateAllowed,
+  type PrepCapacity,
+  type PrepFlavor,
+} from '@/lib/kitchen-prep';
+
 export type OrderFieldType = 'text' | 'textarea' | 'date' | 'checkbox' | 'select';
 
 export interface OrderFieldDef {
@@ -326,8 +333,164 @@ export const WEDDING_GIFT_ACTUAL_FLAVORS: { key: string; label: string; clientKe
   { key: 'actual_qty_red_date', label: '紅棗味', clientKey: 'qty_red_date' },
 ];
 
-export const WEDDING_GIFT_BOTTLE_CAPACITIES = ['25g', '45g', '75g'] as const;
+export const WEDDING_GIFT_BOTTLE_CAPACITIES = ['25g', '45g', '75g(高身樽)', '75g(大肚樽)'] as const;
 export type WeddingGiftBottleCapacity = (typeof WEDDING_GIFT_BOTTLE_CAPACITIES)[number];
+
+/** Map legacy stored `75g` to the renamed tall-bottle option. */
+export function normalizeWeddingGiftBottleCapacity(v: string): string {
+  return v === '75g' ? '75g(高身樽)' : v;
+}
+
+/** Map order bottle_capacity → kitchen-prep capacity id. */
+export function mapWeddingCapacityToPrep(capacity: string): PrepCapacity | null {
+  const c = normalizeWeddingGiftBottleCapacity(capacity.trim());
+  if (c === '25g' || c === '45g') return c;
+  if (c === '75g(高身樽)') return '75g';
+  if (c === '75g(大肚樽)') return '75g_big_belly';
+  return null;
+}
+
+/** Pack matrix column id for a bottle capacity. */
+export function mapWeddingCapacityToPackId(capacity: string): '25' | '45' | '75' | null {
+  const c = normalizeWeddingGiftBottleCapacity(capacity.trim());
+  if (c === '25g') return '25';
+  if (c === '45g') return '45';
+  if (c === '75g(高身樽)' || c === '75g(大肚樽)') return '75';
+  return null;
+}
+
+const WEDDING_FLAVOR_KEYS: { prep: PrepFlavor; actualKey: string; clientKey: string }[] = [
+  { prep: 'rock_sugar', actualKey: 'actual_qty_rock_sugar', clientKey: 'qty_rock_sugar' },
+  { prep: 'osmanthus', actualKey: 'actual_qty_osmanthus', clientKey: 'qty_osmanthus' },
+  { prep: 'red_date', actualKey: 'actual_qty_red_date', clientKey: 'qty_red_date' },
+];
+
+function fieldNum(fields: Record<string, string | boolean>, k: string): number {
+  const v = fields[k];
+  const num = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, num);
+}
+
+function effectiveFlavorQty(
+  fields: Record<string, string | boolean>,
+  actualKey: string,
+  clientKey: string
+): number {
+  const raw = fields[actualKey];
+  const hasActual = raw !== undefined && String(raw).trim() !== '';
+  return hasActual ? fieldNum(fields, actualKey) : fieldNum(fields, clientKey);
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function qtyStr(n: number, decimals = 0): string {
+  if (!Number.isFinite(n) || n === 0) return '';
+  if (decimals === 0) return String(Math.round(n));
+  const r = round2(n);
+  return r === 0 ? '' : String(r);
+}
+
+/** Auto-calc 材料 from capacity × per-flavor actual (fallback client) qtys. */
+export function computeWeddingGiftMaterials(
+  fields: Record<string, string | boolean>
+): Record<string, string> {
+  const capacityRaw = typeof fields.bottle_capacity === 'string' ? fields.bottle_capacity : '';
+  const prepCap = mapWeddingCapacityToPrep(capacityRaw);
+  const empty = {
+    mat_bird_cake: '',
+    mat_bottle_25ml: '',
+    mat_bottle_45ml: '',
+    mat_osmanthus: '',
+    mat_red_date: '',
+    mat_rock_sugar: '',
+    mat_slab_sugar: '',
+  };
+  if (!prepCap) return empty;
+
+  let birdCake = 0;
+  let osmanthus = 0;
+  let redDate = 0;
+  let rockSugar = 0;
+  let slabSugar = 0;
+  let totalBottles = 0;
+
+  for (const { prep, actualKey, clientKey } of WEDDING_FLAVOR_KEYS) {
+    const qty = effectiveFlavorQty(fields, actualKey, clientKey);
+    if (qty <= 0) continue;
+    const formula = getFlavorFormula(prepCap, prep);
+    if (!formula) continue;
+    totalBottles += qty;
+    birdCake += qty * formula.birdNest;
+    rockSugar += qty * formula.rockSugar;
+    slabSugar += qty * formula.slabSugar;
+    if (prep === 'osmanthus') osmanthus += qty * formula.flavorIngredient;
+    if (prep === 'red_date') redDate += qty * formula.flavorIngredient;
+    // rock_sugar flavor ingredient is ice sugar — counted via rockSugar column
+  }
+
+  const glass25 = prepCap === '25g' ? qtyStr(totalBottles) : '';
+  const glass45 = prepCap === '45g' ? qtyStr(totalBottles) : '';
+  // 75g capacities: leave both glass fields blank
+
+  return {
+    mat_bird_cake: qtyStr(birdCake, 2),
+    mat_bottle_25ml: glass25,
+    mat_bottle_45ml: glass45,
+    mat_osmanthus: qtyStr(osmanthus, 2),
+    mat_red_date: qtyStr(redDate, 2),
+    mat_rock_sugar: qtyStr(rockSugar, 2),
+    mat_slab_sugar: qtyStr(slabSugar, 2),
+  };
+}
+
+/** Auto-calc 包裝 from package amount (= total effective bottles) and selected capacity column. */
+export function computeWeddingGiftPacking(
+  fields: Record<string, string | boolean>
+): Record<string, string> {
+  const capacityRaw = typeof fields.bottle_capacity === 'string' ? fields.bottle_capacity : '';
+  const packId = mapWeddingCapacityToPackId(capacityRaw);
+  const out: Record<string, string> = {};
+
+  const flavorQtys: Record<string, number> = {};
+  let total = 0;
+  for (const { prep, actualKey, clientKey } of WEDDING_FLAVOR_KEYS) {
+    // Skip disabled red_date for capacities that disallow it
+    const prepCap = mapWeddingCapacityToPrep(capacityRaw);
+    if (prepCap && prep === 'red_date' && !isRedDateAllowed(prepCap)) {
+      flavorQtys[prep] = 0;
+      continue;
+    }
+    const qty = effectiveFlavorQty(fields, actualKey, clientKey);
+    flavorQtys[prep] = qty;
+    total += qty;
+  }
+
+  for (const flavor of WEDDING_GIFT_PACK_FLAVORS) {
+    for (const cap of WEDDING_GIFT_PACK_CAPACITIES) {
+      const roundKey = weddingGiftRoundTagKey(cap.id, flavor.id);
+      const foilKey = weddingGiftFoilStickerKey(cap.id, flavor.id);
+      if (packId && cap.id === packId) {
+        out[roundKey] = qtyStr(flavorQtys[flavor.id] || 0);
+        out[foilKey] = qtyStr(flavorQtys[flavor.id] || 0);
+      } else {
+        out[roundKey] = '';
+        out[foilKey] = '';
+      }
+    }
+  }
+
+  const pkg = qtyStr(total);
+  out.pack_gold_string = pkg;
+  out.pack_wedding_logo_tag = pkg;
+  out.pack_bow_qty = pkg;
+  out.pack_ribbon_bag_small = pkg;
+  out.pack_ribbon_bag_large = '';
+
+  return out;
+}
 
 export const WEDDING_GIFT_ORDER_TYPE = '燕窩回禮燉製' as const;
 
@@ -336,13 +499,13 @@ export function isWeddingGiftOrderType(t: string): boolean {
 }
 
 export const WEDDING_GIFT_MATERIAL_FIELDS: { key: string; label: string; step?: string }[] = [
-  { key: 'mat_bird_cake', label: '燕餅(0.8g)' },
+  { key: 'mat_bird_cake', label: '燕餅(g)' },
   { key: 'mat_bottle_25ml', label: '玻璃樽(25mL)' },
   { key: 'mat_bottle_45ml', label: '玻璃樽(45mL)' },
-  { key: 'mat_osmanthus', label: '桂花(0.13g)', step: '0.01' },
-  { key: 'mat_red_date', label: '紅棗(1.8g)', step: '0.01' },
-  { key: 'mat_rock_sugar', label: '冰糖(3.57g)', step: '0.01' },
-  { key: 'mat_slab_sugar', label: '片糖(5.03g)', step: '0.01' },
+  { key: 'mat_osmanthus', label: '桂花(g)', step: '0.01' },
+  { key: 'mat_red_date', label: '紅棗(g)', step: '0.01' },
+  { key: 'mat_rock_sugar', label: '冰糖(g)', step: '0.01' },
+  { key: 'mat_slab_sugar', label: '片糖(g)', step: '0.01' },
 ];
 
 /** Packing matrices: capacities × flavors are independent (any combo can have a qty). */
@@ -386,10 +549,10 @@ export const WEDDING_GIFT_PACK_CARTON_FIELDS: { key: string; label: string }[] =
 export function computeWeddingGiftTotal(fields: Record<string, string | boolean>): number {
   const n = (k: string) => {
     const v = fields[k];
-    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+    if (typeof v === 'number') return Number.isFinite(v) ? Math.max(0, v) : 0;
     if (typeof v !== 'string' || !v.trim()) return 0;
     const num = Number(v.replace(/,/g, '').replace(/[^\d.-]/g, ''));
-    return Number.isFinite(num) ? num : 0;
+    return Number.isFinite(num) ? Math.max(0, num) : 0;
   };
   const totalOrdered = n('qty_rock_sugar') + n('qty_osmanthus') + n('qty_red_date');
   const unitPrice = n('unit_bottle_price');
@@ -407,7 +570,7 @@ export function computeBirdNestActualTotal(fields: Record<string, string | boole
   const n = (k: string) => {
     const v = fields[k];
     const num = typeof v === 'number' ? v : Number(v);
-    return Number.isFinite(num) ? num : 0;
+    return Number.isFinite(num) ? Math.max(0, num) : 0;
   };
   const effective = (actualKey: string, clientKey: string) => {
     const raw = fields[actualKey];
@@ -440,7 +603,7 @@ export function computeBirdNestTotals(fields: Record<string, string | boolean>):
   const n = (k: string) => {
     const v = fields[k];
     const num = typeof v === 'number' ? v : Number(v);
-    return Number.isFinite(num) ? num : 0;
+    return Number.isFinite(num) ? Math.max(0, num) : 0;
   };
   const totalOrdered = n('qty_rock_sugar') + n('qty_osmanthus') + n('qty_red_date');
   const actualProductionBottles = computeBirdNestActualTotal(fields);

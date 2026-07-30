@@ -322,11 +322,16 @@ CREATE TABLE IF NOT EXISTS inbound_shipments (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   waybill_number TEXT,
   sender TEXT,
+  sender_address TEXT,
+  receiver_address TEXT,
   arrival_date TEXT,
   photo_path TEXT,
   notes TEXT,
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
+
+ALTER TABLE inbound_shipments ADD COLUMN IF NOT EXISTS sender_address TEXT;
+ALTER TABLE inbound_shipments ADD COLUMN IF NOT EXISTS receiver_address TEXT;
 
 -- rental_tenants before rental_units (units.tenant_id FK)
 CREATE TABLE IF NOT EXISTS rental_tenants (

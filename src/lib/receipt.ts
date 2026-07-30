@@ -184,7 +184,7 @@ export function extractAmounts(text: string): { hkd: number | null; rmb: number 
 
 async function ocrExtract(buffer: Buffer): Promise<string> {
   const { createWorker } = await import('tesseract.js');
-  const langs = process.env.OCR_LANGS || 'eng';
+  const langs = process.env.OCR_LANGS || 'eng+chi_sim';
   const worker = await createWorker(langs);
   try {
     const { data } = await worker.recognize(buffer);

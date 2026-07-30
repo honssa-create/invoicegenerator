@@ -23,13 +23,15 @@ export async function POST(request: Request) {
     }
     const result = await db
       .prepare(
-        `INSERT INTO inbound_shipments (user_id, waybill_number, sender, arrival_date, photo_path, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO inbound_shipments (user_id, waybill_number, sender, sender_address, receiver_address, arrival_date, photo_path, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         session.userId,
         body.waybill_number?.trim() || null,
         body.sender?.trim() || null,
+        body.sender_address?.trim() || null,
+        body.receiver_address?.trim() || null,
         body.arrival_date?.trim() || null,
         body.photo_path?.trim() || null,
         body.notes?.trim() || null

@@ -59,7 +59,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `JWT_SECRET` | Secret for signing session tokens | dev default (change in production) |
 | `OPENAI_API_KEY` | Enables AI vision receipt extraction; falls back to on-device OCR when unset | _(unset)_ |
 | `OPENAI_VISION_MODEL` | Vision model used when `OPENAI_API_KEY` is set | `gpt-4o-mini` |
-| `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng` |
+| `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng+chi_sim` |
 | `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table (and PDF parsing); falls back to on-device OCR when unset | _(unset)_ |
 | `GEMINI_MODEL` | Gemini model used for Scan-to-Table | `gemini-2.5-flash` |
 | `RESEND_API_KEY` | Enables sending real reminder emails via Resend; without it reminders are logged to activity feeds only | _(unset)_ |

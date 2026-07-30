@@ -1,17 +1,30 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { saveReceipt, ocrImageText } from '@/lib/receipt';
+import type { ShipmentScanResult } from '@/lib/inbound';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 
-const PROMPT = `You are reading a courier / logistics shipping label (e.g. SF Express 順豐, or other couriers).
-Extract exactly two things and return ONLY JSON: {"waybill_number": string|null, "sender": string|null}.
-- waybill_number: the tracking / waybill number (運單號) printed on the label (may look like SF followed by digits, or a long digit string).
-- sender: the sender's name or company (寄件人名稱/公司).
-Return null for anything you cannot read. Do not invent values.`;
+type ScanFields = Pick<ShipmentScanResult, 'waybill_number' | 'sender' | 'sender_address' | 'receiver_address'>;
 
-async function geminiExtract(base64: string, mimeType: string): Promise<{ waybill_number: string | null; sender: string | null } | null> {
+const PROMPT = `You are reading a courier / logistics shipping label (e.g. SF Express 順豐, or other couriers).
+Extract these fields and return ONLY JSON:
+{"waybill_number": string|null, "sender": string|null, "sender_address": string|null, "receiver_address": string|null}.
+- waybill_number: the tracking / waybill number (運單號) printed on the label (may look like SF followed by digits, or a long digit string).
+- sender: the sender's name or company (寄件人名稱/公司) — name only, not the address.
+- sender_address: the sender's full address (寄件地址 / 发件地址). Keep line breaks if multi-line. Do not include phone numbers unless they are part of the address block.
+- receiver_address: the receiver's full address (收件地址 / 收方地址). Keep line breaks if multi-line.
+Return null for anything you cannot read. Do not invent values. Prefer simplified or traditional Chinese text exactly as printed.`;
+
+function strOrNull(v: unknown, max = 240): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s.slice(0, max);
+}
+
+async function geminiExtract(base64: string, mimeType: string): Promise<ScanFields | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -33,15 +46,41 @@ async function geminiExtract(base64: string, mimeType: string): Promise<{ waybil
     if (!text) return null;
     const parsed = JSON.parse(text);
     return {
-      waybill_number: parsed.waybill_number ? String(parsed.waybill_number) : null,
-      sender: parsed.sender ? String(parsed.sender) : null,
+      waybill_number: strOrNull(parsed.waybill_number, 64),
+      sender: strOrNull(parsed.sender, 80),
+      sender_address: strOrNull(parsed.sender_address),
+      receiver_address: strOrNull(parsed.receiver_address),
     };
   } catch {
     return null;
   }
 }
 
-function ocrExtractFields(text: string): { waybill_number: string | null; sender: string | null } {
+const FIELD_START =
+  /^(?:寄件|收件|发件|發件|运单|運單|waybill|tracking|sender|receiver|recipient|from|to|电话|電話|手机|手機|联络|聯絡)/i;
+
+function extractLabeledBlock(
+  lines: string[],
+  labelRe: RegExp,
+  maxExtraLines = 2
+): string | null {
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(labelRe);
+    if (!m) continue;
+    const parts: string[] = [];
+    if (m[1]?.trim()) parts.push(m[1].trim());
+    for (let j = i + 1; j < Math.min(i + 1 + maxExtraLines, lines.length); j++) {
+      if (FIELD_START.test(lines[j])) break;
+      if (lines[j].length < 2) break;
+      parts.push(lines[j]);
+    }
+    const addr = parts.join('\n').trim();
+    if (addr.length >= 4) return addr.slice(0, 240);
+  }
+  return null;
+}
+
+function ocrExtractFields(text: string): ScanFields {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   let waybill: string | null = null;
   // SF-style (SF + 10+ digits) or a long digit run typical of waybills.
@@ -51,16 +90,27 @@ function ocrExtractFields(text: string): { waybill_number: string | null; sender
     const digits = text.match(/\b\d{10,16}\b/);
     if (digits) waybill = digits[0];
   }
-  // Sender: look for a line mentioning 寄件 / sender / from.
+
   let sender: string | null = null;
   for (const line of lines) {
-    const m = line.match(/(?:寄件人?|sender|from)\s*[:：]?\s*(.+)/i);
-    if (m && m[1].trim().length >= 2) {
+    // Prefer 寄件人 / sender name; avoid matching 寄件地址.
+    const m = line.match(/(?:寄件人(?!地址)|寄件方|sender(?!\s*address)|from)\s*[:：]?\s*(.+)/i);
+    if (m && m[1].trim().length >= 2 && !/地址/.test(m[1])) {
       sender = m[1].trim().slice(0, 80);
       break;
     }
   }
-  return { waybill_number: waybill, sender };
+
+  const sender_address = extractLabeledBlock(
+    lines,
+    /(?:寄件地址|发件地址|發件地址|寄方地址|寄件人地址|sender\s*address|from\s*address)\s*[:：]?\s*(.*)/i
+  );
+  const receiver_address = extractLabeledBlock(
+    lines,
+    /(?:收件地址|收方地址|到件地址|收件人地址|receiver\s*address|recipient\s*address|ship\s*to|to\s*address)\s*[:：]?\s*(.*)/i
+  );
+
+  return { waybill_number: waybill, sender, sender_address, receiver_address };
 }
 
 export async function POST(request: Request) {
@@ -84,7 +134,7 @@ export async function POST(request: Request) {
 
   const ai = await geminiExtract(buffer.toString('base64'), file.type);
   if (ai) {
-    return NextResponse.json({ result: { ...ai, photo_path: photoPath, source: 'ai' } });
+    return NextResponse.json({ result: { ...ai, photo_path: photoPath, source: 'ai' } satisfies ShipmentScanResult });
   }
 
   let text = '';
@@ -94,5 +144,5 @@ export async function POST(request: Request) {
     text = '';
   }
   const fields = ocrExtractFields(text);
-  return NextResponse.json({ result: { ...fields, photo_path: photoPath, source: 'ocr' } });
+  return NextResponse.json({ result: { ...fields, photo_path: photoPath, source: 'ocr' } satisfies ShipmentScanResult });
 }

@@ -14,6 +14,8 @@ export default function InboundPage() {
   const [loading, setLoading] = useState(true);
   const [waybill, setWaybill] = useState('');
   const [sender, setSender] = useState('');
+  const [senderAddress, setSenderAddress] = useState('');
+  const [receiverAddress, setReceiverAddress] = useState('');
   const [arrival, setArrival] = useState(today());
   const [photoPath, setPhotoPath] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function InboundPage() {
   useEffect(() => { load(); }, []);
 
   const resetForm = () => {
-    setWaybill(''); setSender(''); setArrival(today()); setPhotoPath(''); setPreview(null); setScanMsg('');
+    setWaybill(''); setSender(''); setSenderAddress(''); setReceiverAddress(''); setArrival(today()); setPhotoPath(''); setPreview(null); setScanMsg('');
   };
 
   const handlePhoto = async (rawFile: File) => {
@@ -62,8 +64,15 @@ export default function InboundPage() {
       setPhotoPath(r.photo_path || '');
       if (r.waybill_number) setWaybill(r.waybill_number);
       if (r.sender) setSender(r.sender);
+      if (r.sender_address) setSenderAddress(r.sender_address);
+      if (r.receiver_address) setReceiverAddress(r.receiver_address);
       const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
-      const found = [r.waybill_number && 'waybill', r.sender && 'sender'].filter(Boolean);
+      const found = [
+        r.waybill_number && 'waybill',
+        r.sender && 'sender',
+        r.sender_address && 'sender address',
+        r.receiver_address && 'receiver address',
+      ].filter(Boolean);
       setScanMsg(`${compressNote}${found.length ? `Extracted via ${via}: ${found.join(', ')}. Review & edit if needed.` : `No fields auto-extracted (${via}). Enter manually.`}`);
     } catch {
       setScanMsg(''); setToast(MSG.scanFailed);
@@ -81,7 +90,14 @@ export default function InboundPage() {
     const res = await fetch('/api/inbound', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waybill_number: waybill, sender, arrival_date: arrival, photo_path: photoPath }),
+      body: JSON.stringify({
+        waybill_number: waybill,
+        sender,
+        sender_address: senderAddress,
+        receiver_address: receiverAddress,
+        arrival_date: arrival,
+        photo_path: photoPath,
+      }),
     });
     setSaving(false);
     if (res.ok) { setToast('Shipment saved!'); setTimeout(() => setToast(''), 3000); resetForm(); load(); }
@@ -91,7 +107,15 @@ export default function InboundPage() {
   const del = async (id: number) => {
     if (!confirm('Move this shipment to Deleted Records? You can restore it within 60 days.')) return;
     const res = await fetch(`/api/inbound/${id}`, { method: 'DELETE' });
-    if (res.ok) load();
+    if (res.ok) {
+      setToast('Moved to Deleted Records');
+      setTimeout(() => setToast(''), 3000);
+      load();
+      return;
+    }
+    const d = await res.json().catch(() => ({}));
+    setToast(d.error || 'Failed to delete');
+    setTimeout(() => setToast(''), 4000);
   };
 
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
@@ -101,7 +125,7 @@ export default function InboundPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">{TITLE.inbound}</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Snap a courier label — AI reads the waybill number & sender, then confirm & save', '拍攝快遞標籤 — AI 讀取運單號及寄件人，確認後儲存')}</p>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Snap a courier label — AI reads the waybill, sender & addresses, then confirm & save', '拍攝快遞標籤 — AI 讀取運單號、寄件人及地址，確認後儲存')}</p>
         </div>
       </div>
 
@@ -141,6 +165,14 @@ export default function InboundPage() {
               <input value={sender} onChange={(e) => setSender(e.target.value)} className={inputCls} placeholder="Sender name / company" />
             </div>
             <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Sender Address 寄件地址</label>
+              <textarea value={senderAddress} onChange={(e) => setSenderAddress(e.target.value)} rows={2} className={inputCls} placeholder="Sender address" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Receiver Address 收件地址</label>
+              <textarea value={receiverAddress} onChange={(e) => setReceiverAddress(e.target.value)} rows={2} className={inputCls} placeholder="Receiver address" />
+            </div>
+            <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Arrival Date 到貨日</label>
               <input type="date" value={arrival} onChange={(e) => setArrival(e.target.value)} className={inputCls} />
             </div>
@@ -158,12 +190,14 @@ export default function InboundPage() {
         ) : shipments.length === 0 ? (
           <div className="p-12 text-center text-gray-500">{MSG.noInboundYet}</div>
         ) : (
-          <table className="w-full min-w-[640px]">
+          <table className="w-full min-w-[900px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3">Photo</th>
                 <th className="px-6 py-3">Waybill 運單號</th>
                 <th className="px-6 py-3">Sender 寄件人</th>
+                <th className="px-6 py-3">Sender Addr 寄件地址</th>
+                <th className="px-6 py-3">Receiver Addr 收件地址</th>
                 <th className="px-6 py-3">Arrival 到貨日</th>
                 <th className="px-6 py-3">Actions</th>
               </tr>
@@ -179,6 +213,8 @@ export default function InboundPage() {
                   </td>
                   <td className="px-6 py-3 text-sm font-mono text-gray-800">{s.waybill_number || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-700">{s.sender || '—'}</td>
+                  <td className="px-6 py-3 text-sm text-gray-600 whitespace-pre-line max-w-[12rem]">{s.sender_address || '—'}</td>
+                  <td className="px-6 py-3 text-sm text-gray-600 whitespace-pre-line max-w-[12rem]">{s.receiver_address || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-500">{s.arrival_date || '—'}</td>
                   <td className="px-6 py-3 text-sm"><button onClick={() => del(s.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button></td>
                 </tr>

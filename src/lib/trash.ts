@@ -40,6 +40,24 @@ async function rowExists(table: string, id: number, userId?: number): Promise<bo
   return Boolean(row);
 }
 
+function utcNowSql(): string {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function addUtcDaysSql(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function parseUtcSql(value: string): Date {
+  // Stored as 'YYYY-MM-DD HH:MM:SS' (UTC) or ISO strings.
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
+    return new Date(value.replace(' ', 'T') + 'Z');
+  }
+  return new Date(value);
+}
+
 async function insertTrash(
   userId: number,
   entityType: TrashEntityType,
@@ -50,20 +68,18 @@ async function insertTrash(
 ): Promise<void> {
   await db.prepare(
     `INSERT INTO deleted_records (user_id, entity_type, entity_id, label, summary, payload, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+' || ? || ' days'))`
-  ).run(userId, entityType, entityId, label, summary, JSON.stringify(payload), TRASH_RETENTION_DAYS);
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(userId, entityType, entityId, label, summary, JSON.stringify(payload), addUtcDaysSql(TRASH_RETENTION_DAYS));
 }
 
 export async function purgeExpiredTrash(): Promise<number> {
-  const res = await db.prepare("DELETE FROM deleted_records WHERE expires_at < datetime('now')").run();
+  const res = await db.prepare('DELETE FROM deleted_records WHERE expires_at < ?').run(utcNowSql());
   return res.changes;
 }
 
 async function daysRemaining(expiresAt: string): Promise<number> {
-  const row = await db.prepare("SELECT CAST((julianday(?) - julianday('now')) AS INTEGER) AS d").get(expiresAt) as
-    | { d: number }
-    | undefined;
-  return Math.max(0, row?.d ?? 0);
+  const ms = parseUtcSql(expiresAt).getTime() - Date.now();
+  return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
 export async function listTrash(userId: number): Promise<TrashListItem[]> {

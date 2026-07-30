@@ -46,11 +46,25 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
       .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
     if (invRow) {
       const details = await getInvoiceWithDetails(invRow.id, row.user_id);
+      const billingFromInvoice = details?.billing_address?.trim() || '';
+      const billingFallback = details
+        ? [
+            details.customer_name,
+            details.customer_address,
+            [details.customer_city, details.customer_state, details.customer_zip]
+              .filter(Boolean)
+              .join(', '),
+            details.customer_email,
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : '';
       linkedInvoice = {
         id: invRow.id,
         invoice_number: invRow.invoice_number,
         status: invRow.status,
         total: details?.total ?? null,
+        billing_address: billingFromInvoice || billingFallback || null,
       };
     }
   }

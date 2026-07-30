@@ -186,6 +186,7 @@ export interface LinkedInvoice {
   invoice_number: string;
   status: string;
   total?: number | null;
+  billing_address?: string | null;
 }
 
 export interface LinkedQuotation {

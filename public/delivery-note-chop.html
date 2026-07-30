@@ -4,22 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="ProgId" content="Word.Document" />
-  <meta name="Generator" content="InvoiceFlow Invoice Template" />
-  <title>Invoice Template — 發票範本</title>
+  <meta name="Generator" content="InvoiceFlow Delivery Note Chop" />
+  <title>Delivery Note Chop — 出貨單範本（公司章）</title>
   <!--
     ====================================================================
-    INVOICE TEMPLATE — edit this file, then upload back to Cursor
-    發票範本 — 編輯後上傳給我即可套用
+    DELIVERY NOTE CHOP — edit this file, then upload back to Cursor
+    出貨單範本（公司章） — 編輯後上傳給我即可套用
 
     HOW TO EDIT:
-    1. Open http://localhost:3000/invoice-template.html (or this file)
+    1. Open http://localhost:3000/delivery-note-chop.html (or this file)
     2. Replace company-logo.png with your company logo
     3. Edit the :root variables below for colours / spacing
     4. Save and upload back in Cursor chat
-
-    PLACEHOLDERS (filled when generating an invoice PDF):
-    - <refnumber> → real invoice number (e.g. 1038)
-      Used in INVOICE NO and anywhere marked data-placeholder="refnumber"
     ====================================================================
   -->
   <style>
@@ -198,6 +194,24 @@
     }
     .quo-party-body:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
 
+    .quo-order-no {
+      margin: 12px 0 0;
+      font-size: 13px;
+      color: var(--quo-color-text);
+    }
+    .quo-order-no-k {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--quo-color-label);
+      margin-right: 8px;
+      font-size: 11px;
+    }
+    .quo-order-no-v {
+      outline: 1px dashed transparent;
+    }
+    .quo-order-no-v:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
+
     .quo-meta-row {
       margin: 0 0 6px;
       font-size: 12px;
@@ -256,19 +270,17 @@
       font-size: 12px;
     }
 
-    /* ---- Bottom: message / remarks · totals ---- */
+    /* ---- Bottom: message (no remarks / totals) ---- */
     .quo-bottom {
-      display: table;
+      display: block;
       width: 100%;
       margin-bottom: 40px;
     }
-    .quo-bottom-left,
-    .quo-bottom-right {
-      display: table-cell;
-      vertical-align: top;
+    .quo-bottom-left {
+      display: block;
+      width: 100%;
+      max-width: 70%;
     }
-    .quo-bottom-left { width: 58%; padding-right: 24px; }
-    .quo-bottom-right { width: 42%; }
 
     .quo-message {
       margin: 0 0 18px;
@@ -279,80 +291,34 @@
     }
     .quo-message:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
 
-    .quo-remarks {
-      margin: 0;
-      padding: 0;
-      font-size: 12px;
-      line-height: 1.55;
-      color: var(--quo-color-text);
-      white-space: pre-wrap;
-      outline: 1px dashed transparent;
-    }
-    .quo-remarks:focus { outline: 1px dashed #ccc; background: var(--quo-field-bg); }
-
-    .quo-totals {
-      width: 100%;
-      max-width: 260px;
-      margin-left: auto;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
-    .quo-totals td {
-      padding: 5px 0;
-      vertical-align: baseline;
-    }
-    .quo-totals .quo-tot-label {
-      text-align: right;
-      color: var(--quo-color-label);
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      padding-right: 16px;
-      white-space: nowrap;
-    }
-    .quo-totals .quo-tot-value {
-      text-align: right;
-      min-width: 90px;
-      color: var(--quo-color-text);
-    }
-    .quo-totals .quo-tot-grand .quo-tot-label,
-    .quo-totals .quo-tot-grand .quo-tot-value {
-      font-weight: 700;
-      font-size: 14px;
-      color: var(--quo-color-text);
-      padding-top: 8px;
-    }
-
-    /* ---- Signatures (no company chop) ---- */
+    /* ---- Signatures ---- */
     .quo-sign {
       display: table;
       width: 100%;
       margin-top: 24px;
+      table-layout: fixed;
     }
-    .quo-sign-left,
+    .quo-sign-spacer,
     .quo-sign-right {
       display: table-cell;
       width: 50%;
-      vertical-align: bottom;
+      vertical-align: top;
     }
     .quo-sign-right { text-align: center; }
-
-    .quo-accept-label {
-      margin: 0 0 28px;
-      font-size: 13px;
-      color: var(--quo-color-text);
-    }
-    .quo-accept-line {
-      border: none;
-      border-top: 1px solid #333;
-      width: 85%;
-      margin: 0;
-    }
 
     .quo-behalf {
       margin: 0 0 10px;
       font-size: 12px;
       color: var(--quo-color-text);
+    }
+    .quo-chop {
+      display: block;
+      max-height: 88px;
+      max-width: 88px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      margin: 8px auto 4px;
     }
     .quo-auth-label {
       margin: 0;
@@ -363,7 +329,7 @@
       border: none;
       border-top: 1px solid #333;
       width: 70%;
-      margin: 72px auto 8px;
+      margin: 12px auto 8px;
     }
 
     @media print {
@@ -417,7 +383,7 @@
       </header>
 
       <div class="quo-title-wrap">
-        <h1 class="quo-title">INVOICE</h1>
+        <h1 class="quo-title">DELIVERY NOTE</h1>
         <hr class="quo-title-rule" />
       </div>
 
@@ -425,16 +391,16 @@
         <div class="quo-party">
           <p class="quo-party-label">INVOICE TO</p>
           <div class="quo-party-body" contenteditable="true" spellcheck="false">&lt;BillingAddress&gt;</div>
+          <p class="quo-order-no">
+            <span class="quo-order-no-k">Order No</span>
+            <span class="quo-order-no-v" contenteditable="true">&lt;custom1&gt;</span>
+          </p>
         </div>
         <div class="quo-party">
           <p class="quo-party-label">SHIP TO</p>
           <div class="quo-party-body" contenteditable="true" spellcheck="false">&lt;ShippingAddress&gt;</div>
         </div>
         <div class="quo-meta-block">
-          <p class="quo-meta-row">
-            <span class="quo-meta-k">ORDER NO</span>
-            <span class="quo-meta-v" contenteditable="true">&lt;custom1&gt;</span>
-          </p>
           <p class="quo-meta-row">
             <span class="quo-meta-k">INVOICE NO</span>
             <span class="quo-meta-v" data-placeholder="refnumber" contenteditable="true">&lt;refnumber&gt;</span>
@@ -451,8 +417,6 @@
           <tr>
             <th>DESCRIPTION</th>
             <th class="quo-th-right">QTY</th>
-            <th class="quo-th-right">PRICE</th>
-            <th class="quo-th-right">AMOUNT</th>
           </tr>
         </thead>
         <tbody>
@@ -462,8 +426,6 @@
               <p class="quo-item-desc">&lt;ItemDescription&gt;</p>
             </td>
             <td class="quo-td-right">&lt;Qty&gt;</td>
-            <td class="quo-td-right">&lt;Rate&gt;</td>
-            <td class="quo-td-right">&lt;Amount&gt;</td>
           </tr>
         </tbody>
       </table>
@@ -471,44 +433,14 @@
       <section class="quo-bottom">
         <div class="quo-bottom-left">
           <div class="quo-message" contenteditable="true" spellcheck="false">&lt;Message&gt;</div>
-          <div class="quo-remarks" contenteditable="true" spellcheck="false">We accept both cheque payment and bank transfer
-(Please remark the Invoice No: <span data-placeholder="refnumber">&lt;refnumber&gt;</span> on the cheque or in the bank transfer note.)
--
-Crossed cheque made payable to “Honour Label Limited”
-And mail to above address
--
-Bank transfer detail:
-374-279610-001
-HONOUR LABEL LIMITED
-HANG SENG BANK (bank code : 024)
--
-</div>
-        </div>
-        <div class="quo-bottom-right">
-          <table class="quo-totals">
-            <tr>
-              <td class="quo-tot-label">Subtotal</td>
-              <td class="quo-tot-value">&lt;Subtotal&gt;</td>
-            </tr>
-            <tr>
-              <td class="quo-tot-label">Discount</td>
-              <td class="quo-tot-value">&lt;DiscountBeforeTax&gt;</td>
-            </tr>
-            <tr class="quo-tot-grand">
-              <td class="quo-tot-label">Total</td>
-              <td class="quo-tot-value">&lt;Total&gt;</td>
-            </tr>
-          </table>
         </div>
       </section>
 
       <footer class="quo-sign">
-        <div class="quo-sign-left">
-          <p class="quo-accept-label">Accepted by &amp; Date</p>
-          <hr class="quo-accept-line" />
-        </div>
+        <div class="quo-sign-spacer" aria-hidden="true"></div>
         <div class="quo-sign-right">
           <p class="quo-behalf">For and on behalf of Honour Label Limited</p>
+          <img class="quo-chop" src="company-chop.png" alt="Company chop" />
           <hr class="quo-auth-line" />
           <p class="quo-auth-label">Authorized Signature</p>
         </div>

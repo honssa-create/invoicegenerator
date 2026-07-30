@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
+import FilterBar from '@/components/FilterBar';
 import { compressImage } from '@/lib/imageCompression';
 import { inboundPhotoUrl } from '@/lib/image-url';
 import type { InboundShipment } from '@/lib/inbound';
@@ -9,9 +10,21 @@ import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+type SortKey = 'arrival' | 'waybill' | 'sender';
+type SortDir = 'asc' | 'desc';
+
+/** Prefer arrival_date; fall back to created_at date (matches list API ordering). */
+function shipmentDate(s: InboundShipment): string {
+  return (s.arrival_date || s.created_at || '').slice(0, 10);
+}
+
 export default function InboundPage() {
   const [shipments, setShipments] = useState<InboundShipment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'arrival', dir: 'desc' });
   const [waybill, setWaybill] = useState('');
   const [sender, setSender] = useState('');
   const [senderAddress, setSenderAddress] = useState('');
@@ -118,6 +131,66 @@ export default function InboundPage() {
     setTimeout(() => setToast(''), 4000);
   };
 
+  const displayed = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = shipments.filter((s) => {
+      const d = shipmentDate(s);
+      if (dateStart && d && d < dateStart) return false;
+      if (dateEnd && d && d > dateEnd) return false;
+      if (dateStart && !d) return false;
+      if (dateEnd && !d) return false;
+      if (q) {
+        const hay = [
+          s.waybill_number,
+          s.sender,
+          s.sender_address,
+          s.receiver_address,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    list = [...list].sort((a, b) => {
+      let base: number;
+      switch (sort.key) {
+        case 'waybill':
+          base = (a.waybill_number || '').localeCompare(b.waybill_number || '');
+          break;
+        case 'sender':
+          base = (a.sender || '').localeCompare(b.sender || '');
+          break;
+        default:
+          base = shipmentDate(a).localeCompare(shipmentDate(b));
+      }
+      if (base === 0) return (b.id - a.id) * dir;
+      return dir * base;
+    });
+    return list;
+  }, [shipments, dateStart, dateEnd, search, sort]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'arrival' ? 'desc' : 'asc' }));
+  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
+  const sortTh = (key: SortKey, label: string) => (
+    <th
+      onClick={() => toggleSort(key)}
+      className={`px-6 py-3 cursor-pointer select-none whitespace-nowrap hover:text-gray-700 ${sort.key === key ? 'text-brand-700' : ''}`}
+    >
+      {label}
+      <span className="text-gray-400">{arrow(key)}</span>
+    </th>
+  );
+
+  const clearFilters = () => {
+    setDateStart('');
+    setDateEnd('');
+    setSearch('');
+  };
+
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
 
   return (
@@ -183,27 +256,49 @@ export default function InboundPage() {
         </div>
       </div>
 
+      <FilterBar
+        dateStart={dateStart}
+        dateEnd={dateEnd}
+        onDateStart={setDateStart}
+        onDateEnd={setDateEnd}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder={bi('Waybill, sender, address…', '運單號、寄件人、地址…')}
+        onClear={clearFilters}
+      />
+
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <div className="px-6 py-4 border-b border-gray-200"><h2 className="font-semibold text-gray-900">Recorded Shipments</h2></div>
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+          <h2 className="font-semibold text-gray-900">Recorded Shipments</h2>
+          {!loading && shipments.length > 0 && (
+            <span className="text-xs text-gray-500">
+              {displayed.length === shipments.length
+                ? bi(`${shipments.length} record(s)`, `${shipments.length} 筆`)
+                : bi(`${displayed.length} of ${shipments.length}`, `${displayed.length} / ${shipments.length} 筆`)}
+            </span>
+          )}
+        </div>
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : shipments.length === 0 ? (
           <div className="p-12 text-center text-gray-500">{MSG.noInboundYet}</div>
+        ) : displayed.length === 0 ? (
+          <div className="p-12 text-center text-gray-500">{bi('No shipments match these filters.', '沒有符合篩選條件的到件紀錄。')}</div>
         ) : (
           <table className="w-full min-w-[900px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3">Photo</th>
-                <th className="px-6 py-3">Waybill 運單號</th>
-                <th className="px-6 py-3">Sender 寄件人</th>
+                {sortTh('waybill', 'Waybill 運單號')}
+                {sortTh('sender', 'Sender 寄件人')}
                 <th className="px-6 py-3">Sender Addr 寄件地址</th>
                 <th className="px-6 py-3">Receiver Addr 收件地址</th>
-                <th className="px-6 py-3">Arrival 到貨日</th>
+                {sortTh('arrival', 'Arrival 到貨日')}
                 <th className="px-6 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {shipments.map((s) => (
+              {displayed.map((s) => (
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-6 py-3">
                     {s.photo_path ? (

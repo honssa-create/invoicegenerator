@@ -1,0 +1,56 @@
+# PaddleOCR sidecar (inbound waybills)
+
+CPU PaddleOCR HTTP service used by InvoiceFlow `POST /api/inbound/scan`.
+
+## Endpoints
+
+| Method | Path | Body | Response |
+|--------|------|------|----------|
+| `GET` | `/health` | — | `{ "ok": true }` |
+| `POST` | `/ocr` | multipart `file` | `{ "boxes": [{ text, score, x0, y0, x1, y1 }] }` |
+| `POST` | `/ocr/json` | `{ "image_base64": "...", "mime_type": "image/jpeg" }` | same |
+
+If `PADDLE_OCR_SECRET` is set, send header `X-Paddle-OCR-Secret: <secret>` (or `Authorization: Bearer <secret>`).
+
+## Local run (Docker)
+
+```bash
+cd services/paddle-ocr
+docker build -t paddle-ocr .
+docker run --rm -p 8000:8000 paddle-ocr
+curl http://127.0.0.1:8000/health
+```
+
+First boot downloads OCR models and can take several minutes; needs ~2GB+ RAM.
+
+## Local run (venv)
+
+```bash
+cd services/paddle-ocr
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+## Point the Next.js app at it
+
+In `.env.local`:
+
+```bash
+PADDLE_OCR_URL=http://127.0.0.1:8000
+# PADDLE_OCR_SECRET=same-as-sidecar-if-set
+```
+
+Restart `npm run dev`. Leave `GEMINI_API_KEY` unset to force the Paddle path while testing.
+
+## Railway (second service)
+
+1. In the same Railway project: **+ New** → GitHub repo (same repo).
+2. Service **Settings → Root Directory:** `services/paddle-ocr` (uses this Dockerfile).
+3. Allocate **≥2GB RAM**. Private networking is enough (no public domain required).
+4. On the **Next.js** service set:
+   ```bash
+   PADDLE_OCR_URL=http://<paddle-service-name>.railway.internal:8000
+   ```
+   Optional: set the same `PADDLE_OCR_SECRET` on both services.

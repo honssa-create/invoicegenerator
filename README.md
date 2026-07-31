@@ -21,7 +21,7 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 - **Invoice ↔ Order linkage** — Link an invoice to its order; the order shows a live payment badge (green Paid / red Unpaid) derived from the linked invoice, and each page cross-links to the other
 - **Automated 30-day payment reminders** — A daily-runnable job emails clients whose invoices are unpaid after 30 days and logs a `[System]` entry into the invoice's and linked order's activity feed
 - **Isolated activity logs** — Every Order, Invoice, and Quotation has its own ClickUp-style activity sidebar that auto-logs creation, status/field changes, exports, and system events, plus free-text comments
-- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; AI vision (Gemini, OCR fallback) extracts the waybill number and sender, defaults the arrival date to today, and saves the record with the cargo photo. Cargo photos are auto-compressed in the browser (≤1200px, &lt;300KB JPEG) before upload
+- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; **PaddleOCR** (when `PADDLE_OCR_URL` is set) extracts waybill / sender / addresses via SF 寄·收 region heuristics, else Gemini, else on-device OCR. Defaults arrival date to today; cargo photos are auto-compressed in the browser before upload
 - **Scan to Table (掃描成表格)** — Upload an image or PDF of any printed table and extract it into an editable grid (Google Gemini vision when `GEMINI_API_KEY` is set, otherwise on-device OCR), then export it
 - **Receipt scanning (收據掃描)** — Upload one or more receipt images; the first is auto-scanned to extract merchant, date, and total (AI vision when `OPENAI_API_KEY` is set, otherwise on-device OCR); blanks are left for manual entry
 - **Multiple receipts per expense (多檔案上傳)** — Attach several receipt images; the table shows up to 3 thumbnails (2 + a `+N` badge when more), and a gallery modal shows all images with the receipt number
@@ -60,8 +60,10 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `OPENAI_API_KEY` | Enables AI vision receipt extraction; falls back to on-device OCR when unset | _(unset)_ |
 | `OPENAI_VISION_MODEL` | Vision model used when `OPENAI_API_KEY` is set | `gpt-4o-mini` |
 | `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng+chi_sim` |
-| `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table (and PDF parsing); falls back to on-device OCR when unset | _(unset)_ |
-| `GEMINI_MODEL` | Gemini model used for Scan-to-Table | `gemini-2.5-flash` |
+| `PADDLE_OCR_URL` | Base URL of the PaddleOCR sidecar for inbound waybill scan (e.g. `http://127.0.0.1:8000` or Railway private `http://…railway.internal:8000`) | _(unset — skip Paddle)_ |
+| `PADDLE_OCR_SECRET` | Optional shared secret; sent as `X-Paddle-OCR-Secret` (set the same value on the sidecar) | _(unset)_ |
+| `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table / inbound fallback / PDF parsing | _(unset)_ |
+| `GEMINI_MODEL` | Gemini model used when `GEMINI_API_KEY` is set | `gemini-2.5-flash` |
 | `RESEND_API_KEY` | Enables sending real reminder emails via Resend; without it reminders are logged to activity feeds only | _(unset)_ |
 | `REMINDER_FROM_EMAIL` | From address for reminder emails | `InvoiceFlow <onboarding@resend.dev>` |
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
@@ -111,6 +113,13 @@ Set `JWT_SECRET` to a strong random string in production.
 4. **Required environment variables**
    - `JWT_SECRET` — session signing secret
 
-5. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
+5. **Optional — PaddleOCR second service** (better inbound waybill OCR without cloud AI)
+   - **+ New** service from the same GitHub repo
+   - Root Directory: `services/paddle-ocr` (uses that folder’s Dockerfile)
+   - Allocate ≥2GB RAM; private networking is enough
+   - On the Next.js service set `PADDLE_OCR_URL=http://<paddle-service-name>.railway.internal:8000`
+   - Details: [`services/paddle-ocr/README.md`](services/paddle-ocr/README.md)
+
+6. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
 
 This repo includes `railpack.json` and `railway.json` so Railpack detects **Node.js / Next.js** and runs `npm run build` + `npm start` automatically.

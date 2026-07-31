@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { saveReceipt, ocrImageText } from '@/lib/receipt';
 import type { ShipmentScanResult } from '@/lib/inbound';
+import { extractFieldsFromBoxes, hasAnyInboundField, ocrExtractFields } from '@/lib/inbound-ocr';
+import { paddleOcrBoxes } from '@/lib/paddle-ocr';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
@@ -56,63 +58,6 @@ async function geminiExtract(base64: string, mimeType: string): Promise<ScanFiel
   }
 }
 
-const FIELD_START =
-  /^(?:寄件|收件|发件|發件|运单|運單|waybill|tracking|sender|receiver|recipient|from|to|电话|電話|手机|手機|联络|聯絡)/i;
-
-function extractLabeledBlock(
-  lines: string[],
-  labelRe: RegExp,
-  maxExtraLines = 2
-): string | null {
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(labelRe);
-    if (!m) continue;
-    const parts: string[] = [];
-    if (m[1]?.trim()) parts.push(m[1].trim());
-    for (let j = i + 1; j < Math.min(i + 1 + maxExtraLines, lines.length); j++) {
-      if (FIELD_START.test(lines[j])) break;
-      if (lines[j].length < 2) break;
-      parts.push(lines[j]);
-    }
-    const addr = parts.join('\n').trim();
-    if (addr.length >= 4) return addr.slice(0, 240);
-  }
-  return null;
-}
-
-function ocrExtractFields(text: string): ScanFields {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  let waybill: string | null = null;
-  // SF-style (SF + 10+ digits) or a long digit run typical of waybills.
-  const sf = text.match(/\bSF\s?\d[\d\s]{8,}\b/i);
-  if (sf) waybill = sf[0].replace(/\s+/g, '');
-  if (!waybill) {
-    const digits = text.match(/\b\d{10,16}\b/);
-    if (digits) waybill = digits[0];
-  }
-
-  let sender: string | null = null;
-  for (const line of lines) {
-    // Prefer 寄件人 / sender name; avoid matching 寄件地址.
-    const m = line.match(/(?:寄件人(?!地址)|寄件方|sender(?!\s*address)|from)\s*[:：]?\s*(.+)/i);
-    if (m && m[1].trim().length >= 2 && !/地址/.test(m[1])) {
-      sender = m[1].trim().slice(0, 80);
-      break;
-    }
-  }
-
-  const sender_address = extractLabeledBlock(
-    lines,
-    /(?:寄件地址|发件地址|發件地址|寄方地址|寄件人地址|sender\s*address|from\s*address)\s*[:：]?\s*(.*)/i
-  );
-  const receiver_address = extractLabeledBlock(
-    lines,
-    /(?:收件地址|收方地址|到件地址|收件人地址|receiver\s*address|recipient\s*address|ship\s*to|to\s*address)\s*[:：]?\s*(.*)/i
-  );
-
-  return { waybill_number: waybill, sender, sender_address, receiver_address };
-}
-
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -132,11 +77,24 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await file.arrayBuffer());
   const photoPath = await saveReceipt(buffer, file.type, file.name);
 
+  // 1) PaddleOCR sidecar (privacy-first when configured)
+  const boxes = await paddleOcrBoxes(buffer, file.type);
+  if (boxes) {
+    const paddleFields = extractFieldsFromBoxes(boxes);
+    if (hasAnyInboundField(paddleFields)) {
+      return NextResponse.json({
+        result: { ...paddleFields, photo_path: photoPath, source: 'paddle' } satisfies ShipmentScanResult,
+      });
+    }
+  }
+
+  // 2) Gemini (optional cloud)
   const ai = await geminiExtract(buffer.toString('base64'), file.type);
   if (ai) {
     return NextResponse.json({ result: { ...ai, photo_path: photoPath, source: 'ai' } satisfies ShipmentScanResult });
   }
 
+  // 3) tesseract.js + regex
   let text = '';
   try {
     text = await ocrImageText(buffer);

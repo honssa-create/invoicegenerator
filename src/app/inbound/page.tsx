@@ -79,7 +79,8 @@ export default function InboundPage() {
       if (r.sender) setSender(r.sender);
       if (r.sender_address) setSenderAddress(r.sender_address);
       if (r.receiver_address) setReceiverAddress(r.receiver_address);
-      const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
+      const via =
+        r.source === 'paddle' ? 'PaddleOCR' : r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
       const found = [
         r.waybill_number && 'waybill',
         r.sender && 'sender',
@@ -220,7 +221,7 @@ export default function InboundPage() {
               <div className="text-4xl mb-2">📦📸</div>
             )}
             <p className="text-sm font-medium text-gray-700">{scanning ? 'Scanning…' : 'Click or drop a courier label photo'}</p>
-            <p className="text-xs text-gray-400 mt-1">SF Express / logistics waybill · AI vision (Gemini) with OCR fallback</p>
+            <p className="text-xs text-gray-400 mt-1">SF Express / logistics waybill · PaddleOCR when configured, else Gemini, else on-device OCR</p>
             {scanMsg && <p className="text-xs text-brand-700 mt-2">{scanMsg}</p>}
           </div>
         </div>

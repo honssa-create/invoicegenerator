@@ -17,5 +17,5 @@ export interface ShipmentScanResult {
   sender_address: string | null;
   receiver_address: string | null;
   photo_path: string | null;
-  source: 'ai' | 'ocr';
+  source: 'paddle' | 'ai' | 'ocr';
 }

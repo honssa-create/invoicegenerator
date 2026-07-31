@@ -1,7 +1,9 @@
 import {
   BIRD_NEST_FLAVORS,
+  getNestieeLines,
   isBadgeOrderType,
   isBirdNestOrderType,
+  isNestieeOrderType,
   orderTitle,
   parseHonourLines,
   type Order,
@@ -59,6 +61,17 @@ export function buildQuotationItemsFromOrder(
   const f = order.fields;
   const orderType = fieldStr(f, 'order_type');
   const unitPrice = parseNumericFromText(fieldStr(f, 'supplier_price'));
+
+  if (isNestieeOrderType(orderType)) {
+    const nestieeLines = getNestieeLines(f);
+    if (nestieeLines.length) {
+      return nestieeLines.map((line) => ({
+        description: line.name,
+        quantity: line.quantity || 1,
+        unit_price: line.unit_price || unitPrice,
+      }));
+    }
+  }
 
   if (isBirdNestOrderType(orderType)) {
     const items: QuotationLineDraft[] = [];

@@ -2,7 +2,8 @@ import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
 import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
-import { WOO_PLATFORM_ORDER_TYPE } from './orders';
+import { parseNestieeLinesFromWoo, parsePaymentAmount, WOO_PLATFORM_ORDER_TYPE } from './orders';
+import type { WooLineItemLike } from './orders';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -109,6 +110,20 @@ export async function upsertHubOrder(
   if (input.raw_payload) fields.external_payload = input.raw_payload;
   const mappedType = WOO_PLATFORM_ORDER_TYPE[input.source_platform as keyof typeof WOO_PLATFORM_ORDER_TYPE];
   if (mappedType) fields.order_type = mappedType;
+
+  if (input.source_platform === 'nestiee') {
+    const rawLines = (input.raw_payload?.line_items as WooLineItemLike[] | undefined) || [];
+    fields.nestiee_lines = JSON.stringify(parseNestieeLinesFromWoo(rawLines));
+
+    const verified = fields.payment_verified === true || fields.payment_verified === 'true';
+    const existingPay =
+      parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
+    if (!verified && existingPay <= 0 && input.total_amount > 0) {
+      const amount = String(Math.round(input.total_amount * 100) / 100);
+      fields.payment_amount = amount;
+      fields.payment1_amount = amount;
+    }
+  }
 
   if (existing) {
     await db.prepare(

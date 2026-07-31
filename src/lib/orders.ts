@@ -232,17 +232,93 @@ export function isBadgeOrderType(t: string): t is BadgeOrderType {
   return (BADGE_ORDER_TYPES as readonly string[]).includes(t);
 }
 
-/** Bird's-nest stewing orders share dates, flavor qty, and production formulas. */
-export const BIRD_NEST_ORDER_TYPES = ['燕窩回禮燉製', 'Nestiee 燕窩訂單'] as const;
+/** Bird's-nest stewing orders (燕窩回禮燉製) share dates, flavor qty, and production formulas. */
+export const BIRD_NEST_ORDER_TYPES = ['燕窩回禮燉製'] as const;
 export type BirdNestOrderType = (typeof BIRD_NEST_ORDER_TYPES)[number];
 export function isBirdNestOrderType(t: string): t is BirdNestOrderType {
   return (BIRD_NEST_ORDER_TYPES as readonly string[]).includes(t);
 }
 
+export const NESTIEE_ORDER_TYPE = 'Nestiee 燕窩訂單' as const;
+export function isNestieeOrderType(t: string): boolean {
+  return t === NESTIEE_ORDER_TYPE;
+}
+
+/** Normalized Woo line item stored on Nestiee orders as `fields.nestiee_lines` JSON. */
+export interface NestieeLineItem {
+  name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
+
+export type WooLineItemLike = {
+  name?: string | null;
+  quantity?: number | string | null;
+  price?: number | string | null;
+  total?: number | string | null;
+};
+
+function nestieeNum(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value !== 'string' || !value.trim()) return 0;
+  const n = Number(value.replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Normalize WooCommerce `line_items` into Nestiee product rows. */
+export function parseNestieeLinesFromWoo(lineItems: WooLineItemLike[] | null | undefined): NestieeLineItem[] {
+  if (!Array.isArray(lineItems) || !lineItems.length) return [];
+  const out: NestieeLineItem[] = [];
+  for (const li of lineItems) {
+    const name = String(li?.name ?? '').trim();
+    if (!name) continue;
+    const quantity = nestieeNum(li.quantity);
+    const unit_price = Math.round(nestieeNum(li.price) * 100) / 100;
+    const rawTotal = nestieeNum(li.total);
+    const line_total =
+      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    out.push({ name, quantity, unit_price, line_total });
+  }
+  return out;
+}
+
+/** Read `fields.nestiee_lines` (JSON string or already-parsed array). */
+export function getNestieeLines(
+  fields: Record<string, string | boolean | unknown>
+): NestieeLineItem[] {
+  const raw = fields.nestiee_lines;
+  if (raw == null || raw === false || raw === '') return [];
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const out: NestieeLineItem[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const name = String(r.name ?? '').trim();
+    if (!name) continue;
+    const quantity = nestieeNum(r.quantity);
+    const unit_price = Math.round(nestieeNum(r.unit_price ?? r.price) * 100) / 100;
+    const rawTotal = nestieeNum(r.line_total ?? r.total);
+    const line_total =
+      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    out.push({ name, quantity, unit_price, line_total });
+  }
+  return out;
+}
+
 /** Default order_type when ingesting from a WooCommerce store platform. */
 export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
   honour: 'honour訂製',
-  nestiee: 'Nestiee 燕窩訂單',
+  nestiee: NESTIEE_ORDER_TYPE,
 };
 
 export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'] as const;

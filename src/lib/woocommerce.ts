@@ -34,7 +34,7 @@ export interface WooOrder {
     postcode?: string;
     country?: string;
   };
-  line_items?: { name: string; quantity: number }[];
+  line_items?: { name: string; quantity: number; price?: number | string; total?: number | string }[];
 }
 
 const STORE_META: Array<{

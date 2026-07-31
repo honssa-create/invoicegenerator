@@ -14,8 +14,6 @@ import {
   ORDER_TYPES,
   ORDER_PAYMENT_METHODS,
   ORDER_PAYMENT_METHOD_OTHER,
-  BIRD_NEST_FLAVORS,
-  BIRD_NEST_ACTUAL_FLAVORS,
   WEDDING_GIFT_BOTTLE_CAPACITIES,
   WEDDING_GIFT_CLIENT_FLAVORS,
   WEDDING_GIFT_ACTUAL_FLAVORS,
@@ -38,6 +36,7 @@ import {
   computeWeddingGiftPacking,
   normalizeOrderPaymentMethod,
   parseHonourLines,
+  getNestieeLines,
   weddingGiftFoilStickerKey,
   weddingGiftRoundTagKey,
   STATUS_COLORS,
@@ -1240,60 +1239,48 @@ export default function OrderDetailPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Client Quantities 客人訂購數量</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
-                    {BIRD_NEST_FLAVORS.map((f) => (
-                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
-                    ))}
-                    {readOnly('客人訂總數量', bn.totalOrdered)}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">實際生產樽數</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
-                    {BIRD_NEST_ACTUAL_FLAVORS.map((f, i) => {
-                      const clientKey = BIRD_NEST_FLAVORS[i].key;
-                      const raw = fVal(f.key);
-                      const display = raw !== '' ? raw : fVal(clientKey);
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Ordered Products 訂購產品</h3>
+                  {(() => {
+                    const nestieeLines = getNestieeLines(order.fields);
+                    if (!nestieeLines.length) {
                       return (
-                        <div key={f.key}>
-                          {labeled(
-                            f.label,
-                            <input
-                              type="number"
-                              min={0}
-                              value={display}
-                              onChange={(e) => setFieldLocal(f.key, nonNeg(e.target.value))}
-                              onBlur={(e) => {
-                                const v = nonNeg(e.target.value);
-                                setFieldLocal(f.key, v);
-                                patch({ fields: { [f.key]: v } });
-                              }}
-                              placeholder="0"
-                              className={softInput}
-                            />
-                          )}
-                        </div>
+                        <p className="text-sm text-gray-400">
+                          No store line items yet. Import from Hub / Nestiee WooCommerce to fill products and prices.
+                          {order.description ? (
+                            <span className="block mt-1 text-gray-500">Description: {order.description}</span>
+                          ) : null}
+                        </p>
                       );
-                    })}
-                    {readOnly('實際生產總數量', computeBirdNestActualTotal(order.fields))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Inventory & Production 本地模擬計算</h3>
-                  <div className="max-w-xs mb-4">
-                    {readOnly('總生產樽數', bn.productionBottles)}
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                    {readOnly('燕餅 (g)', `${bn.birdCakeGrams} g`)}
-                    {readOnly('圓形tag', bn.roundTag)}
-                    {readOnly('貼紙', bn.sticker)}
-                    {readOnly('金繩', bn.goldString)}
-                    {readOnly('Wedding Logo Tag', bn.weddingLogoTag)}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-3">Auto-derived from 實際生產樽數 (= {bn.productionBottles}) to simplify Tracy’s packing checklist. 燕餅 = 樽數 × {`${0.8}`}g.</p>
+                    }
+                    const fmt = (n: number) =>
+                      n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                    return (
+                      <div className="overflow-x-auto rounded-xl border border-gray-200">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-400">
+                            <tr>
+                              <th className="px-4 py-2.5 font-medium">Product</th>
+                              <th className="px-4 py-2.5 font-medium text-right">Qty</th>
+                              <th className="px-4 py-2.5 font-medium text-right">Unit price</th>
+                              <th className="px-4 py-2.5 font-medium text-right">Line total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {nestieeLines.map((line, i) => (
+                              <tr key={`${line.name}-${i}`} className="bg-white">
+                                <td className="px-4 py-3 text-gray-900">{line.name}</td>
+                                <td className="px-4 py-3 text-right tabular-nums text-gray-700">{line.quantity}</td>
+                                <td className="px-4 py-3 text-right tabular-nums text-gray-700">{fmt(line.unit_price)}</td>
+                                <td className="px-4 py-3 text-right tabular-nums font-medium text-gray-900">
+                                  {fmt(line.line_total)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

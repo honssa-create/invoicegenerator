@@ -328,7 +328,7 @@ export async function completePrepProduction(
   return await getPrepOrder(id, userId);
 }
 
-/** Import a bird's-nest order (燕窩回禮燉製 / Nestiee 燕窩訂單) into the prep schedule. */
+/** Import a bird's-nest order (燕窩回禮燉製, or Nestiee if flavor qty fields are present) into the prep schedule. */
 export async function importFromOrder(
   userId: number,
   orderId: number,

@@ -21,7 +21,7 @@ export interface WooOrderPayload {
     postcode?: string;
     country?: string;
   };
-  line_items?: { name: string; quantity: number }[];
+  line_items?: { name: string; quantity: number; price?: number | string; total?: number | string }[];
 }
 
 function parseOrdersJson(body: string, platform: string): WooOrderPayload[] {

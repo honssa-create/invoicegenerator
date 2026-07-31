@@ -1,89 +1,174 @@
-// Client-safe constants, types and formulas for the Kitchen Scheduling & Two-Tier
-// Inventory system. Server logic lives in kitchen-server.ts.
+/** Client-safe constants and types for the Kitchen fulfillment dashboard. */
 
-export const FLAVORS = ['冰糖', '桂花', '紅棗'] as const;
-export const CAPACITIES = ['45ml', '25ml'] as const;
-export type Flavor = (typeof FLAVORS)[number];
-export type Capacity = (typeof CAPACITIES)[number];
+import { NESTIEE_GIFT_BOX_TYPES } from './orders';
+import {
+  FINISHED_SKUS,
+  finishedSkuLabel,
+  type BomLine,
+  type StockCheckLine,
+} from './kitchen-bom';
 
-export const OOS_STATUS = '無現貨 (Out of Stock)';
-export const READY_STATUS = 'Ready to Ship';
+export {
+  FINISHED_SKUS,
+  FINISHED_CAPACITIES,
+  FINISHED_FLAVORS,
+  finishedSku,
+  finishedSkuLabel,
+  parseFinishedSku,
+  expandGiftBoxBom,
+  checkBomAgainstStock,
+  bomIsSufficient,
+  aggregateBomDemand,
+  GIFT_BOX_BOMS,
+  bomLineKey,
+  applyBomQtyOverrides,
+  normalizeBomQty,
+  SUI_XIN_YAN_BING_G,
+  SUI_XIN_BING_TANG_G,
+  giftNeedKey,
+  bottleNeedKey,
+  type BomLine,
+  type StockCheckLine,
+  type MovementDeltas,
+} from './kitchen-bom';
 
-export function skuOf(capacity: string, flavor: string): string {
-  return `${capacity} ${flavor}`;
-}
+export const GIFT_BOX_TYPES = NESTIEE_GIFT_BOX_TYPES;
 
-// All finished-goods SKUs (capacity × flavor).
-export const FINISHED_SKUS: string[] = CAPACITIES.flatMap((c) => FLAVORS.map((f) => skuOf(c, f)));
-
-// Raw materials + per-bottle consumption rate. 燕餅 (g) = bottles × 0.8g etc.
 export interface RawMaterialDef {
   name: string;
   unit: string;
-  perBottle: number;
   seedStock: number;
 }
 
+/** Raw materials tracked in kitchen inventory (restock + 隨心燉 BOM).
+ *  頂級乾燕餅 ≡ 燕餅；燕窩冰糖 ≡ 冰糖. */
 export const RAW_MATERIALS: RawMaterialDef[] = [
-  { name: '燕餅', unit: 'g', perBottle: 0.8, seedStock: 500 },
-  { name: '冰糖', unit: 'g', perBottle: 5, seedStock: 2000 },
-  { name: '片糖', unit: 'g', perBottle: 3, seedStock: 1500 },
-  { name: '空玻璃樽', unit: '個', perBottle: 1, seedStock: 300 },
-  { name: '圓形Tag', unit: '個', perBottle: 1, seedStock: 300 },
-  { name: '金繩', unit: '條', perBottle: 1, seedStock: 300 },
-  { name: '紙箱', unit: '個', perBottle: 0.05, seedStock: 50 },
+  { name: '燕餅', unit: 'g', seedStock: 0 },
+  { name: '桂花', unit: 'g', seedStock: 0 },
+  { name: '紅棗', unit: 'g', seedStock: 0 },
+  { name: '冰糖', unit: 'g', seedStock: 0 },
+  { name: '片糖', unit: 'g', seedStock: 0 },
+  { name: '玻璃燉瓶', unit: '個', seedStock: 0 },
 ];
 
-export interface MaterialRequirement {
-  name: string;
-  unit: string;
-  qty: number;
+/** Legacy raw names → canonical (fold stock on seed). */
+export const RAW_MATERIAL_ALIASES: Record<string, string> = {
+  頂級乾燕餅: '燕餅',
+  燕窩冰糖: '冰糖',
+};
+
+export const KITCHEN_ACTIONS = ['make_gift_box', 'allocate_gift_box', 'make_return_gift', 'restock_raw', 'void'] as const;
+export type KitchenAction = (typeof KITCHEN_ACTIONS)[number];
+
+export const KITCHEN_ACTION_LABELS: Record<KitchenAction, string> = {
+  make_gift_box: '包裝禮盒',
+  allocate_gift_box: '分配禮盒',
+  make_return_gift: '包裝回禮',
+  restock_raw: '補充原料',
+  void: 'Void',
+};
+
+export interface GiftBoxRow {
+  boxType: string;
+  label: string;
+  quantity: number;
+  needed: number;
 }
 
-// Compute raw materials required for a batch of `bottles` (used by the 大字報).
-export function computeBatchMaterials(bottles: number): MaterialRequirement[] {
-  return RAW_MATERIALS.map((m) => ({
-    name: m.name,
-    unit: m.unit,
-    qty: Math.round(m.perBottle * bottles * 100) / 100,
-  }));
-}
-
-// ---- Shared types returned by the kitchen state API ----
 export interface FinishedRow {
   sku: string;
+  label: string;
   quantity: number;
+  needed: number;
 }
+
 export interface RawRow {
   name: string;
   unit: string;
-  total_stock: number;
-  allocated_stock: number;
-  available: number;
-}
-export interface DailyOrder {
-  id: number;
-  source: string;
-  customer: string | null;
-  sku: string;
   quantity: number;
-  status: string;
-  created_at: string;
+  needed: number;
 }
-export interface BrewingBatch {
+
+/** Format raw qty for display: grams up to 3 decimals; count units as integers. */
+export function formatRawQty(qty: number, unit: string): string {
+  if (!Number.isFinite(qty)) return '0';
+  if (unit === 'g') {
+    const rounded = Math.round(qty * 1000) / 1000;
+    return rounded.toFixed(3).replace(/\.?0+$/, '') || '0';
+  }
+  return String(Math.round(qty));
+}
+
+/** Round raw stock values: g → 3dp, others → integer. */
+export function roundRawQty(qty: number, unit: string): number {
+  if (!Number.isFinite(qty)) return 0;
+  if (unit === 'g') return Math.round(qty * 1000) / 1000;
+  return Math.round(qty);
+}
+
+export interface KitchenNeedLine {
+  needKey: string;
+  label: string;
+  required: number;
+  fulfilled: number;
+  remaining: number;
+  done: boolean;
+}
+
+export interface KitchenOpenOrder {
   id: number;
-  flavor: string;
-  capacity: string;
-  brewing_date: string | null;
-  bottle_count: number;
-  status: 'scheduled' | 'completed';
-  created_at: string;
-  completed_at: string | null;
-  materials: MaterialRequirement[];
+  poNumber: string;
+  type: 'nestiee' | 'return_gift';
+  typeLabel: string;
+  needs: KitchenNeedLine[];
+  fullyFulfilled: boolean;
 }
+
+export interface KitchenMovement {
+  id: number;
+  action: KitchenAction;
+  actionLabel: string;
+  /** For void rows: label of the original action that was voided. */
+  voidedActionLabel: string | null;
+  summary: string;
+  orderId: number | null;
+  createdAt: string;
+  createdBy: number;
+  createdByName: string;
+  voidedAt: string | null;
+  voidedBy: number | null;
+  voidedByName: string | null;
+  voidsMovementId: number | null;
+}
+
+export interface KitchenDemand {
+  giftBoxes: Record<string, number>;
+  finished: Record<string, number>;
+  raw: Record<string, number>;
+}
+
 export interface KitchenState {
+  giftBoxes: GiftBoxRow[];
   finished: FinishedRow[];
   raw: RawRow[];
-  orders: DailyOrder[];
-  batches: BrewingBatch[];
+  demand: KitchenDemand;
+  openOrders: KitchenOpenOrder[];
+  movements: KitchenMovement[];
+  isAdmin: boolean;
+}
+
+export function formatBomConsumption(lines: BomLine[]): string {
+  return lines
+    .map((l) =>
+      l.kind === 'finished'
+        ? `−${l.qty} ${finishedSkuLabel(l.sku)}`
+        : `−${l.qty} ${l.name}`
+    )
+    .join(' · ');
+}
+
+export function formatStockStatus(check: StockCheckLine, unit = 'g'): string {
+  const have =
+    check.kind === 'raw' ? formatRawQty(check.have, unit) : String(Math.round(check.have));
+  return `${have} / ${check.enough ? '足夠' : '不足'}`;
 }

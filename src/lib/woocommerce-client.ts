@@ -7,21 +7,42 @@ export interface WooOrderPayload {
   total: string;
   date_created: string;
   date_modified?: string;
+  customer_note?: string;
+  payment_method?: string;
+  payment_method_title?: string;
   billing?: {
     first_name?: string;
     last_name?: string;
-    email?: string;
-    phone?: string;
-  };
-  shipping?: {
+    company?: string;
     address_1?: string;
     address_2?: string;
     city?: string;
     state?: string;
     postcode?: string;
     country?: string;
+    email?: string;
+    phone?: string;
   };
-  line_items?: { name: string; quantity: number; price?: number | string; total?: number | string }[];
+  shipping?: {
+    first_name?: string;
+    last_name?: string;
+    company?: string;
+    address_1?: string;
+    address_2?: string;
+    city?: string;
+    state?: string;
+    postcode?: string;
+    country?: string;
+    phone?: string;
+  };
+  meta_data?: { key?: string; value?: unknown }[];
+  line_items?: {
+    name: string;
+    quantity: number;
+    price?: number | string;
+    total?: number | string;
+    meta_data?: { key?: string; value?: unknown }[];
+  }[];
 }
 
 function parseOrdersJson(body: string, platform: string): WooOrderPayload[] {

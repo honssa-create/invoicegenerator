@@ -97,6 +97,7 @@ export async function ingestWooOrders(
           phone: order.billing?.phone || null,
           shipping_address: wooShippingAddress(order),
           description: wooOrderDescription(order),
+          notes: order.customer_note?.trim() || null,
           external_po_number: order.number,
           raw_payload: order as unknown as Record<string, unknown>,
         });

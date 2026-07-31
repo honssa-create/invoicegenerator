@@ -4,6 +4,7 @@ import { normalizeWooStoreUrl } from './woo-url';
 import { parseWooApiJson, wooApiErrorMessage, wooRequestHeaders } from './woo-api';
 import type { HubImportDateRange } from './hub-import';
 import { orderCreatedInRange } from './hub-import';
+import { formatWooAddress } from './orders';
 
 export interface WooStoreConfig {
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
@@ -20,21 +21,42 @@ export interface WooOrder {
   total: string;
   date_created: string;
   date_modified: string;
+  customer_note?: string;
+  payment_method?: string;
+  payment_method_title?: string;
   billing?: {
     first_name?: string;
     last_name?: string;
-    email?: string;
-    phone?: string;
-  };
-  shipping?: {
+    company?: string;
     address_1?: string;
     address_2?: string;
     city?: string;
     state?: string;
     postcode?: string;
     country?: string;
+    email?: string;
+    phone?: string;
   };
-  line_items?: { name: string; quantity: number; price?: number | string; total?: number | string }[];
+  shipping?: {
+    first_name?: string;
+    last_name?: string;
+    company?: string;
+    address_1?: string;
+    address_2?: string;
+    city?: string;
+    state?: string;
+    postcode?: string;
+    country?: string;
+    phone?: string;
+  };
+  meta_data?: { key?: string; value?: unknown }[];
+  line_items?: {
+    name: string;
+    quantity: number;
+    price?: number | string;
+    total?: number | string;
+    meta_data?: { key?: string; value?: unknown }[];
+  }[];
 }
 
 const STORE_META: Array<{
@@ -155,9 +177,13 @@ export function wooCustomerName(order: WooOrder): string {
 }
 
 export function wooShippingAddress(order: WooOrder): string | null {
-  const s = order.shipping;
-  if (!s) return null;
-  return [s.address_1, s.address_2, s.city, s.state, s.postcode, s.country].filter(Boolean).join(', ') || null;
+  const formatted = formatWooAddress(order.shipping);
+  return formatted || null;
+}
+
+export function wooBillingAddress(order: WooOrder): string | null {
+  const formatted = formatWooAddress(order.billing);
+  return formatted || null;
 }
 
 export function wooOrderDescription(order: WooOrder): string {

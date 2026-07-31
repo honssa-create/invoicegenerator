@@ -10,12 +10,14 @@ import {
   quotationValidUntilFromIssueDate,
 } from './order-to-quotation';
 import type { Order } from './orders';
+import { resolveOrderAddressesForQuotation } from './orders';
 
 async function findOrCreateCustomerFromOrder(userId: number, order: Order): Promise<number> {
   const name = order.name?.trim() || 'Unknown Customer';
   const email = order.customer_email?.trim() || null;
   const phone = order.phone?.trim() || null;
-  const address = order.shipping_address?.trim() || null;
+  const { billingAddress } = resolveOrderAddressesForQuotation(order);
+  const address = billingAddress;
 
   let customerId: number | undefined;
 
@@ -68,7 +70,7 @@ export async function convertOrderToQuotation(
   const notes = buildQuotationNotesFromOrder(order);
   const terms = buildQuotationTermsFromOrder(order);
   const email = order.customer_email?.trim() || null;
-  const shippingAddress = order.shipping_address?.trim() || null;
+  const { billingAddress, shippingAddress } = resolveOrderAddressesForQuotation(order);
   const orderNo =
     order.po_number?.trim() ||
     String(order.fields.original_order_id || '').trim() ||
@@ -97,7 +99,7 @@ export async function convertOrderToQuotation(
         validUntil,
         notes,
         terms,
-        shippingAddress,
+        billingAddress,
         shippingAddress,
         email,
         orderNo,

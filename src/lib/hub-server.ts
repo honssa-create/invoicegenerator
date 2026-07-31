@@ -2,8 +2,16 @@ import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
 import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
-import { parseNestieeLinesFromWoo, parsePaymentAmount, WOO_PLATFORM_ORDER_TYPE } from './orders';
-import type { WooLineItemLike } from './orders';
+import {
+  formatWooAddress,
+  parseNestieeLinesFromWoo,
+  parseNestieePaymentFromWoo,
+  parsePaymentAmount,
+  applyNestieeGiftBoxAutoQtys,
+  WOO_PLATFORM_ORDER_TYPE,
+  type WooAddressLike,
+  type WooLineItemLike,
+} from './orders';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -16,6 +24,7 @@ export interface HubOrderUpsertInput {
   phone?: string | null;
   shipping_address?: string | null;
   description?: string | null;
+  notes?: string | null;
   external_po_number?: string | null;
   raw_payload?: Record<string, unknown>;
 }
@@ -90,11 +99,17 @@ export async function upsertHubOrder(
 ): Promise<{ id: number; inserted: boolean; system_order_no: string }> {
   const existing = await db
     .prepare(
-      `SELECT id, system_order_no, fields_json FROM orders
+      `SELECT id, system_order_no, fields_json, notes, shipping_address FROM orders
        WHERE user_id = ? AND source_platform = ? AND original_order_id = ?`
     )
     .get(userId, input.source_platform, input.original_order_id) as
-    | { id: number; system_order_no: string | null; fields_json: string | null }
+    | {
+        id: number;
+        system_order_no: string | null;
+        fields_json: string | null;
+        notes: string | null;
+        shipping_address: string | null;
+      }
     | undefined;
 
   let fields: Record<string, unknown> = {};
@@ -111,9 +126,18 @@ export async function upsertHubOrder(
   const mappedType = WOO_PLATFORM_ORDER_TYPE[input.source_platform as keyof typeof WOO_PLATFORM_ORDER_TYPE];
   if (mappedType) fields.order_type = mappedType;
 
-  if (input.source_platform === 'nestiee') {
-    const rawLines = (input.raw_payload?.line_items as WooLineItemLike[] | undefined) || [];
-    fields.nestiee_lines = JSON.stringify(parseNestieeLinesFromWoo(rawLines));
+  let shippingAddress = input.shipping_address?.trim() || null;
+
+  if (input.source_platform === 'nestiee' && input.raw_payload) {
+    const payload = input.raw_payload;
+    const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
+    const nestieeLines = parseNestieeLinesFromWoo(rawLines);
+    fields.nestiee_lines = JSON.stringify(nestieeLines);
+    applyNestieeGiftBoxAutoQtys(fields, nestieeLines);
+
+    const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
+    if (billing) fields.billing_address = billing;
+    if (!shippingAddress && billing) shippingAddress = billing;
 
     const verified = fields.payment_verified === true || fields.payment_verified === 'true';
     const existingPay =
@@ -123,7 +147,22 @@ export async function upsertHubOrder(
       fields.payment_amount = amount;
       fields.payment1_amount = amount;
     }
+
+    if (!verified) {
+      const pay = parseNestieePaymentFromWoo(payload);
+      const hasMethod = String(fields.payment_method_detail || '').trim();
+      if (!hasMethod && pay.method) {
+        fields.payment_method_detail = pay.method;
+        if (pay.note) fields.payment_method_note = pay.note;
+      }
+      if (!String(fields.payment_bank || '').trim() && pay.bank) {
+        fields.payment_bank = pay.bank;
+      }
+    }
   }
+
+  const notesToWrite =
+    input.notes?.trim() && !(existing?.notes || '').trim() ? input.notes.trim() : null;
 
   if (existing) {
     await db.prepare(
@@ -135,6 +174,7 @@ export async function upsertHubOrder(
          phone = COALESCE(?, phone),
          shipping_address = COALESCE(?, shipping_address),
          description = COALESCE(?, description),
+         notes = COALESCE(?, notes),
          po_number = COALESCE(?, po_number),
          fields_json = ?,
          updated_at = datetime('now')
@@ -145,8 +185,9 @@ export async function upsertHubOrder(
       input.total_amount,
       input.customer_email?.trim() || null,
       input.phone?.trim() || null,
-      input.shipping_address?.trim() || null,
+      shippingAddress,
       input.description?.trim() || null,
+      notesToWrite,
       input.external_po_number?.trim() || null,
       JSON.stringify(fields),
       existing.id,
@@ -165,8 +206,8 @@ export async function upsertHubOrder(
       `INSERT INTO orders (
          user_id, source_platform, original_order_id, system_order_no,
          po_number, name, description, status, customer_email, phone,
-         shipping_address, total_amount, fields_json, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+         shipping_address, total_amount, notes, fields_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     )
     .run(
       userId,
@@ -179,8 +220,9 @@ export async function upsertHubOrder(
       input.status,
       input.customer_email?.trim() || null,
       input.phone?.trim() || null,
-      input.shipping_address?.trim() || null,
+      shippingAddress,
       input.total_amount,
+      input.notes?.trim() || null,
       JSON.stringify(fields),
       input.created_at
     );

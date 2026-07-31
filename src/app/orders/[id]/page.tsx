@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -37,6 +37,8 @@ import {
   normalizeOrderPaymentMethod,
   parseHonourLines,
   getNestieeLines,
+  NESTIEE_GIFT_BOX_TYPES,
+  nestieeGiftQtyManualKey,
   weddingGiftFoilStickerKey,
   weddingGiftRoundTagKey,
   STATUS_COLORS,
@@ -1209,36 +1211,6 @@ export default function OrderDetailPage() {
             {orderType === 'Nestiee 燕窩訂單' && (
               <div className="space-y-8">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Dates 日期</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
-                    {labeled(
-                      'Big Day',
-                      <input
-                        type="date"
-                        value={fVal('big_day')}
-                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
-                        onBlur={(e) => {
-                          const v = e.target.value;
-                          const upd: Record<string, string> = { big_day: v };
-                          if (v && !fVal('expiry_date')) {
-                            const d = new Date(v);
-                            d.setDate(d.getDate() + 28);
-                            const iso = d.toISOString().slice(0, 10);
-                            upd.expiry_date = iso;
-                            setFieldLocal('expiry_date', iso);
-                          }
-                          patch({ fields: upd });
-                        }}
-                        className={softInput}
-                      />
-                    )}
-                    {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
-                    {labeled('生產日期', fInput('production_date', 'date'))}
-                    {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
-                  </div>
-                </div>
-
-                <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">Ordered Products 訂購產品</h3>
                   {(() => {
                     const nestieeLines = getNestieeLines(order.fields);
@@ -1267,20 +1239,68 @@ export default function OrderDetailPage() {
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {nestieeLines.map((line, i) => (
-                              <tr key={`${line.name}-${i}`} className="bg-white">
-                                <td className="px-4 py-3 text-gray-900">{line.name}</td>
-                                <td className="px-4 py-3 text-right tabular-nums text-gray-700">{line.quantity}</td>
-                                <td className="px-4 py-3 text-right tabular-nums text-gray-700">{fmt(line.unit_price)}</td>
-                                <td className="px-4 py-3 text-right tabular-nums font-medium text-gray-900">
-                                  {fmt(line.line_total)}
-                                </td>
-                              </tr>
+                              <Fragment key={`${line.name}-${i}`}>
+                                <tr className="bg-white">
+                                  <td className="px-4 py-3 text-gray-900">{line.name}</td>
+                                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{line.quantity}</td>
+                                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{fmt(line.unit_price)}</td>
+                                  <td className="px-4 py-3 text-right tabular-nums font-medium text-gray-900">
+                                    {fmt(line.line_total)}
+                                  </td>
+                                </tr>
+                                {line.options?.length ? (
+                                  <tr className="bg-gray-50/80">
+                                    <td colSpan={4} className="px-4 py-2.5">
+                                      <ul className="space-y-1 text-xs text-gray-600">
+                                        {line.options.map((opt, oi) => (
+                                          <li key={`${opt.label}-${oi}`} className="flex flex-wrap gap-x-2">
+                                            <span className="font-medium text-gray-700">{opt.label}:</span>
+                                            <span>{opt.value}</span>
+                                            {opt.price > 0 ? (
+                                              <span className="tabular-nums text-gray-500">(+{fmt(opt.price)})</span>
+                                            ) : null}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
                       </div>
                     );
                   })()}
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">所需禮盒</h3>
+                  <p className="text-xs text-gray-400 mb-3">Enter how many of each gift-box type are needed for this order.</p>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {NESTIEE_GIFT_BOX_TYPES.map((box) => (
+                      <div key={box.id}>
+                        {labeled(
+                          box.label,
+                          <input
+                            type="number"
+                            min={0}
+                            value={fVal(box.qtyKey)}
+                            onChange={(e) => setFieldLocal(box.qtyKey, nonNeg(e.target.value))}
+                            onBlur={(e) => {
+                              const v = nonNeg(e.target.value);
+                              const manualKey = nestieeGiftQtyManualKey(box.qtyKey);
+                              setFieldLocal(box.qtyKey, v);
+                              setFieldLocal(manualKey, 'true');
+                              patch({ fields: { [box.qtyKey]: v, [manualKey]: 'true' } });
+                            }}
+                            placeholder="0"
+                            className={softInput}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

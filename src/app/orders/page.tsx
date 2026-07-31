@@ -8,7 +8,7 @@ import FilterBar from '@/components/FilterBar';
 import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, orderTitle, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
-const EMPTY = { po_number: '', name: '', description: '', delivery_date: '' };
+const EMPTY = { po_number: '', name: '', description: '', delivery_date: '', order_type: '' };
 
 type SortKey = 'order' | 'type' | 'status' | 'delivery' | 'created';
 
@@ -211,6 +211,20 @@ export default function OrdersPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">PO# *</label>
                 <input required value={form.po_number} onChange={(e) => setForm({ ...form, po_number: e.target.value })} className={inputCls} placeholder="e.g. H3219" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{bi('Order Type', '訂單類型')} *</label>
+                <select
+                  required
+                  value={form.order_type}
+                  onChange={(e) => setForm({ ...form, order_type: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">{bi('Select type…', '選擇類型…')}</option>
+                  {ORDER_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Name (客戶)</label>

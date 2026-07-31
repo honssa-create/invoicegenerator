@@ -4,6 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrders, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
+import { ORDER_TYPES } from '@/lib/orders';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -27,10 +28,16 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
+    const orderType =
+      typeof body.order_type === 'string' &&
+      (ORDER_TYPES as readonly string[]).includes(body.order_type.trim())
+        ? body.order_type.trim()
+        : '';
+    const fieldsJson = JSON.stringify(orderType ? { order_type: orderType } : {});
     const result = await db
       .prepare(
         `INSERT INTO orders (user_id, po_number, name, description, status, delivery_date, customer_email, phone, shipping_address, notes, fields_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         ownerId,
@@ -42,7 +49,8 @@ export async function POST(request: Request) {
         body.customer_email?.trim() || null,
         body.phone?.trim() || null,
         body.shipping_address?.trim() || null,
-        body.notes?.trim() || null
+        body.notes?.trim() || null,
+        fieldsJson
       );
     const id = result.lastInsertRowid as number;
     await logActivity(id, session.userId, 'activity', session.name, 'created this order');

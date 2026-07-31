@@ -73,6 +73,9 @@ export default function OrderDetailPage() {
   const [quotations, setQuotations] = useState<QuotationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameCancelledRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const payment1InputRef = useRef<HTMLInputElement>(null);
   const payment2InputRef = useRef<HTMLInputElement>(null);
@@ -207,6 +210,77 @@ export default function OrderDetailPage() {
   const deleteFile = async (fileId: number) => {
     const res = await fetch(`/api/order-files/${fileId}`, { method: 'DELETE' });
     if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
+  };
+
+  const downloadFile = async (f: { id: number; path: string; original_name: string | null }) => {
+    try {
+      const res = await fetch(`${orderFileUrl(f)}?download=1`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.original_name || `order-file-${f.id}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const startRenameFile = (f: { id: number; original_name: string | null }) => {
+    renameCancelledRef.current = false;
+    setRenamingFileId(f.id);
+    setRenameDraft(f.original_name || `Image #${f.id}`);
+  };
+
+  const cancelRenameFile = () => {
+    renameCancelledRef.current = true;
+    setRenamingFileId(null);
+    setRenameDraft('');
+  };
+
+  const saveRenameFile = async (fileId: number) => {
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false;
+      setRenamingFileId(null);
+      setRenameDraft('');
+      return;
+    }
+    const name = renameDraft.trim();
+    if (!name) {
+      setRenamingFileId(null);
+      setRenameDraft('');
+      return;
+    }
+    const current = order?.files.find((f) => f.id === fileId);
+    if (current && (current.original_name || '').trim() === name) {
+      setRenamingFileId(null);
+      setRenameDraft('');
+      return;
+    }
+    const res = await fetch(`/api/order-files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ original_name: name }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.file) {
+        setOrder((o) =>
+          o
+            ? {
+                ...o,
+                files: o.files.map((f) => (f.id === fileId ? { ...f, original_name: data.file.original_name } : f)),
+              }
+            : o
+        );
+      }
+    }
+    setRenamingFileId(null);
+    setRenameDraft('');
   };
 
   const handlePaymentReceipt = async (rawFile: File, slot: 1 | 2 | 3) => {
@@ -663,6 +737,14 @@ export default function OrderDetailPage() {
           <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🚚 {bi('Generate Delivery Note', '產生出貨單')}
           </Link>
+          {isBadgeOrderType(orderType) && (
+            <Link
+              href={`/orders/${order.id}/production-note`}
+              className="btn bg-slate-800 text-white hover:bg-slate-900 w-full sm:w-auto"
+            >
+              {bi('Prepare Production Note', '準備生產單')}
+            </Link>
+          )}
           <button
             type="button"
             onClick={deleteOrder}
@@ -1475,6 +1557,7 @@ export default function OrderDetailPage() {
                 {order.files.map((f) => {
                   const url = orderFileUrl(f);
                   const name = f.original_name || `Image #${f.id}`;
+                  const renaming = renamingFileId === f.id;
                   return (
                     <li
                       key={f.id}
@@ -1487,12 +1570,53 @@ export default function OrderDetailPage() {
                         onClick={() => setLightbox(url)}
                         className="h-14 w-14 rounded-md object-cover border border-gray-200 shrink-0 bg-white cursor-zoom-in hover:ring-2 hover:ring-brand-400"
                       />
+                      {renaming ? (
+                        <input
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          onBlur={() => saveRenameFile(f.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              (e.target as HTMLInputElement).blur();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              cancelRenameFile();
+                            }
+                          }}
+                          className="flex-1 min-w-0 rounded-md border border-brand-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                          aria-label={bi('Rename file', '重新命名檔案')}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setLightbox(url)}
+                          onDoubleClick={(e) => {
+                            e.preventDefault();
+                            startRenameFile(f);
+                          }}
+                          className="flex-1 min-w-0 text-left text-sm text-brand-700 hover:underline truncate"
+                          title={bi('Double-click to rename', '雙擊重新命名')}
+                        >
+                          {name}
+                        </button>
+                      )}
+                      {!renaming && (
+                        <button
+                          type="button"
+                          onClick={() => startRenameFile(f)}
+                          className="text-xs text-gray-600 hover:text-gray-800 font-medium shrink-0 px-2 py-1"
+                        >
+                          {bi('Rename', '重新命名')}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => setLightbox(url)}
-                        className="flex-1 min-w-0 text-left text-sm text-brand-700 hover:underline truncate"
+                        onClick={() => downloadFile(f)}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium shrink-0 px-2 py-1"
                       >
-                        {name}
+                        {bi('Download', '下載')}
                       </button>
                       <button
                         type="button"

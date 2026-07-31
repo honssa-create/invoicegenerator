@@ -47,6 +47,7 @@ import {
   type HonourLineItem,
   type Order,
 } from '@/lib/orders';
+import { parseWeddingGiftConfirmation } from '@/lib/wedding-gift-confirmation';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 interface InvoiceOption {
@@ -79,6 +80,9 @@ export default function OrderDetailPage() {
   const [paymentScanMsg, setPaymentScanMsg] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [convertingQuote, setConvertingQuote] = useState(false);
   const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
+  const [confirmPasteText, setConfirmPasteText] = useState('');
+  const [confirmPasteError, setConfirmPasteError] = useState('');
 
   useEffect(() => {
     fetch(`/api/orders/${id}`)
@@ -518,6 +522,67 @@ export default function OrderDetailPage() {
     } else {
       patch({ fields: derived });
     }
+  };
+
+  /** Apply pasted 即食燕窩回禮 confirmation → core + fields + derived materials/packing. */
+  const applyWeddingGiftConfirmation = () => {
+    if (!order) return;
+    const parsed = parseWeddingGiftConfirmation(confirmPasteText);
+    const fieldsPatch: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed.fields)) {
+      if (!v) continue;
+      // Keep an existing expiry date; only auto-fill when empty
+      if (k === 'expiry_date' && fVal('expiry_date')) continue;
+      fieldsPatch[k] = v;
+    }
+    if (fieldsPatch.big_day && !fieldsPatch.expiry_date && !fVal('expiry_date')) {
+      const d = new Date(`${fieldsPatch.big_day}T12:00:00`);
+      d.setDate(d.getDate() + 28);
+      fieldsPatch.expiry_date = d.toISOString().slice(0, 10);
+    }
+
+    const corePatch: Record<string, unknown> = {};
+    if (parsed.core.name) corePatch.name = parsed.core.name;
+    if (parsed.core.phone) corePatch.phone = parsed.core.phone;
+    if (parsed.core.shipping_address) corePatch.shipping_address = parsed.core.shipping_address;
+    if (parsed.core.notes) {
+      const existing = (order.notes || '').trim();
+      corePatch.notes = existing ? `${existing}\n\n${parsed.core.notes}` : parsed.core.notes;
+    }
+
+    if (!Object.keys(fieldsPatch).length && !Object.keys(corePatch).length) {
+      setConfirmPasteError(
+        parsed.warnings[0] || bi('No recognizable fields found', '未能辨識任何欄位')
+      );
+      return;
+    }
+
+    const nextFields = { ...order.fields, ...fieldsPatch };
+    const materials = computeWeddingGiftMaterials(nextFields);
+    const packing = computeWeddingGiftPacking(nextFields);
+    const derived = { ...fieldsPatch, ...materials, ...packing };
+    const total = computeWeddingGiftTotal(nextFields);
+    if (total > 0) corePatch.total_amount = total;
+
+    setOrder((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        ...(corePatch as Partial<Order>),
+        fields: { ...prev.fields, ...derived },
+      };
+    });
+    patch({
+      fields: derived,
+      ...(Object.keys(corePatch).length ? { core: corePatch } : {}),
+    });
+    setConfirmPasteOpen(false);
+    setConfirmPasteText('');
+    setConfirmPasteError('');
+    setQuoteToast({
+      text: bi('Confirmation applied — review fields', '已套用確認訊息 — 請核對欄位'),
+      kind: 'success',
+    });
   };
 
   const weddingGiftQtyInput = (key: string) => (
@@ -970,6 +1035,22 @@ export default function OrderDetailPage() {
               <div className="space-y-8">
                 {/* Section 1 — 客人訂購數量 */}
                 <div className="space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <p className="text-sm text-gray-500">
+                      {bi('Paste a confirmation message to autofill fields', '貼上確認訊息以自動填入欄位')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmPasteText('');
+                        setConfirmPasteError('');
+                        setConfirmPasteOpen(true);
+                      }}
+                      className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto shrink-0"
+                    >
+                      {bi('Paste confirmation', '貼上確認訊息')}
+                    </button>
+                  </div>
                   <div className="grid md:grid-cols-3 gap-5">
                     {labeled(
                       'Big Day',
@@ -1432,6 +1513,61 @@ export default function OrderDetailPage() {
         <div onClick={() => setLightbox(null)} className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 cursor-zoom-out">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={lightbox} alt="Proof" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
+        </div>
+      )}
+
+      {confirmPasteOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4"
+          onClick={() => setConfirmPasteOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                {bi('Paste confirmation', '貼上確認訊息')}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                {bi(
+                  'Paste the WhatsApp / IG confirmation message. Fields will autofill; you can edit afterward.',
+                  '貼上 WhatsApp / IG 確認訊息，系統會自動填入欄位，之後仍可手動修改。'
+                )}
+              </p>
+            </div>
+            <textarea
+              value={confirmPasteText}
+              onChange={(e) => {
+                setConfirmPasteText(e.target.value);
+                if (confirmPasteError) setConfirmPasteError('');
+              }}
+              rows={12}
+              placeholder={'【📩 即食燕窩回禮 Confirmation】\n…'}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm font-mono bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none resize-y min-h-[200px]"
+              autoFocus
+            />
+            {confirmPasteError && (
+              <p className="text-sm text-red-600">{confirmPasteError}</p>
+            )}
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmPasteOpen(false)}
+                className="btn border border-gray-200 text-gray-700 hover:bg-gray-50 w-full sm:w-auto"
+              >
+                {BTN.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={applyWeddingGiftConfirmation}
+                disabled={!confirmPasteText.trim()}
+                className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 w-full sm:w-auto"
+              >
+                {bi('Apply', '套用')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </AppLayout>

@@ -6,6 +6,7 @@ import { getOrder, listOrders, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
+import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -35,26 +36,32 @@ export async function POST(request: Request) {
         ? body.order_type.trim()
         : '';
     const fieldsJson = JSON.stringify(orderType ? { order_type: orderType } : {});
-    const result = await db
-      .prepare(
-        `INSERT INTO orders (user_id, po_number, name, description, status, delivery_date, customer_email, phone, shipping_address, notes, fields_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        ownerId,
-        body.po_number?.trim() || null,
-        body.name?.trim() || null,
-        body.description?.trim() || null,
-        body.status?.trim() || '草稿',
-        body.delivery_date?.trim() || null,
-        body.customer_email?.trim() || null,
-        body.phone?.trim() || null,
-        body.shipping_address?.trim() || null,
-        body.notes?.trim() || null,
-        fieldsJson
-      );
-    const id = result.lastInsertRowid as number;
-    await logActivity(id, session.userId, 'activity', session.name, 'created this order');
+    const { id, referenceNumber } = await db.transaction(async () => {
+      const referenceNumber = await allocateGlobalRecordNumber('order');
+      const result = await db
+        .prepare(
+          `INSERT INTO orders (
+             user_id, reference_number, po_number, name, description, status, delivery_date,
+             customer_email, phone, shipping_address, notes, fields_json
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          ownerId,
+          referenceNumber,
+          body.po_number?.trim() || null,
+          body.name?.trim() || null,
+          body.description?.trim() || null,
+          body.status?.trim() || '草稿',
+          body.delivery_date?.trim() || null,
+          body.customer_email?.trim() || null,
+          body.phone?.trim() || null,
+          body.shipping_address?.trim() || null,
+          body.notes?.trim() || null,
+          fieldsJson
+        );
+      return { id: result.lastInsertRowid as number, referenceNumber };
+    });
+    await logActivity(id, session.userId, 'activity', session.name, `created order ${referenceNumber}`);
     if (orderType === WEDDING_GIFT_ORDER_TYPE) {
       try {
         await ensurePrepFromWeddingOrder(ownerId, id);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -107,6 +107,20 @@ type SortKey = 'stewing_date' | 'order_code' | 'capacity' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export default function KitchenPrepListPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+        </div>
+      }
+    >
+      <KitchenPrepListContent />
+    </Suspense>
+  );
+}
+
+function KitchenPrepListContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<PrepOrder[]>([]);

@@ -2,6 +2,11 @@ import db from './db';
 import type { SessionPayload } from './auth';
 import { getDataOwnerId } from './org-server';
 import {
+  DOCUMENT_NUMBER_RE,
+  ORDER_REFERENCE_RE,
+  allocateGlobalRecordNumber,
+} from './record-numbering';
+import {
   TRASH_RETENTION_DAYS,
   TRASH_ENTITY_LABELS,
   type TrashEntityType,
@@ -119,6 +124,16 @@ async function restoreInvoice(userId: number, payload: { invoice: Row; items: Ro
   if (!customer) {
     throw new Error('Linked customer no longer exists — restore the customer first');
   }
+  const legacyNumber = String(payload.invoice.invoice_number || '');
+  const numberTaken = DOCUMENT_NUMBER_RE.test(legacyNumber)
+    ? await db.prepare('SELECT 1 FROM invoices WHERE invoice_number = ?').get(legacyNumber)
+    : true;
+  if (numberTaken) {
+    if (!payload.invoice.external_invoice_number) {
+      payload.invoice.external_invoice_number = legacyNumber || null;
+    }
+    payload.invoice.invoice_number = await allocateGlobalRecordNumber('invoice');
+  }
   await insertRow('invoices', payload.invoice);
   for (const item of payload.items) await insertRow('invoice_items', item);
   for (const f of payload.files || []) await insertRow('invoice_files', f);
@@ -135,6 +150,13 @@ async function restoreCustomer(userId: number, payload: { customer: Row }): Prom
 async function restoreOrder(userId: number, payload: { order: Row; files: Row[] }): Promise<number> {
   const id = payload.order.id as number;
   await assertNotExists('orders', id, userId, 'Order');
+  const reference = String(payload.order.reference_number || '');
+  const referenceTaken = ORDER_REFERENCE_RE.test(reference)
+    ? await db.prepare('SELECT 1 FROM orders WHERE reference_number = ?').get(reference)
+    : true;
+  if (referenceTaken) {
+    payload.order.reference_number = await allocateGlobalRecordNumber('order');
+  }
   await insertRow('orders', payload.order);
   for (const f of payload.files) await insertRow('order_files', f);
   return id;
@@ -143,6 +165,13 @@ async function restoreOrder(userId: number, payload: { order: Row; files: Row[] 
 async function restoreQuotation(userId: number, payload: { quotation: Row; items: Row[]; files?: Row[] }): Promise<number> {
   const id = payload.quotation.id as number;
   await assertNotExists('quotations', id, userId, 'Quotation');
+  const quoteNumber = String(payload.quotation.quote_number || '');
+  const numberTaken = DOCUMENT_NUMBER_RE.test(quoteNumber)
+    ? await db.prepare('SELECT 1 FROM quotations WHERE quote_number = ?').get(quoteNumber)
+    : true;
+  if (numberTaken) {
+    payload.quotation.quote_number = await allocateGlobalRecordNumber('quotation');
+  }
   await insertRow('quotations', payload.quotation);
   for (const item of payload.items) await insertRow('quotation_items', item);
   for (const f of payload.files || []) await insertRow('quotation_files', f);
@@ -329,8 +358,8 @@ export async function trashOrder(userId: number, orderId: number): Promise<boole
   const order = await db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, userId) as Row | undefined;
   if (!order) return false;
   const files = await db.prepare('SELECT * FROM order_files WHERE order_id = ?').all(orderId) as Row[];
-  const label = String(order.po_number || order.name || `Order #${orderId}`);
-  const summary = [order.name, order.status].filter(Boolean).join(' · ') || null;
+  const label = String(order.reference_number || `Order #${orderId}`);
+  const summary = [order.po_number, order.name, order.status].filter(Boolean).join(' · ') || null;
 
   await db.transaction(async () => {
     await insertTrash(userId, 'order', orderId, label, summary, { order, files });

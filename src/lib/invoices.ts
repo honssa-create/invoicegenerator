@@ -1,36 +1,18 @@
 import db from './db';
+import { allocateGlobalRecordNumber } from './record-numbering';
 import type { InvoiceFile, InvoiceItem, InvoiceWithDetails } from './types';
 import { calculateInvoiceTotals } from './utils';
 
 export { calculateInvoiceTotals, formatCurrency, formatDate, STATUS_COLORS } from './utils';
 
-const INVOICE_NUMBER_START = 1038;
-
-/** Next 4-digit invoice number for this user (1038, 1039, …). */
-export async function generateInvoiceNumber(userId: number): Promise<string> {
-  const rows = await db
-    .prepare('SELECT invoice_number FROM invoices WHERE user_id = ?')
-    .all(userId) as { invoice_number: string }[];
-
-  let max = INVOICE_NUMBER_START - 1;
-  for (const { invoice_number } of rows) {
-    if (!/^\d{4,}$/.test(invoice_number)) continue;
-    const n = Number(invoice_number);
-    if (Number.isFinite(n) && n > max) max = n;
-  }
-  return String(max + 1);
+/** Reserve the next office-wide 8-digit invoice number. */
+export async function generateInvoiceNumber(_userId?: number): Promise<string> {
+  return allocateGlobalRecordNumber('invoice');
 }
 
-/** Invoice number = source + 1 (or the next free number if that is taken). */
-export async function nextInvoiceNumberAfter(userId: number, current: string): Promise<string> {
-  let n = /^\d{4,}$/.test(current.trim()) ? Number(current.trim()) + 1 : Number(await generateInvoiceNumber(userId));
-  if (!Number.isFinite(n) || n < INVOICE_NUMBER_START) n = Number(await generateInvoiceNumber(userId));
-
-  const exists = db.prepare('SELECT 1 FROM invoices WHERE user_id = ? AND invoice_number = ?');
-  while (await exists.get(userId, String(n))) {
-    n += 1;
-  }
-  return String(n);
+/** Duplicates also use the next office-wide number rather than source + 1. */
+export async function nextInvoiceNumberAfter(_userId?: number, _current?: string): Promise<string> {
+  return allocateGlobalRecordNumber('invoice');
 }
 
 export async function getInvoiceWithDetails(invoiceId: number | string, userId: number): Promise<InvoiceWithDetails | null> {

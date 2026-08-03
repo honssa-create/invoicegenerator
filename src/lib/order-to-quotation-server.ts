@@ -144,7 +144,7 @@ export async function convertOrderToQuotation(
     userId,
     'activity',
     authorName,
-    `created from order #${orderId}${order.po_number ? ` (${order.po_number})` : ''}`
+    `created from order ${order.reference_number}${order.po_number ? ` (PO# ${order.po_number})` : ''}`
   );
 
   return { quotationId, quoteNumber };

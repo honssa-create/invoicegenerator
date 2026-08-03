@@ -59,8 +59,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const ownerId = await getDataOwnerId(session.userId);
 
   const existing = await db
-    .prepare('SELECT status, fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, ownerId) as { status: string; fields_json: string } | undefined;
+    .prepare('SELECT reference_number, status, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .get(params.id, ownerId) as { reference_number: string; status: string; fields_json: string } | undefined;
   if (!existing) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   try {
@@ -105,8 +105,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const invoiceId = linkedInvoiceId ? Number(linkedInvoiceId) : null;
       if (invoiceId) {
         const invoice = await db
-          .prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?')
-          .get(invoiceId, ownerId);
+          .prepare('SELECT id, invoice_number FROM invoices WHERE id = ? AND user_id = ?')
+          .get(invoiceId, ownerId) as { id: number; invoice_number: string } | undefined;
         if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
       }
 
@@ -115,7 +115,16 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (invoiceId) {
         await db.prepare('UPDATE invoices SET order_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
           .run(params.id, invoiceId, ownerId);
-        await logActivity(params.id, session.userId, 'activity', session.name, `linked invoice #${invoiceId}`);
+        const invoice = await db
+          .prepare('SELECT invoice_number FROM invoices WHERE id = ?')
+          .get(invoiceId) as { invoice_number: string } | undefined;
+        await logActivity(
+          params.id,
+          session.userId,
+          'activity',
+          session.name,
+          `linked invoice ${invoice?.invoice_number || invoiceId}`,
+        );
       } else {
         await logActivity(params.id, session.userId, 'activity', session.name, 'unlinked invoice');
       }
@@ -131,7 +140,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         await db.prepare('UPDATE orders SET quotation_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
           .run(quotationId, params.id, ownerId);
         await logActivity(params.id, session.userId, 'activity', session.name, `linked quotation ${quote.quote_number}`);
-        await logUnifiedActivity('quotation', quotationId, session.userId, 'activity', session.name, `linked order #${params.id}`);
+        await logUnifiedActivity(
+          'quotation',
+          quotationId,
+          session.userId,
+          'activity',
+          session.name,
+          `linked order ${existing.reference_number}`,
+        );
       } else {
         await db.prepare('UPDATE orders SET quotation_id = NULL, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
           .run(params.id, ownerId);

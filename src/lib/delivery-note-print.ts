@@ -2,7 +2,7 @@ import {
   DEFAULT_DELIVERY_NOTE_PREVIEW,
   type DeliveryNotePreviewModel,
 } from '@/components/DeliveryNoteDocument';
-import { orderTitle, type Order } from '@/lib/orders';
+import type { Order } from '@/lib/orders';
 import { formatQuotationDate } from '@/lib/quotation-style';
 
 function fieldStr(fields: Record<string, string | boolean>, key: string): string {
@@ -33,7 +33,7 @@ export function orderToDeliveryNotePreview(order: Order): DeliveryNotePreviewMod
     fieldStr(order.fields, 'invoice_no') ||
     '—';
 
-  const orderNo = order.po_number?.trim() || orderTitle(order) || '—';
+  const orderNo = order.po_number?.trim() || order.name?.trim() || '—';
 
   const date =
     formatQuotationDate(order.delivery_date) ||

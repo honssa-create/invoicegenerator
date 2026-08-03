@@ -4,6 +4,7 @@ import { warnIfEphemeralReceiptStorage } from './receipt-storage';
 import { warnIfR2Misconfigured } from './r2';
 import fs from 'fs';
 import path from 'path';
+import { assignLegacyDocumentNumbers } from './record-numbering-core';
 
 type Queryable = Pool | PoolClient;
 
@@ -78,6 +79,7 @@ export interface RunResult {
 const NO_RETURNING_TABLES = new Set([
   'expense_option_settings',
   'expense_report_sequence',
+  'global_record_sequences',
   'rental_debit_note_seq',
   'rental_debit_note_styles',
   'integration_tokens',
@@ -153,7 +155,155 @@ async function loadSchemaSql(): Promise<string> {
   return fs.readFileSync(schemaPath, 'utf8');
 }
 
+async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
+  const conn = await getPool().connect();
+  try {
+    await conn.query('BEGIN');
+    await conn.query(`SELECT pg_advisory_xact_lock(72910421)`);
+    const done = await conn.query<{ key: string }>(
+      `SELECT key FROM app_migrations WHERE key = 'unified_global_record_numbering_v1'`,
+    );
+    if (done.rows.length) {
+      await conn.query('COMMIT');
+      return;
+    }
+
+    await conn.query(`
+      UPDATE invoices
+      SET external_invoice_number = invoice_number
+      WHERE external_invoice_number IS NULL
+        AND (source_platform <> 'manual' OR invoice_number !~ '^[0-9]+$')
+    `);
+
+    const invoiceRows = await conn.query<{
+      id: number;
+      invoice_number: string;
+      created_at: string;
+    }>(`SELECT id, invoice_number, created_at FROM invoices ORDER BY created_at, id`);
+    const quoteRows = await conn.query<{
+      id: number;
+      quote_number: string;
+      created_at: string;
+    }>(`SELECT id, quote_number, created_at FROM quotations ORDER BY created_at, id`);
+    const orderRows = await conn.query<{ id: number }>(
+      `SELECT id FROM orders ORDER BY created_at, id`,
+    );
+
+    const invoiceNumbers = assignLegacyDocumentNumbers(
+      invoiceRows.rows.map((row) => ({ id: row.id, value: row.invoice_number, created_at: row.created_at })),
+    );
+    const quoteNumbers = assignLegacyDocumentNumbers(
+      quoteRows.rows.map((row) => ({ id: row.id, value: row.quote_number, created_at: row.created_at })),
+    );
+
+    // Temporary globally unique values avoid legacy per-user uniqueness collisions while normalizing.
+    await conn.query(`UPDATE invoices SET invoice_number = '__legacy_invoice_' || id`);
+    await conn.query(`UPDATE quotations SET quote_number = '__legacy_quote_' || id`);
+
+    let maxInvoice = 0;
+    for (const [id, serial] of Array.from(invoiceNumbers.entries())) {
+      maxInvoice = Math.max(maxInvoice, serial);
+      await conn.query(`UPDATE invoices SET invoice_number = $1 WHERE id = $2`, [
+        String(serial).padStart(8, '0'),
+        id,
+      ]);
+    }
+
+    let maxQuote = 0;
+    for (const [id, serial] of Array.from(quoteNumbers.entries())) {
+      maxQuote = Math.max(maxQuote, serial);
+      await conn.query(`UPDATE quotations SET quote_number = $1 WHERE id = $2`, [
+        String(serial).padStart(8, '0'),
+        id,
+      ]);
+    }
+
+    let orderSerial = 1;
+    for (const row of orderRows.rows) {
+      await conn.query(`UPDATE orders SET reference_number = $1 WHERE id = $2`, [
+        `ORD-${String(orderSerial).padStart(7, '0')}`,
+        row.id,
+      ]);
+      orderSerial += 1;
+    }
+
+    const linkedQuotes = await conn.query<{
+      id: number;
+      fields_json: string | null;
+      quote_number: string;
+    }>(
+      `SELECT o.id, o.fields_json, q.quote_number
+       FROM orders o
+       JOIN quotations q ON q.id = o.quotation_id`,
+    );
+    for (const row of linkedQuotes.rows) {
+      let fields: Record<string, unknown> = {};
+      try {
+        fields = row.fields_json ? JSON.parse(row.fields_json) : {};
+      } catch {
+        fields = {};
+      }
+      fields.quotation_no = row.quote_number;
+      await conn.query(`UPDATE orders SET fields_json = $1 WHERE id = $2`, [
+        JSON.stringify(fields),
+        row.id,
+      ]);
+    }
+
+    await conn.query(`
+      INSERT INTO global_record_sequences (record_type, next_serial)
+      VALUES ('order', $1), ('quotation', $2), ('invoice', $3)
+      ON CONFLICT (record_type) DO UPDATE
+      SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
+    `, [orderSerial, maxQuote + 1, maxInvoice + 1]);
+
+    await conn.query(`ALTER TABLE orders ALTER COLUMN reference_number SET NOT NULL`);
+    await conn.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_reference_number_format`);
+    await conn.query(`
+      ALTER TABLE orders
+      ADD CONSTRAINT orders_reference_number_format CHECK (reference_number ~ '^ORD-[0-9]{7}$')
+    `);
+    await conn.query(`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_number_format`);
+    await conn.query(`
+      ALTER TABLE invoices
+      ADD CONSTRAINT invoices_number_format CHECK (invoice_number ~ '^[0-9]{8}$')
+    `);
+    await conn.query(`ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_number_format`);
+    await conn.query(`
+      ALTER TABLE quotations
+      ADD CONSTRAINT quotations_number_format CHECK (quote_number ~ '^[0-9]{8}$')
+    `);
+    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reference_number ON orders(reference_number)`);
+    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number_global ON invoices(invoice_number)`);
+    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_number_global ON quotations(quote_number)`);
+    await conn.query(
+      `INSERT INTO app_migrations (key) VALUES ('unified_global_record_numbering_v1') ON CONFLICT DO NOTHING`,
+    );
+    await conn.query('COMMIT');
+  } catch (error) {
+    await conn.query('ROLLBACK');
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function syncGlobalRecordSequences(): Promise<void> {
+  await client().query(`
+    INSERT INTO global_record_sequences (record_type, next_serial)
+    VALUES
+      ('order', COALESCE((SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) + 1 FROM orders), 1)),
+      ('quotation', COALESCE((SELECT MAX(CAST(quote_number AS INTEGER)) + 1 FROM quotations), 1)),
+      ('invoice', COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) + 1 FROM invoices), 1))
+    ON CONFLICT (record_type) DO UPDATE
+    SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
+  `);
+}
+
 async function runBootDataFixes(): Promise<void> {
+  await migrateUnifiedRecordNumberingOnce();
+  await syncGlobalRecordSequences();
+
   // Advance expense_report_sequence from max batch_id (same semantics as SQLite boot).
   await client().query(`
     INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)

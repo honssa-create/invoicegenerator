@@ -2,6 +2,7 @@ import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
 import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
+import { allocateGlobalRecordNumber } from './record-numbering';
 import {
   formatWooAddress,
   parseNestieeLinesFromWoo,
@@ -201,31 +202,35 @@ export async function upsertHubOrder(
   }
 
   const systemOrderNo = await allocateSystemOrderNo(userId, input.source_platform);
-  const result = await db
-    .prepare(
-      `INSERT INTO orders (
-         user_id, source_platform, original_order_id, system_order_no,
-         po_number, name, description, status, customer_email, phone,
-         shipping_address, total_amount, notes, fields_json, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    )
-    .run(
-      userId,
-      input.source_platform,
-      input.original_order_id,
-      systemOrderNo,
-      input.external_po_number?.trim() || systemOrderNo,
-      input.customer_name,
-      input.description?.trim() || null,
-      input.status,
-      input.customer_email?.trim() || null,
-      input.phone?.trim() || null,
-      shippingAddress,
-      input.total_amount,
-      input.notes?.trim() || null,
-      JSON.stringify(fields),
-      input.created_at
-    );
+  const result = await db.transaction(async () => {
+    const referenceNumber = await allocateGlobalRecordNumber('order');
+    return db
+      .prepare(
+        `INSERT INTO orders (
+           user_id, source_platform, original_order_id, system_order_no, reference_number,
+           po_number, name, description, status, customer_email, phone,
+           shipping_address, total_amount, notes, fields_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      )
+      .run(
+        userId,
+        input.source_platform,
+        input.original_order_id,
+        systemOrderNo,
+        referenceNumber,
+        input.external_po_number?.trim() || null,
+        input.customer_name,
+        input.description?.trim() || null,
+        input.status,
+        input.customer_email?.trim() || null,
+        input.phone?.trim() || null,
+        shippingAddress,
+        input.total_amount,
+        input.notes?.trim() || null,
+        JSON.stringify(fields),
+        input.created_at
+      );
+  });
 
   return {
     id: Number(result.lastInsertRowid),
@@ -270,14 +275,14 @@ export async function upsertHubInvoice(
     .get(userId, input.source_platform, input.original_order_id) as { id: number } | undefined;
 
   const customerId = await findOrCreateCustomer(userId, input.customer_name, input.customer_email);
-  const invoiceNumber = input.invoice_number?.trim() || input.system_order_no;
+  const externalInvoiceNumber = input.invoice_number?.trim() || input.system_order_no;
   const orderId = input.order_id ?? null;
 
   if (existing) {
     await db.prepare(
       `UPDATE invoices SET
          customer_id = ?,
-         invoice_number = ?,
+         external_invoice_number = ?,
          status = ?,
          issue_date = ?,
          due_date = ?,
@@ -287,7 +292,7 @@ export async function upsertHubInvoice(
        WHERE id = ? AND user_id = ?`
     ).run(
       customerId,
-      invoiceNumber,
+      externalInvoiceNumber,
       input.status,
       input.issue_date,
       input.due_date,
@@ -302,32 +307,38 @@ export async function upsertHubInvoice(
     return { id: existing.id, inserted: false, order_id: linked?.order_id ?? orderId };
   }
 
-  const result = await db
-    .prepare(
-      `INSERT INTO invoices (
-         user_id, customer_id, source_platform, original_order_id, system_order_no,
-         invoice_number, status, issue_date, due_date, notes, order_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    )
-    .run(
-      userId,
-      customerId,
-      input.source_platform,
-      input.original_order_id,
-      input.system_order_no,
-      invoiceNumber,
-      input.status,
-      input.issue_date,
-      input.due_date,
-      `Synced from QuickBooks (ID ${input.original_order_id})`,
-      orderId
-    );
+  const invoiceId = await db.transaction(async () => {
+    const invoiceNumber = await allocateGlobalRecordNumber('invoice');
+    const result = await db
+      .prepare(
+        `INSERT INTO invoices (
+           user_id, customer_id, source_platform, original_order_id, system_order_no,
+           invoice_number, external_invoice_number, status, issue_date, due_date, notes,
+           order_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(
+        userId,
+        customerId,
+        input.source_platform,
+        input.original_order_id,
+        input.system_order_no,
+        invoiceNumber,
+        externalInvoiceNumber,
+        input.status,
+        input.issue_date,
+        input.due_date,
+        `Synced from QuickBooks (ID ${input.original_order_id})`,
+        orderId
+      );
 
-  const invoiceId = Number(result.lastInsertRowid);
-  await db.prepare(
-    `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
-     VALUES (?, ?, 1, ?, ?)`
-  ).run(invoiceId, 'QuickBooks imported total', 1, input.total_amount, input.total_amount);
+    const invoiceId = Number(result.lastInsertRowid);
+    await db.prepare(
+      `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
+       VALUES (?, ?, 1, ?, ?)`
+    ).run(invoiceId, 'QuickBooks imported total', input.total_amount, input.total_amount);
+    return invoiceId;
+  });
 
   return { id: invoiceId, inserted: true, order_id: orderId };
 }
@@ -335,10 +346,11 @@ export async function upsertHubInvoice(
 export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
   const rows = await db
     .prepare(
-      `SELECT o.id, o.source_platform, o.original_order_id, o.system_order_no,
+      `SELECT o.id, o.source_platform, o.original_order_id, o.system_order_no, o.reference_number,
               o.name AS customer_name, o.total_amount, o.status, o.po_number,
               o.created_at, o.updated_at,
-              i.id AS linked_invoice_id, i.invoice_number AS linked_invoice_number
+              i.id AS linked_invoice_id, i.invoice_number AS linked_invoice_number,
+              i.external_invoice_number AS linked_external_invoice_number
        FROM orders o
        LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id
        WHERE o.user_id = ?
@@ -351,6 +363,7 @@ export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
     source_platform: (r.source_platform as HubPlatform) || 'manual',
     original_order_id: (r.original_order_id as string) || null,
     system_order_no: (r.system_order_no as string) || null,
+    reference_number: (r.reference_number as string) || '',
     customer_name: (r.customer_name as string) || '',
     total_amount: r.total_amount as number | null,
     status: (r.status as string) || '',
@@ -359,6 +372,7 @@ export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
     updated_at: r.updated_at as string,
     linked_invoice_id: (r.linked_invoice_id as number) || null,
     linked_invoice_number: (r.linked_invoice_number as string) || null,
+    linked_external_invoice_number: (r.linked_external_invoice_number as string) || null,
   }));
 }
 

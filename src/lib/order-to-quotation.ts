@@ -4,7 +4,6 @@ import {
   isBadgeOrderType,
   isBirdNestOrderType,
   isNestieeOrderType,
-  orderTitle,
   parseHonourLines,
   type Order,
 } from './orders';
@@ -124,7 +123,6 @@ export function buildQuotationItemsFromOrder(
     order.description?.trim() ||
     fieldStr(f, 'name') ||
     order.name?.trim() ||
-    orderTitle(order) ||
     'Order items';
 
   return [{ description: desc, quantity: qty || 1, unit_price: unitPrice }];

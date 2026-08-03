@@ -11,7 +11,7 @@ export function isClearDbAllowed(): boolean {
 
 /**
  * Truncate every public table except `users`, then re-seed singleton rows
- * (expense sequence + role permissions) so the app keeps working.
+ * (record sequences + role permissions) so the app keeps working.
  *
  * Guarded by ALLOW_CLEAR_DB — throws if the env flag is not set.
  */
@@ -39,6 +39,11 @@ export async function clearDatabaseExceptUsers(): Promise<{ truncated: string[] 
   await pool.query(`
     INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
     ON CONFLICT (id) DO NOTHING
+  `);
+  await pool.query(`
+    INSERT INTO global_record_sequences (record_type, next_serial)
+    VALUES ('order', 1), ('quotation', 1), ('invoice', 1)
+    ON CONFLICT (record_type) DO NOTHING
   `);
   const { seedRolePermissionsIfEmpty } = await import('./permissions-server');
   await seedRolePermissionsIfEmpty();

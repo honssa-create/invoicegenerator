@@ -105,7 +105,7 @@ function OrderHubContent() {
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter((r) =>
-        [r.system_order_no, r.po_number, r.customer_name, r.original_order_id, r.status]
+        [r.reference_number, r.system_order_no, r.po_number, r.customer_name, r.original_order_id, r.status]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -453,7 +453,7 @@ function OrderHubContent() {
           <table className="w-full min-w-[1100px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-4 py-3">System Order No.</th>
+                <th className="px-4 py-3">Reference / PO#</th>
                 <th className="px-4 py-3">Platform</th>
                 <th className="px-4 py-3">Original ID</th>
                 <th className="px-4 py-3">Customer</th>
@@ -468,8 +468,11 @@ function OrderHubContent() {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <Link href={`/orders/${r.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium">
-                      {r.system_order_no || r.po_number || `#${r.id}`}
+                      {r.reference_number}
                     </Link>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {r.po_number || r.system_order_no || 'No PO#'}
+                    </p>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PLATFORM_COLORS[r.source_platform]}`}>
@@ -483,9 +486,16 @@ function OrderHubContent() {
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{r.created_at?.slice(0, 10)}</td>
                   <td className="px-4 py-3">
                     {r.linked_invoice_id ? (
-                      <Link href={`/invoices/${r.linked_invoice_id}`} className="text-brand-600 hover:text-brand-700">
-                        {r.linked_invoice_number}
-                      </Link>
+                      <div>
+                        <Link href={`/invoices/${r.linked_invoice_id}`} className="text-brand-600 hover:text-brand-700">
+                          {r.linked_invoice_number}
+                        </Link>
+                        {r.linked_external_invoice_number && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            External: {r.linked_external_invoice_number}
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       '—'
                     )}

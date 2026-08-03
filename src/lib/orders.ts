@@ -205,6 +205,7 @@ export interface LinkedQuotation {
 export interface Order extends CoreColumns {
   id: number;
   user_id: number;
+  reference_number: string;
   total_amount: number | null;
   fields: Record<string, string | boolean>;
   files: OrderFile[];
@@ -969,9 +970,10 @@ export function computeBirdNestTotals(fields: Record<string, string | boolean>):
 }
 
 export function orderTitle(o: {
+  reference_number?: string | null;
   po_number?: string | null;
   name?: string | null;
   description?: string | null;
 }): string {
-  return [o.po_number, o.name, o.description].filter(Boolean).join(' - ') || 'Untitled order';
+  return [o.reference_number, o.po_number, o.name, o.description].filter(Boolean).join(' - ') || 'Untitled order';
 }

@@ -171,6 +171,7 @@ function fulfilledOf(map: Map<string, number>, orderId: number, needKey: string)
 
 interface OrderRow {
   id: number;
+  reference_number: string;
   po_number: string | null;
   name: string | null;
   fields_json: string | null;
@@ -231,7 +232,7 @@ function returnGiftNeeds(
 
 async function loadOpenOrders(userId: number, fulfillments: Map<string, number>): Promise<KitchenOpenOrder[]> {
   const rows = (await db
-    .prepare('SELECT id, po_number, name, status, fields_json FROM orders WHERE user_id = ? ORDER BY id DESC')
+    .prepare('SELECT id, reference_number, po_number, name, status, fields_json FROM orders WHERE user_id = ? ORDER BY id DESC')
     .all(userId)) as OrderRow[];
 
   const out: KitchenOpenOrder[] = [];
@@ -263,7 +264,8 @@ async function loadOpenOrders(userId: number, fulfillments: Map<string, number>)
 
     out.push({
       id: row.id,
-      poNumber: row.po_number?.trim() || String(row.id),
+      referenceNumber: row.reference_number,
+      poNumber: row.po_number?.trim() || '',
       type,
       typeLabel,
       needs,

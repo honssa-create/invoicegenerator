@@ -145,6 +145,7 @@ export interface KitchenNeedLine {
 
 export interface KitchenOpenOrder {
   id: number;
+  referenceNumber: string;
   poNumber: string;
   type: 'nestiee' | 'return_gift';
   typeLabel: string;

@@ -447,7 +447,7 @@ export default function KitchenPage() {
       }
       clearOrderTicks(order.id);
       setCompleteOrder(null);
-      flash(bi(`Order ${order.poNumber} completed`, `訂單 ${order.poNumber} 已完成`));
+      flash(bi(`Order ${order.referenceNumber} completed`, `訂單 ${order.referenceNumber} 已完成`));
     } finally {
       setBusy(false);
     }
@@ -898,8 +898,9 @@ export default function KitchenPage() {
                           href={`/orders/${o.id}`}
                           className="text-brand-600 hover:text-brand-700 hover:underline"
                         >
-                          {o.poNumber}
+                          {o.referenceNumber}
                         </Link>
+                        {o.poNumber && <span className="ml-2 text-xs text-gray-400">PO# {o.poNumber}</span>}
                       </div>
                       {o.fullyFulfilled && (
                         <span className="text-xs font-normal text-green-700">已完成</span>
@@ -1214,7 +1215,7 @@ export default function KitchenPage() {
                   <option value="">—</option>
                   {returnOrders.map((o) => (
                     <option key={o.id} value={o.id}>
-                      {o.poNumber}
+                      {o.referenceNumber}{o.poNumber ? ` · PO# ${o.poNumber}` : ''}
                     </option>
                   ))}
                 </select>
@@ -1338,8 +1339,8 @@ export default function KitchenPage() {
             </h3>
             <p className="text-sm text-gray-600 mb-3">
               {bi(
-                `All items for PO# ${completeOrder.poNumber} are marked. Confirm to deduct stock and mark this order done?`,
-                `PO# ${completeOrder.poNumber} 的所需項目已全部勾選。確認後將扣除庫存並將此訂單標為完成？`
+                `All items for ${completeOrder.referenceNumber}${completeOrder.poNumber ? ` (PO# ${completeOrder.poNumber})` : ''} are marked. Confirm to deduct stock and mark this order done?`,
+                `${completeOrder.referenceNumber}${completeOrder.poNumber ? `（PO# ${completeOrder.poNumber}）` : ''} 的所需項目已全部勾選。確認後將扣除庫存並將此訂單標為完成？`
               )}
             </p>
             <ul className="border rounded-lg p-3 mb-4 space-y-1 text-sm max-h-48 overflow-y-auto">

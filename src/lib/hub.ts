@@ -23,6 +23,7 @@ export interface HubOrderRow {
   source_platform: HubPlatform;
   original_order_id: string | null;
   system_order_no: string | null;
+  reference_number: string;
   customer_name: string;
   total_amount: number | null;
   status: string;
@@ -31,6 +32,7 @@ export interface HubOrderRow {
   updated_at: string;
   linked_invoice_id: number | null;
   linked_invoice_number: string | null;
+  linked_external_invoice_number: string | null;
 }
 
 export interface HubSyncResult {

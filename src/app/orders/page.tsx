@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
-import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, orderTitle, type Order } from '@/lib/orders';
+import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY = { po_number: '', name: '', description: '', delivery_date: '', order_type: '' };
 
-type SortKey = 'order' | 'type' | 'status' | 'delivery' | 'created';
+type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
 
 function getOrderType(o: Order): string {
   const t = o.fields?.order_type;
@@ -55,7 +55,7 @@ export default function OrdersPage() {
       if (orderType && getOrderType(o) !== orderType) return false;
       if (status && o.status !== status) return false;
       if (q) {
-        const hay = [orderTitle(o), o.po_number, o.name, o.description, getOrderType(o)]
+        const hay = [o.reference_number, o.po_number, o.name, o.description, getOrderType(o)]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -77,7 +77,10 @@ export default function OrdersPage() {
           base = (a.delivery_date || '').localeCompare(b.delivery_date || '');
           break;
         case 'order':
-          base = orderTitle(a).localeCompare(orderTitle(b), 'zh');
+          base = (a.po_number || '').localeCompare(b.po_number || '', 'zh');
+          break;
+        case 'reference':
+          base = a.reference_number.localeCompare(b.reference_number);
           break;
         default:
           base = (a.created_at || '').localeCompare(b.created_at || '');
@@ -145,7 +148,7 @@ export default function OrdersPage() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder={bi('Search PO#, name, description, type…', '搜尋 PO#、客戶、描述、類型…')}
+        searchPlaceholder={bi('Search reference, PO#, name, description, type…', '搜尋參考編號、PO#、客戶、描述、類型…')}
         onClear={clearFilters}
       >
         <div className="flex flex-col">
@@ -173,10 +176,11 @@ export default function OrdersPage() {
           <div className="p-12 text-center text-gray-500">{bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}</div>
         ) : (
           <div className="table-scroll">
-          <table className="w-full min-w-[720px]">
+          <table className="w-full min-w-[840px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                {sortTh('order', bi('Order', '訂單'))}
+                {sortTh('reference', bi('Reference Number', '參考編號'))}
+                {sortTh('order', bi('Order Number', '訂單號碼'))}
                 {sortTh('type', bi('Order Type', '訂單類型'))}
                 {sortTh('status', bi('Status', '狀態'))}
                 {sortTh('delivery', bi('Delivery', '交貨'))}
@@ -187,7 +191,15 @@ export default function OrdersPage() {
               {displayed.map((o) => (
                 <tr key={o.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
-                    <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{orderTitle(o)}</Link>
+                    <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
+                      {o.reference_number}
+                    </Link>
+                  </td>
+                  <td className="px-6 py-4">
+                    <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+                      {o.po_number || '—'}
+                    </Link>
+                    {o.name && <p className="mt-0.5 text-xs text-gray-400">{o.name}</p>}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
                   <td className="px-6 py-4">

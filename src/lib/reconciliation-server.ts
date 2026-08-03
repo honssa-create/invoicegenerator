@@ -140,17 +140,19 @@ async function findOrderByOrderNo(userId: number, orderNo: string): Promise<Orde
 
   const byPo = await db
     .prepare(
-      `SELECT o.id AS order_id, o.po_number AS order_no, o.system_order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
+      `SELECT o.id AS order_id, o.po_number AS order_no, o.system_order_no, o.reference_number,
+              i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM orders o
        LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id
        WHERE o.user_id = ? AND (
          LOWER(TRIM(o.po_number)) = LOWER(?)
          OR LOWER(TRIM(o.system_order_no)) = LOWER(?)
+         OR LOWER(TRIM(o.reference_number)) = LOWER(?)
        )
        ORDER BY i.id DESC
        LIMIT 1`
     )
-    .get(userId, normalized, normalized) as
+    .get(userId, normalized, normalized, normalized) as
     | { order_id: number; order_no: string | null; invoice_id: number | null; invoice_number: string | null; invoice_status: string | null }
     | undefined;
 
@@ -160,7 +162,11 @@ async function findOrderByOrderNo(userId: number, orderNo: string): Promise<Orde
       : null;
     return {
       order_id: byPo.order_id,
-      order_no: byPo.order_no || (byPo as { system_order_no?: string }).system_order_no || normalized,
+      order_no:
+        (byPo as { reference_number?: string }).reference_number ||
+        byPo.order_no ||
+        (byPo as { system_order_no?: string }).system_order_no ||
+        normalized,
       invoice_id: byPo.invoice_id,
       invoice_number: byPo.invoice_number,
       expected_amount: expected,
@@ -172,10 +178,13 @@ async function findOrderByOrderNo(userId: number, orderNo: string): Promise<Orde
       `SELECT o.id AS order_id, o.po_number AS order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM invoices i
        LEFT JOIN orders o ON o.id = i.order_id AND o.user_id = i.user_id
-       WHERE i.user_id = ? AND LOWER(TRIM(i.invoice_number)) = LOWER(?)
+       WHERE i.user_id = ? AND (
+         LOWER(TRIM(i.invoice_number)) = LOWER(?)
+         OR LOWER(TRIM(i.external_invoice_number)) = LOWER(?)
+       )
        LIMIT 1`
     )
-    .get(userId, normalized) as
+    .get(userId, normalized, normalized) as
     | { order_id: number | null; order_no: string | null; invoice_id: number; invoice_number: string; invoice_status: string }
     | undefined;
 

@@ -6,6 +6,7 @@ import { getInvoiceWithDetails } from './invoices';
 interface OrderRow {
   id: number;
   user_id: number;
+  reference_number: string;
   po_number: string | null;
   name: string | null;
   description: string | null;
@@ -79,6 +80,7 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   return {
     id: row.id,
     user_id: row.user_id,
+    reference_number: row.reference_number,
     po_number: row.po_number || '',
     name: row.name || '',
     description: row.description || '',

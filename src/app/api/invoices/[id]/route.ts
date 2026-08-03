@@ -11,11 +11,12 @@ async function linkedOrder(orderId: number | null | undefined, ownerId: number) 
   if (!orderId) return null;
   const row = (await db
     .prepare(
-      'SELECT id, po_number, name, description, fields_json FROM orders WHERE id = ? AND user_id = ?',
+      'SELECT id, reference_number, po_number, name, description, fields_json FROM orders WHERE id = ? AND user_id = ?',
     )
     .get(orderId, ownerId)) as
     | {
         id: number;
+        reference_number: string;
         po_number: string | null;
         name: string | null;
         description: string | null;
@@ -33,6 +34,7 @@ async function linkedOrder(orderId: number | null | undefined, ownerId: number) 
 
   return {
     id: row.id,
+    reference_number: row.reference_number,
     po_number: row.po_number,
     name: row.name,
     description: row.description,
@@ -87,8 +89,10 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const ownerId = await getDataOwnerId(session.userId);
 
   const existing = await db
-    .prepare('SELECT id, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
-    .get(params.id, ownerId) as { id: number; status: string; order_id: number | null } | undefined;
+    .prepare('SELECT id, invoice_number, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
+    .get(params.id, ownerId) as
+      | { id: number; invoice_number: string; status: string; order_id: number | null }
+      | undefined;
 
   if (!existing) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
@@ -198,8 +202,23 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     }
     if (order_id !== undefined && (order_id || null) !== existing.order_id) {
       if (order_id) {
-        await logActivity('invoice', params.id, session.userId, 'activity', session.name, `linked to order #${order_id}`);
-        await logActivity('order', order_id, session.userId, 'activity', session.name, `linked invoice #${params.id}`);
+        const order = await linkedOrder(order_id, ownerId);
+        await logActivity(
+          'invoice',
+          params.id,
+          session.userId,
+          'activity',
+          session.name,
+          `linked to order ${order?.reference_number || order_id}`,
+        );
+        await logActivity(
+          'order',
+          order_id,
+          session.userId,
+          'activity',
+          session.name,
+          `linked invoice ${existing.invoice_number}`,
+        );
       } else {
         await logActivity('invoice', params.id, session.userId, 'activity', session.name, 'unlinked from order');
       }

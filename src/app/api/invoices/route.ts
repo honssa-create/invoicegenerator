@@ -75,9 +75,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'At least one line item is required' }, { status: 400 });
     }
 
-    const invoiceNumber = await generateInvoiceNumber(ownerId);
-
-    const invoiceId = await db.transaction(async () => {
+    const { invoiceId, invoiceNumber } = await db.transaction(async () => {
+      const invoiceNumber = await generateInvoiceNumber(ownerId);
       const result = await db
         .prepare(
           `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
@@ -107,7 +106,7 @@ export async function POST(request: Request) {
         await insertItem.run(invoiceId, item.description.trim(), qty, price, qty * price);
       }
 
-      return invoiceId;
+      return { invoiceId, invoiceNumber };
     });
 
     await logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);

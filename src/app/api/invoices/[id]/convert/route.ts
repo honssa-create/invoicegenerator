@@ -5,6 +5,7 @@ import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getInvoiceWithDetails } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
+import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 
 /** Convert an invoice into a new order (mirrors quotation → order). */
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -39,14 +40,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
     firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
   const orderName = [(inv.customer_name || '').trim(), itemPart].filter(Boolean).join(' - ');
 
-  const orderId = await db.transaction(async () => {
+  const { orderId, referenceNumber } = await db.transaction(async () => {
+    const referenceNumber = await allocateGlobalRecordNumber('order');
     const result = await db
       .prepare(
-        `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json)
-         VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}')`,
+        `INSERT INTO orders (
+           user_id, reference_number, po_number, name, description, status,
+           customer_email, phone, shipping_address, notes, fields_json
+         ) VALUES (?, ?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}')`,
       )
       .run(
         ownerId,
+        referenceNumber,
         (inv.order_no || '').trim() || null,
         orderName || inv.customer_name || null,
         null,
@@ -66,10 +71,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
       ).run(oid, params.id, ownerId);
     }
 
-    return oid;
+    return { orderId: oid, referenceNumber };
   });
 
-  await logActivity('invoice', params.id, session.userId, 'activity', session.name, 'converted to an order');
+  await logActivity('invoice', params.id, session.userId, 'activity', session.name, `converted to order ${referenceNumber}`);
   await logActivity('order', orderId, session.userId, 'activity', session.name, `created from invoice ${inv.invoice_number}`);
   return NextResponse.json({ target: 'order', id: orderId });
 }

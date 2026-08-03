@@ -55,9 +55,8 @@ export async function POST(request: Request) {
 
     if (!issue_date) return NextResponse.json({ error: 'Issue date is required' }, { status: 400 });
 
-    const quoteNumber = await generateQuoteNumber(ownerId);
-
-    const qid = await db.transaction(async () => {
+    const { qid, quoteNumber } = await db.transaction(async () => {
+      const quoteNumber = await generateQuoteNumber(ownerId);
       const result = await db
         .prepare(
           `INSERT INTO quotations (
@@ -112,7 +111,7 @@ export async function POST(request: Request) {
           item.class_name?.trim() || null
         );
       }
-      return qid;
+      return { qid, quoteNumber };
     });
 
     await logActivity('quotation', qid, session.userId, 'activity', session.name, `created this quotation (${quoteNumber})`);

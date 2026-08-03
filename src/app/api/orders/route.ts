@@ -51,7 +51,7 @@ export async function POST(request: Request) {
           body.po_number?.trim() || null,
           body.name?.trim() || null,
           body.description?.trim() || null,
-          body.status?.trim() || '草稿',
+          body.status?.trim() || 'OPEN',
           body.delivery_date?.trim() || null,
           body.customer_email?.trim() || null,
           body.phone?.trim() || null,

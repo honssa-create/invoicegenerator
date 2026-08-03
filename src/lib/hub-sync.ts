@@ -438,7 +438,7 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
             original_order_id: inv.Id,
             customer_name: customerName,
             total_amount: total,
-            status: mapQbInvoiceStatus(balance, total) === 'paid' ? '已寄出 SENT' : '製作中',
+            status: mapQbInvoiceStatus(balance, total) === 'paid' ? '已寄出 SENT' : 'IN PROGRESS 安排中',
             created_at: (inv.MetaData?.CreateTime || `${issueDate} 00:00:00`).replace('T', ' ').slice(0, 19),
             customer_email: inv.BillEmail?.Address || null,
             description: docNumber ? `QuickBooks invoice ${docNumber}` : `QuickBooks invoice ${systemNo}`,

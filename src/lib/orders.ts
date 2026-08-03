@@ -32,21 +32,41 @@ export interface CoreColumns {
 }
 
 export const ORDER_STATUSES = [
-  '草稿',
-  '已到公司',
-  '圖稿已給客戶',
-  '已搬到生產中',
-  '製作中',
+  'OPEN',
+  '快遞到件',
+  'IN PROGRESS 安排中',
+  '需長時間處理',
+  '起版中 SAMPLE',
+  'PRODUCTION 生產中',
+  '有問題',
+  '已到公司 BACK TO OFFICE',
+  '已到公司 - 請安排包裝/PACK箱',
+  '已到公司 - 已完成包裝',
+  '可以寄出 READY TO SEND',
   '已寄出 SENT',
-];
+  '客退貨/客原版',
+  '已處理',
+  'FAIL',
+] as const;
+
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export const STATUS_COLORS: Record<string, string> = {
-  '草稿': 'bg-gray-100 text-gray-700',
-  '已到公司': 'bg-blue-100 text-blue-700',
-  '圖稿已給客戶': 'bg-purple-100 text-purple-700',
-  '已搬到生產中': 'bg-teal-100 text-teal-700',
-  '製作中': 'bg-amber-100 text-amber-700',
+  'OPEN': 'bg-gray-100 text-gray-700',
+  '快遞到件': 'bg-sky-100 text-sky-700',
+  'IN PROGRESS 安排中': 'bg-violet-100 text-violet-700',
+  '需長時間處理': 'bg-pink-100 text-pink-700',
+  '起版中 SAMPLE': 'bg-red-100 text-red-700',
+  'PRODUCTION 生產中': 'bg-cyan-100 text-cyan-700',
+  '有問題': 'bg-rose-100 text-rose-700',
+  '已到公司 BACK TO OFFICE': 'bg-green-100 text-green-700',
+  '已到公司 - 請安排包裝/PACK箱': 'bg-teal-100 text-teal-700',
+  '已到公司 - 已完成包裝': 'bg-emerald-100 text-emerald-700',
+  '可以寄出 READY TO SEND': 'bg-blue-100 text-blue-700',
   '已寄出 SENT': 'bg-yellow-100 text-yellow-800',
+  '客退貨/客原版': 'bg-stone-200 text-stone-700',
+  '已處理': 'bg-zinc-200 text-zinc-700',
+  'FAIL': 'bg-fuchsia-100 text-fuchsia-700',
 };
 
 // The full custom-field list shown in the order detail "Fields" panel, in order.

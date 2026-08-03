@@ -288,6 +288,34 @@ async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
   }
 }
 
+async function migrateOrderStatusesV2Once(): Promise<void> {
+  const conn = await getPool().connect();
+  try {
+    await conn.query('BEGIN');
+    await conn.query(`SELECT pg_advisory_xact_lock(72910422)`);
+    const done = await conn.query<{ key: string }>(
+      `SELECT key FROM app_migrations WHERE key = 'order_status_workflow_v2'`,
+    );
+    if (done.rows.length) {
+      await conn.query('COMMIT');
+      return;
+    }
+
+    // Product decision: reset every existing order into the new workflow at OPEN.
+    await conn.query(`UPDATE orders SET status = 'OPEN'`);
+    await conn.query(`ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'OPEN'`);
+    await conn.query(
+      `INSERT INTO app_migrations (key) VALUES ('order_status_workflow_v2') ON CONFLICT DO NOTHING`,
+    );
+    await conn.query('COMMIT');
+  } catch (error) {
+    await conn.query('ROLLBACK');
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
 async function syncGlobalRecordSequences(): Promise<void> {
   await client().query(`
     INSERT INTO global_record_sequences (record_type, next_serial)
@@ -302,6 +330,7 @@ async function syncGlobalRecordSequences(): Promise<void> {
 
 async function runBootDataFixes(): Promise<void> {
   await migrateUnifiedRecordNumberingOnce();
+  await migrateOrderStatusesV2Once();
   await syncGlobalRecordSequences();
 
   // Advance expense_report_sequence from max batch_id (same semantics as SQLite boot).

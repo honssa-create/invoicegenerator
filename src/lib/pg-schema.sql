@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS orders (
   po_number TEXT,
   name TEXT,
   description TEXT,
-  status TEXT DEFAULT '草稿',
+  status TEXT DEFAULT 'OPEN',
   delivery_date TEXT,
   customer_email TEXT,
   phone TEXT,

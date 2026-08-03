@@ -164,15 +164,15 @@ export function mapWooStatus(status: string): string {
       return '已寄出 SENT';
     case 'processing':
     case 'on-hold':
-      return '製作中';
+      return 'IN PROGRESS 安排中';
     case 'pending':
-      return '草稿';
+      return 'OPEN';
     case 'cancelled':
     case 'refunded':
     case 'failed':
-      return '草稿';
+      return 'OPEN';
     default:
-      return '製作中';
+      return 'IN PROGRESS 安排中';
   }
 }
 

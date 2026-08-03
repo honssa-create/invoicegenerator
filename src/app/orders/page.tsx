@@ -8,8 +8,6 @@ import FilterBar from '@/components/FilterBar';
 import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
-const EMPTY = { po_number: '', name: '', description: '', delivery_date: '', order_type: '' };
-
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
 
 function getOrderType(o: Order): string {
@@ -21,9 +19,8 @@ export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY);
-  const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
@@ -115,20 +112,29 @@ export default function OrdersPage() {
     setSearch('');
   };
 
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (res.ok && data.order) router.push(`/orders/${data.order.id}`);
+  const create = async () => {
+    if (creating) return;
+    setCreating(true);
+    setCreateError('');
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.order?.id) {
+        setCreateError(data.error || bi('Failed to create order', '無法建立訂單'));
+        return;
+      }
+      router.push(`/orders/${data.order.id}`);
+    } catch {
+      setCreateError(bi('Failed to create order', '無法建立訂單'));
+    } finally {
+      setCreating(false);
+    }
   };
 
-  const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
@@ -139,11 +145,22 @@ export default function OrdersPage() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Manage production orders with a ClickUp-style detail view', '以 ClickUp 風格詳情頁管理生產訂單')}</p>
         </div>
         <div className="page-actions">
-          <button onClick={() => { setForm(EMPTY); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
-            + {bi('New Order', '新增訂單')}
+          <button
+            type="button"
+            onClick={create}
+            disabled={creating}
+            className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            + {creating ? BTN.creating : bi('New Order', '新增訂單')}
           </button>
         </div>
       </div>
+
+      {createError && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {createError}
+        </div>
+      )}
 
       <FilterBar
         dateStart={dateStart}
@@ -218,50 +235,6 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
-
-      {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel">
-            <h2 className="text-lg font-semibold mb-4">{bi('New Order', '新增訂單')}</h2>
-            <form onSubmit={create} className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">PO# *</label>
-                <input required value={form.po_number} onChange={(e) => setForm({ ...form, po_number: e.target.value })} className={inputCls} placeholder="e.g. H3219" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">{bi('Order Type', '訂單類型')} *</label>
-                <select
-                  required
-                  value={form.order_type}
-                  onChange={(e) => setForm({ ...form, order_type: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">{bi('Select type…', '選擇類型…')}</option>
-                  {ORDER_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Name (客戶)</label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} placeholder="e.g. Hoi Yan Chan" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Description 描述</label>
-                <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputCls} placeholder="e.g. 4款亞加力" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Date 交貨日期</label>
-                <input value={form.delivery_date} onChange={(e) => setForm({ ...form, delivery_date: e.target.value })} className={inputCls} placeholder="e.g. 22/1" />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{saving ? BTN.creating : BTN.create}</button>
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">{BTN.cancel}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </AppLayout>
   );
 }

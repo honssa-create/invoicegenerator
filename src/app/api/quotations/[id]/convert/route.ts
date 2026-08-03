@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
           `INSERT INTO orders (
              user_id, reference_number, po_number, name, description, status,
              customer_email, phone, shipping_address, notes, fields_json, quotation_id
-           ) VALUES (?, ?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}', ?)`
+           ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, '{}', ?)`
         )
         .run(
           ownerId,

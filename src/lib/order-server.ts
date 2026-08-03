@@ -84,7 +84,7 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
     po_number: row.po_number || '',
     name: row.name || '',
     description: row.description || '',
-    status: row.status || '草稿',
+    status: row.status || 'OPEN',
     delivery_date: row.delivery_date || '',
     customer_email: row.customer_email || '',
     phone: row.phone || '',

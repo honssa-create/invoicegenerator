@@ -417,6 +417,45 @@ export function computeStewingRawNeeds(
     .map((name) => ({ name, qty: acc[name] }));
 }
 
+/** Raw grams needed for one prep order (uses actual production qty incl. wedding buffer). */
+export function computePrepOrderRawNeeds(
+  capacity: PrepCapacity,
+  orderType: PrepOrderType,
+  qtys: PrepFlavorQty
+): { name: string; qty: number }[] {
+  const calc = computePrepCalculation(capacity, orderType, qtys);
+  const splits = calc.rows
+    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .map((r) => ({ flavor: r.flavor, qty: r.actualQty }));
+  return computeStewingRawNeeds(capacity, splits);
+}
+
+/** Sum raw needs across unfinished prep orders (any status except completed). */
+export function aggregateRawNeedsFromPrepOrders(
+  orders: Array<{
+    capacity: PrepCapacity;
+    order_type: PrepOrderType;
+    status: PrepStatus;
+    qty_osmanthus: number;
+    qty_red_date: number;
+    qty_rock_sugar: number;
+  }>
+): Record<string, number> {
+  const raw: Record<string, number> = {};
+  for (const o of orders) {
+    if (o.status === 'completed') continue;
+    const lines = computePrepOrderRawNeeds(o.capacity, o.order_type, {
+      osmanthus: o.qty_osmanthus,
+      red_date: o.qty_red_date,
+      rock_sugar: o.qty_rock_sugar,
+    });
+    for (const line of lines) {
+      raw[line.name] = round2((raw[line.name] || 0) + line.qty);
+    }
+  }
+  return raw;
+}
+
 export function formatGrams(n: number): string {
   if (n === 0) return '—';
   return `${n.toFixed(2)}g`;

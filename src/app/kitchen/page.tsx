@@ -681,7 +681,7 @@ export default function KitchenPage() {
               <thead>
                 <tr className="text-left text-gray-500 border-b">
                   <th className="py-2 pr-2">禮盒</th>
-                  <th className="py-2 pr-2 text-right">現有</th>
+                  <th className="py-2 pr-2 text-right">庫存</th>
                   <th className="py-2 pr-2 text-right">需要</th>
                   <th className="py-2 text-right">{bi('Min', '最低')}</th>
                 </tr>
@@ -727,7 +727,7 @@ export default function KitchenPage() {
               <thead>
                 <tr className="text-left text-gray-500 border-b">
                   <th className="py-2 pr-2">容量/口味</th>
-                  <th className="py-2 pr-2 text-right">現有</th>
+                  <th className="py-2 pr-2 text-right">庫存</th>
                   <th className="py-2 text-right">需要</th>
                 </tr>
               </thead>
@@ -755,14 +755,16 @@ export default function KitchenPage() {
               <thead>
                 <tr className="text-left text-gray-500 border-b">
                   <th className="py-2 pr-2">原料</th>
-                  <th className="py-2 pr-2 text-right">現有</th>
-                  <th className="py-2 text-right">需要</th>
+                  <th className="py-2 pr-2 text-right">庫存</th>
+                  <th className="py-2 pr-2 text-right">需要</th>
+                  <th className="py-2 text-right">可用</th>
                 </tr>
               </thead>
               <tbody>
                 {state.raw.map((r) => {
                   const have = availableStockMaps.raw[r.name] ?? r.quantity;
-                  const needed = Math.max(0, r.needed - (tempReserved.raw[r.name] || 0));
+                  const needed = r.needed;
+                  const available = have - needed;
                   return (
                   <tr key={r.name} className="border-b border-gray-50">
                     <td className="py-2 pr-2">
@@ -770,8 +772,11 @@ export default function KitchenPage() {
                       <span className="text-gray-400 text-xs ml-1">{r.unit}</span>
                     </td>
                     <td className="py-2 pr-2 text-right font-medium">{formatRawQty(have, r.unit)}</td>
-                    <td className={`py-2 text-right ${shortfall(have, needed)}`}>
+                    <td className={`py-2 pr-2 text-right ${shortfall(have, needed)}`}>
                       {formatRawQty(needed, r.unit)}
+                    </td>
+                    <td className={`py-2 text-right font-medium ${available < 0 ? 'text-red-600' : ''}`}>
+                      {formatRawQty(available < 0 ? 0 : available, r.unit)}
                     </td>
                   </tr>
                   );
@@ -1038,7 +1043,7 @@ export default function KitchenPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
                   <div className="rounded-lg bg-gray-50 p-3">
-                    <div className="text-gray-500 text-xs">禮盒現有</div>
+                    <div className="text-gray-500 text-xs">禮盒庫存</div>
                     <div className="text-xl font-semibold">{currentGiftHave}</div>
                   </div>
                   <div className="rounded-lg bg-gray-50 p-3">

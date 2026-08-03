@@ -33,6 +33,7 @@ import {
   mapWeddingCapacityToPrep,
 } from './orders';
 import type { PrepFlavor } from './kitchen-prep';
+import { aggregateRawNeedsFromPrepOrders, type PrepCapacity, type PrepOrderType, type PrepStatus } from './kitchen-prep';
 
 // Re-export PrepFlavor mapping used for 回禮 bottles
 const WEDDING_FLAVOR_KEYS: { prep: PrepFlavor; actualKey: string; clientKey: string }[] = [
@@ -294,9 +295,7 @@ function computeDemand(openOrders: KitchenOpenOrder[]): KitchenState['demand'] {
         for (const [sku, qty] of Object.entries(agg.finished)) {
           finished[sku] = (finished[sku] || 0) + qty;
         }
-        for (const [name, qty] of Object.entries(agg.raw)) {
-          raw[name] = (raw[name] || 0) + qty;
-        }
+        // Raw needed is driven by unfinished kitchen prep orders (see getState).
       } else if (n.needKey.startsWith('bottle:')) {
         const sku = n.needKey.slice(7);
         finished[sku] = (finished[sku] || 0) + n.remaining;
@@ -304,6 +303,24 @@ function computeDemand(openOrders: KitchenOpenOrder[]): KitchenState['demand'] {
     }
   }
   return { giftBoxes, finished, raw };
+}
+
+async function loadUnfinishedPrepRawDemand(userId: number): Promise<Record<string, number>> {
+  const rows = (await db
+    .prepare(
+      `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar
+       FROM kitchen_prep_orders
+       WHERE user_id = ? AND status != 'completed'`
+    )
+    .all(userId)) as {
+    capacity: PrepCapacity;
+    order_type: PrepOrderType;
+    status: PrepStatus;
+    qty_osmanthus: number;
+    qty_red_date: number;
+    qty_rock_sugar: number;
+  }[];
+  return aggregateRawNeedsFromPrepOrders(rows);
 }
 
 async function loadMovements(userId: number): Promise<KitchenMovement[]> {
@@ -368,6 +385,7 @@ export async function getState(userId: number, opts?: { isAdmin?: boolean }): Pr
   const fulfillments = await loadFulfillments(userId);
   const openOrders = await loadOpenOrders(userId, fulfillments);
   const demand = computeDemand(openOrders);
+  demand.raw = await loadUnfinishedPrepRawDemand(userId);
   const movements = await loadMovements(userId);
 
   const giftBoxes = GIFT_BOX_TYPES.map((g) => ({

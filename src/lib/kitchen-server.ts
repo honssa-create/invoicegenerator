@@ -19,6 +19,7 @@ import {
   aggregateBomDemand,
   finishedSku,
   finishedSkuLabel,
+  finishedShortfallsByCapacity,
   giftNeedKey,
   bottleNeedKey,
   reverseMovementDeltas,
@@ -398,7 +399,38 @@ export async function getState(userId: number, opts?: { isAdmin?: boolean }): Pr
     openOrders,
     movements,
     isAdmin: Boolean(opts?.isAdmin),
+    holidayMode: await getHolidayMode(userId),
   };
+}
+
+async function getHolidayMode(userId: number): Promise<boolean> {
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO kitchen_settings (user_id, holiday_mode) VALUES (?, 0)`
+    )
+    .run(userId);
+  const row = (await db
+    .prepare('SELECT holiday_mode FROM kitchen_settings WHERE user_id = ?')
+    .get(userId)) as { holiday_mode: number } | undefined;
+  return Boolean(row?.holiday_mode);
+}
+
+export async function setHolidayMode(
+  ownerId: number,
+  isAdmin: boolean,
+  holidayMode: boolean
+): Promise<{ error?: string; state?: KitchenState }> {
+  if (!isAdmin) return { error: 'Only admin can toggle holiday mode' };
+  await db
+    .prepare(
+      `INSERT INTO kitchen_settings (user_id, holiday_mode, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(user_id) DO UPDATE SET
+         holiday_mode = excluded.holiday_mode,
+         updated_at = datetime('now')`
+    )
+    .run(ownerId, holidayMode ? 1 : 0);
+  return { state: await getState(ownerId, { isAdmin: true }) };
 }
 
 async function applyDeltas(userId: number, deltas: MovementDeltas) {
@@ -464,7 +496,11 @@ export async function makeGiftBox(
   ownerId: number,
   actorId: number,
   input: { boxType: string; quantity: number; consumeOverrides?: Record<string, number> }
-): Promise<{ error?: string; state?: KitchenState }> {
+): Promise<{
+  error?: string;
+  state?: KitchenState;
+  prep_orders?: { id: number; order_code: string; capacity: string; order_type: string }[];
+}> {
   await ensureSeed(ownerId);
   const boxType = input.boxType;
   if (!GIFT_BOX_TYPES.some((g) => g.id === boxType)) {
@@ -479,14 +515,33 @@ export async function makeGiftBox(
   const lines = resolved.lines;
   const stock = await loadStockMaps(ownerId);
 
+  const finishedShort: string[] = [];
+  const rawShort: string[] = [];
   for (const line of lines) {
     if (line.kind === 'finished') {
       if ((stock.finished[line.sku] || 0) < line.qty) {
-        return { error: `成品不足：${finishedSkuLabel(line.sku)}（需要 ${line.qty}，現有 ${stock.finished[line.sku] || 0}）` };
+        finishedShort.push(
+          `成品不足：${finishedSkuLabel(line.sku)}（需要 ${line.qty}，現有 ${stock.finished[line.sku] || 0}）`
+        );
       }
     } else if ((stock.raw[line.name] || 0) < line.qty) {
-      return { error: `原料不足：${line.name}（需要 ${line.qty}，現有 ${stock.raw[line.name] || 0}）` };
+      rawShort.push(`原料不足：${line.name}（需要 ${line.qty}，現有 ${stock.raw[line.name] || 0}）`);
     }
+  }
+
+  if (finishedShort.length || rawShort.length) {
+    let prep_orders:
+      | { id: number; order_code: string; capacity: string; order_type: string }[]
+      | undefined;
+    if (finishedShort.length) {
+      const groups = finishedShortfallsByCapacity(lines, stock.finished);
+      if (groups.length) {
+        const { upsertRestockPrepsForShortfalls } = await import('./kitchen-prep-server');
+        prep_orders = await upsertRestockPrepsForShortfalls(ownerId, groups);
+      }
+    }
+    const error = [...finishedShort, ...rawShort].join('；');
+    return { error, prep_orders };
   }
 
   // Packaging only: bottles/raw → gift box stock (orders allocate from gift boxes separately).

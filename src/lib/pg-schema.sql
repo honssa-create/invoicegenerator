@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   order_code TEXT NOT NULL,
   linked_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
   stewing_date TEXT NOT NULL,
-  order_type TEXT NOT NULL DEFAULT 'daily' CHECK (order_type IN ('daily', 'wedding')),
+  order_type TEXT NOT NULL DEFAULT 'daily' CHECK (order_type IN ('daily', 'wedding', 'restock')),
   capacity TEXT NOT NULL DEFAULT '45g',
   status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('inactive', 'scheduled', 'in_prep', 'completed')),
   qty_osmanthus INTEGER NOT NULL DEFAULT 0,
@@ -346,6 +346,12 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   completed_at TEXT,
   completed_by TEXT,
   completion_splits_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS kitchen_settings (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  holiday_mode INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS inbound_shipments (

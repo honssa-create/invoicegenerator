@@ -112,6 +112,32 @@ export function expandGiftBoxBom(boxType: string, quantity: number): BomLine[] {
   );
 }
 
+export type FinishedFlavorQtys = {
+  osmanthus: number;
+  red_date: number;
+  rock_sugar: number;
+};
+
+/** Aggregate finished-bottle shortfalls from BOM lines, grouped by prep capacity. */
+export function finishedShortfallsByCapacity(
+  bomLines: BomLine[],
+  finishedStock: Record<string, number>
+): { capacity: PrepCapacity; qtys: FinishedFlavorQtys }[] {
+  const byCap = new Map<PrepCapacity, FinishedFlavorQtys>();
+  for (const line of bomLines) {
+    if (line.kind !== 'finished') continue;
+    const parsed = parseFinishedSku(line.sku);
+    if (!parsed) continue;
+    const have = finishedStock[line.sku] || 0;
+    const short = Math.max(0, Math.ceil(line.qty - have));
+    if (short <= 0) continue;
+    const cur = byCap.get(parsed.capacity) || { osmanthus: 0, red_date: 0, rock_sugar: 0 };
+    cur[parsed.flavor] = (cur[parsed.flavor] || 0) + short;
+    byCap.set(parsed.capacity, cur);
+  }
+  return Array.from(byCap.entries()).map(([capacity, qtys]) => ({ capacity, qtys }));
+}
+
 /** Normalize a consume qty for packaging (finished / bottles = int; gram raw = 3dp). */
 export function normalizeBomQty(line: BomLine, qty: number): number {
   if (!Number.isFinite(qty) || qty < 0) return line.qty;

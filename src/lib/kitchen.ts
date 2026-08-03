@@ -16,6 +16,7 @@ export {
   finishedSkuLabel,
   parseFinishedSku,
   expandGiftBoxBom,
+  finishedShortfallsByCapacity,
   checkBomAgainstStock,
   bomIsSufficient,
   aggregateBomDemand,
@@ -30,9 +31,26 @@ export {
   type BomLine,
   type StockCheckLine,
   type MovementDeltas,
+  type FinishedFlavorQtys,
 } from './kitchen-bom';
 
 export const GIFT_BOX_TYPES = NESTIEE_GIFT_BOX_TYPES;
+
+/** Minimum on-hand stock to keep for each gift-box kind. */
+export const GIFT_BOX_MIN_STOCK = 10;
+/** Minimum when 節日模式 (holiday mode) is on. */
+export const GIFT_BOX_MIN_STOCK_HOLIDAY = 20;
+
+export function giftBoxMinStock(holidayMode = false): number {
+  return holidayMode ? GIFT_BOX_MIN_STOCK_HOLIDAY : GIFT_BOX_MIN_STOCK;
+}
+
+/** How many units to package to reach the minimum (0 if already at/above). */
+export function giftBoxTopUpQty(quantity: number, minStock: number = GIFT_BOX_MIN_STOCK): number {
+  const q = Number.isFinite(quantity) ? Math.floor(quantity) : 0;
+  const min = Number.isFinite(minStock) ? Math.floor(minStock) : GIFT_BOX_MIN_STOCK;
+  return Math.max(0, min - q);
+}
 
 export interface RawMaterialDef {
   name: string;
@@ -165,6 +183,8 @@ export interface KitchenState {
   openOrders: KitchenOpenOrder[];
   movements: KitchenMovement[];
   isAdmin: boolean;
+  /** Org-wide: elevate gift-box min stock (admin toggle). */
+  holidayMode: boolean;
 }
 
 export function formatBomConsumption(lines: BomLine[]): string {

@@ -5,9 +5,10 @@ import {
 } from './kitchen-prep';
 
 describe('defaultPrepStatusForCreate', () => {
-  it('sets daily creates to in_prep', () => {
+  it('sets daily and restock creates to in_prep', () => {
     expect(defaultPrepStatusForCreate('daily', '2099-01-01', { today: '2026-08-03' })).toBe('in_prep');
     expect(defaultPrepStatusForCreate('daily', '2020-01-01', { today: '2026-08-03' })).toBe('in_prep');
+    expect(defaultPrepStatusForCreate('restock', '2099-01-01', { today: '2026-08-03' })).toBe('in_prep');
   });
 
   it('sets wedding without production date to inactive', () => {

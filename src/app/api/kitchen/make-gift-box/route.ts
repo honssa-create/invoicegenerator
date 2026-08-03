@@ -19,8 +19,13 @@ export async function POST(request: Request) {
       quantity: Number(body.quantity),
       consumeOverrides,
     });
-    if (result.error) return NextResponse.json({ error: result.error }, { status: 400 });
-    const state = await getState(ownerId, { isAdmin: session.role === 'admin' });
+    if (result.error) {
+      return NextResponse.json(
+        { error: result.error, prep_orders: result.prep_orders || [] },
+        { status: 400 }
+      );
+    }
+    const state = result.state || (await getState(ownerId, { isAdmin: session.role === 'admin' }));
     return NextResponse.json({ state });
   } catch {
     return NextResponse.json({ error: 'Failed to make gift box' }, { status: 500 });

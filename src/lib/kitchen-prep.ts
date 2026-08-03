@@ -19,12 +19,13 @@ export const PREP_FLAVOR_LABELS: Record<PrepFlavor, string> = {
   rock_sugar: '冰糖 Rock Sugar',
 };
 
-export const PREP_ORDER_TYPES = ['daily', 'wedding'] as const;
+export const PREP_ORDER_TYPES = ['daily', 'wedding', 'restock'] as const;
 export type PrepOrderType = (typeof PREP_ORDER_TYPES)[number];
 
 export const PREP_ORDER_TYPE_LABELS: Record<PrepOrderType, string> = {
   daily: '日常訂單 Daily',
   wedding: '回禮訂單 Wedding',
+  restock: '補充存貨 Restock',
 };
 
 export const PREP_STATUSES = ['inactive', 'scheduled', 'in_prep', 'completed'] as const;
@@ -49,14 +50,14 @@ export function hkTodayIso(now: Date = new Date()): string {
 
 /**
  * Default status when creating a prep row.
- * Daily → in_prep. Wedding/回禮 → inactive until stewing/production date is due.
+ * Daily / 補充存貨 → in_prep. Wedding/回禮 → inactive until stewing/production date is due.
  */
 export function defaultPrepStatusForCreate(
   orderType: PrepOrderType,
   stewingDate: string,
   opts?: { hasProductionDate?: boolean; today?: string }
 ): PrepStatus {
-  if (orderType === 'daily') return 'in_prep';
+  if (orderType === 'daily' || orderType === 'restock') return 'in_prep';
   const today = opts?.today ?? hkTodayIso();
   if (opts?.hasProductionDate === false) return 'inactive';
   if (!stewingDate?.trim() || stewingDate > today) return 'inactive';

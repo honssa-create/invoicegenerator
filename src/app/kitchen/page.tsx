@@ -5,6 +5,8 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import {
   GIFT_BOX_TYPES,
+  giftBoxMinStock,
+  giftBoxTopUpQty,
   RAW_MATERIALS,
   expandGiftBoxBom,
   checkBomAgainstStock,
@@ -424,7 +426,19 @@ export default function KitchenPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        flash(data.error || 'Failed', 'error');
+        const prepOrders = Array.isArray(data.prep_orders) ? data.prep_orders : [];
+        if (prepOrders.length) {
+          const codes = prepOrders.map((p: { order_code?: string }) => p.order_code).filter(Boolean).join(', ');
+          flash(
+            bi(
+              `${data.error || 'Finished stock short'} — created restock prep ${codes}`,
+              `${data.error || '成品不足'} — 已建立補充存貨備料單 ${codes}`
+            ),
+            'error'
+          );
+        } else {
+          flash(data.error || 'Failed', 'error');
+        }
         return;
       }
       setState(data.state);
@@ -433,6 +447,67 @@ export default function KitchenPage() {
         giftOrderId
           ? bi('Gift boxes allocated', '禮盒已分配')
           : bi('Gift box packaged', '禮盒已包裝')
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const topUpGiftBox = async (boxType: string, quantity: number) => {
+    const minStock = giftBoxMinStock(Boolean(state?.holidayMode));
+    const topUp = giftBoxTopUpQty(quantity, minStock);
+    if (topUp <= 0 || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/kitchen/make-gift-box', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boxType, quantity: topUp }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const prepOrders = Array.isArray(data.prep_orders) ? data.prep_orders : [];
+        if (prepOrders.length) {
+          const first = prepOrders[0] as { id?: number; order_code?: string };
+          flash(
+            bi(
+              `${data.error || 'Finished stock short'} — restock prep ${first.order_code || ''} created`,
+              `${data.error || '成品不足'} — 已建立補充存貨備料單 ${first.order_code || ''}`
+            ),
+            'error'
+          );
+        } else {
+          flash(data.error || 'Failed', 'error');
+        }
+        return;
+      }
+      setState(data.state);
+      flash(bi(`Topped up to ${minStock}`, `已補貨至 ${minStock}`));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleHolidayMode = async () => {
+    if (!state?.isAdmin || busy) return;
+    const next = !state.holidayMode;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/kitchen/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ holiday_mode: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        flash(data.error || 'Failed', 'error');
+        return;
+      }
+      setState(data.state);
+      flash(
+        next
+          ? bi('Holiday mode on — gift box min 20', '節日模式已開啟 — 禮盒最低庫存 20')
+          : bi('Holiday mode off — gift box min 10', '節日模式已關閉 — 禮盒最低庫存 10')
       );
     } finally {
       setBusy(false);
@@ -535,6 +610,7 @@ export default function KitchenPage() {
     (state.giftBoxes.find((g) => g.boxType === giftType)?.needed || 0) -
       (tempReserved.gift[giftType] || 0)
   );
+  const giftMinStock = giftBoxMinStock(Boolean(state.holidayMode));
 
   return (
     <AppLayout>
@@ -545,6 +621,28 @@ export default function KitchenPage() {
             {bi('Gift boxes · finished bottles · raw · order fulfillment', '禮盒 · 成品樽 · 原料 · 訂單履約')}
           </p>
         </div>
+        {state.isAdmin && (
+          <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
+            <span className="text-sm font-medium text-gray-700">節日模式</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={state.holidayMode}
+              disabled={busy}
+              onClick={toggleHolidayMode}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-40 ${
+                state.holidayMode ? 'bg-brand-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  state.holidayMode ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+            <span className="text-xs text-gray-500 tabular-nums">≥{giftMinStock}</span>
+          </label>
+        )}
       </div>
 
       {toast && (
@@ -558,6 +656,23 @@ export default function KitchenPage() {
       )}
 
       {/* Inventory */}
+      {(() => {
+        const lowBoxes = state.giftBoxes.filter((g) => giftBoxTopUpQty(g.quantity, giftMinStock) > 0);
+        if (!lowBoxes.length) return null;
+        return (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {bi(
+              `Gift boxes below ${giftMinStock}: `,
+              `禮盒低於 ${giftMinStock}：`
+            )}
+            {lowBoxes.map((g) => g.label).join('、')}
+            {bi(
+              ` — use Top up to restock${state.holidayMode ? ' (holiday mode)' : ''}.`,
+              ` — 請用「補貨至${giftMinStock}」補充${state.holidayMode ? '（節日模式）' : ''}。`
+            )}
+          </div>
+        );
+      })()}
       <div className="grid lg:grid-cols-3 gap-6 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="font-semibold text-gray-900 mb-3">{bi('Gift boxes', '禮盒庫存')}</h2>
@@ -567,18 +682,36 @@ export default function KitchenPage() {
                 <tr className="text-left text-gray-500 border-b">
                   <th className="py-2 pr-2">禮盒</th>
                   <th className="py-2 pr-2 text-right">現有</th>
-                  <th className="py-2 text-right">需要</th>
+                  <th className="py-2 pr-2 text-right">需要</th>
+                  <th className="py-2 text-right">{bi('Min', '最低')}</th>
                 </tr>
               </thead>
               <tbody>
                 {state.giftBoxes.map((g) => {
                   const have = availableStockMaps.giftBoxes[g.boxType] ?? g.quantity;
                   const needed = Math.max(0, g.needed - (tempReserved.gift[g.boxType] || 0));
+                  const topUp = giftBoxTopUpQty(g.quantity, giftMinStock);
+                  const low = topUp > 0;
                   return (
-                  <tr key={g.boxType} className="border-b border-gray-50">
+                  <tr key={g.boxType} className={`border-b border-gray-50 ${low ? 'bg-amber-50/60' : ''}`}>
                     <td className="py-2 pr-2">{g.label}</td>
-                    <td className="py-2 pr-2 text-right font-medium">{have}</td>
-                    <td className={`py-2 text-right ${shortfall(have, needed)}`}>{needed}</td>
+                    <td className={`py-2 pr-2 text-right font-medium ${low ? 'text-red-600' : ''}`}>{have}</td>
+                    <td className={`py-2 pr-2 text-right ${shortfall(have, needed)}`}>{needed}</td>
+                    <td className="py-2 text-right">
+                      {low ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => topUpGiftBox(g.boxType, g.quantity)}
+                          className="text-xs px-2 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-40"
+                          title={bi(`Package ${topUp} to reach ${giftMinStock}`, `包裝 ${topUp} 個至 ${giftMinStock}`)}
+                        >
+                          {bi(`Top up +${topUp}`, `補貨至${giftMinStock} +${topUp}`)}
+                        </button>
+                      ) : (
+                        <span className="text-gray-400 text-xs">≥{giftMinStock}</span>
+                      )}
+                    </td>
                   </tr>
                   );
                 })}

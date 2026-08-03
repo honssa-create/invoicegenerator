@@ -86,6 +86,7 @@ const NO_RETURNING_TABLES = new Set([
   'integration_settings',
   'app_migrations',
   'role_permissions',
+  'kitchen_settings',
 ]);
 
 function insertTableName(sql: string): string | null {
@@ -212,6 +213,24 @@ async function runBootDataFixes(): Promise<void> {
     `);
     await client().query(
       `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_inactive') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Allow kitchen_prep_orders.order_type = restock (補充存貨).
+  const migType = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_order_type_restock'`
+  );
+  if (!migType.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_order_type_check
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_order_type_check
+        CHECK (order_type IN ('daily', 'wedding', 'restock'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_order_type_restock') ON CONFLICT DO NOTHING`
     );
   }
 }

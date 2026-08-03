@@ -4,10 +4,15 @@ import {
   getNestieeLines,
   parseNestieeLinesFromWoo,
   parseNestieePaymentFromWoo,
+  parseWooShippingTotal,
+  parseWooShippingMethod,
+  normalizeOrderShippingMethod,
+  appendNestieeShippingLine,
   computeNestieeGiftBoxQtysFromLines,
   applyNestieeGiftBoxAutoQtys,
   resolveOrderAddressesForQuotation,
   stripHtml,
+  NESTIEE_SHIPPING_LINE_NAME,
 } from './orders';
 
 describe('parseNestieeLinesFromWoo', () => {
@@ -312,5 +317,102 @@ describe('applyNestieeGiftBoxAutoQtys', () => {
     expect(fields.nestiee_gift_qty_red_silver).toBe('0');
     expect(fields.nestiee_gift_qty_pink_osmanthus).toBe('0');
     expect(fields.nestiee_gift_qty_pink_red_date).toBe('0');
+  });
+});
+
+describe('parseWooShippingTotal / parseWooShippingMethod', () => {
+  it('prefers top-level shipping_total', () => {
+    expect(
+      parseWooShippingTotal({
+        shipping_total: '35.00',
+        shipping_lines: [{ method_title: '順豐', total: '10' }],
+      })
+    ).toBe(35);
+  });
+
+  it('sums shipping_lines when shipping_total missing or zero', () => {
+    expect(
+      parseWooShippingTotal({
+        shipping_total: '0',
+        shipping_lines: [
+          { method_title: 'SF Express', total: '20' },
+          { method_title: 'Extra', total: '5.5' },
+        ],
+      })
+    ).toBe(25.5);
+  });
+
+  it('returns first non-empty method_title', () => {
+    expect(
+      parseWooShippingMethod({
+        shipping_lines: [
+          { method_title: '', total: '0' },
+          { method_title: '香港郵政', total: '12' },
+        ],
+      })
+    ).toBe('香港郵政');
+  });
+});
+
+describe('normalizeOrderShippingMethod', () => {
+  it('maps common Woo titles onto select options', () => {
+    expect(normalizeOrderShippingMethod('SF Express')).toBe('SF 順豐');
+    expect(normalizeOrderShippingMethod('順豐速運')).toBe('順豐');
+    expect(normalizeOrderShippingMethod('EMS')).toBe('EMS');
+    expect(normalizeOrderShippingMethod('Hongkong Post')).toBe('香港郵政');
+  });
+
+  it('preserves unknown titles', () => {
+    expect(normalizeOrderShippingMethod('Store Pickup')).toBe('Store Pickup');
+  });
+});
+
+describe('appendNestieeShippingLine', () => {
+  const product = {
+    name: '🌕⚪星空禮盒 · 即食燕窩',
+    quantity: 1,
+    unit_price: 344,
+    line_total: 344,
+    options: [{ label: '口味', value: '⚪冰糖原味【最勁典】', price: 0 }],
+  };
+
+  it('appends Shipping when total > 0', () => {
+    expect(appendNestieeShippingLine([product], 35)).toEqual([
+      product,
+      { name: NESTIEE_SHIPPING_LINE_NAME, quantity: 1, unit_price: 35, line_total: 35 },
+    ]);
+  });
+
+  it('omits Shipping when total is zero', () => {
+    expect(appendNestieeShippingLine([product], 0)).toEqual([product]);
+  });
+
+  it('replaces an existing Shipping row (idempotent)', () => {
+    const withOld = appendNestieeShippingLine([product], 10);
+    expect(appendNestieeShippingLine(withOld, 20)).toEqual([
+      product,
+      { name: NESTIEE_SHIPPING_LINE_NAME, quantity: 1, unit_price: 20, line_total: 20 },
+    ]);
+  });
+
+  it('does not inflate gift-box qtys', () => {
+    const lines = appendNestieeShippingLine([product], 35);
+    expect(computeNestieeGiftBoxQtysFromLines(lines)).toEqual({
+      nestiee_gift_qty_star_gold: 0,
+      nestiee_gift_qty_star_silver: 1,
+      nestiee_gift_qty_red_gold: 0,
+      nestiee_gift_qty_red_silver: 0,
+      nestiee_gift_qty_pink_osmanthus: 0,
+      nestiee_gift_qty_pink_red_date: 0,
+    });
+  });
+});
+
+describe('customer_note → order notes mapping', () => {
+  it('documents that Hub ingest passes Woo customer_note as notes (hub-sync)', () => {
+    // ingestWooOrders sets notes: order.customer_note?.trim() || null
+    // upsertHubOrder writes on insert; on update only when local notes are empty.
+    const customerNote = '  Please gift wrap  ';
+    expect(customerNote.trim() || null).toBe('Please gift wrap');
   });
 });

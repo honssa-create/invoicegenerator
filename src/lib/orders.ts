@@ -82,7 +82,7 @@ export const ORDER_FIELDS: OrderFieldDef[] = [
   { key: 'card_size', label: '紙卡尺寸', type: 'text' },
   { key: 'tracking_no', label: 'Tracking Number 運單號', type: 'text', placeholder: 'e.g. SF5120793357800' },
   { key: 'shipping_method', label: 'Shipping 寄出方式', type: 'select', options: ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] },
-  { key: 'other_craft', label: '其他加工', type: 'text' },
+  { key: 'other_craft', label: '其他加工', type: 'textarea' },
   { key: 'carton_count', label: 'Number of Cartons / 箱數', type: 'text', col: 'carton_count', placeholder: 'e.g. 5' },
   { key: 'extra_actions', label: '額外動作', type: 'textarea' },
 ];
@@ -419,7 +419,12 @@ export type WooAddressLike = {
   email?: string | null;
 };
 
-export type WooMetaDatum = { key?: string | null; value?: unknown };
+export type WooMetaDatum = {
+  key?: string | null;
+  value?: unknown;
+  display_key?: string | null;
+  display_value?: unknown;
+};
 
 export type WooLineItemLike = {
   name?: string | null;
@@ -628,6 +633,327 @@ export function parseNestieePaymentFromWoo(payload: Record<string, unknown> | nu
     method: primary.method,
     note: primary.note,
   };
+}
+
+/** Synthetic Nestiee line name for Woo shipping fees. */
+export const NESTIEE_SHIPPING_LINE_NAME = 'Shipping';
+
+type WooShippingLineLike = {
+  method_title?: string | null;
+  method_id?: string | null;
+  total?: string | number | null;
+};
+
+/** Prefer top-level shipping_total; else sum shipping_lines[].total. */
+export function parseWooShippingTotal(payload: Record<string, unknown> | null | undefined): number {
+  if (!payload) return 0;
+  const top = nestieeNum(payload.shipping_total);
+  if (top > 0) return Math.round(top * 100) / 100;
+  const lines = Array.isArray(payload.shipping_lines)
+    ? (payload.shipping_lines as WooShippingLineLike[])
+    : [];
+  let sum = 0;
+  for (const line of lines) {
+    sum += nestieeNum(line?.total);
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+/** First non-empty shipping_lines[].method_title. */
+export function parseWooShippingMethod(payload: Record<string, unknown> | null | undefined): string {
+  if (!payload) return '';
+  const lines = Array.isArray(payload.shipping_lines)
+    ? (payload.shipping_lines as WooShippingLineLike[])
+    : [];
+  for (const line of lines) {
+    const title = String(line?.method_title ?? '').trim();
+    if (title) return title;
+  }
+  return '';
+}
+
+const ORDER_SHIPPING_METHODS = ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] as const;
+
+/** Map Woo shipping titles onto Shipment Detail select options when possible. */
+export function normalizeOrderShippingMethod(raw: string | null | undefined): string {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  if ((ORDER_SHIPPING_METHODS as readonly string[]).includes(text)) return text;
+  const lower = text.toLowerCase();
+  if (/sf\s*express|\bsf\b|順豐速運|顺丰/.test(lower) || /順豐/.test(text)) {
+    if (/sf\s*順豐|^sf\b/i.test(text) || /sf\s*express/i.test(lower)) return 'SF 順豐';
+    return '順豐';
+  }
+  if (/\bems\b/i.test(text)) return 'EMS';
+  if (/香港郵政|hong\s*kong\s*post|hkpost/i.test(text)) return '香港郵政';
+  if (/其他|other/i.test(text)) return '其他';
+  // Preserve unknown Woo titles so nothing is lost (select still shows the value).
+  return text;
+}
+
+/**
+ * Strip any existing Shipping rows, then append one when shippingTotal > 0.
+ * Keeps Nestiee re-imports idempotent.
+ */
+export function appendNestieeShippingLine(
+  lines: NestieeLineItem[],
+  shippingTotal: number
+): NestieeLineItem[] {
+  const withoutShipping = lines.filter(
+    (line) => normalizeNestieeMatchText(line.name) !== normalizeNestieeMatchText(NESTIEE_SHIPPING_LINE_NAME)
+  );
+  const amount = Math.round(Math.max(0, shippingTotal) * 100) / 100;
+  if (amount <= 0) return withoutShipping;
+  return [
+    ...withoutShipping,
+    {
+      name: NESTIEE_SHIPPING_LINE_NAME,
+      quantity: 1,
+      unit_price: amount,
+      line_total: amount,
+    },
+  ];
+}
+
+/** Synthetic Honour line style for Woo shipping fees. */
+export const HONOUR_SHIPPING_LINE_STYLE = 'Shipping';
+
+export interface HonourCpoOption {
+  label: string;
+  value: string;
+  key: string;
+}
+
+function honourMetaLabel(m: WooMetaDatum): string {
+  const display = stripHtml(String(m.display_key ?? '')).trim();
+  if (display && !display.startsWith('_')) return display;
+  return String(m.key ?? '').trim();
+}
+
+function honourMetaValue(m: WooMetaDatum): string {
+  const display = stripHtml(String(m.display_value ?? '')).trim();
+  if (display) return display;
+  return stripHtml(String(m.value ?? '')).trim();
+}
+
+function isHonourCpoInternalKey(key: string): boolean {
+  if (!key) return true;
+  if (key.startsWith('_cpo_')) return true;
+  if (key.startsWith('_uni_item_')) return true;
+  if (key.startsWith('_uni_custom_')) return true;
+  if (key.startsWith('pi_')) return true;
+  if (key === '_add-to-cart') return true;
+  if (/_upload(_file)?$/i.test(key)) return true;
+  if (/_notes$/i.test(key)) return true;
+  return false;
+}
+
+/** Digits from CPO qty display values like "300個" / "300pcs". */
+export function parseHonourCpoQuantityDigits(raw: string): string {
+  const m = String(raw || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
+  return m ? m[1] : '';
+}
+
+function honourCpoQuantityFromMeta(meta: WooMetaDatum[] | null | undefined): string {
+  if (!Array.isArray(meta)) return '';
+  for (const m of meta) {
+    const key = String(m?.key ?? '');
+    if (/_(quantity|qty)$/i.test(key)) {
+      const digits = parseHonourCpoQuantityDigits(honourMetaValue(m));
+      if (digits) return digits;
+    }
+  }
+  for (const m of meta) {
+    const label = honourMetaLabel(m);
+    if (!label || /顏色數量|人數/.test(label)) continue;
+    if (/數量|quantity|pcs/i.test(label)) {
+      const digits = parseHonourCpoQuantityDigits(honourMetaValue(m));
+      if (digits) return digits;
+    }
+  }
+  return '';
+}
+
+/**
+ * Visible Uni CPO options from line meta (excludes internals / uploads / pi_*).
+ */
+export function extractHonourCpoOptions(meta: WooMetaDatum[] | null | undefined): HonourCpoOption[] {
+  if (!Array.isArray(meta)) return [];
+  const out: HonourCpoOption[] = [];
+  for (const m of meta) {
+    const key = String(m?.key ?? '').trim();
+    if (isHonourCpoInternalKey(key)) continue;
+    // Keep _uni_cpo_* product options; skip other underscore internals without display labels.
+    const label = honourMetaLabel(m);
+    const value = honourMetaValue(m);
+    if (!value) continue;
+    if (!key.startsWith('_uni_cpo_') && label.startsWith('_')) continue;
+    if (!label || label.startsWith('_')) continue;
+    out.push({ label, value, key });
+  }
+  return out;
+}
+
+function honourCardSizeFromMeta(meta: WooMetaDatum[] | null | undefined): string {
+  if (!Array.isArray(meta)) return '';
+  let length = '';
+  let width = '';
+  let size = '';
+  for (const m of meta) {
+    const key = String(m?.key ?? '');
+    const value = honourMetaValue(m);
+    if (!value) continue;
+    if (/custom_length/i.test(key)) length = value;
+    else if (/custom_width/i.test(key)) width = value;
+    else if (/_size$/i.test(key) || /尺寸|size/i.test(honourMetaLabel(m))) {
+      if (!/^自訂|custom$/i.test(value)) size = value;
+    }
+  }
+  if (length && width) return `${length}×${width}`;
+  return size;
+}
+
+/**
+ * Map CPO options onto Honour Order Detail craft fields.
+ * Only fills empty fields so local edits survive re-import.
+ */
+export function applyHonourOptionsToFields(
+  fields: Record<string, unknown>,
+  options: HonourCpoOption[],
+  metaForSize?: WooMetaDatum[] | null
+): string[] {
+  const written: string[] = [];
+  const setIfEmpty = (key: string, value: string) => {
+    if (!value.trim()) return;
+    if (String(fields[key] ?? '').trim()) return;
+    fields[key] = value.trim();
+    written.push(key);
+  };
+
+  const cardSize = honourCardSizeFromMeta(metaForSize || null);
+  if (cardSize) setIfEmpty('card_size', cardSize);
+
+  const dumpLines: string[] = [];
+  for (const opt of options) {
+    const label = opt.label;
+    const value = opt.value;
+    // Notes go to order notes, not the craft dump.
+    if (/備註|notes?/i.test(label)) continue;
+    dumpLines.push(`${label}: ${value}`);
+
+    // Exact Honour craft labels only — other colours/options stay in the dump.
+    if (label === '金屬電鍍色') {
+      setIfEmpty('plating_color', value);
+      continue;
+    }
+    if (label === '背面配件') {
+      setIfEmpty('clasp', value);
+      continue;
+    }
+    if (label === '做法') {
+      setIfEmpty('craft', value);
+      continue;
+    }
+  }
+  if (dumpLines.length) setIfEmpty('other_craft', dumpLines.join('\n'));
+  return written;
+}
+
+/** Normalize Woo line_items into Honour style/qty/price rows (Uni CPO qty preferred). */
+export function parseHonourLinesFromWoo(lineItems: WooLineItemLike[] | null | undefined): HonourLineItem[] {
+  if (!Array.isArray(lineItems) || !lineItems.length) return [];
+  const out: HonourLineItem[] = [];
+  for (const li of lineItems) {
+    const style = String(li?.name ?? '').trim();
+    if (!style) continue;
+    const cpoQty = honourCpoQuantityFromMeta(li.meta_data);
+    const wooQty = nestieeNum(li.quantity);
+    const quantity = cpoQty || (wooQty > 0 ? String(wooQty) : '');
+    const parsedQuantity = nestieeNum(quantity);
+    const linePrice = nestieeNum(li.price);
+    const unitPrice = parsedQuantity > 0 ? linePrice / parsedQuantity : linePrice;
+    const unit_price = String(Math.round(unitPrice * 10_000) / 10_000);
+    out.push({ style, quantity, unit_price });
+  }
+  return out;
+}
+
+/**
+ * Strip any existing Shipping rows, then append one when shippingTotal > 0.
+ */
+export function appendHonourShippingLine(
+  lines: HonourLineItem[],
+  shippingTotal: number
+): HonourLineItem[] {
+  const withoutShipping = lines.filter(
+    (line) => line.style.trim().toLowerCase() !== HONOUR_SHIPPING_LINE_STYLE.toLowerCase()
+  );
+  const amount = Math.round(Math.max(0, shippingTotal) * 100) / 100;
+  if (amount <= 0) return withoutShipping;
+  return [
+    ...withoutShipping,
+    {
+      style: HONOUR_SHIPPING_LINE_STYLE,
+      quantity: '1',
+      unit_price: String(amount),
+    },
+  ];
+}
+
+/** Same Woo payment shape as Nestiee. */
+export function parseHonourPaymentFromWoo(
+  payload: Record<string, unknown> | null | undefined
+): ReturnType<typeof parseNestieePaymentFromWoo> {
+  return parseNestieePaymentFromWoo(payload);
+}
+
+/** Build requested_delivery from pi_overall_estimate_min/max_date. */
+export function parseHonourEstimateDelivery(
+  payload: Record<string, unknown> | null | undefined
+): string {
+  if (!payload) return '';
+  const meta = Array.isArray(payload.meta_data) ? (payload.meta_data as WooMetaDatum[]) : [];
+  const min = String(
+    meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_min_date')?.value ?? ''
+  ).trim();
+  const max = String(
+    meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_max_date')?.value ?? ''
+  ).trim();
+  if (min && max && min !== max) return `${min} - ${max}`;
+  return min || max || '';
+}
+
+/** Collect CPO options across all product line items. */
+export function collectHonourCpoOptionsFromLines(
+  lineItems: WooLineItemLike[] | null | undefined
+): { options: HonourCpoOption[]; sizeMeta: WooMetaDatum[] } {
+  if (!Array.isArray(lineItems)) return { options: [], sizeMeta: [] };
+  const options: HonourCpoOption[] = [];
+  const sizeMeta: WooMetaDatum[] = [];
+  for (const li of lineItems) {
+    const meta = li.meta_data || [];
+    sizeMeta.push(...meta);
+    options.push(...extractHonourCpoOptions(meta));
+  }
+  return { options, sizeMeta };
+}
+
+/** Collect non-empty CPO 備註 values for the order's customer notes. */
+export function parseHonourCpoNotesFromLines(
+  lineItems: WooLineItemLike[] | null | undefined
+): string {
+  if (!Array.isArray(lineItems)) return '';
+  const notes: string[] = [];
+  for (const li of lineItems) {
+    for (const meta of li.meta_data || []) {
+      const key = String(meta?.key ?? '');
+      const label = honourMetaLabel(meta);
+      if (!/備註|notes?/i.test(label) && !/_notes?$/i.test(key)) continue;
+      const value = honourMetaValue(meta);
+      if (value && !notes.includes(value)) notes.push(value);
+    }
+  }
+  return notes.join('\n');
 }
 
 /** Parse a free-form payment amount field into a finite number (else 0). */

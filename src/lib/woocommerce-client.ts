@@ -10,6 +10,12 @@ export interface WooOrderPayload {
   customer_note?: string;
   payment_method?: string;
   payment_method_title?: string;
+  shipping_total?: string;
+  shipping_lines?: {
+    method_title?: string;
+    method_id?: string;
+    total?: string;
+  }[];
   billing?: {
     first_name?: string;
     last_name?: string;

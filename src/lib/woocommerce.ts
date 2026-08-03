@@ -24,6 +24,12 @@ export interface WooOrder {
   customer_note?: string;
   payment_method?: string;
   payment_method_title?: string;
+  shipping_total?: string;
+  shipping_lines?: {
+    method_title?: string;
+    method_id?: string;
+    total?: string;
+  }[];
   billing?: {
     first_name?: string;
     last_name?: string;
@@ -168,6 +174,12 @@ export function mapWooStatus(status: string): string {
     default:
       return '製作中';
   }
+}
+
+/** Woo draft orders are incomplete checkouts and must not enter the Order Hub. */
+export function isWooDraftOrder(status: string | null | undefined): boolean {
+  const normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'draft' || normalized === 'wc-draft';
 }
 
 export function wooCustomerName(order: WooOrder): string {

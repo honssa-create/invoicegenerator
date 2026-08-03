@@ -8,7 +8,19 @@ import {
   parseNestieeLinesFromWoo,
   parseNestieePaymentFromWoo,
   parsePaymentAmount,
+  parseWooShippingTotal,
+  parseWooShippingMethod,
+  normalizeOrderShippingMethod,
+  appendNestieeShippingLine,
   applyNestieeGiftBoxAutoQtys,
+  parseHonourLinesFromWoo,
+  appendHonourShippingLine,
+  honourLinesDerivedFields,
+  applyHonourOptionsToFields,
+  collectHonourCpoOptionsFromLines,
+  parseHonourCpoNotesFromLines,
+  parseHonourPaymentFromWoo,
+  parseHonourEstimateDelivery,
   WOO_PLATFORM_ORDER_TYPE,
   type WooAddressLike,
   type WooLineItemLike,
@@ -128,13 +140,23 @@ export async function upsertHubOrder(
   if (mappedType) fields.order_type = mappedType;
 
   let shippingAddress = input.shipping_address?.trim() || null;
+  let importedNotes = input.notes?.trim() || '';
 
   if (input.source_platform === 'nestiee' && input.raw_payload) {
     const payload = input.raw_payload;
     const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
-    const nestieeLines = parseNestieeLinesFromWoo(rawLines);
+    const shippingTotal = parseWooShippingTotal(payload);
+    const nestieeLines = appendNestieeShippingLine(
+      parseNestieeLinesFromWoo(rawLines),
+      shippingTotal
+    );
     fields.nestiee_lines = JSON.stringify(nestieeLines);
     applyNestieeGiftBoxAutoQtys(fields, nestieeLines);
+
+    const shipMethod = parseWooShippingMethod(payload);
+    if (shipMethod && !String(fields.shipping_method || '').trim()) {
+      fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
+    }
 
     const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
     if (billing) fields.billing_address = billing;
@@ -162,8 +184,61 @@ export async function upsertHubOrder(
     }
   }
 
+  if (input.source_platform === 'honour' && input.raw_payload) {
+    const payload = input.raw_payload;
+    const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
+    const shippingTotal = parseWooShippingTotal(payload);
+    const honourLines = appendHonourShippingLine(parseHonourLinesFromWoo(rawLines), shippingTotal);
+    Object.assign(fields, honourLinesDerivedFields(honourLines));
+
+    const { options, sizeMeta } = collectHonourCpoOptionsFromLines(rawLines);
+    applyHonourOptionsToFields(fields, options, sizeMeta);
+    const cpoNotes = parseHonourCpoNotesFromLines(rawLines);
+    if (cpoNotes && !importedNotes.includes(cpoNotes)) {
+      importedNotes = [importedNotes, cpoNotes].filter(Boolean).join('\n');
+    }
+
+    const shipMethod = parseWooShippingMethod(payload);
+    if (shipMethod && !String(fields.shipping_method || '').trim()) {
+      fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
+    }
+
+    const estimate = parseHonourEstimateDelivery(payload);
+    if (estimate && !String(fields.requested_delivery || '').trim()) {
+      fields.requested_delivery = estimate;
+    }
+
+    const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
+    if (billing) fields.billing_address = billing;
+    if (!shippingAddress && billing) shippingAddress = billing;
+
+    const verified = fields.payment_verified === true || fields.payment_verified === 'true';
+    const existingPay =
+      parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
+    if (!verified && existingPay <= 0 && input.total_amount > 0) {
+      const amount = String(Math.round(input.total_amount * 100) / 100);
+      fields.payment_amount = amount;
+      fields.payment1_amount = amount;
+    }
+
+    if (!verified) {
+      const pay = parseHonourPaymentFromWoo(payload);
+      const hasMethod = String(fields.payment_method_detail || '').trim();
+      if (!hasMethod && pay.method) {
+        fields.payment_method_detail = pay.method;
+        if (pay.note) fields.payment_method_note = pay.note;
+      }
+      if (!String(fields.payment_bank || '').trim() && pay.bank) {
+        fields.payment_bank = pay.bank;
+      }
+      if (!String(fields.payment_option || '').trim() && pay.bank) {
+        fields.payment_option = pay.bank;
+      }
+    }
+  }
+
   const notesToWrite =
-    input.notes?.trim() && !(existing?.notes || '').trim() ? input.notes.trim() : null;
+    importedNotes && !(existing?.notes || '').trim() ? importedNotes : null;
 
   if (existing) {
     await db.prepare(
@@ -226,7 +301,7 @@ export async function upsertHubOrder(
         input.phone?.trim() || null,
         shippingAddress,
         input.total_amount,
-        input.notes?.trim() || null,
+        importedNotes || null,
         JSON.stringify(fields),
         input.created_at
       );

@@ -1094,8 +1094,18 @@ export default function OrderDetailPage() {
                   <div className="grid md:grid-cols-3 gap-5">
                     {labeled('內部包裝處理', fInput('internal_pack', 'text', 'e.g. 不需要'))}
                     {labeled('交貨包裝', fInput('pack_required', 'text', 'e.g. OPP 獨立包裝'))}
-                    {labeled('其他加工', fInput('other_craft', 'text'))}
                   </div>
+                  {labeled(
+                    '其他加工',
+                    <textarea
+                      value={fVal('other_craft')}
+                      onChange={(e) => setFieldLocal('other_craft', e.target.value)}
+                      onBlur={(e) => patch({ fields: { other_craft: e.target.value } })}
+                      rows={6}
+                      placeholder="Woo / CPO option dump for further processing…"
+                      className={softInput}
+                    />
+                  )}
                 </div>
 
                 {/* Supplier */}

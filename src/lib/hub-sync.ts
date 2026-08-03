@@ -12,6 +12,7 @@ import { getQuickBooksCredentials } from './integration-settings-server';
 import {
   fetchWooOrders,
   getWooStoreConfigs,
+  isWooDraftOrder,
   mapWooStatus,
   wooCustomerName,
   wooOrderDescription,
@@ -74,13 +75,15 @@ export async function ingestWooOrders(
     errors: [],
   };
 
-  const rows = dateRange
+  const dateRows = dateRange
     ? orders.filter((o) => {
         const day = o.date_created.slice(0, 10);
         return day >= dateRange.dateFrom && day <= dateRange.dateTo;
       })
     : orders;
-  result.fetched = rows.length;
+  const rows = dateRows.filter((order) => !isWooDraftOrder(order.status));
+  result.fetched = dateRows.length;
+  result.skipped += dateRows.length - rows.length;
   const syncedAt = new Date().toISOString();
 
   await db.transaction(async () => {

@@ -30,7 +30,7 @@ export default function OrdersPage() {
   const [orderType, setOrderType] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'created', dir: 'desc' });
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'reference', dir: 'desc' });
 
   const load = () => {
     setLoading(true);
@@ -91,7 +91,11 @@ export default function OrdersPage() {
   }, [orders, dateStart, dateEnd, orderType, status, search, sort]);
 
   const toggleSort = (key: SortKey) =>
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'reference' || key === 'created' || key === 'delivery' ? 'desc' : 'asc' }
+    );
   const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
   const sortTh = (key: SortKey, label: string) => (
     <th

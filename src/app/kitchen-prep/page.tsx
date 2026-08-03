@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import CompletionModal from '@/components/kitchen-prep/CompletionModal';
@@ -53,11 +53,62 @@ const EMPTY: FormState = {
   lines: [emptyLine()],
 };
 
+function parsePrefillForm(searchParams: URLSearchParams): FormState | null {
+  if (searchParams.get('create') !== '1') return null;
+  const orderTypeRaw = searchParams.get('order_type') || 'restock';
+  const order_type: PrepOrderType = PREP_ORDER_TYPES.includes(orderTypeRaw as PrepOrderType)
+    ? (orderTypeRaw as PrepOrderType)
+    : 'restock';
+
+  let lines: CapacityLine[] = [emptyLine()];
+  const rawLines = searchParams.get('lines');
+  if (rawLines) {
+    try {
+      const parsed = JSON.parse(rawLines) as Array<{
+        capacity?: string;
+        qty_osmanthus?: number;
+        qty_red_date?: number;
+        qty_rock_sugar?: number;
+      }>;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const withNums = parsed
+          .filter((l) => PREP_CAPACITIES.includes(l.capacity as PrepCapacity))
+          .map((l) => {
+            const capacity = l.capacity as PrepCapacity;
+            const o = Math.max(0, Math.round(Number(l.qty_osmanthus) || 0));
+            const r = isRedDateAllowed(capacity)
+              ? Math.max(0, Math.round(Number(l.qty_red_date) || 0))
+              : 0;
+            const s = Math.max(0, Math.round(Number(l.qty_rock_sugar) || 0));
+            return {
+              capacity,
+              qty_osmanthus: o ? String(o) : '',
+              qty_red_date: r ? String(r) : '',
+              qty_rock_sugar: s ? String(s) : '',
+            };
+          })
+          .filter((l) => l.qty_osmanthus || l.qty_red_date || l.qty_rock_sugar);
+        if (withNums.length) lines = withNums;
+      }
+    } catch {
+      /* ignore bad lines param */
+    }
+  }
+
+  return {
+    stewing_date: new Date().toISOString().slice(0, 10),
+    order_type,
+    order_code: '',
+    lines,
+  };
+}
+
 type SortKey = 'stewing_date' | 'order_code' | 'capacity' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export default function KitchenPrepListPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState<PrepOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -75,6 +126,15 @@ export default function KitchenPrepListPage() {
       .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const prefill = parsePrefillForm(searchParams);
+    if (!prefill) return;
+    setError('');
+    setForm(prefill);
+    setShowForm(true);
+    router.replace('/kitchen-prep', { scroll: false });
+  }, [searchParams, router]);
 
   const sortedOrders = useMemo(() => {
     const list = [...orders];

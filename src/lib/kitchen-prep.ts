@@ -482,6 +482,31 @@ export function originalOrderQuantity(qtys: PrepFlavorQty): number {
   return Math.max(0, qtys.osmanthus) + Math.max(0, qtys.red_date) + Math.max(0, qtys.rock_sugar);
 }
 
+/** Deep-link to Kitchen Prep create form with capacity lines prefilled (e.g. gift-box shortfall). */
+export function buildKitchenPrepCreateHref(input: {
+  orderType?: PrepOrderType;
+  lines: Array<{
+    capacity: PrepCapacity;
+    qty_osmanthus?: number;
+    qty_red_date?: number;
+    qty_rock_sugar?: number;
+  }>;
+}): string {
+  const params = new URLSearchParams({ create: '1' });
+  if (input.orderType) params.set('order_type', input.orderType);
+  const lines = input.lines
+    .filter((l) => PREP_CAPACITIES.includes(l.capacity))
+    .map((l) => ({
+      capacity: l.capacity,
+      qty_osmanthus: Math.max(0, Math.round(Number(l.qty_osmanthus) || 0)),
+      qty_red_date: Math.max(0, Math.round(Number(l.qty_red_date) || 0)),
+      qty_rock_sugar: Math.max(0, Math.round(Number(l.qty_rock_sugar) || 0)),
+    }))
+    .filter((l) => l.qty_osmanthus + l.qty_red_date + l.qty_rock_sugar > 0);
+  if (lines.length) params.set('lines', JSON.stringify(lines));
+  return `/kitchen-prep?${params.toString()}`;
+}
+
 /** Rule A: 紅棗 & 冰糖 — no 片糖. Rule B: 桂花 — no 冰糖. */
 export function validateFormulaBusinessRules(
   flavor: PrepFlavor,

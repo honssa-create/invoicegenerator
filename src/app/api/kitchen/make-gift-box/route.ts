@@ -21,7 +21,10 @@ export async function POST(request: Request) {
     });
     if (result.error) {
       return NextResponse.json(
-        { error: result.error, prep_orders: result.prep_orders || [] },
+        {
+          error: result.error,
+          finished_shortfalls: result.finished_shortfalls || [],
+        },
         { status: 400 }
       );
     }

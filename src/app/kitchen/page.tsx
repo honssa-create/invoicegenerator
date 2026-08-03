@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import {
   GIFT_BOX_TYPES,
   giftBoxMinStock,
   giftBoxTopUpQty,
   RAW_MATERIALS,
+  KITCHEN_ACTIONS,
+  KITCHEN_ACTION_LABELS,
   expandGiftBoxBom,
   checkBomAgainstStock,
   bomIsSufficient,
@@ -18,11 +21,13 @@ import {
   normalizeBomQty,
   SUI_XIN_YAN_BING_G,
   SUI_XIN_BING_TANG_G,
+  type KitchenAction,
   type KitchenState,
   type KitchenOpenOrder,
   type KitchenNeedLine,
 } from '@/lib/kitchen';
 import { type StockMaps } from '@/lib/kitchen-bom';
+import { buildKitchenPrepCreateHref, type PrepCapacity } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type Modal = 'gift' | 'return' | 'restock' | null;
@@ -92,6 +97,7 @@ function isNeedStockEnough(n: KitchenNeedLine, stock: StockMaps): boolean {
 }
 
 export default function KitchenPage() {
+  const router = useRouter();
   const [state, setState] = useState<KitchenState | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [modal, setModal] = useState<Modal>(null);
@@ -113,6 +119,7 @@ export default function KitchenPage() {
 
   // 補充原料
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
+  const [historyActionFilter, setHistoryActionFilter] = useState<KitchenAction | ''>('');
 
   const load = () =>
     fetch('/api/kitchen/state')
@@ -129,6 +136,52 @@ export default function KitchenPage() {
   }, [toast]);
 
   const flash = (text: string, kind: 'success' | 'error' = 'success') => setToast({ text, kind });
+
+  /** Ask to create a kitchen prep order when finished bottles are short for packaging. */
+  const offerPrepFromFinishedShortfalls = (
+    shortfalls: unknown,
+    errorMessage?: string
+  ): boolean => {
+    if (!Array.isArray(shortfalls) || shortfalls.length === 0) return false;
+    const lines = shortfalls
+      .map((g: {
+        capacity?: string;
+        qtys?: { osmanthus?: number; red_date?: number; rock_sugar?: number };
+      }) => ({
+        capacity: g.capacity as PrepCapacity,
+        qty_osmanthus: Number(g.qtys?.osmanthus) || 0,
+        qty_red_date: Number(g.qtys?.red_date) || 0,
+        qty_rock_sugar: Number(g.qtys?.rock_sugar) || 0,
+      }))
+      .filter(
+        (l) =>
+          l.capacity &&
+          l.qty_osmanthus + l.qty_red_date + l.qty_rock_sugar > 0
+      );
+    if (!lines.length) return false;
+
+    const summary = lines
+      .map(
+        (l) =>
+          `${l.capacity}: 桂花${l.qty_osmanthus}/紅棗${l.qty_red_date}/冰糖${l.qty_rock_sugar}`
+      )
+      .join('；');
+    const ok = confirm(
+      bi(
+        `${errorMessage || 'Not enough finished bottles to pack gift boxes.'}\n\nCreate a restock prep order for:\n${summary}?`,
+        `${errorMessage || '成品樽不足，無法包裝禮盒。'}\n\n是否建立補充存貨備料單？\n${summary}`
+      )
+    );
+    if (ok) {
+      setModal(null);
+      router.push(
+        buildKitchenPrepCreateHref({ orderType: 'restock', lines })
+      );
+    } else if (errorMessage) {
+      flash(errorMessage, 'error');
+    }
+    return true;
+  };
 
   const stockMaps = useMemo(() => {
     if (!state) return { finished: {}, raw: {}, giftBoxes: {} };
@@ -424,19 +477,10 @@ export default function KitchenPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        const prepOrders = Array.isArray(data.prep_orders) ? data.prep_orders : [];
-        if (prepOrders.length) {
-          const codes = prepOrders.map((p: { order_code?: string }) => p.order_code).filter(Boolean).join(', ');
-          flash(
-            bi(
-              `${data.error || 'Finished stock short'} — created restock prep ${codes}`,
-              `${data.error || '成品不足'} — 已建立補充存貨備料單 ${codes}`
-            ),
-            'error'
-          );
-        } else {
-          flash(data.error || 'Failed', 'error');
+        if (offerPrepFromFinishedShortfalls(data.finished_shortfalls, data.error)) {
+          return;
         }
+        flash(data.error || 'Failed', 'error');
         return;
       }
       setState(data.state);
@@ -464,19 +508,10 @@ export default function KitchenPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        const prepOrders = Array.isArray(data.prep_orders) ? data.prep_orders : [];
-        if (prepOrders.length) {
-          const first = prepOrders[0] as { id?: number; order_code?: string };
-          flash(
-            bi(
-              `${data.error || 'Finished stock short'} — restock prep ${first.order_code || ''} created`,
-              `${data.error || '成品不足'} — 已建立補充存貨備料單 ${first.order_code || ''}`
-            ),
-            'error'
-          );
-        } else {
-          flash(data.error || 'Failed', 'error');
+        if (offerPrepFromFinishedShortfalls(data.finished_shortfalls, data.error)) {
+          return;
         }
+        flash(data.error || 'Failed', 'error');
         return;
       }
       setState(data.state);
@@ -580,6 +615,17 @@ export default function KitchenPage() {
 
   const giftNeededTotal = state?.giftBoxes.reduce((s, g) => s + g.needed, 0) || 0;
   const returnNeededCount = returnOrders.length;
+
+  const filteredMovements = useMemo(() => {
+    if (!state) return [];
+    if (!historyActionFilter) return state.movements;
+    return state.movements.filter((m) => m.action === historyActionFilter);
+  }, [state, historyActionFilter]);
+
+  const historyActionOptions = useMemo(
+    () => KITCHEN_ACTIONS.filter((a) => a !== 'void'),
+    []
+  );
 
   const inputCls =
     'px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
@@ -933,7 +979,26 @@ export default function KitchenPage() {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="font-semibold text-gray-900 mb-3">{bi('History', '歷史')}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h2 className="font-semibold text-gray-900">{bi('History', '歷史')}</h2>
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <span>動作</span>
+              <select
+                className={`${inputCls} min-w-[9rem]`}
+                value={historyActionFilter}
+                onChange={(e) =>
+                  setHistoryActionFilter((e.target.value || '') as KitchenAction | '')
+                }
+              >
+                <option value="">{bi('All', '全部')}</option>
+                {historyActionOptions.map((a) => (
+                  <option key={a} value={a}>
+                    {KITCHEN_ACTION_LABELS[a]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-white">
@@ -946,14 +1011,16 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {state.movements.length === 0 && (
+                {filteredMovements.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-6 text-center text-gray-400">
-                      {bi('No movements yet', '尚無紀錄')}
+                      {state.movements.length === 0
+                        ? bi('No movements yet', '尚無紀錄')
+                        : bi('No movements for this action', '此動作尚無紀錄')}
                     </td>
                   </tr>
                 )}
-                {state.movements.map((m) => (
+                {filteredMovements.map((m) => (
                   <tr
                     key={m.id}
                     className={`border-b border-gray-50 align-top ${m.voidedAt ? 'opacity-50' : ''}`}

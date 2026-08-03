@@ -517,7 +517,7 @@ export async function makeGiftBox(
 ): Promise<{
   error?: string;
   state?: KitchenState;
-  prep_orders?: { id: number; order_code: string; capacity: string; order_type: string }[];
+  finished_shortfalls?: { capacity: string; qtys: { osmanthus: number; red_date: number; rock_sugar: number } }[];
 }> {
   await ensureSeed(ownerId);
   const boxType = input.boxType;
@@ -548,18 +548,11 @@ export async function makeGiftBox(
   }
 
   if (finishedShort.length || rawShort.length) {
-    let prep_orders:
-      | { id: number; order_code: string; capacity: string; order_type: string }[]
-      | undefined;
-    if (finishedShort.length) {
-      const groups = finishedShortfallsByCapacity(lines, stock.finished);
-      if (groups.length) {
-        const { upsertRestockPrepsForShortfalls } = await import('./kitchen-prep-server');
-        prep_orders = await upsertRestockPrepsForShortfalls(ownerId, groups);
-      }
-    }
+    const finished_shortfalls = finishedShort.length
+      ? finishedShortfallsByCapacity(lines, stock.finished)
+      : [];
     const error = [...finishedShort, ...rawShort].join('；');
-    return { error, prep_orders };
+    return { error, finished_shortfalls };
   }
 
   // Packaging only: bottles/raw → gift box stock (orders allocate from gift boxes separately).

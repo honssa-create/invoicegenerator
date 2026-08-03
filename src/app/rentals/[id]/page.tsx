@@ -895,7 +895,10 @@ function RentalDetailInner() {
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
         <button onClick={() => router.push('/rentals')} className="text-sm text-brand-600 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to Rentals', '返回租金管理')}</button>
-        <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+        <label className="flex flex-col gap-0.5 w-full sm:w-auto">
+          <span className="text-xs font-medium text-gray-500">{bi('Billing period', '帳期')}</span>
+          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+        </label>
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 bg-brand-50 text-brand-700 text-sm rounded-lg cursor-pointer">{toast} ✕</div>}
@@ -1002,7 +1005,7 @@ function RentalDetailInner() {
             <input type="tel" className={fieldCls} value={tenantPhone} onChange={(e) => setTenantPhone(e.target.value)} placeholder="+852…" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Email 電郵</label>
             <input type="email" className={fieldCls} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
@@ -1244,7 +1247,7 @@ function RentalDetailInner() {
                 )}
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Note (optional)</label>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Invoice note (optional)', '發票備註（選填）')}</label>
                     <input className={inp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} placeholder="e.g. Water meter 1234" />
                   </div>
                   <div className="flex flex-col items-end gap-1 pb-2.5 min-w-[5.5rem]">
@@ -1528,7 +1531,7 @@ function RentalDetailInner() {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Email Preview Note (optional)</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Email preview note (optional)', '電郵預覽備註（選填）')}</label>
               <textarea className={inp} rows={3} value={invoiceNote} onChange={(e) => setInvoiceNote(e.target.value)} placeholder={`Dear ${unit.tenantName},…`} />
               <p className="text-xs text-gray-400 mt-1">Send to: {unit.tenantEmail || 'No email set — log only'}</p>
             </div>
@@ -1570,7 +1573,7 @@ function RentalDetailInner() {
                   Multi-month allocation — arrears first, then future months for advance rent
                 </p>
               </div>
-              <button onClick={() => setShowPaidModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+              <button type="button" onClick={() => setShowPaidModal(false)} className="text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
             </div>
 
             <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
@@ -1681,6 +1684,7 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1"
                                   value={row.billingPeriod}
                                   onChange={(e) => updatePeriodRow(idx, { billingPeriod: e.target.value })}
+                                  aria-label={bi('Period', '帳期')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -1689,6 +1693,7 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.rent}
                                   onChange={(e) => updatePeriodRow(idx, { rent: e.target.value })}
+                                  aria-label={bi('Rent', '租金')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -1697,6 +1702,7 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.electricity}
                                   onChange={(e) => updatePeriodRow(idx, { electricity: e.target.value })}
+                                  aria-label={bi('Electricity', '電費')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -1705,12 +1711,14 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.water}
                                   onChange={(e) => updatePeriodRow(idx, { water: e.target.value })}
+                                  aria-label={bi('Water', '水費')}
                                 />
                               </td>
                               <td className="px-1 py-2">
                                 <button
                                   type="button"
                                   className="text-gray-400 hover:text-red-600 text-xs"
+                                  aria-label={bi('Remove row', '刪除列')}
                                   onClick={() => {
                                     setPeriodRows((prev) => {
                                       const next = prev.filter((_, i) => i !== idx);
@@ -1782,13 +1790,23 @@ function RentalDetailInner() {
                 <div>
                   <p className="text-sm font-medium text-gray-700 mb-2">Upload Bank Slip / 收款憑證 (optional)</p>
                   <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={bi('Upload bank slip', '上傳收款憑證')}
                     onClick={() => receiptInputRef.current?.click()}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); receiptInputRef.current?.click(); } }}
                     onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleReceiptUpload(f); }}
                     onDragOver={(e) => e.preventDefault()}
                     className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
                   >
-                    <input ref={receiptInputRef} type="file" accept="image/*" className="hidden"
-                      onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }} />
+                    <input
+                      ref={receiptInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      aria-label={bi('Upload bank slip', '上傳收款憑證')}
+                      onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }}
+                    />
                     {ocrLoading ? (
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" />
                     ) : receiptFile ? (
@@ -1845,12 +1863,24 @@ function RentalDetailInner() {
             </label>
             {endContractForm.startNew && (
               <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/50">
-                <input className={inp} placeholder="New tenant name" value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={inp} placeholder="Start DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
-                  <input className={inp} placeholder="End DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{bi('New tenant name', '新租客姓名')}</label>
+                  <input className={inp} value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
                 </div>
-                <input type="number" className={inp} placeholder="Base rent" value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{bi('Lease start', '起租日')}</label>
+                    <input className={inp} placeholder="DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{bi('Lease end', '完租日')}</label>
+                    <input className={inp} placeholder="DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{bi('Base rent', '基本租金')}</label>
+                  <input type="number" className={inp} value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
+                </div>
               </div>
             )}
             <div className="flex justify-end gap-3 pt-2">
@@ -1866,6 +1896,7 @@ function RentalDetailInner() {
       {/* Note modal */}
       {showNoteModal && (
         <Modal title={bi('Log Activity Note', '記錄活動備註')} onClose={() => setShowNoteModal(false)}>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Activity note', '活動備註')}</label>
           <textarea className={inp} rows={4} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="e.g. Tenant called about late payment…" />
           <div className="flex justify-end gap-3 mt-4">
             <button onClick={() => setShowNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
@@ -1885,7 +1916,7 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
       <div className="modal-panel max-h-[92vh]">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-xl font-bold">{title}</h2>
-          <button onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-700 text-xl">✕</button>
+          <button type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
         </div>
         {children}
       </div>

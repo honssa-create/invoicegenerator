@@ -503,12 +503,20 @@ export default function TenantDetailPage() {
             {readOnly && <span className="ml-2 text-amber-600">(Read-only)</span>}
           </p>
         </div>
-        <div className="page-actions flex-wrap">
-          <input type="month" value={fromPeriod} onChange={(e) => setFromPeriod(e.target.value)} className={`${inp} w-auto`} title="From period (optional — auto-detects arrears)" placeholder="From (auto)" />
-          <span className="text-gray-400 self-center">→</span>
-          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} title="Target period" />
-          <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} title="Paid lookback months" />
-          <span className="text-xs text-gray-400 self-center">paid mo.</span>
+        <div className="page-actions flex-wrap items-end">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-gray-500">{bi('From period', '起始帳期')}</span>
+            <input type="month" value={fromPeriod} onChange={(e) => setFromPeriod(e.target.value)} className={`${inp} w-auto`} />
+          </label>
+          <span className="text-gray-400 self-end pb-2">→</span>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-gray-500">{bi('Target period', '目標帳期')}</span>
+            <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-gray-500">{bi('Paid lookback (months)', '已付回溯月數')}</span>
+            <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} />
+          </label>
           <button
             type="button"
             onClick={openDebitNoteModal}
@@ -684,6 +692,7 @@ export default function TenantDetailPage() {
                   checked={selectedUnitIds.includes(u.id)}
                   onChange={() => toggleUnit(u.id)}
                   className="h-4 w-4 rounded border-gray-300"
+                  aria-label={bi(`Include ${u.unitName}`, `納入 ${u.unitName}`)}
                 />
                 <Link href={`/rentals/${u.id}`} className="text-brand-600 hover:underline font-medium">{u.unitName}</Link>
               </li>
@@ -941,6 +950,7 @@ export default function TenantDetailPage() {
                                     className="w-full text-xs border rounded px-1 py-1"
                                     value={row.unitId}
                                     onChange={(e) => updateTenantPeriodRow(idx, { unitId: Number(e.target.value) })}
+                                    aria-label={bi('Unit', '單位')}
                                   >
                                     {units.map((u) => (
                                       <option key={u.id} value={u.id}>{u.unitName}</option>
@@ -956,6 +966,7 @@ export default function TenantDetailPage() {
                                   className="w-full text-xs border rounded px-2 py-1"
                                   value={row.billingPeriod}
                                   onChange={(e) => updateTenantPeriodRow(idx, { billingPeriod: e.target.value })}
+                                  aria-label={bi('Period', '帳期')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -964,6 +975,7 @@ export default function TenantDetailPage() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.rent}
                                   onChange={(e) => updateTenantPeriodRow(idx, { rent: e.target.value })}
+                                  aria-label={bi('Rent', '租金')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -972,6 +984,7 @@ export default function TenantDetailPage() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.electricity}
                                   onChange={(e) => updateTenantPeriodRow(idx, { electricity: e.target.value })}
+                                  aria-label={bi('Electricity', '電費')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -980,12 +993,14 @@ export default function TenantDetailPage() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.water}
                                   onChange={(e) => updateTenantPeriodRow(idx, { water: e.target.value })}
+                                  aria-label={bi('Water', '水費')}
                                 />
                               </td>
                               <td className="px-1 py-2">
                                 <button
                                   type="button"
                                   className="text-gray-400 hover:text-red-600 text-xs"
+                                  aria-label={bi('Remove row', '刪除列')}
                                   onClick={() => {
                                     setPeriodRows((prev) => {
                                       const next = prev.filter((_, i) => i !== idx);
@@ -1087,6 +1102,7 @@ export default function TenantDetailPage() {
                       max={outstanding}
                       value={allocations[c.id] || ''}
                       onChange={(e) => setAllocations({ ...allocations, [c.id]: e.target.value })}
+                      aria-label={bi(`Allocate ${CHARGE_TYPE_LABELS[c.chargeType]}`, `分配${CHARGE_TYPE_LABELS[c.chargeType]}`)}
                     />
                   </div>
                 );

@@ -197,7 +197,10 @@ export default function RentalsPage() {
           <Link href="/rentals/templates" className="btn border border-gray-300 text-gray-700 hover:bg-gray-50">
             {NAV.templates}
           </Link>
-          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+          <label className="flex flex-col gap-0.5 w-full sm:w-auto">
+            <span className="text-xs font-medium text-gray-500">{bi('Billing period', '帳期')}</span>
+            <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+          </label>
           <button onClick={runScheduler} disabled={busy || readOnly} className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{bi('Run Billing', '執行出帳')}</button>
           {!readOnly && (
             <button onClick={() => openUnitModal(blankUnit)} className="btn bg-brand-600 text-white hover:bg-brand-700">+ {bi('Add Unit', '新增單位')}</button>
@@ -245,18 +248,21 @@ export default function RentalsPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={leaseFilter}
-              onChange={(e) => setLeaseFilter(e.target.value as LeaseDisplayStatus | 'all')}
-              className={`${inp} w-auto text-sm`}
-            >
-              <option value="all">All contract status</option>
-              <option value="active">生效中 Active</option>
-              <option value="ending_soon">即將到期 Ending soon</option>
-              <option value="ended">合約完結 Ended</option>
-              <option value="terminated">提早終止 Terminated</option>
-              <option value="vacant">空置 Vacant</option>
-            </select>
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-xs font-medium text-gray-500 whitespace-nowrap">{bi('Contract status', '合約狀態')}</span>
+              <select
+                value={leaseFilter}
+                onChange={(e) => setLeaseFilter(e.target.value as LeaseDisplayStatus | 'all')}
+                className={`${inp} w-auto text-sm`}
+              >
+                <option value="all">All contract status</option>
+                <option value="active">生效中 Active</option>
+                <option value="ending_soon">即將到期 Ending soon</option>
+                <option value="ended">合約完結 Ended</option>
+                <option value="terminated">提早終止 Terminated</option>
+                <option value="vacant">空置 Vacant</option>
+              </select>
+            </label>
           {selectedUnitIds.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-gray-600">
@@ -294,7 +300,7 @@ export default function RentalsPage() {
             <table className="w-full min-w-[900px] text-sm">
               <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-3 py-3 text-left w-10" title="Select units with same tenant for grouped debit note">☑</th>
+                  <th className="px-3 py-3 w-10" />
                   <th className="px-4 py-3 text-left">單位 Unit</th>
                   <th className="px-4 py-3 text-left">租單位人士 Tenant</th>
                   <th className="px-4 py-3 text-left">Contract 合約</th>
@@ -512,7 +518,7 @@ export default function RentalsPage() {
           <div className="modal-panel sm:max-w-2xl max-h-[92vh]">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-xl font-bold">{unitModal.id ? 'Edit Lease 編輯租約' : 'New Rental Unit 新增單位'}</h2>
-              <button onClick={() => setUnitModal(null)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+              <button type="button" onClick={() => setUnitModal(null)} className="text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
               {[

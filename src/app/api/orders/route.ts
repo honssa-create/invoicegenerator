@@ -4,7 +4,8 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrders, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
-import { ORDER_TYPES } from '@/lib/orders';
+import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
+import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -54,6 +55,13 @@ export async function POST(request: Request) {
       );
     const id = result.lastInsertRowid as number;
     await logActivity(id, session.userId, 'activity', session.name, 'created this order');
+    if (orderType === WEDDING_GIFT_ORDER_TYPE) {
+      try {
+        await ensurePrepFromWeddingOrder(ownerId, id);
+      } catch {
+        // Order still created; prep can be caught up by cron.
+      }
+    }
     return NextResponse.json({ order: await getOrder(id, ownerId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });

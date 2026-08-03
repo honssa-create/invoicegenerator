@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { importFromOrder } from '@/lib/kitchen-prep-server';
+import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { getDataOwnerId } from '@/lib/org-server';
 
 export async function POST(request: Request) {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'order_id is required' }, { status: 400 });
     }
     const ownerId = await getDataOwnerId(session.userId);
-    const order = await importFromOrder(session.userId, orderId, ownerId);
+    const order = await ensurePrepFromWeddingOrder(ownerId, orderId);
     if (!order) return NextResponse.json({ error: 'Order not found or not importable' }, { status: 404 });
     return NextResponse.json({ order }, { status: 201 });
   } catch {

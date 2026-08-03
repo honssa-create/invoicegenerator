@@ -196,6 +196,24 @@ async function runBootDataFixes(): Promise<void> {
   // Seed role_permissions for operator/accountant when empty (canonical source: permissions-server).
   const { seedRolePermissionsIfEmpty } = await import('./permissions-server');
   await seedRolePermissionsIfEmpty();
+
+  // Allow kitchen_prep_orders.status = inactive (one-time constraint refresh).
+  const mig = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_status_inactive'`
+  );
+  if (!mig.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_status_check
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_status_check
+        CHECK (status IN ('inactive', 'scheduled', 'in_prep', 'completed'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_inactive') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

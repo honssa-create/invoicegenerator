@@ -45,12 +45,10 @@ import {
   orderTitle,
   isBadgeOrderType,
   isWeddingGiftOrderType,
-  isBirdNestOrderType,
-  isNestieeOrderType,
   type HonourLineItem,
   type Order,
 } from '@/lib/orders';
-import { parseWeddingGiftConfirmation } from '@/lib/wedding-gift-confirmation';
+import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 interface InvoiceOption {
@@ -85,16 +83,26 @@ export default function OrderDetailPage() {
   const [paymentPreview, setPaymentPreview] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [paymentScanMsg, setPaymentScanMsg] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [convertingQuote, setConvertingQuote] = useState(false);
-  const [importingPrep, setImportingPrep] = useState(false);
   const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
   const [confirmPasteText, setConfirmPasteText] = useState('');
   const [confirmPasteError, setConfirmPasteError] = useState('');
+  /** Big Day value last persisted with derived dates (or loaded from server). */
+  const bigDayPersistedRef = useRef('');
+  /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
+  const bigDaySavedOnChangeRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/orders/${id}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setOrder(d?.order || null))
+      .then((d) => {
+        const o = d?.order || null;
+        setOrder(o);
+        if (o) {
+          bigDayPersistedRef.current = String(o.fields?.big_day || '');
+          bigDaySavedOnChangeRef.current = null;
+        }
+      })
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -110,6 +118,20 @@ export default function OrderDetailPage() {
   }, []);
 
   const patch = async (payload: { core?: Record<string, unknown>; fields?: Record<string, unknown>; linked_invoice_id?: string | number | null; linked_quotation_id?: string | number | null }) => {
+    // Keep UI in sync immediately so a later server response can't briefly wipe autofills.
+    if (payload.fields && Object.keys(payload.fields).length) {
+      setOrder((o) =>
+        o
+          ? {
+              ...o,
+              fields: {
+                ...o.fields,
+                ...(payload.fields as Record<string, string | boolean>),
+              },
+            }
+          : o
+      );
+    }
     const res = await fetch(`/api/orders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -117,7 +139,10 @@ export default function OrderDetailPage() {
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.order) setOrder(data.order);
+      if (data.order) {
+        setOrder(data.order);
+        bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
+      }
     }
   };
 
@@ -153,47 +178,6 @@ export default function OrderDetailPage() {
       setQuoteToast({ text: 'Failed to convert order', kind: 'error' });
     } finally {
       setConvertingQuote(false);
-    }
-  };
-
-  const importToKitchenPrep = async () => {
-    setImportingPrep(true);
-    setQuoteToast(null);
-    try {
-      const res = await fetch('/api/kitchen-prep/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: Number(id) }),
-      });
-      let data: { error?: string; order?: { id: number; order_code?: string } } = {};
-      try {
-        data = await res.json();
-      } catch {
-        setQuoteToast({
-          text: bi(`Import failed (HTTP ${res.status})`, `匯入失敗（HTTP ${res.status}）`),
-          kind: 'error',
-        });
-        return;
-      }
-      if (!res.ok || !data.order?.id) {
-        setQuoteToast({
-          text: data.error || bi('Failed to import to Kitchen Prep', '匯入廚房備料失敗'),
-          kind: 'error',
-        });
-        return;
-      }
-      setQuoteToast({
-        text: bi(
-          `Imported prep ${data.order.order_code || data.order.id}`,
-          `已匯入備料單 ${data.order.order_code || data.order.id}`
-        ),
-        kind: 'success',
-      });
-      setTimeout(() => router.push(`/kitchen-prep/${data.order!.id}`), 600);
-    } catch {
-      setQuoteToast({ text: bi('Failed to import to Kitchen Prep', '匯入廚房備料失敗'), kind: 'error' });
-    } finally {
-      setImportingPrep(false);
     }
   };
 
@@ -650,14 +634,14 @@ export default function OrderDetailPage() {
     const fieldsPatch: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed.fields)) {
       if (!v) continue;
-      // Keep an existing expiry date; only auto-fill when empty
-      if (k === 'expiry_date' && fVal('expiry_date')) continue;
+      // Derived from Big Day — applied only when Big Day itself changes (below).
+      if (k === 'expiry_date' || k === 'production_date') continue;
       fieldsPatch[k] = v;
     }
-    if (fieldsPatch.big_day && !fieldsPatch.expiry_date && !fVal('expiry_date')) {
-      const d = new Date(`${fieldsPatch.big_day}T12:00:00`);
-      d.setDate(d.getDate() + 28);
-      fieldsPatch.expiry_date = d.toISOString().slice(0, 10);
+    if (fieldsPatch.big_day && fieldsPatch.big_day !== fVal('big_day')) {
+      // Big Day change always refreshes derived dates (overrides prior edits).
+      fieldsPatch.expiry_date = addCalendarDays(fieldsPatch.big_day, 28);
+      fieldsPatch.production_date = addCalendarDays(fieldsPatch.big_day, -10);
     }
 
     const corePatch: Record<string, unknown> = {};
@@ -778,18 +762,6 @@ export default function OrderDetailPage() {
           >
             {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
           </button>
-          {(isBirdNestOrderType(orderType) || isNestieeOrderType(orderType)) && (
-            <button
-              type="button"
-              onClick={importToKitchenPrep}
-              disabled={importingPrep}
-              className="btn bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 w-full sm:w-auto"
-            >
-              {importingPrep
-                ? bi('Importing…', '匯入中…')
-                : bi('Import to Kitchen Prep', '匯入廚房備料')}
-            </button>
-          )}
           <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🚚 {bi('Generate Delivery Note', '產生出貨單')}
           </Link>
@@ -1196,24 +1168,52 @@ export default function OrderDetailPage() {
                       <input
                         type="date"
                         value={fVal('big_day')}
-                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const prev = fVal('big_day');
+                          setFieldLocal('big_day', v);
+                          if (v && v !== prev) {
+                            const expiryIso = addCalendarDays(v, 28);
+                            const productionIso = addCalendarDays(v, -10);
+                            setFieldLocal('expiry_date', expiryIso);
+                            setFieldLocal('production_date', productionIso);
+                            // Persist all three immediately — a later blur that only sends
+                            // big_day would overwrite these via setOrder(server).
+                            bigDaySavedOnChangeRef.current = v;
+                            bigDayPersistedRef.current = v;
+                            void patch({
+                              fields: {
+                                big_day: v,
+                                expiry_date: expiryIso,
+                                production_date: productionIso,
+                              },
+                            });
+                          }
+                        }}
                         onBlur={(e) => {
                           const v = e.target.value;
-                          const upd: Record<string, string> = { big_day: v };
-                          if (v && !fVal('expiry_date')) {
-                            const d = new Date(v);
-                            d.setDate(d.getDate() + 28);
-                            const iso = d.toISOString().slice(0, 10);
-                            upd.expiry_date = iso;
-                            setFieldLocal('expiry_date', iso);
+                          // onChange already saved this value with derived dates.
+                          if (bigDaySavedOnChangeRef.current === v) {
+                            bigDaySavedOnChangeRef.current = null;
+                            return;
                           }
-                          patch({ fields: upd });
+                          const upd: Record<string, string> = { big_day: v };
+                          if (v && v !== bigDayPersistedRef.current) {
+                            const expiryIso = addCalendarDays(v, 28);
+                            const productionIso = addCalendarDays(v, -10);
+                            upd.expiry_date = expiryIso;
+                            upd.production_date = productionIso;
+                            setFieldLocal('expiry_date', expiryIso);
+                            setFieldLocal('production_date', productionIso);
+                            bigDayPersistedRef.current = v;
+                          }
+                          void patch({ fields: upd });
                         }}
                         className={softInput}
                       />
                     )}
                     {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
-                    {labeled('生產日期', fInput('production_date', 'date'))}
+                    {labeled('生產日期', fInput('production_date', 'date'), 'Big Day前10天')}
                   </div>
 
                   <h3 className="text-sm font-semibold text-gray-700">客人訂購數量</h3>

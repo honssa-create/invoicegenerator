@@ -19,6 +19,7 @@ import {
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const STATUS_COLORS: Record<string, string> = {
+  inactive: 'bg-gray-100 text-gray-600',
   scheduled: 'bg-blue-100 text-blue-700',
   in_prep: 'bg-amber-100 text-amber-700',
   completed: 'bg-green-100 text-green-700',

@@ -27,14 +27,49 @@ export const PREP_ORDER_TYPE_LABELS: Record<PrepOrderType, string> = {
   wedding: '回禮訂單 Wedding',
 };
 
-export const PREP_STATUSES = ['scheduled', 'in_prep', 'completed'] as const;
+export const PREP_STATUSES = ['inactive', 'scheduled', 'in_prep', 'completed'] as const;
 export type PrepStatus = (typeof PREP_STATUSES)[number];
 
 export const PREP_STATUS_LABELS: Record<PrepStatus, string> = {
+  inactive: 'Inactive 未開始',
   scheduled: 'Scheduled 已排程',
   in_prep: 'In Prep 備料中',
   completed: 'Completed 已完成',
 };
+
+/** Calendar date in Asia/Hong_Kong as YYYY-MM-DD. */
+export function hkTodayIso(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Hong_Kong',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+/**
+ * Default status when creating a prep row.
+ * Daily → in_prep. Wedding/回禮 → inactive until stewing/production date is due.
+ */
+export function defaultPrepStatusForCreate(
+  orderType: PrepOrderType,
+  stewingDate: string,
+  opts?: { hasProductionDate?: boolean; today?: string }
+): PrepStatus {
+  if (orderType === 'daily') return 'in_prep';
+  const today = opts?.today ?? hkTodayIso();
+  if (opts?.hasProductionDate === false) return 'inactive';
+  if (!stewingDate?.trim() || stewingDate > today) return 'inactive';
+  return 'scheduled';
+}
+
+/** Wedding/回禮 status from stewing date (does not touch in_prep / completed). */
+export function weddingPrepStatusFromDate(
+  stewingDate: string,
+  opts?: { hasProductionDate?: boolean; today?: string }
+): PrepStatus {
+  return defaultPrepStatusForCreate('wedding', stewingDate, opts);
+}
 
 /** Per-bottle weights (grams) for one flavor line at a given capacity. */
 export interface FlavorFormulaPerBottle {
@@ -423,7 +458,8 @@ export function validateFormulaBusinessRules(
 
 export function validatePrepFlavorQtys(
   capacity: PrepCapacity,
-  qtys: PrepFlavorQty
+  qtys: PrepFlavorQty,
+  opts?: { allowEmpty?: boolean }
 ): string | null {
   if (qtys.red_date > 0 && !isRedDateAllowed(capacity)) {
     return `Red Date (紅棗) is not allowed for ${PREP_CAPACITY_LABELS[capacity]}`;
@@ -438,7 +474,7 @@ export function validatePrepFlavorQtys(
     const ruleErr = validateFormulaBusinessRules(flavor, formula);
     if (ruleErr) return ruleErr;
   }
-  if (originalOrderQuantity(qtys) === 0) {
+  if (!opts?.allowEmpty && originalOrderQuantity(qtys) === 0) {
     return 'At least one flavor quantity is required';
   }
   return null;

@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   stewing_date TEXT NOT NULL,
   order_type TEXT NOT NULL DEFAULT 'daily' CHECK (order_type IN ('daily', 'wedding')),
   capacity TEXT NOT NULL DEFAULT '45g',
-  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'in_prep', 'completed')),
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('inactive', 'scheduled', 'in_prep', 'completed')),
   qty_osmanthus INTEGER NOT NULL DEFAULT 0,
   qty_red_date INTEGER NOT NULL DEFAULT 0,
   qty_rock_sugar INTEGER NOT NULL DEFAULT 0,

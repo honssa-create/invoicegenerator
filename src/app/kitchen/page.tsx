@@ -22,7 +22,7 @@ import {
   type KitchenOpenOrder,
   type KitchenNeedLine,
 } from '@/lib/kitchen';
-import { FINISHED_SKUS, type StockMaps } from '@/lib/kitchen-bom';
+import { type StockMaps } from '@/lib/kitchen-bom';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type Modal = 'gift' | 'return' | 'restock' | null;
@@ -111,9 +111,8 @@ export default function KitchenPage() {
   const [returnOrderId, setReturnOrderId] = useState<number | ''>('');
   const [returnQtys, setReturnQtys] = useState<Record<string, number>>({});
 
-  // 補充原料 / 成品
+  // 補充原料
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
-  const [finishedInputs, setFinishedInputs] = useState<Record<string, string>>({});
 
   const load = () =>
     fetch('/api/kitchen/state')
@@ -283,7 +282,6 @@ export default function KitchenPage() {
 
   const openRestock = () => {
     setRawInputs({});
-    setFinishedInputs({});
     setModal('restock');
   };
 
@@ -543,15 +541,12 @@ export default function KitchenPage() {
     const deltas = Object.entries(rawInputs)
       .map(([name, v]) => ({ name, qty: Number(v) }))
       .filter((d) => Number.isFinite(d.qty) && d.qty !== 0);
-    const finishedDeltas = Object.entries(finishedInputs)
-      .map(([sku, v]) => ({ sku, qty: Number(v) }))
-      .filter((d) => Number.isFinite(d.qty) && d.qty !== 0);
     setBusy(true);
     try {
       const res = await fetch('/api/kitchen/restock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deltas, finishedDeltas }),
+        body: JSON.stringify({ deltas }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1245,25 +1240,6 @@ export default function KitchenPage() {
                         placeholder="0"
                         value={rawInputs[m.name] || ''}
                         onChange={(e) => setRawInputs((prev) => ({ ...prev, [m.name]: e.target.value }))}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">
-                  {bi('Finished bottles (until brewing)', '成品樽（燉煮功能上線前）')}
-                </h4>
-                <div className="space-y-2 mb-4">
-                  {FINISHED_SKUS.map((sku) => (
-                    <div key={sku} className="flex items-center gap-3">
-                      <label className="w-44 text-xs shrink-0">{finishedSkuLabel(sku)}</label>
-                      <input
-                        type="number"
-                        className={`${inputCls} flex-1`}
-                        placeholder="0"
-                        value={finishedInputs[sku] || ''}
-                        onChange={(e) =>
-                          setFinishedInputs((prev) => ({ ...prev, [sku]: e.target.value }))
-                        }
                       />
                     </div>
                   ))}

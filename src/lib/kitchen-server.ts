@@ -745,14 +745,11 @@ export async function restockRaw(
   actorId: number,
   input: {
     deltas: { name: string; qty: number }[];
-    finishedDeltas?: { sku: string; qty: number }[];
   }
 ): Promise<{ error?: string; state?: KitchenState }> {
   await ensureSeed(ownerId);
   const allowedRaw = new Set(RAW_MATERIALS.map((m) => m.name));
-  const allowedSku = new Set(FINISHED_SKUS);
   const rawDeltas: MovementDeltas['rawDeltas'] = [];
-  const finishedDeltas: MovementDeltas['finishedDeltas'] = [];
   const summaryParts: string[] = [];
 
   for (const d of input.deltas || []) {
@@ -765,14 +762,7 @@ export async function restockRaw(
     rawDeltas.push({ name: d.name, delta: rounded });
     summaryParts.push(`${rounded > 0 ? '+' : ''}${formatRawQty(rounded, unit)} ${d.name}`);
   }
-  for (const d of input.finishedDeltas || []) {
-    if (!allowedSku.has(d.sku)) return { error: `Unknown finished SKU: ${d.sku}` };
-    const qty = Number(d.qty);
-    if (!Number.isFinite(qty) || qty === 0) continue;
-    finishedDeltas.push({ sku: d.sku, delta: qty });
-    summaryParts.push(`${qty > 0 ? '+' : ''}${qty} ${finishedSkuLabel(d.sku)}`);
-  }
-  if (rawDeltas.length === 0 && finishedDeltas.length === 0) {
+  if (rawDeltas.length === 0) {
     return { error: 'No restock quantities provided' };
   }
 
@@ -782,15 +772,10 @@ export async function restockRaw(
       return { error: `原料庫存不足：${r.name}` };
     }
   }
-  for (const f of finishedDeltas) {
-    if ((stock.finished[f.sku] || 0) + f.delta < 0) {
-      return { error: `成品庫存不足：${finishedSkuLabel(f.sku)}` };
-    }
-  }
 
   const deltas: MovementDeltas = {
     giftBoxDeltas: [],
-    finishedDeltas,
+    finishedDeltas: [],
     rawDeltas,
     fulfillments: [],
   };

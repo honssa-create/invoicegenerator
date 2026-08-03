@@ -11,14 +11,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const deltas = Array.isArray(body.deltas) ? body.deltas : [];
-    const finishedDeltas = Array.isArray(body.finishedDeltas) ? body.finishedDeltas : [];
     const result = await restockRaw(ownerId, session.userId, {
       deltas: deltas.map((d: { name?: string; qty?: number }) => ({
         name: String(d.name || ''),
-        qty: Number(d.qty),
-      })),
-      finishedDeltas: finishedDeltas.map((d: { sku?: string; qty?: number }) => ({
-        sku: String(d.sku || ''),
         qty: Number(d.qty),
       })),
     });

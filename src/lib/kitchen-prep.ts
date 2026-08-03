@@ -6,8 +6,8 @@ export type PrepCapacity = (typeof PREP_CAPACITIES)[number];
 export const PREP_CAPACITY_LABELS: Record<PrepCapacity, string> = {
   '25g': '25g',
   '45g': '45g',
-  '75g': '75g (Normal)',
-  '75g_big_belly': '75g (Big Belly)',
+  '75g': '75g (高身樽)',
+  '75g_big_belly': '75g (大肚樽)',
 };
 
 export const PREP_FLAVORS = ['osmanthus', 'red_date', 'rock_sugar'] as const;
@@ -122,15 +122,6 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
       slabSugar: 0,
     },
   },
-};
-
-/** @deprecated Use CAPACITY_FLAVOR_FORMULAS — kept for reference / 45g flat view. */
-export const FORMULA_45G = {
-  birdNest: 0.8,
-  osmanthus: 0.13,
-  redDate: 1.8,
-  rockSugar: 3.57,
-  slabSugar: 5.03,
 };
 
 export const WEDDING_BUFFER = 3;
@@ -357,6 +348,39 @@ export function computePrepCalculation(
   };
 }
 
+/**
+ * Raw grams consumed for 完成燉製 from actual split bottle counts × per-bottle formula.
+ * 桂花/紅棗 come from flavorIngredient; 冰糖 from rockSugar only (rock_sugar flavorIngredient
+ * is the same 冰糖 and must not be double-counted).
+ */
+export function computeStewingRawNeeds(
+  capacity: PrepCapacity,
+  splits: { flavor: PrepFlavor; qty: number }[]
+): { name: string; qty: number }[] {
+  const acc: Record<string, number> = {};
+  const add = (name: string, grams: number) => {
+    if (!(grams > 0)) return;
+    acc[name] = round2((acc[name] || 0) + grams);
+  };
+
+  for (const s of splits) {
+    const qty = Math.max(0, Math.round(s.qty));
+    if (!s.flavor || qty <= 0) continue;
+    const formula = getFlavorFormula(capacity, s.flavor);
+    if (!formula) continue;
+
+    add('燕餅', round2(qty * formula.birdNest));
+    if (s.flavor === 'osmanthus') add('桂花', round2(qty * formula.flavorIngredient));
+    if (s.flavor === 'red_date') add('紅棗', round2(qty * formula.flavorIngredient));
+    add('冰糖', round2(qty * formula.rockSugar));
+    add('片糖', round2(qty * formula.slabSugar));
+  }
+
+  return Object.keys(acc)
+    .filter((name) => (acc[name] || 0) > 0)
+    .map((name) => ({ name, qty: acc[name] }));
+}
+
 export function formatGrams(n: number): string {
   if (n === 0) return '—';
   return `${n.toFixed(2)}g`;
@@ -402,7 +426,7 @@ export function validatePrepFlavorQtys(
   qtys: PrepFlavorQty
 ): string | null {
   if (qtys.red_date > 0 && !isRedDateAllowed(capacity)) {
-    return 'Red Date (紅棗) is not allowed for 25g capacity';
+    return `Red Date (紅棗) is not allowed for ${PREP_CAPACITY_LABELS[capacity]}`;
   }
   for (const flavor of PREP_FLAVORS) {
     const qty = qtys[flavor];

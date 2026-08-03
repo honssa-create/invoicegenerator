@@ -57,7 +57,15 @@ export const RAW_MATERIAL_ALIASES: Record<string, string> = {
   燕窩冰糖: '冰糖',
 };
 
-export const KITCHEN_ACTIONS = ['make_gift_box', 'allocate_gift_box', 'make_return_gift', 'restock_raw', 'void'] as const;
+export const KITCHEN_ACTIONS = [
+  'make_gift_box',
+  'allocate_gift_box',
+  'make_return_gift',
+  'restock_raw',
+  'complete_stew',
+  'print_prep_sheet',
+  'void',
+] as const;
 export type KitchenAction = (typeof KITCHEN_ACTIONS)[number];
 
 export const KITCHEN_ACTION_LABELS: Record<KitchenAction, string> = {
@@ -65,6 +73,8 @@ export const KITCHEN_ACTION_LABELS: Record<KitchenAction, string> = {
   allocate_gift_box: '分配禮盒',
   make_return_gift: '包裝回禮',
   restock_raw: '補充原料',
+  complete_stew: '完成燉製',
+  print_prep_sheet: '列印材料單',
   void: 'Void',
 };
 

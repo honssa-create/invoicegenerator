@@ -11,6 +11,8 @@ const txStorage = new AsyncLocalStorage<PoolClient>();
 
 let pool: Pool | null = null;
 let schemaReady: Promise<void> | null = null;
+/** True while the schema boot promise is executing — nested ensureSchema must no-op to avoid deadlock. */
+let schemaBootInProgress = false;
 
 function databaseUrl(): string {
   if (process.env.NEXT_PHASE === 'phase-production-build') {
@@ -182,36 +184,39 @@ async function runBootDataFixes(): Promise<void> {
   // Purge expired trash.
   await client().query(`DELETE FROM deleted_records WHERE expires_at < to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`);
 
-  // Seed role_permissions if empty (upserts applied by permissions-server on demand too).
-  const count = await client().query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM role_permissions`);
-  if (Number(count.rows[0]?.n || 0) === 0) {
-    const roles = ['admin', 'staff', 'viewer'] as const;
-    const sections = [
-      'dashboard', 'invoices', 'quotations', 'orders', 'expenses', 'customers',
-      'cashflow', 'accounting', 'kitchen', 'kitchen-prep', 'inbound', 'rentals', 'admin',
-    ];
-    for (const role of roles) {
-      for (const section of sections) {
-        const allowed = role === 'admin' ? 1 : role === 'viewer' && section === 'admin' ? 0 : role === 'viewer' ? 1 : 1;
-        await client().query(
-          `INSERT INTO role_permissions (role, section, allowed) VALUES ($1, $2, $3)
-           ON CONFLICT (role, section) DO NOTHING`,
-          [role, section, allowed]
-        );
-      }
-    }
-  }
+  // Fix legacy permission section key (hyphen → underscore).
+  await client().query(`
+    UPDATE role_permissions SET section = 'kitchen_prep'
+    WHERE section = 'kitchen-prep'
+  `);
+  // Drop obsolete role seeds (staff/viewer) and unused admin rows from the old boot path.
+  // Admin permissions are always DEFAULT_ROLE_PERMISSIONS; operator/accountant are seeded below.
+  await client().query(`DELETE FROM role_permissions WHERE role IN ('staff', 'viewer', 'admin')`);
+
+  // Seed role_permissions for operator/accountant when empty (canonical source: permissions-server).
+  const { seedRolePermissionsIfEmpty } = await import('./permissions-server');
+  await seedRolePermissionsIfEmpty();
 }
 
 export async function ensureSchema(): Promise<void> {
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
+  // Nested call from boot helpers (e.g. seedRolePermissionsIfEmpty → db.prepare) must not
+  // await the in-flight schemaReady promise — that deadlocks login and every first DB use.
+  if (schemaBootInProgress) {
+    return;
+  }
   if (!schemaReady) {
     schemaReady = (async () => {
-      const sql = await loadSchemaSql();
-      await getPool().query(sql);
-      await runBootDataFixes();
-      warnIfEphemeralReceiptStorage();
-      warnIfR2Misconfigured();
+      schemaBootInProgress = true;
+      try {
+        const sql = await loadSchemaSql();
+        await getPool().query(sql);
+        await runBootDataFixes();
+        warnIfEphemeralReceiptStorage();
+        warnIfR2Misconfigured();
+      } finally {
+        schemaBootInProgress = false;
+      }
     })().catch((err) => {
       schemaReady = null;
       throw err;

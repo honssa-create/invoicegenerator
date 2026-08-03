@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import PrepSummaryTable from '@/components/kitchen-prep/PrepSummaryTable';
+import CompletionModal from '@/components/kitchen-prep/CompletionModal';
 import {
   PREP_CAPACITIES,
   PREP_CAPACITY_LABELS,
@@ -18,7 +19,7 @@ import {
   type PrepCalculation,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
-import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
+import { MSG, bi } from '@/lib/ui-labels';
 
 export default function KitchenPrepDetailPage() {
   const params = useParams();
@@ -30,6 +31,7 @@ export default function KitchenPrepDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [showComplete, setShowComplete] = useState(false);
 
   const load = () =>
     fetch(`/api/kitchen-prep/${id}`)
@@ -87,7 +89,16 @@ export default function KitchenPrepDetailPage() {
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
         <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to schedule', '返回排程')}</button>
-        <div className="page-actions w-full sm:w-auto">
+        <div className="page-actions w-full sm:w-auto flex flex-col sm:flex-row gap-2">
+          {order.status !== 'completed' && (
+            <button
+              type="button"
+              onClick={() => setShowComplete(true)}
+              className="btn bg-green-600 text-white hover:bg-green-700 w-full sm:w-auto font-bold"
+            >
+              {bi('Complete Stewing', '完成燉製')}
+            </button>
+          )}
           <Link href={`/kitchen-prep/${id}/print`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🖨 {bi('Print Prep Sheet', '列印備料單')}
           </Link>
@@ -164,7 +175,7 @@ export default function KitchenPrepDetailPage() {
         </div>
         {!isRedDateAllowed(order.capacity) && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
-            ⚠ Red Date (紅棗) is disabled for 25g capacity.
+            ⚠ Red Date (紅棗) is disabled for {PREP_CAPACITY_LABELS[order.capacity]}.
           </p>
         )}
         {order.order_type === 'wedding' && (
@@ -174,7 +185,7 @@ export default function KitchenPrepDetailPage() {
         )}
         {!calc.formulaReady && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
-            Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet — 25g and 45g are available. Please provide 75g formulas to complete calculations.
+            Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet.
           </p>
         )}
       </div>
@@ -190,6 +201,18 @@ export default function KitchenPrepDetailPage() {
       </div>
 
       {saving && <p className="text-center text-sm text-gray-400 mt-4">Saving…</p>}
+
+      {showComplete && (
+        <CompletionModal
+          order={order}
+          onClose={() => setShowComplete(false)}
+          onCompleted={(updated) => {
+            setShowComplete(false);
+            setOrder(updated);
+            load();
+          }}
+        />
+      )}
     </AppLayout>
   );
 }

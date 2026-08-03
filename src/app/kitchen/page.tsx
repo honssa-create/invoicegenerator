@@ -330,6 +330,7 @@ export default function KitchenPage() {
     for (const n of pending) {
       if (!isNeedStockEnough(n, probe)) {
         flash(bi('Not enough stock to complete this order', '庫存不足，無法完成此訂單'), 'error');
+        clearOrderTicks(order.id);
         setCompleteOrder(null);
         return;
       }
@@ -1175,7 +1176,10 @@ export default function KitchenPage() {
                 type="button"
                 className="px-4 py-2 rounded-lg border"
                 disabled={busy}
-                onClick={() => setCompleteOrder(null)}
+                onClick={() => {
+                  if (completeOrder) clearOrderTicks(completeOrder.id);
+                  setCompleteOrder(null);
+                }}
               >
                 {BTN.cancel}
               </button>

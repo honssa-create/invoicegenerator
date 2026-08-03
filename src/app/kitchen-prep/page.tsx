@@ -230,7 +230,7 @@ export default function KitchenPrepListPage() {
                         onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
                         className="inline-flex items-center justify-center min-h-[48px] px-4 py-2.5 text-sm sm:text-base font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
                       >
-                        {bi('完成燉製', '完成燉製')}
+                        {bi('Complete Stewing', '完成燉製')}
                       </button>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>

@@ -730,6 +730,127 @@ export async function restockRaw(
   return { state: await getState(ownerId) };
 }
 
+/** Add finished bottles + consume raw from Kitchen Prep 完成燉製. */
+export async function addFinishedFromStewing(
+  ownerId: number,
+  actorId: number,
+  input: {
+    finishedDeltas: { sku: string; qty: number }[];
+    /** Positive consume amounts (grams / units); stored as negative stock deltas. */
+    rawConsume?: { name: string; qty: number }[];
+    prepOrderId?: number;
+    prepOrderCode?: string;
+    remarks?: string | null;
+  }
+): Promise<{ error?: string }> {
+  await ensureSeed(ownerId);
+  const allowedSku = new Set(FINISHED_SKUS);
+  const allowedRaw = new Set(RAW_MATERIALS.map((m) => m.name));
+  const finishedDeltas: MovementDeltas['finishedDeltas'] = [];
+  const rawDeltas: MovementDeltas['rawDeltas'] = [];
+  const summaryParts: string[] = [];
+
+  if (input.prepOrderCode?.trim()) {
+    summaryParts.push(input.prepOrderCode.trim());
+  }
+
+  for (const d of input.finishedDeltas || []) {
+    if (!allowedSku.has(d.sku)) return { error: `Unknown finished SKU: ${d.sku}` };
+    const qty = Math.round(Number(d.qty));
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    finishedDeltas.push({ sku: d.sku, delta: qty });
+    summaryParts.push(`+${qty} ${finishedSkuLabel(d.sku)}`);
+  }
+
+  for (const d of input.rawConsume || []) {
+    if (!allowedRaw.has(d.name)) return { error: `Unknown raw material: ${d.name}` };
+    const qty = Number(d.qty);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    const unit = RAW_MATERIALS.find((m) => m.name === d.name)?.unit || 'g';
+    const rounded = roundRawQty(qty, unit);
+    if (rounded <= 0) continue;
+    rawDeltas.push({ name: d.name, delta: -rounded });
+    summaryParts.push(`-${formatRawQty(rounded, unit)}${unit === 'g' ? 'g' : unit} ${d.name}`);
+  }
+
+  if (finishedDeltas.length === 0 && rawDeltas.length === 0) {
+    return { error: 'No finished bottle or raw quantities to apply' };
+  }
+
+  if (input.remarks?.trim()) {
+    summaryParts.push(`備註: ${input.remarks.trim()}`);
+  }
+
+  const stock = await loadStockMaps(ownerId);
+  for (const r of rawDeltas) {
+    if ((stock.raw[r.name] || 0) + r.delta < 0) {
+      const unit = RAW_MATERIALS.find((m) => m.name === r.name)?.unit || 'g';
+      return {
+        error: `原料庫存不足：${r.name}（需要 ${formatRawQty(Math.abs(r.delta), unit)}${unit === 'g' ? 'g' : unit}，現有 ${formatRawQty(stock.raw[r.name] || 0, unit)}${unit === 'g' ? 'g' : unit}）`,
+      };
+    }
+  }
+
+  const deltas: MovementDeltas = {
+    giftBoxDeltas: [],
+    finishedDeltas,
+    rawDeltas,
+    fulfillments: [],
+  };
+
+  await db.transaction(async () => {
+    await applyDeltas(ownerId, deltas);
+    await insertMovement(
+      ownerId,
+      actorId,
+      'complete_stew',
+      {
+        summary: summaryParts.join('\n'),
+        deltas,
+        prepOrderId: input.prepOrderId ?? null,
+        prepOrderCode: input.prepOrderCode || null,
+      },
+      null
+    );
+  });
+
+  return {};
+}
+
+/** Log Kitchen Prep sheet print — no stock change; history action `print_prep_sheet` (列印材料單). */
+export async function logPrepSheetPrint(
+  ownerId: number,
+  actorId: number,
+  actorName: string,
+  input: { prepOrderId: number; prepOrderCode: string }
+): Promise<{ error?: string }> {
+  await ensureSeed(ownerId);
+  const code = input.prepOrderCode?.trim() || `PREP#${input.prepOrderId}`;
+  const name = actorName?.trim() || '—';
+  const emptyDeltas: MovementDeltas = {
+    giftBoxDeltas: [],
+    finishedDeltas: [],
+    rawDeltas: [],
+    fulfillments: [],
+  };
+
+  await insertMovement(
+    ownerId,
+    actorId,
+    'print_prep_sheet',
+    {
+      summary: `訂單 ${code}\n用戶 ${name}`,
+      deltas: emptyDeltas,
+      prepOrderId: input.prepOrderId,
+      prepOrderCode: code,
+      printedByName: name,
+    },
+    null
+  );
+
+  return {};
+}
+
 export async function voidMovement(
   ownerId: number,
   actorId: number,
@@ -755,7 +876,12 @@ export async function voidMovement(
   if (row.voided_at) return { error: 'Already voided' };
   if (row.action === 'void') return { error: 'Cannot void a void record' };
 
-  let details: { summary?: string; deltas?: MovementDeltas };
+  let details: {
+    summary?: string;
+    deltas?: MovementDeltas;
+    prepOrderId?: number | null;
+    prepOrderCode?: string | null;
+  };
   try {
     details = JSON.parse(row.details_json || '{}');
   } catch {
@@ -767,6 +893,11 @@ export async function voidMovement(
   const stock = await loadStockMaps(ownerId);
   const neg = wouldGoNegative(reversed, stock);
   if (neg) return { error: neg };
+
+  const prepOrderId =
+    row.action === 'complete_stew' && details.prepOrderId != null
+      ? Number(details.prepOrderId)
+      : null;
 
   // Also refuse fulfillment reverse below zero (applyDeltas uses GREATEST(0,…))
   await db.transaction(async () => {
@@ -795,6 +926,23 @@ export async function voidMovement(
         row.id
       );
     void voidRes;
+
+    if (Number.isFinite(prepOrderId) && prepOrderId! > 0) {
+      await db
+        .prepare(
+          `UPDATE kitchen_prep_orders SET
+             status = 'scheduled',
+             expected_yield = NULL,
+             actual_yield = NULL,
+             completion_remarks = NULL,
+             completion_splits_json = NULL,
+             completed_at = NULL,
+             completed_by = NULL,
+             updated_at = datetime('now')
+           WHERE id = ? AND status = 'completed'`
+        )
+        .run(prepOrderId);
+    }
   });
 
   return { state: await getState(ownerId, { isAdmin: true }) };

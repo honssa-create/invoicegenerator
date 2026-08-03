@@ -45,6 +45,8 @@ import {
   orderTitle,
   isBadgeOrderType,
   isWeddingGiftOrderType,
+  isBirdNestOrderType,
+  isNestieeOrderType,
   type HonourLineItem,
   type Order,
 } from '@/lib/orders';
@@ -83,6 +85,7 @@ export default function OrderDetailPage() {
   const [paymentPreview, setPaymentPreview] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [paymentScanMsg, setPaymentScanMsg] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [convertingQuote, setConvertingQuote] = useState(false);
+  const [importingPrep, setImportingPrep] = useState(false);
   const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
   const [confirmPasteText, setConfirmPasteText] = useState('');
@@ -150,6 +153,47 @@ export default function OrderDetailPage() {
       setQuoteToast({ text: 'Failed to convert order', kind: 'error' });
     } finally {
       setConvertingQuote(false);
+    }
+  };
+
+  const importToKitchenPrep = async () => {
+    setImportingPrep(true);
+    setQuoteToast(null);
+    try {
+      const res = await fetch('/api/kitchen-prep/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: Number(id) }),
+      });
+      let data: { error?: string; order?: { id: number; order_code?: string } } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setQuoteToast({
+          text: bi(`Import failed (HTTP ${res.status})`, `匯入失敗（HTTP ${res.status}）`),
+          kind: 'error',
+        });
+        return;
+      }
+      if (!res.ok || !data.order?.id) {
+        setQuoteToast({
+          text: data.error || bi('Failed to import to Kitchen Prep', '匯入廚房備料失敗'),
+          kind: 'error',
+        });
+        return;
+      }
+      setQuoteToast({
+        text: bi(
+          `Imported prep ${data.order.order_code || data.order.id}`,
+          `已匯入備料單 ${data.order.order_code || data.order.id}`
+        ),
+        kind: 'success',
+      });
+      setTimeout(() => router.push(`/kitchen-prep/${data.order!.id}`), 600);
+    } catch {
+      setQuoteToast({ text: bi('Failed to import to Kitchen Prep', '匯入廚房備料失敗'), kind: 'error' });
+    } finally {
+      setImportingPrep(false);
     }
   };
 
@@ -734,6 +778,18 @@ export default function OrderDetailPage() {
           >
             {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
           </button>
+          {(isBirdNestOrderType(orderType) || isNestieeOrderType(orderType)) && (
+            <button
+              type="button"
+              onClick={importToKitchenPrep}
+              disabled={importingPrep}
+              className="btn bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 w-full sm:w-auto"
+            >
+              {importingPrep
+                ? bi('Importing…', '匯入中…')
+                : bi('Import to Kitchen Prep', '匯入廚房備料')}
+            </button>
+          )}
           <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🚚 {bi('Generate Delivery Note', '產生出貨單')}
           </Link>

@@ -24,8 +24,15 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
   const cellPad = isPrint ? 'px-4 py-4' : 'px-6 py-4';
   const tfootClass = isPrint ? 'bg-gray-100 font-bold' : 'bg-brand-50 border-t-2 border-brand-200';
 
+  const osmanthusTotal = activeRows
+    .filter((r) => r.flavor === 'osmanthus')
+    .reduce((s, r) => s + r.flavorGrams, 0);
+  const redDateTotal = activeRows
+    .filter((r) => r.flavor === 'red_date')
+    .reduce((s, r) => s + r.flavorGrams, 0);
+
   return (
-    <table className={`${PREP_SUMMARY_TYPO.table} ${isPrint ? '' : 'min-w-[880px]'}`}>
+    <table className={`${PREP_SUMMARY_TYPO.table} ${isPrint ? '' : 'min-w-[960px]'}`}>
       <thead>
         <tr className={`${PREP_SUMMARY_TYPO.thead} ${theadClass}`}>
           <th className={`${thClass} text-left`}>容量 Capacity</th>
@@ -33,7 +40,8 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
           <th className={`${thClass} text-right`}>Order Qty</th>
           <th className={`${thClass} text-right`}>Actual Qty 實際生產樽數</th>
           <th className={`${thClass} text-right`}>燕餅 Bird&apos;s Nest</th>
-          <th className={`${thClass} text-right`}>Flavor Ingredient</th>
+          <th className={`${thClass} text-right`}>桂花 Osmanthus</th>
+          <th className={`${thClass} text-right`}>紅棗 Red Date</th>
           <th className={`${thClass} text-right`}>冰糖 Rock Sugar</th>
           <th className={`${thClass} text-right`}>片糖 Slab Sugar</th>
         </tr>
@@ -56,7 +64,10 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
               {formatGrams(r.birdNestGrams)}
             </td>
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
-              {formatGrams(r.flavorGrams)}
+              {r.flavor === 'osmanthus' ? formatGrams(r.flavorGrams) : '—'}
+            </td>
+            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
+              {r.flavor === 'red_date' ? formatGrams(r.flavorGrams) : '—'}
             </td>
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-700`}>
               {r.flavor === 'osmanthus' ? '—' : formatGrams(r.rockSugarGrams)}
@@ -68,7 +79,7 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
         ))}
         {activeRows.length === 0 && (
           <tr>
-            <td colSpan={8} className={`${cellPad} text-center text-gray-400`}>
+            <td colSpan={9} className={`${cellPad} text-center text-gray-400`}>
               Enter order quantities to see calculations.
             </td>
           </tr>
@@ -88,7 +99,10 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
               {formatGrams(calc.totals.birdNestGrams)}
             </td>
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-              {formatGrams(calc.totals.flavorGrams)}
+              {formatGrams(osmanthusTotal)}
+            </td>
+            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
+              {formatGrams(redDateTotal)}
             </td>
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
               {formatGrams(calc.totals.rockSugarGrams)}

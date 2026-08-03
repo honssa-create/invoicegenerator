@@ -282,7 +282,12 @@ export async function buildRentPaymentNoticeForUnit(
 ): Promise<RentPaymentNoticeMatrix | null> {
   const tenantId = await getTenantIdForUnit(unitId, userId);
   if (!tenantId) return null;
-  return await buildRentPaymentNoticeMatrix(tenantId, userId, targetPeriod, options);
+  const query = typeof options === 'string' ? { fromPeriod: options } : (options || {});
+  return await buildRentPaymentNoticeMatrix(tenantId, userId, targetPeriod, {
+    ...query,
+    mode: 'single',
+    unitId: Number(unitId),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -469,19 +474,7 @@ function buildNoticeColumns(
       });
     }
   }
-  if (!cols.length) {
-    return units.flatMap((unit) => {
-      const chargeTypes = CHARGE_ORDER.filter((t) =>
-        utilityChargeTypesForMode(resolveUtilityBillingMode(unit.utilityBillingMode, tenantMode)).includes(t),
-      );
-      return chargeTypes.map((chargeType) => ({
-        unitId: unit.id,
-        unitName: unit.unitName,
-        chargeType,
-        label: columnLabel(unit.unitName, chargeType),
-      }));
-    });
-  }
+  // Only columns with real charge activity — never invent empty unit/charge columns.
   return cols;
 }
 
@@ -553,6 +546,9 @@ export async function buildRentPaymentNoticeMatrix(
 
   const { periods, fromPeriod } = resolveNoticePeriods(charges, targetPeriod, query);
   const columns = buildNoticeColumns(units, charges, tenant.utilityBillingMode);
+  // Drop units with no charge activity so headers only show units the tenant actually rented/billed.
+  const activeUnitIds = new Set(columns.map((c) => c.unitId));
+  units = units.filter((u) => activeUnitIds.has(u.id));
 
   const chargeMap = new Map<string, RentalChargeItem>();
   for (const c of charges) {

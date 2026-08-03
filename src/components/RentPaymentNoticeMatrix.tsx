@@ -16,33 +16,42 @@ function cellDisplay(cell: { outstanding: number; amountDue: number; status: str
 }
 
 export default function RentPaymentNoticeMatrix({ matrix, compact }: Props) {
-  const { columns, rows, units, summary } = matrix;
-  const unitGroups = units.map((unit) => ({
-    unit,
-    cols: columns.filter((c) => c.unitId === unit.id),
-  }));
+  const { columns, rows, summary } = matrix;
+  // Only unit groups that have charge columns (units the tenant actually rented/billed).
+  const unitGroups = matrix.units
+    .map((unit) => ({
+      unit,
+      cols: columns.filter((c) => c.unitId === unit.id),
+    }))
+    .filter(({ cols }) => cols.length > 0);
 
   if (!columns.length) {
     return <p className="text-sm text-gray-500 py-6 text-center">{bi('No charge items for this tenant yet.', '此租客尚無收費項目。')}</p>;
   }
 
   const colCount = columns.length;
+  const spacerCell = (extraClass = '') => (
+    <td className={`w-full min-w-[1rem] p-0 border-0 ${extraClass}`} aria-hidden />
+  );
 
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto">
-        <table className={`w-full border-collapse text-sm ${compact ? 'text-xs' : ''}`}>
+        <table className={`w-full table-auto border-collapse text-sm ${compact ? 'text-xs' : ''}`}>
           <thead>
             <tr className="bg-gray-900 text-white">
               <th rowSpan={2} className="text-left px-3 py-2 border border-gray-700 whitespace-nowrap sticky left-0 bg-gray-900 z-10">
                 月份 Month
               </th>
               {unitGroups.map(({ unit, cols }) => (
-                <th key={unit.id} colSpan={cols.length} className="text-center px-2 py-2 border border-gray-700">
+                <th key={unit.id} colSpan={cols.length} className="text-center px-2 py-2 border border-gray-700 whitespace-nowrap">
                   {unit.unitName}
                 </th>
               ))}
-              <th rowSpan={2} className="text-right px-3 py-2 border border-gray-700 whitespace-nowrap">小計 Subtotal</th>
+              <th rowSpan={2} className="w-full min-w-[1rem] p-0 border-0 bg-gray-900" aria-hidden />
+              <th rowSpan={2} className="text-right px-3 py-2 border border-gray-700 whitespace-nowrap sticky right-0 bg-gray-900 z-10">
+                小計 Subtotal
+              </th>
             </tr>
             <tr className="bg-gray-800 text-white text-[11px]">
               {columns.map((col) => (
@@ -58,13 +67,13 @@ export default function RentPaymentNoticeMatrix({ matrix, compact }: Props) {
                 key={row.period}
                 className={`border-b border-gray-100 ${row.isFullyPaid ? 'bg-green-50/40' : row.rowTotal > 0 ? 'hover:bg-red-50/30' : 'hover:bg-gray-50/50'}`}
               >
-                <td className="px-3 py-2 font-medium text-gray-800 border-r border-gray-200 sticky left-0 bg-inherit z-10">
+                <td className="px-3 py-2 font-medium text-gray-800 border-r border-gray-200 sticky left-0 bg-inherit z-10 whitespace-nowrap">
                   {row.periodLabel}
                 </td>
                 {row.cells.map((cell, idx) => (
                   <td
                     key={idx}
-                    className={`px-2 py-2 text-right border-r border-gray-100 ${
+                    className={`px-2 py-2 text-right border-r border-gray-100 whitespace-nowrap ${
                       cell.status === 'paid' ? 'text-green-700 font-medium' :
                       cell.status === 'unpaid' ? 'font-semibold text-red-700' :
                       cell.status === 'partial' ? 'font-semibold text-orange-600' :
@@ -74,7 +83,8 @@ export default function RentPaymentNoticeMatrix({ matrix, compact }: Props) {
                     {cellDisplay(cell)}
                   </td>
                 ))}
-                <td className={`px-3 py-2 text-right font-semibold ${row.rowTotal > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                {spacerCell()}
+                <td className={`px-3 py-2 text-right font-semibold whitespace-nowrap sticky right-0 bg-inherit z-10 border-l border-gray-200 ${row.rowTotal > 0 ? 'text-red-700' : 'text-green-700'}`}>
                   {row.rowTotal > 0 ? formatMoney(row.rowTotal) : row.isFullyPaid ? '已付' : '—'}
                 </td>
               </tr>
@@ -83,44 +93,52 @@ export default function RentPaymentNoticeMatrix({ matrix, compact }: Props) {
           <tfoot>
             {summary.priorArrearsTotal > 0 && (
               <tr className="bg-red-50 font-bold border-t-2 border-red-200">
-                <td className="px-3 py-3 sticky left-0 bg-red-50 text-red-800">前期欠款 Prior Arrears</td>
+                <td className="px-3 py-3 sticky left-0 bg-red-50 text-red-800 whitespace-nowrap">前期欠款 Prior Arrears</td>
                 {Array.from({ length: colCount }).map((_, idx) => (
                   <td key={idx} className="px-2 py-3 text-right text-red-700">—</td>
                 ))}
-                <td className="px-3 py-3 text-right text-lg text-red-800">{formatMoney(summary.priorArrearsTotal)}</td>
+                {spacerCell('bg-red-50')}
+                <td className="px-3 py-3 text-right text-lg text-red-800 whitespace-nowrap sticky right-0 bg-red-50 z-10 border-l border-red-200">
+                  {formatMoney(summary.priorArrearsTotal)}
+                </td>
               </tr>
             )}
             {summary.priorPaidPeriods.length > 0 && (
               <tr className="bg-green-50 font-semibold">
-                <td className="px-3 py-3 sticky left-0 bg-green-50 text-green-800">前期已付 Prior Paid</td>
+                <td className="px-3 py-3 sticky left-0 bg-green-50 text-green-800 whitespace-nowrap">前期已付 Prior Paid</td>
                 {Array.from({ length: colCount }).map((_, idx) => (
                   <td key={idx} className="px-2 py-3 text-center text-green-700 text-xs">已繳付</td>
                 ))}
-                <td className="px-3 py-3 text-right text-green-800">{formatMoney(summary.priorPaidTotal)}</td>
+                {spacerCell('bg-green-50')}
+                <td className="px-3 py-3 text-right text-green-800 whitespace-nowrap sticky right-0 bg-green-50 z-10 border-l border-green-200">
+                  {formatMoney(summary.priorPaidTotal)}
+                </td>
               </tr>
             )}
             <tr className="bg-blue-50 font-semibold">
-              <td className="px-3 py-3 sticky left-0 bg-blue-50 text-blue-900">本期費用 Current ({matrix.period})</td>
+              <td className="px-3 py-3 sticky left-0 bg-blue-50 text-blue-900 whitespace-nowrap">本期費用 Current ({matrix.period})</td>
               {Array.from({ length: colCount }).map((_, idx) => (
                 <td key={idx} className="px-2 py-3 text-right text-blue-800">—</td>
               ))}
-              <td className="px-3 py-3 text-right text-blue-900">
+              {spacerCell('bg-blue-50')}
+              <td className="px-3 py-3 text-right text-blue-900 whitespace-nowrap sticky right-0 bg-blue-50 z-10 border-l border-blue-200">
                 {summary.currentPeriodOutstanding > 0
                   ? formatMoney(summary.currentPeriodOutstanding)
                   : summary.currentPeriodDue > 0 ? '已付' : '—'}
               </td>
             </tr>
             <tr className="bg-brand-50 font-bold">
-              <td className="px-3 py-3 border-t-2 border-brand-200 sticky left-0 bg-brand-50">應繳總計 Total Due</td>
+              <td className="px-3 py-3 border-t-2 border-brand-200 sticky left-0 bg-brand-50 whitespace-nowrap">應繳總計 Total Due</td>
               {columns.map((col, idx) => {
                 const colTotal = rows.reduce((s, r) => s + (r.cells[idx]?.outstanding || 0), 0);
                 return (
-                  <td key={`${col.unitId}-${col.chargeType}`} className="px-2 py-3 text-right border-t-2 border-brand-200 text-brand-800">
+                  <td key={`${col.unitId}-${col.chargeType}`} className="px-2 py-3 text-right border-t-2 border-brand-200 text-brand-800 whitespace-nowrap">
                     {colTotal > 0 ? formatMoney(colTotal) : '—'}
                   </td>
                 );
               })}
-              <td className="px-3 py-3 text-right text-xl text-brand-700 border-t-2 border-brand-200">
+              {spacerCell('bg-brand-50 border-t-2 border-brand-200')}
+              <td className="px-3 py-3 text-right text-xl text-brand-700 border-t-2 border-brand-200 whitespace-nowrap sticky right-0 bg-brand-50 z-10 border-l border-brand-200">
                 {formatMoney(matrix.grandTotal)}
               </td>
             </tr>

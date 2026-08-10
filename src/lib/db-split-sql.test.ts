@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitSqlStatements } from './db';
+import { adaptSql, splitSqlStatements } from './db';
 
 describe('splitSqlStatements', () => {
   it('splits plain statements', () => {
@@ -26,5 +26,13 @@ CREATE TABLE x (id INT);`;
       "INSERT INTO t VALUES ('a;b')",
       'SELECT 1',
     ]);
+  });
+});
+
+describe('adaptSql', () => {
+  it('rewrites SQLite IFNULL to COALESCE', () => {
+    expect(adaptSql("SELECT IFNULL(paid_date, '') FROM expenses")).toBe(
+      "SELECT COALESCE(paid_date, '') FROM expenses"
+    );
   });
 });

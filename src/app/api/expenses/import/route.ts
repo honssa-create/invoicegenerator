@@ -206,66 +206,72 @@ export async function POST(request: Request) {
       skipped++;
       continue;
     }
-    const existing = await db
-      .prepare(
-        `SELECT 1 FROM expenses
-         WHERE user_id = ? AND IFNULL(paid_date, '') = ?
-           AND IFNULL(amount_hkd, -1) = IFNULL(?, -1)
-           AND IFNULL(amount_rmb, -1) = IFNULL(?, -1)
-           AND IFNULL(merchant, '') = ?
-           AND IFNULL(supplier_input, '') = ?`
-      )
-      .get(ownerId, date || '', amountHkd, amountRmb, merchant || '', supplierInput || '');
-    if (existing) {
-      skipped++;
-      continue;
-    }
-    seenInBatch.add(dupKey);
-
-    const { refs: urlRefs, warnings } = await resolveImportReceiptPaths(
-      sheetRow,
-      row,
-      [
-        ...(hyperlinkByRow.get(idx) || []),
-        ...(xlsxAssets?.urlsByDataRow.get(idx) || []),
-      ],
-      isCsv ? undefined : worksheet,
-      isCsv ? undefined : idx,
-    );
-    const receiptRefs = [...urlRefs];
-    receiptWarnings.push(...warnings);
-    receiptFetched += urlRefs.length;
-    receiptFailed += warnings.length;
-
-    for (const embedded of xlsxAssets?.imagesByDataRow.get(idx) || []) {
-      try {
-        const stored = await storeImportImageBuffer(embedded.buffer, embedded.mimeType, embedded.name);
-        receiptRefs.push({ path: stored, sourceUrl: null });
-        receiptFetched++;
-      } catch {
-        receiptFailed++;
-        receiptWarnings.push({
-          row: sheetRow,
-          url: embedded.name,
-          message: `Row ${sheetRow}: embedded receipt image could not be saved`,
-        });
+    try {
+      const existing = await db
+        .prepare(
+          `SELECT 1 FROM expenses
+           WHERE user_id = ? AND COALESCE(paid_date, '') = ?
+             AND COALESCE(amount_hkd, -1) = COALESCE(?, -1)
+             AND COALESCE(amount_rmb, -1) = COALESCE(?, -1)
+             AND COALESCE(merchant, '') = ?
+             AND COALESCE(supplier_input, '') = ?`
+        )
+        .get(ownerId, date || '', amountHkd, amountRmb, merchant || '', supplierInput || '');
+      if (existing) {
+        skipped++;
+        continue;
       }
-    }
+      seenInBatch.add(dupKey);
 
-    candidates.push({
-      sheetRow,
-      date,
-      amountHkd,
-      amountRmb,
-      merchant,
-      supplierInput,
-      paymentMethod,
-      reason,
-      platform,
-      notes,
-      specialNotes,
-      receiptRefs,
-    });
+      const { refs: urlRefs, warnings } = await resolveImportReceiptPaths(
+        sheetRow,
+        row,
+        [
+          ...(hyperlinkByRow.get(idx) || []),
+          ...(xlsxAssets?.urlsByDataRow.get(idx) || []),
+        ],
+        isCsv ? undefined : worksheet,
+        isCsv ? undefined : idx,
+      );
+      const receiptRefs = [...urlRefs];
+      receiptWarnings.push(...warnings);
+      receiptFetched += urlRefs.length;
+      receiptFailed += warnings.length;
+
+      for (const embedded of xlsxAssets?.imagesByDataRow.get(idx) || []) {
+        try {
+          const stored = await storeImportImageBuffer(embedded.buffer, embedded.mimeType, embedded.name);
+          receiptRefs.push({ path: stored, sourceUrl: null });
+          receiptFetched++;
+        } catch {
+          receiptFailed++;
+          receiptWarnings.push({
+            row: sheetRow,
+            url: embedded.name,
+            message: `Row ${sheetRow}: embedded receipt image could not be saved`,
+          });
+        }
+      }
+
+      candidates.push({
+        sheetRow,
+        date,
+        amountHkd,
+        amountRmb,
+        merchant,
+        supplierInput,
+        paymentMethod,
+        reason,
+        platform,
+        notes,
+        specialNotes,
+        receiptRefs,
+      });
+    } catch (e) {
+      skipped++;
+      const detail = e instanceof Error ? e.message : 'unknown error';
+      errors.push(`Row ${sheetRow}: failed to prepare (${detail})`);
+    }
   }
 
   const tagsAdded: string[] = [];
@@ -323,8 +329,9 @@ export async function POST(request: Request) {
       imported++;
     }
     });
-  } catch {
-    return NextResponse.json({ error: 'Import failed while saving rows' }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'unknown error';
+    return NextResponse.json({ error: `Import failed while saving rows: ${detail}` }, { status: 500 });
   }
 
   return NextResponse.json({

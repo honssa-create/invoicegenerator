@@ -62,6 +62,8 @@ export function adaptSql(sql: string): string {
   out = out.replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, "to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')");
   out = out.replace(/\bexcluded\./gi, 'EXCLUDED.');
   out = out.replace(/\s+COLLATE\s+NOCASE\b/gi, '');
+  // SQLite IFNULL → Postgres COALESCE
+  out = out.replace(/\bIFNULL\s*\(/gi, 'COALESCE(');
   // SQLite allows MAX(a,b); Postgres needs GREATEST for scalar max.
   out = out.replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
   return out;

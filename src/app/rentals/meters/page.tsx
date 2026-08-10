@@ -81,6 +81,7 @@ export default function UtilityMeterReadingsPage() {
   const [notes, setNotes] = useState('');
   const [drafts, setDrafts] = useState<DraftItem[]>(emptyDrafts);
   const [saving, setSaving] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -274,12 +275,19 @@ export default function UtilityMeterReadingsPage() {
                       return (
                         <td key={d.key} className="px-3 py-3">
                           {item?.photo_path && item.id > 0 ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={`/api/rentals/meters/files/${item.id}`}
-                              alt=""
-                              className="w-20 h-14 object-cover rounded border border-gray-200 mb-1"
-                            />
+                            <button
+                              type="button"
+                              onClick={() => setLightbox(`/api/rentals/meters/files/${item.id}`)}
+                              className="block mb-1 rounded border border-gray-200 overflow-hidden cursor-zoom-in hover:ring-2 hover:ring-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              title={bi('Click to enlarge', '點擊放大')}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={`/api/rentals/meters/files/${item.id}`}
+                                alt=""
+                                className="w-20 h-14 object-cover"
+                              />
+                            </button>
                           ) : (
                             <div className="w-20 h-14 rounded border border-dashed border-gray-200 bg-gray-50 mb-1" />
                           )}
@@ -385,12 +393,19 @@ export default function UtilityMeterReadingsPage() {
                     <div className="flex flex-col sm:flex-row gap-3">
                       <div className="shrink-0">
                         {d.previewUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={d.previewUrl}
-                            alt=""
-                            className="w-28 h-20 object-cover rounded-lg border border-gray-200"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => setLightbox(d.previewUrl)}
+                            className="block rounded-lg border border-gray-200 overflow-hidden cursor-zoom-in hover:ring-2 hover:ring-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            title={bi('Click to enlarge', '點擊放大')}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={d.previewUrl}
+                              alt=""
+                              className="w-28 h-20 object-cover"
+                            />
+                          </button>
                         ) : (
                           <div className="w-28 h-20 rounded-lg border border-dashed border-gray-300 bg-white flex items-center justify-center text-xs text-gray-400">
                             {bi('No photo', '無照片')}
@@ -464,6 +479,23 @@ export default function UtilityMeterReadingsPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 cursor-zoom-out"
+          role="dialog"
+          aria-modal="true"
+          aria-label={bi('Photo preview', '照片預覽')}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt={bi('Meter dial photo', '水電錶照片')}
+            className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white"
+          />
         </div>
       )}
     </AppLayout>

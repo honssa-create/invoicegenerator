@@ -18,6 +18,7 @@ import {
   formatDisplayDate,
   formatDueDayLabel,
   formatMoney,
+  isVacantUnitName,
   toFormDate,
   type LeaseDisplayStatus,
   type PreviousYearRent,
@@ -38,11 +39,15 @@ interface DashboardData {
   previousLeases?: PreviousLeaseRecord[];
 }
 
-const blankUnit: Partial<RentalUnit> = {
+type UnitModalState = Partial<RentalUnit> & { vacant?: boolean };
+
+const blankUnit: UnitModalState = {
   unitName: '', tenantName: '', tenantPhone: '', tenantEmail: '',
   currentYearRent: 0, previousYearsRent: [], leaseStartDate: '', leaseEndDate: '',
   dueDateDay: 1, autoSendReceiptEmail: false, automationEnabled: true,
   utilityBillingMode: 'company_shared_meter',
+  sharedMeterDeductionUnitIds: [],
+  vacant: false,
 };
 
 export default function RentalsPage() {
@@ -53,7 +58,7 @@ export default function RentalsPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [tenants, setTenants] = useState<RentalTenant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [unitModal, setUnitModal] = useState<Partial<RentalUnit> | null>(null);
+  const [unitModal, setUnitModal] = useState<UnitModalState | null>(null);
   const [previousYearsText, setPreviousYearsText] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -144,24 +149,55 @@ export default function RentalsPage() {
 
   const openUnitModal = (unit: Partial<RentalUnit>) => {
     setPreviousYearsText((unit.previousYearsRent || []).map((r) => `${r.year}, ${r.rent}`).join('\n'));
+    const vacant = Boolean(unit.id) && (isVacantUnitName(unit.tenantName) || !unit.tenantId);
     setUnitModal({
       ...unit,
       leaseStartDate: unit.leaseStartDate ? toFormDate(unit.leaseStartDate) : '',
       leaseEndDate: unit.leaseEndDate ? toFormDate(unit.leaseEndDate) : '',
+      vacant,
+      tenantName: vacant ? '' : (unit.tenantName || ''),
+      tenantPhone: vacant ? '' : (unit.tenantPhone || ''),
+      tenantEmail: vacant ? '' : (unit.tenantEmail || ''),
+      automationEnabled: vacant ? false : unit.automationEnabled !== false,
+      autoSendReceiptEmail: vacant ? false : Boolean(unit.autoSendReceiptEmail),
+      sharedMeterDeductionUnitIds: unit.sharedMeterDeductionUnitIds || [],
     });
   };
 
   const saveUnit = async () => {
+    if (!unitModal) return;
+    const vacant = Boolean(unitModal.vacant);
+    if (!vacant && !unitModal.tenantName?.trim()) {
+      setToast(bi('Tenant name is required (or mark vacant)', '請填寫租客姓名（或標記為空置）'));
+      return;
+    }
+    if (!unitModal.unitName?.trim()) {
+      setToast(bi('Unit name is required', '請填寫單位名稱'));
+      return;
+    }
     setBusy(true);
-    const isEdit = Boolean(unitModal?.id);
-    const payload = { ...unitModal, previousYearsRent: parsePreviousYears(previousYearsText) };
-    const res = await fetch(isEdit ? `/api/rentals/units/${unitModal?.id}` : '/api/rentals', {
+    const isEdit = Boolean(unitModal.id);
+    const payload = {
+      ...unitModal,
+      previousYearsRent: parsePreviousYears(previousYearsText),
+      vacant,
+      tenantName: vacant ? '' : unitModal.tenantName,
+      tenantPhone: vacant ? '' : unitModal.tenantPhone,
+      tenantEmail: vacant ? '' : unitModal.tenantEmail,
+      automationEnabled: vacant ? false : unitModal.automationEnabled !== false,
+      autoSendReceiptEmail: vacant ? false : Boolean(unitModal.autoSendReceiptEmail),
+    };
+    const res = await fetch(isEdit ? `/api/rentals/units/${unitModal.id}` : '/api/rentals', {
       method: isEdit ? 'PATCH' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     setBusy(false);
-    if (!res.ok) { setToast('Failed to save lease'); return; }
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setToast(d.error || bi('Failed to save lease', '儲存租約失敗'));
+      return;
+    }
     setUnitModal(null);
     setToast(isEdit ? MSG.leaseUpdated : MSG.newUnitAdded);
     load();
@@ -521,17 +557,52 @@ export default function RentalsPage() {
               <button type="button" onClick={() => setUnitModal(null)} className="text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Unit Name</label>
+                <input
+                  type="text"
+                  className={inp}
+                  placeholder="e.g. Room A"
+                  value={unitModal.unitName || ''}
+                  onChange={(e) => setUnitModal({ ...unitModal, unitName: e.target.value })}
+                />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm cursor-pointer pb-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(unitModal.vacant)}
+                    onChange={(e) => {
+                      const vacant = e.target.checked;
+                      setUnitModal({
+                        ...unitModal,
+                        vacant,
+                        tenantName: vacant ? '' : unitModal.tenantName,
+                        tenantPhone: vacant ? '' : unitModal.tenantPhone,
+                        tenantEmail: vacant ? '' : unitModal.tenantEmail,
+                        automationEnabled: vacant ? false : unitModal.automationEnabled !== false,
+                        autoSendReceiptEmail: vacant ? false : Boolean(unitModal.autoSendReceiptEmail),
+                      });
+                    }}
+                  />
+                  {bi('Vacant / 空置 (no tenant)', '空置 Vacant（暫無租客）')}
+                </label>
+              </div>
               {[
-                ['Unit Name', 'unitName', 'text', 'e.g. Room A'],
                 ['Tenant Name 租單位人士', 'tenantName', 'text', ''],
                 ['Phone 電話', 'tenantPhone', 'tel', '+852…'],
                 ['Email', 'tenantEmail', 'email', ''],
               ].map(([label, field, type, placeholder]) => (
                 <div key={field}>
                   <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-                  <input type={type} className={inp} placeholder={placeholder}
+                  <input
+                    type={type}
+                    className={`${inp} ${unitModal.vacant ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
+                    placeholder={placeholder}
+                    disabled={Boolean(unitModal.vacant)}
                     value={(unitModal as Record<string, unknown>)[field] as string || ''}
-                    onChange={(e) => setUnitModal({ ...unitModal, [field]: e.target.value })} />
+                    onChange={(e) => setUnitModal({ ...unitModal, [field]: e.target.value })}
+                  />
                 </div>
               ))}
               <div>
@@ -570,19 +641,77 @@ export default function RentalsPage() {
                 <UtilityBillingPicker
                   compact
                   value={(unitModal.utilityBillingMode || 'company_shared_meter') as UtilityBillingMode}
-                  onChange={(mode) => setUnitModal({ ...unitModal, utilityBillingMode: mode })}
+                  onChange={(mode) => setUnitModal({
+                    ...unitModal,
+                    utilityBillingMode: mode,
+                    sharedMeterDeductionUnitIds: mode === 'company_shared_meter'
+                      ? (unitModal.sharedMeterDeductionUnitIds || [])
+                      : [],
+                  })}
                 />
               </div>
+              {unitModal.utilityBillingMode === 'company_shared_meter' && (
+                <div className="md:col-span-2 rounded-lg border border-orange-100 bg-orange-50/40 p-3">
+                  <p className="text-xs font-semibold text-orange-900 mb-1">
+                    {bi('Other units’ electric dials to deduct', '需扣除的其他單位電錶度數')}
+                  </p>
+                  <p className="text-[11px] text-orange-800/80 mb-2">
+                    {bi(
+                      'Selected units appear as usage inputs on this shared meter’s monthly calculator.',
+                      '所選單位會出現在此大分錶每月電費計算的「其他單位用電」欄位。',
+                    )}
+                  </p>
+                  {units.filter((u) => u.id !== unitModal.id).length === 0 ? (
+                    <p className="text-xs text-gray-500">
+                      {bi('No other units yet — add more units to select deductions.', '尚無其他單位可選。')}
+                    </p>
+                  ) : (
+                    <div className="grid sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                      {units
+                        .filter((u) => u.id !== unitModal.id)
+                        .map((u) => {
+                          const checked = (unitModal.sharedMeterDeductionUnitIds || []).includes(u.id);
+                          return (
+                            <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const cur = unitModal.sharedMeterDeductionUnitIds || [];
+                                  setUnitModal({
+                                    ...unitModal,
+                                    sharedMeterDeductionUnitIds: checked
+                                      ? cur.filter((id) => id !== u.id)
+                                      : [...cur, u.id],
+                                  });
+                                }}
+                              />
+                              <span className="font-medium text-gray-800">{u.unitName}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex gap-4 mt-4 flex-wrap">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={Boolean(unitModal.autoSendReceiptEmail)}
-                  onChange={(e) => setUnitModal({ ...unitModal, autoSendReceiptEmail: e.target.checked })} />
+              <label className={`flex items-center gap-2 text-sm ${unitModal.vacant ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+                <input
+                  type="checkbox"
+                  disabled={Boolean(unitModal.vacant)}
+                  checked={Boolean(unitModal.autoSendReceiptEmail)}
+                  onChange={(e) => setUnitModal({ ...unitModal, autoSendReceiptEmail: e.target.checked })}
+                />
                 付款後自動發送收據 Email
               </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={unitModal.automationEnabled !== false}
-                  onChange={(e) => setUnitModal({ ...unitModal, automationEnabled: e.target.checked })} />
+              <label className={`flex items-center gap-2 text-sm ${unitModal.vacant ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+                <input
+                  type="checkbox"
+                  disabled={Boolean(unitModal.vacant)}
+                  checked={!unitModal.vacant && unitModal.automationEnabled !== false}
+                  onChange={(e) => setUnitModal({ ...unitModal, automationEnabled: e.target.checked })}
+                />
                 Monthly invoice automation
               </label>
             </div>

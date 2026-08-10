@@ -52,6 +52,7 @@ import {
   resolveUtilityBillingMode,
   utilityChargeTypesForMode,
   normalizeUtilityBillingMode,
+  isVacantUnitName,
 } from './rentals';
 import { getTenantLeaseHistory } from './rental-lease-server';
 import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
@@ -365,7 +366,7 @@ export async function syncChargeItemsFromRecord(record: RentRecord) {
 }
 
 export async function ensureUnitTenantLink(unit: RentalUnit): Promise<RentalTenant | null> {
-  if (!unit.tenantName?.trim()) return null;
+  if (isVacantUnitName(unit.tenantName)) return null;
   const tenant = await findOrCreateTenant(unit.user_id, unit.tenantName, unit.tenantPhone, unit.tenantEmail);
   const row = await db.prepare('SELECT tenant_id FROM rental_units WHERE id = ?').get(unit.id) as { tenant_id: number | null } | undefined;
   if (!row?.tenant_id) await linkUnitToTenant(unit.id, unit.user_id, tenant.id);

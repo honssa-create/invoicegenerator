@@ -57,6 +57,8 @@ import {
   pastLeaseStatusLabel,
   unitHasWaterMeterFormula,
   waterMeterDataFromInputs,
+  isVacantUnitName,
+  hydrateOtherUnitUsagesFromLegacy,
   type DebitNotePaymentTemplateId,
   type RentRecord,
   type RentalActivityLog,
@@ -91,6 +93,8 @@ interface DetailPayload {
   leaseDocuments?: RentalLeaseDocument[];
   suggestedPrevElectricityReading?: number | null;
   suggestedPrevWaterReading?: number | null;
+  portfolioUnits?: { id: number; unitName: string }[];
+  sharedMeterDeductionUnits?: { id: number; unitName: string }[];
 }
 
 interface UtilitySnapshot {
@@ -104,9 +108,7 @@ interface UtilitySnapshot {
   electricityPeriodTo: string;
   meterPrevReading: string;
   meterCurrReading: string;
-  meter213B: string;
-  meterStockRoom1: string;
-  meterStockRoom2: string;
+  otherUnitUsages: Record<string, string>;
   meterRatePerUnit: string;
   waterMeterPrev: string;
   waterMeterCurr: string;
@@ -185,6 +187,7 @@ function RentalDetailInner() {
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
   const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_shared_meter');
+  const [sharedMeterDeductionUnitIds, setSharedMeterDeductionUnitIds] = useState<number[]>([]);
   const [billingCompany, setBillingCompany] = useState<DebitNoteCompanyId | ''>('');
   const [leaseStartDate, setLeaseStartDate] = useState('');
   const [leaseEndDate, setLeaseEndDate] = useState('');
@@ -203,9 +206,7 @@ function RentalDetailInner() {
   const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
   const [meterPrevReading, setMeterPrevReading] = useState('');
   const [meterCurrReading, setMeterCurrReading] = useState('');
-  const [meter213B, setMeter213B] = useState('');
-  const [meterStockRoom1, setMeterStockRoom1] = useState('');
-  const [meterStockRoom2, setMeterStockRoom2] = useState('');
+  const [otherUnitUsages, setOtherUnitUsages] = useState<Record<string, string>>({});
   const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
   const [waterMeterPrev, setWaterMeterPrev] = useState('');
   const [waterMeterCurr, setWaterMeterCurr] = useState('');
@@ -299,6 +300,7 @@ function RentalDetailInner() {
           setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
           setBaseRent(String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)));
           setUtilityBillingMode(normalizeUtilityBillingMode(d.unit.utilityBillingMode));
+          setSharedMeterDeductionUnitIds(d.unit.sharedMeterDeductionUnitIds || []);
           setBillingCompany(
             d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
               ? d.unit.billingCompany
@@ -327,12 +329,19 @@ function RentalDetailInner() {
             setElectricityFee(String(rec.electricityFee || 0));
             setElectricityPeriodFrom(toFormDate(rec.electricityPeriodFrom));
             setElectricityPeriodTo(toFormDate(rec.electricityPeriodTo));
-            const meter = rec.electricityMeter;
+            const deductionMeta = (d.sharedMeterDeductionUnits || []) as { id: number; unitName: string }[];
+            const meterRaw = rec.electricityMeter;
+            const meter = meterRaw
+              ? hydrateOtherUnitUsagesFromLegacy(meterRaw, deductionMeta)
+              : null;
             setMeterPrevReading(meter?.prevReading != null ? String(meter.prevReading) : '');
             setMeterCurrReading(meter?.currReading != null ? String(meter.currReading) : '');
-            setMeter213B(meter?.meter213B != null ? String(meter.meter213B) : '');
-            setMeterStockRoom1(meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '');
-            setMeterStockRoom2(meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '');
+            const usageStrings: Record<string, string> = {};
+            for (const u of deductionMeta) {
+              const v = meter?.otherUnitUsages?.[String(u.id)];
+              usageStrings[String(u.id)] = v != null && Number.isFinite(v) ? String(v) : '';
+            }
+            setOtherUnitUsages(usageStrings);
             setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
             setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
             setSuggestedPrevWaterReading(d.suggestedPrevWaterReading ?? null);
@@ -359,9 +368,7 @@ function RentalDetailInner() {
               electricityPeriodTo: toFormDate(rec.electricityPeriodTo),
               meterPrevReading: meter?.prevReading != null ? String(meter.prevReading) : (d.suggestedPrevElectricityReading != null ? String(d.suggestedPrevElectricityReading) : ''),
               meterCurrReading: meter?.currReading != null ? String(meter.currReading) : '',
-              meter213B: meter?.meter213B != null ? String(meter.meter213B) : '',
-              meterStockRoom1: meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '',
-              meterStockRoom2: meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '',
+              otherUnitUsages: { ...usageStrings },
               meterRatePerUnit: meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '',
               waterMeterPrev: waterMeter?.prevReading != null ? String(waterMeter.prevReading) : (d.suggestedPrevWaterReading != null ? String(d.suggestedPrevWaterReading) : ''),
               waterMeterCurr: waterMeter?.currReading != null ? String(waterMeter.currReading) : '',
@@ -407,12 +414,12 @@ function RentalDetailInner() {
   useEffect(() => {
     if (!electricityFormula) return;
     const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
-      meter213B, meterStockRoom1, meterStockRoom2,
+      otherUnitUsages,
     });
     const fee = calcElectricityFeeForFormula(electricityFormula, meter);
     const hasInput = [meterPrevReading, meterCurrReading, meterRatePerUnit].some((v) => v.trim() !== '');
     setElectricityFee(hasInput ? String(fee) : '');
-  }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
+  }, [electricityFormula, meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
@@ -427,9 +434,7 @@ function RentalDetailInner() {
     electricityPeriodTo,
     meterPrevReading,
     meterCurrReading,
-    meter213B,
-    meterStockRoom1,
-    meterStockRoom2,
+    otherUnitUsages: { ...otherUnitUsages },
     meterRatePerUnit,
     waterMeterPrev,
     waterMeterCurr,
@@ -438,7 +443,7 @@ function RentalDetailInner() {
   }), [
     baseRentPeriodFrom, baseRentPeriodTo, waterFee, waterPeriodFrom, waterPeriodTo,
     electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit,
     waterMeterPrev, waterMeterCurr, waterMeterRate, utilityNote,
   ]);
 
@@ -453,9 +458,7 @@ function RentalDetailInner() {
     setElectricityPeriodTo(snap.electricityPeriodTo);
     setMeterPrevReading(snap.meterPrevReading);
     setMeterCurrReading(snap.meterCurrReading);
-    setMeter213B(snap.meter213B);
-    setMeterStockRoom1(snap.meterStockRoom1);
-    setMeterStockRoom2(snap.meterStockRoom2);
+    setOtherUnitUsages({ ...snap.otherUnitUsages });
     setMeterRatePerUnit(snap.meterRatePerUnit);
     setWaterMeterPrev(snap.waterMeterPrev);
     setWaterMeterCurr(snap.waterMeterCurr);
@@ -479,7 +482,7 @@ function RentalDetailInner() {
     if (electricityFormula) {
       payload.electricityMeter = meterDataFromInputs(
         s.meterPrevReading, s.meterCurrReading, s.meterRatePerUnit,
-        { meter213B: s.meter213B, meterStockRoom1: s.meterStockRoom1, meterStockRoom2: s.meterStockRoom2 },
+        { otherUnitUsages: s.otherUnitUsages },
       );
     }
     if (waterMeterFormula) {
@@ -542,7 +545,7 @@ function RentalDetailInner() {
     baseRentPeriodFrom, baseRentPeriodTo,
     waterFee, waterPeriodFrom, waterPeriodTo,
     electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit,
     waterMeterPrev, waterMeterCurr, waterMeterRate,
     utilityNote,
   ]);
@@ -560,6 +563,9 @@ function RentalDetailInner() {
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
         utilityBillingMode,
+        sharedMeterDeductionUnitIds: utilityBillingMode === 'company_shared_meter'
+          ? sharedMeterDeductionUnitIds
+          : [],
         billingCompany: billingCompany || null,
         leaseStartDate: fromFormDate(leaseStartDate),
         leaseEndDate: fromFormDate(leaseEndDate),
@@ -876,12 +882,12 @@ function RentalDetailInner() {
     ? computeLeaseDisplayStatus(viewingLease)
     : currentLease
       ? computeLeaseDisplayStatus(currentLease)
-      : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
+      : !isVacantUnitName(unit.tenantName) ? 'active' : 'vacant';
   const contractEnded = readOnly || leaseStatus === 'ended' || leaseStatus === 'terminated';
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
   const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
   const liveElectricityMeter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
-    meter213B, meterStockRoom1, meterStockRoom2,
+    otherUnitUsages,
   });
   const liveElectricityFee = electricityFormula
     ? calcElectricityFeeForFormula(electricityFormula, liveElectricityMeter)
@@ -1079,8 +1085,39 @@ function RentalDetailInner() {
           <p className="text-xs text-gray-400 mb-3">Controls whether water &amp; electricity appear on debit notes for this unit</p>
           <UtilityBillingPicker
             value={utilityBillingMode}
-            onChange={setUtilityBillingMode}
+            onChange={(mode) => {
+              setUtilityBillingMode(mode);
+              if (mode !== 'company_shared_meter') setSharedMeterDeductionUnitIds([]);
+            }}
           />
+          {utilityBillingMode === 'company_shared_meter' && (
+            <div className="mt-3 rounded-lg border border-orange-100 bg-orange-50/40 p-3">
+              <p className="text-xs font-semibold text-orange-900 mb-2">
+                {bi('Other units’ electric dials to deduct', '需扣除的其他單位電錶度數')}
+              </p>
+              <div className="grid sm:grid-cols-2 gap-2">
+                {(data?.portfolioUnits || [])
+                  .filter((u) => u.id !== data?.unit.id)
+                  .map((u) => {
+                    const checked = sharedMeterDeductionUnitIds.includes(u.id);
+                    return (
+                      <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSharedMeterDeductionUnitIds((cur) =>
+                              checked ? cur.filter((x) => x !== u.id) : [...cur, u.id],
+                            );
+                          }}
+                        />
+                        <span className="font-medium text-gray-800">{u.unitName}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
         </div>
         )}
         {!readOnly && (
@@ -1154,16 +1191,15 @@ function RentalDetailInner() {
                         formula={electricityFormula}
                         prevReading={meterPrevReading}
                         currReading={meterCurrReading}
-                        meter213B={meter213B}
-                        meterStockRoom1={meterStockRoom1}
-                        meterStockRoom2={meterStockRoom2}
                         ratePerUnit={meterRatePerUnit}
+                        deductionUnits={data?.sharedMeterDeductionUnits || []}
+                        otherUnitUsages={otherUnitUsages}
                         onPrevReading={setMeterPrevReading}
                         onCurrReading={setMeterCurrReading}
-                        onMeter213B={setMeter213B}
-                        onMeterStockRoom1={setMeterStockRoom1}
-                        onMeterStockRoom2={setMeterStockRoom2}
                         onRatePerUnit={setMeterRatePerUnit}
+                        onOtherUnitUsage={(unitId, value) => {
+                          setOtherUnitUsages((prev) => ({ ...prev, [String(unitId)]: value }));
+                        }}
                         suggestedPrevReading={suggestedPrevReading}
                         inpClassName={fieldCls}
                         readOnly={readOnly}

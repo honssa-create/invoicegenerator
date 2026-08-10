@@ -173,6 +173,9 @@ async function mergeElectricity(
     ...existing,
     prevReading,
     ...patch,
+    otherUnitUsages: patch.otherUnitUsages
+      ? { ...(existing.otherUnitUsages || {}), ...patch.otherUnitUsages }
+      : existing.otherUnitUsages,
     ratePerUnit: existing.ratePerUnit,
   };
   await updateRentRecordUtilities(record.id, userId, { electricityMeter: next });
@@ -247,7 +250,11 @@ async function syncItemToBilling(
         prevFromRound,
       );
       if (usage != null) {
-        await mergeElectricity(userId, '213A', period, { meter213B: usage });
+        const deduction = await findUnitByName(userId, '213B');
+        await mergeElectricity(userId, '213A', period, {
+          meter213B: usage,
+          otherUnitUsages: deduction ? { [String(deduction.id)]: usage } : undefined,
+        });
       }
       return synced;
     }
@@ -267,9 +274,15 @@ async function syncItemToBilling(
         prevFromRound,
       );
       if (usage != null) {
+        const sr1 = await findUnitByName(userId, 'Stock Room 1');
+        const sr2 = await findUnitByName(userId, 'Stock Room 2');
+        const otherUnitUsages: Record<string, number | null> = {};
+        if (sr1) otherUnitUsages[String(sr1.id)] = usage;
+        if (sr2) otherUnitUsages[String(sr2.id)] = usage;
         await mergeElectricity(userId, '213A', period, {
           meterStockRoom1: usage,
           meterStockRoom2: usage,
+          otherUnitUsages: Object.keys(otherUnitUsages).length ? otherUnitUsages : undefined,
         });
       }
       return a ?? b;

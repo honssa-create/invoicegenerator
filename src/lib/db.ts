@@ -155,6 +155,121 @@ async function loadSchemaSql(): Promise<string> {
   return fs.readFileSync(schemaPath, 'utf8');
 }
 
+/**
+ * Split a SQL script into statements so each can autocommit separately.
+ * Running the whole pg-schema.sql as one Query holds AccessExclusiveLock across
+ * many tables until the end — concurrent SELECTs that join those tables deadlock
+ * (e.g. invoices ↔ reconciliation_records).
+ */
+export function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let i = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let dollarTag: string | null = null;
+
+  while (i < sql.length) {
+    const c = sql[i];
+    const next = sql[i + 1];
+
+    if (inLineComment) {
+      buf += c;
+      if (c === '\n') inLineComment = false;
+      i += 1;
+      continue;
+    }
+    if (inBlockComment) {
+      buf += c;
+      if (c === '*' && next === '/') {
+        buf += '/';
+        i += 2;
+        inBlockComment = false;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+    if (dollarTag !== null) {
+      if (c === '$' && sql.startsWith(dollarTag, i)) {
+        buf += dollarTag;
+        i += dollarTag.length;
+        dollarTag = null;
+        continue;
+      }
+      buf += c;
+      i += 1;
+      continue;
+    }
+    if (inSingle) {
+      buf += c;
+      if (c === "'" && next === "'") {
+        buf += next;
+        i += 2;
+        continue;
+      }
+      if (c === "'") inSingle = false;
+      i += 1;
+      continue;
+    }
+    if (inDouble) {
+      buf += c;
+      if (c === '"') inDouble = false;
+      i += 1;
+      continue;
+    }
+
+    if (c === '-' && next === '-') {
+      buf += c + next;
+      i += 2;
+      inLineComment = true;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      buf += c + next;
+      i += 2;
+      inBlockComment = true;
+      continue;
+    }
+    if (c === "'") {
+      buf += c;
+      inSingle = true;
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      buf += c;
+      inDouble = true;
+      i += 1;
+      continue;
+    }
+    if (c === '$') {
+      const rest = sql.slice(i);
+      const m = rest.match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/);
+      if (m) {
+        dollarTag = m[0];
+        buf += dollarTag;
+        i += dollarTag.length;
+        continue;
+      }
+    }
+    if (c === ';') {
+      const stmt = buf.trim();
+      if (stmt) out.push(stmt);
+      buf = '';
+      i += 1;
+      continue;
+    }
+    buf += c;
+    i += 1;
+  }
+  const tail = buf.trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
 async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
   const conn = await getPool().connect();
   try {
@@ -458,7 +573,12 @@ export async function ensureSchema(): Promise<void> {
       schemaBootInProgress = true;
       try {
         const sql = await loadSchemaSql();
-        await getPool().query(sql);
+        // Autocommit each statement so AccessExclusiveLock is released between ALTERs.
+        // A single multi-statement Query holds locks across invoices + reconciliation_records
+        // and deadlocks concurrent JOINs (Postgres 40P01).
+        for (const stmt of splitSqlStatements(sql)) {
+          await getPool().query(stmt);
+        }
         await runBootDataFixes();
         warnIfEphemeralReceiptStorage();
         warnIfR2Misconfigured();

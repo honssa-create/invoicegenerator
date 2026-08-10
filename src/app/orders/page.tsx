@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
+import OrdersBoard from '@/components/OrdersBoard';
 import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
@@ -20,6 +21,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [creatingStatus, setCreatingStatus] = useState<string | null>(null);
   const [createError, setCreateError] = useState('');
 
   const [dateStart, setDateStart] = useState('');
@@ -28,6 +30,8 @@ export default function OrdersPage() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'reference', dir: 'desc' });
+  const [view, setView] = useState<'line' | 'board'>('line');
+  const [boardError, setBoardError] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -112,15 +116,17 @@ export default function OrdersPage() {
     setSearch('');
   };
 
-  const create = async () => {
+  const create = async (status?: string) => {
     if (creating) return;
     setCreating(true);
+    setCreatingStatus(status || null);
     setCreateError('');
+    setBoardError('');
     try {
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(status ? { status } : {}),
       });
       const data = await res.json();
       if (!res.ok || !data.order?.id) {
@@ -132,6 +138,32 @@ export default function OrdersPage() {
       setCreateError(bi('Failed to create order', '無法建立訂單'));
     } finally {
       setCreating(false);
+      setCreatingStatus(null);
+    }
+  };
+
+  const changeBoardStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
+    const prev = orders.find((o) => o.id === orderId)?.status;
+    if (prev == null || prev === nextStatus) return true;
+    setBoardError('');
+    setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ core: { status: nextStatus } }),
+      });
+      if (!res.ok) {
+        setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prev } : o)));
+        const data = await res.json().catch(() => ({}));
+        setBoardError(data.error || bi('Failed to update status', '無法更新狀態'));
+        return false;
+      }
+      return true;
+    } catch {
+      setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prev } : o)));
+      setBoardError(bi('Failed to update status', '無法更新狀態'));
+      return false;
     }
   };
 
@@ -145,6 +177,26 @@ export default function OrdersPage() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Manage production orders with a ClickUp-style detail view', '以 ClickUp 風格詳情頁管理生產訂單')}</p>
         </div>
         <div className="page-actions">
+          <div className="inline-flex rounded-lg border border-gray-300 p-0.5 text-sm bg-white">
+            <button
+              type="button"
+              onClick={() => setView('line')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                view === 'line' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {bi('Line', '列表')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('board')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                view === 'board' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {bi('Board', '看板')}
+            </button>
+          </div>
           <button
             type="button"
             onClick={create}
@@ -156,9 +208,9 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {createError && (
+      {(createError || boardError) && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {createError}
+          {createError || boardError}
         </div>
       )}
 
@@ -188,53 +240,68 @@ export default function OrdersPage() {
         </div>
       </FilterBar>
 
-      <div className="bg-white rounded-xl border border-gray-200">
-        {loading ? (
-          <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
-        ) : orders.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">{bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}</div>
-        ) : displayed.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">{bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}</div>
-        ) : (
-          <div className="table-scroll">
-          <table className="w-full min-w-[840px]">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                {sortTh('reference', bi('Reference Number', '參考編號'))}
-                {sortTh('order', bi('Order Number', '訂單號碼'))}
-                {sortTh('type', bi('Order Type', '訂單類型'))}
-                {sortTh('status', bi('Status', '狀態'))}
-                {sortTh('delivery', bi('Delivery', '交貨'))}
-                {sortTh('created', bi('Created', '建立'))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {displayed.map((o) => (
-                <tr key={o.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
-                      {o.reference_number}
-                    </Link>
-                  </td>
-                  <td className="px-6 py-4">
-                    <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-                      {o.po_number || '—'}
-                    </Link>
-                    {o.name && <p className="mt-0.5 text-xs text-gray-400">{o.name}</p>}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>{o.status}</span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{o.delivery_date || '—'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {view === 'board' ? (
+        loading ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
           </div>
-        )}
-      </div>
+        ) : (
+          <OrdersBoard
+            orders={displayed}
+            onStatusChange={changeBoardStatus}
+            onCreateInStatus={(status) => { void create(status); }}
+            creatingStatus={creatingStatus}
+          />
+        )
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200">
+          {loading ? (
+            <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
+          ) : orders.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">{bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}</div>
+          ) : displayed.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">{bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}</div>
+          ) : (
+            <div className="table-scroll">
+            <table className="w-full min-w-[840px]">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                  {sortTh('reference', bi('Reference Number', '參考編號'))}
+                  {sortTh('order', bi('Order Number', '訂單號碼'))}
+                  {sortTh('type', bi('Order Type', '訂單類型'))}
+                  {sortTh('status', bi('Status', '狀態'))}
+                  {sortTh('delivery', bi('Delivery', '交貨'))}
+                  {sortTh('created', bi('Created', '建立'))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {displayed.map((o) => (
+                  <tr key={o.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
+                        {o.reference_number}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+                        {o.po_number || '—'}
+                      </Link>
+                      {o.name && <p className="mt-0.5 text-xs text-gray-400">{o.name}</p>}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>{o.status}</span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{o.delivery_date || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </div>
+      )}
     </AppLayout>
   );
 }

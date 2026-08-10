@@ -51,22 +51,79 @@ export const ORDER_STATUSES = [
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+/** Exact ClickUp-style status dots from the status board palette. */
+export const STATUS_DOT_COLORS: Record<string, string> = {
+  'OPEN': '#9CA3AF',
+  '快遞到件': '#5BA4CF',
+  'IN PROGRESS 安排中': '#8B6CC1',
+  '需長時間處理': '#C23A8A',
+  '起版中 SAMPLE': '#A02D2D',
+  'PRODUCTION 生產中': '#5BC0DE',
+  '有問題': '#E04B8A',
+  '已到公司 BACK TO OFFICE': '#8FA03A',
+  '已到公司 - 請安排包裝/PACK箱': '#7DBFAE',
+  '已到公司 - 已完成包裝': '#7DBFAE',
+  '可以寄出 READY TO SEND': '#6B8FD4',
+  '已寄出 SENT': '#C9A227',
+  '客退貨/客原版': '#8B7D72',
+  '已處理': '#5C5C5C',
+  'FAIL': '#E91E8C',
+};
+
 export const STATUS_COLORS: Record<string, string> = {
-  'OPEN': 'bg-gray-100 text-gray-700',
-  '快遞到件': 'bg-sky-100 text-sky-700',
-  'IN PROGRESS 安排中': 'bg-violet-100 text-violet-700',
-  '需長時間處理': 'bg-pink-100 text-pink-700',
-  '起版中 SAMPLE': 'bg-red-100 text-red-700',
-  'PRODUCTION 生產中': 'bg-cyan-100 text-cyan-700',
-  '有問題': 'bg-rose-100 text-rose-700',
-  '已到公司 BACK TO OFFICE': 'bg-green-100 text-green-700',
-  '已到公司 - 請安排包裝/PACK箱': 'bg-teal-100 text-teal-700',
-  '已到公司 - 已完成包裝': 'bg-emerald-100 text-emerald-700',
-  '可以寄出 READY TO SEND': 'bg-blue-100 text-blue-700',
-  '已寄出 SENT': 'bg-yellow-100 text-yellow-800',
-  '客退貨/客原版': 'bg-stone-200 text-stone-700',
-  '已處理': 'bg-zinc-200 text-zinc-700',
-  'FAIL': 'bg-fuchsia-100 text-fuchsia-700',
+  'OPEN': 'bg-[#F3F4F6] text-[#6B7280]',
+  '快遞到件': 'bg-[#E8F4FA] text-[#3D7FA8]',
+  'IN PROGRESS 安排中': 'bg-[#F0EBF8] text-[#6B4FA0]',
+  '需長時間處理': 'bg-[#F9E8F2] text-[#9A2D6C]',
+  '起版中 SAMPLE': 'bg-[#F8EAEA] text-[#7A2222]',
+  'PRODUCTION 生產中': 'bg-[#E8F7FB] text-[#2F8FA8]',
+  '有問題': 'bg-[#FCE8F1] text-[#B8306A]',
+  '已到公司 BACK TO OFFICE': 'bg-[#F2F5E6] text-[#6A7A2C]',
+  '已到公司 - 請安排包裝/PACK箱': 'bg-[#EAF6F3] text-[#4A8F80]',
+  '已到公司 - 已完成包裝': 'bg-[#EAF6F3] text-[#4A8F80]',
+  '可以寄出 READY TO SEND': 'bg-[#EAF0FA] text-[#4A6BB0]',
+  '已寄出 SENT': 'bg-[#F8F3E0] text-[#8A7018]',
+  '客退貨/客原版': 'bg-[#F0EDEB] text-[#6B6058]',
+  '已處理': 'bg-[#EBEBEB] text-[#3F3F3F]',
+  'FAIL': 'bg-[#FCE4F2] text-[#C01070]',
+};
+
+/** Soft column tint for Kanban board columns (header/bg wash). */
+export const STATUS_COLUMN_BG: Record<string, string> = {
+  'OPEN': 'bg-[#E8EAED]',
+  '快遞到件': 'bg-[#D4EAF6]',
+  'IN PROGRESS 安排中': 'bg-[#E4D9F4]',
+  '需長時間處理': 'bg-[#F5D6E8]',
+  '起版中 SAMPLE': 'bg-[#F3D6D6]',
+  'PRODUCTION 生產中': 'bg-[#D4EFF6]',
+  '有問題': 'bg-[#F9D6E7]',
+  '已到公司 BACK TO OFFICE': 'bg-[#E4EBC8]',
+  '已到公司 - 請安排包裝/PACK箱': 'bg-[#D5EEE7]',
+  '已到公司 - 已完成包裝': 'bg-[#D5EEE7]',
+  '可以寄出 READY TO SEND': 'bg-[#D8E3F6]',
+  '已寄出 SENT': 'bg-[#F3E9C4]',
+  '客退貨/客原版': 'bg-[#E6E0DB]',
+  '已處理': 'bg-[#DDDDDD]',
+  'FAIL': 'bg-[#F9D0E8]',
+};
+
+/** Stronger header wash / accent strip for board columns. */
+export const STATUS_COLUMN_ACCENT: Record<string, string> = {
+  'OPEN': 'border-t-[#9CA3AF]',
+  '快遞到件': 'border-t-[#5BA4CF]',
+  'IN PROGRESS 安排中': 'border-t-[#8B6CC1]',
+  '需長時間處理': 'border-t-[#C23A8A]',
+  '起版中 SAMPLE': 'border-t-[#A02D2D]',
+  'PRODUCTION 生產中': 'border-t-[#5BC0DE]',
+  '有問題': 'border-t-[#E04B8A]',
+  '已到公司 BACK TO OFFICE': 'border-t-[#8FA03A]',
+  '已到公司 - 請安排包裝/PACK箱': 'border-t-[#7DBFAE]',
+  '已到公司 - 已完成包裝': 'border-t-[#7DBFAE]',
+  '可以寄出 READY TO SEND': 'border-t-[#6B8FD4]',
+  '已寄出 SENT': 'border-t-[#C9A227]',
+  '客退貨/客原版': 'border-t-[#8B7D72]',
+  '已處理': 'border-t-[#5C5C5C]',
+  'FAIL': 'border-t-[#E91E8C]',
 };
 
 // The full custom-field list shown in the order detail "Fields" panel, in order.

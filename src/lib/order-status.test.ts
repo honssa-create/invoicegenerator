@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ORDER_STATUSES, STATUS_COLORS } from './orders';
+import { ORDER_STATUSES, STATUS_COLORS, STATUS_COLUMN_BG, STATUS_COLUMN_ACCENT, STATUS_DOT_COLORS } from './orders';
 
 const EXPECTED_ORDER_STATUSES = [
   'OPEN',
@@ -32,5 +32,29 @@ describe('order status workflow', () => {
     for (const status of ORDER_STATUSES) {
       expect(STATUS_COLORS[status], status).toBeTruthy();
     }
+  });
+
+  it('defines a column tint for every status', () => {
+    for (const status of ORDER_STATUSES) {
+      expect(STATUS_COLUMN_BG[status], status).toBeTruthy();
+    }
+  });
+
+  it('defines a column accent for every status', () => {
+    for (const status of ORDER_STATUSES) {
+      expect(STATUS_COLUMN_ACCENT[status], status).toBeTruthy();
+    }
+  });
+
+  it('defines a palette dot color for every status', () => {
+    for (const status of ORDER_STATUSES) {
+      expect(STATUS_DOT_COLORS[status], status).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    }
+  });
+
+  it('keeps packing statuses on the same mint palette', () => {
+    expect(STATUS_DOT_COLORS['已到公司 - 請安排包裝/PACK箱']).toBe(
+      STATUS_DOT_COLORS['已到公司 - 已完成包裝'],
+    );
   });
 });

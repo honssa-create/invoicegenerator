@@ -4,7 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrders, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
-import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
+import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 
@@ -35,6 +35,9 @@ export async function POST(request: Request) {
       (ORDER_TYPES as readonly string[]).includes(body.order_type.trim())
         ? body.order_type.trim()
         : '';
+    const statusRaw = typeof body.status === 'string' ? body.status.trim() : '';
+    const status =
+      statusRaw && (ORDER_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : 'OPEN';
     const fieldsJson = JSON.stringify(orderType ? { order_type: orderType } : {});
     const { id, referenceNumber } = await db.transaction(async () => {
       const referenceNumber = await allocateGlobalRecordNumber('order');
@@ -51,7 +54,7 @@ export async function POST(request: Request) {
           body.po_number?.trim() || null,
           body.name?.trim() || null,
           body.description?.trim() || null,
-          body.status?.trim() || 'OPEN',
+          status,
           body.delivery_date?.trim() || null,
           body.customer_email?.trim() || null,
           body.phone?.trim() || null,

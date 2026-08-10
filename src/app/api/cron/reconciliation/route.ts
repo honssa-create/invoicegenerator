@@ -12,7 +12,14 @@ async function runSync(userId: number | null) {
   }
   const users = await db.prepare(query).all(...params) as { id: number }[];
 
-  const results: { user_id: number; fetched: number; imported: number; matched: number; skipped: number; error?: string }[] = [];
+  const results: {
+    user_id: number;
+    fetched: number;
+    imported: number;
+    suggested: number;
+    skipped: number;
+    error?: string;
+  }[] = [];
 
   for (const user of users) {
     try {
@@ -23,7 +30,7 @@ async function runSync(userId: number | null) {
         user_id: user.id,
         fetched: 0,
         imported: 0,
-        matched: 0,
+        suggested: 0,
         skipped: 0,
         error: err instanceof Error ? err.message : 'sync failed',
       });

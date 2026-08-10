@@ -412,6 +412,38 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_order_type_restock') ON CONFLICT DO NOTHING`
     );
   }
+
+  // Reconciliation approval workflow: Pending Approval + confidence / suggestion columns.
+  const migRecon = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_approval_workflow_v1'`
+  );
+  if (!migRecon.rows.length) {
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_status_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_status_check
+        CHECK (status IN ('Unmatched', 'Pending Approval', 'Matched', 'Discrepancy'))
+    `);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS confidence TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_order_id INTEGER`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_invoice_id INTEGER`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS candidate_order_ids_json TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_by TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_at TEXT`);
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_confidence_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_confidence_check
+        CHECK (confidence IS NULL OR confidence IN ('high', 'medium'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_approval_workflow_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

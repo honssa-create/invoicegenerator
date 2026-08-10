@@ -40,7 +40,7 @@ interface ItemRow {
   synced_record_id: number | null;
 }
 
-export type UtilityMeterItemInput = {
+type UtilityMeterItemInput = {
   meter_key: string;
   reading_value?: number | null;
   photo_path?: string | null;
@@ -171,7 +171,7 @@ async function mergeElectricity(
   }
   const next: ElectricityMeterData = {
     ...existing,
-    prevReading: prevReading ?? existing.prevReading,
+    prevReading,
     ...patch,
     ratePerUnit: existing.ratePerUnit,
   };
@@ -203,7 +203,7 @@ async function mergeWater(
   }
   const next: WaterMeterData = {
     ...existing,
-    prevReading: prevReading ?? existing.prevReading,
+    prevReading,
     currReading,
     ratePerUnit: existing.ratePerUnit,
   };

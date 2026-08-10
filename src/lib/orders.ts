@@ -51,7 +51,6 @@ export const ORDER_STATUSES = [
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** Exact ClickUp-style status dots from the status board palette. */
 export const STATUS_DOT_COLORS: Record<string, string> = {
   'OPEN': '#9CA3AF',
   '快遞到件': '#5BA4CF',
@@ -88,7 +87,6 @@ export const STATUS_COLORS: Record<string, string> = {
   'FAIL': 'bg-[#FCE4F2] text-[#C01070]',
 };
 
-/** Soft column tint for Kanban board columns (header/bg wash). */
 export const STATUS_COLUMN_BG: Record<string, string> = {
   'OPEN': 'bg-[#E8EAED]',
   '快遞到件': 'bg-[#D4EAF6]',
@@ -107,7 +105,6 @@ export const STATUS_COLUMN_BG: Record<string, string> = {
   'FAIL': 'bg-[#F9D0E8]',
 };
 
-/** Stronger header wash / accent strip for board columns. */
 export const STATUS_COLUMN_ACCENT: Record<string, string> = {
   'OPEN': 'border-t-[#9CA3AF]',
   '快遞到件': 'border-t-[#5BA4CF]',
@@ -302,6 +299,11 @@ export const ORDER_TYPES = [
   'Cupmoka',
 ] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
+
+export function getOrderType(o: Pick<Order, 'fields'>): string {
+  const t = o.fields?.order_type;
+  return typeof t === 'string' ? t : '';
+}
 
 /** Badge-style custom orders (honour訂製 / honour en訂製) share the curated Order Detail form. */
 export const BADGE_ORDER_TYPES = ['honour訂製', 'honour en訂製'] as const;

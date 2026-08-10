@@ -6,15 +6,10 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import OrdersBoard from '@/components/OrdersBoard';
-import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, type Order } from '@/lib/orders';
+import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, getOrderType, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
-
-function getOrderType(o: Order): string {
-  const t = o.fields?.order_type;
-  return typeof t === 'string' ? t : '';
-}
 
 export default function OrdersPage() {
   const router = useRouter();

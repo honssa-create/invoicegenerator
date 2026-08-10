@@ -12,7 +12,6 @@ import {
   formatDebitNotePeriodLong,
   formatDisplayDate,
   formatMoney,
-  formatPeriodRangeShort,
   buildDebitNoteFooterRemark,
   buildDebitNotePaymentInstructionsText,
   defaultPaymentTemplateForUnits,
@@ -39,11 +38,9 @@ import {
   type RentalUnit,
   type RentPaymentNoticeMatrix,
   type RentPaymentNoticeQuery,
-  type TenantLeaseHistoryRow,
   type TenantProfileSummary,
   type RentPaymentNoticeSummary,
   type RentRecord,
-  type PeriodPaymentAllocation,
   type TenantBillingHistoryRow,
   type UtilityBillingMode,
   addBillingMonths,
@@ -297,8 +294,6 @@ export async function buildRentPaymentNoticeForUnit(
 // Charge item sync from legacy rental_records (parallel run)
 // ---------------------------------------------------------------------------
 
-const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
-
 async function distributeLegacyPaid(amountPaid: number, dues: { id: number; due: number }[]) {
   let remaining = amountPaid || 0;
   const setAllocated = db.prepare(
@@ -461,7 +456,7 @@ function buildNoticeColumns(
   const cols: RentPaymentNoticeMatrix['columns'] = [];
   for (const unit of units) {
     const unitId = Number(unit.id);
-    const chargeTypes = CHARGE_ORDER.filter((t) =>
+    const chargeTypes = CHARGE_DISPLAY_ORDER.filter((t) =>
       utilityChargeTypesForMode(resolveUtilityBillingMode(unit.utilityBillingMode, tenantMode)).includes(t),
     );
     for (const chargeType of chargeTypes) {
@@ -1277,28 +1272,6 @@ export async function getChargeItemsForRecord(recordId: number, userId: number):
   ).all(recordId, userId) as ChargeRow[]).map(hydrateCharge);
 }
 
-export async function getChargeItemByRecordAndType(
-  recordId: number,
-  userId: number,
-  chargeType: RentalChargeType,
-): Promise<RentalChargeItem | null> {
-  const row = await db.prepare(
-    `SELECT * FROM rental_charge_items
-     WHERE legacy_record_id = ? AND user_id = ? AND charge_type = ?`
-  ).get(recordId, userId, chargeType) as ChargeRow | undefined;
-  return row ? hydrateCharge(row) : null;
-}
-
-export async function getChargeItemsForTenant(tenantId: number, userId: number): Promise<RentalChargeItem[]> {
-  const units = await getTenantUnits(tenantId, userId);
-  if (!units.length) return [];
-  const placeholders = units.map(() => '?').join(',');
-  return (await db.prepare(
-    `SELECT * FROM rental_charge_items WHERE user_id = ? AND unit_id IN (${placeholders})
-     ORDER BY billing_period DESC`
-  ).all(userId, ...units.map((u) => u.id)) as ChargeRow[]).map(hydrateCharge);
-}
-
 /** Outstanding charge items for units, FIFO-sorted (period → unit → rent/water/elec). */
 export async function getOutstandingChargeItemsForUnits(
   userId: number,
@@ -1319,7 +1292,7 @@ export async function getOutstandingChargeItemsForUnits(
   return items.sort(
     (a, b) => a.billingPeriod.localeCompare(b.billingPeriod)
       || a.unitId - b.unitId
-      || CHARGE_ORDER.indexOf(a.chargeType) - CHARGE_ORDER.indexOf(b.chargeType),
+      || CHARGE_DISPLAY_ORDER.indexOf(a.chargeType) - CHARGE_DISPLAY_ORDER.indexOf(b.chargeType),
   );
 }
 

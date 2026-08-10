@@ -15,9 +15,6 @@ export const RENTAL_STATUS_BADGE: Record<RentalDisplayStatus, string> = {
   partial: 'bg-orange-100 text-orange-800 border border-orange-200',
 };
 
-// Legacy alias kept for backward-compat in existing card UI
-export const RENTAL_STATUS_COLORS = RENTAL_STATUS_BADGE;
-
 export interface PreviousYearRent {
   year: number;
   rent: number;
@@ -279,12 +276,6 @@ export function debitNoteDueDate(issuedDate: string): string {
   return addDaysToIsoDate(issuedDate, 7);
 }
 
-/** @alias formatDateToDDMMYYYY */
-export function formatPeriodDate(iso: string): string {
-  const f = formatDateToDDMMYYYY(iso);
-  return f === '—' ? iso : f;
-}
-
 export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
   if (from && to) {
     const f = formatDateToDDMMYYYY(from);
@@ -294,10 +285,6 @@ export function formatUtilityPeriod(from: string | null | undefined, to: string 
   if (from) return `from ${formatDateToDDMMYYYY(from)}`;
   if (to) return `to ${formatDateToDDMMYYYY(to)}`;
   return '';
-}
-
-export function formatRentPeriodRange(from: string, to: string): string {
-  return `${formatDateToDDMMYYYY(from)} - ${formatDateToDDMMYYYY(to)}`;
 }
 
 /**
@@ -348,16 +335,6 @@ export function calculateBasicRentPeriod(
 export function defaultRentPeriod(billingPeriod: string, rentPaymentDay: number): { from: string; to: string } {
   const [year, month] = billingPeriod.split('-').map(Number);
   const { isoFrom, isoTo } = calculateBasicRentPeriod(rentPaymentDay, year, month - 1);
-  return { from: isoFrom, to: isoTo };
-}
-
-/** @deprecated Use calculateBasicRentPeriod */
-export function computeRentPeriod(
-  rentPaymentDay: number,
-  targetYear: number,
-  targetMonth: number,
-): { from: string; to: string } {
-  const { isoFrom, isoTo } = calculateBasicRentPeriod(rentPaymentDay, targetYear, targetMonth);
   return { from: isoFrom, to: isoTo };
 }
 
@@ -759,30 +736,23 @@ export function waterMeterDataFromInputs(prev: string, curr: string, rate: strin
   };
 }
 
-/** Fixed physical meters logged in 水電錶紀錄. */
-export const UTILITY_METER_KEYS = [
-  'stock_room_1_2_elec',
-  'elec_213a_main',
-  'water_213a',
-  'water_213b',
-  'elec_213b',
-] as const;
-
-export type UtilityMeterKey = (typeof UTILITY_METER_KEYS)[number];
-
-export interface UtilityMeterDefinition {
-  key: UtilityMeterKey;
-  label: string;
-  kind: 'electricity' | 'water';
-}
-
-export const UTILITY_METER_DEFINITIONS: UtilityMeterDefinition[] = [
+export const UTILITY_METER_DEFINITIONS = [
   { key: 'stock_room_1_2_elec', label: 'Stock Room 1 & 2 電錶 - 2樓走廊', kind: 'electricity' },
   { key: 'elec_213a_main', label: '213A 大電錶 - 2樓走廊', kind: 'electricity' },
   { key: 'water_213a', label: '213A 水錶 - 213男廁內', kind: 'water' },
   { key: 'water_213b', label: '213B 水錶 - 天台', kind: 'water' },
   { key: 'elec_213b', label: '213B 電錶 - 213室門口位置', kind: 'electricity' },
-];
+] as const;
+
+export type UtilityMeterKey = (typeof UTILITY_METER_DEFINITIONS)[number]['key'];
+
+export type UtilityMeterDefinition = {
+  key: UtilityMeterKey;
+  label: string;
+  kind: 'electricity' | 'water';
+};
+
+export const UTILITY_METER_KEYS: readonly UtilityMeterKey[] = UTILITY_METER_DEFINITIONS.map((d) => d.key);
 
 export function isUtilityMeterKey(value: string): value is UtilityMeterKey {
   return (UTILITY_METER_KEYS as readonly string[]).includes(value);
@@ -821,10 +791,6 @@ export function companyBillsUtilities(mode: UtilityBillingMode): boolean {
 /** Charge types included on tenant bills / debit notes for this utility mode. */
 export function utilityChargeTypesForMode(mode: UtilityBillingMode): RentalChargeType[] {
   return companyBillsUtilities(mode) ? ['rent', 'water', 'electricity'] : ['rent'];
-}
-
-export function tenantBillsUtilities(mode: UtilityBillingMode): boolean {
-  return companyBillsUtilities(mode);
 }
 
 /** Unit-level setting with optional tenant fallback (legacy). */
@@ -1161,8 +1127,6 @@ export function resolveDebitNoteCompanyHeader(companyIds: DebitNoteCompanyId[]):
   };
 }
 
-export const DEFAULT_DEBIT_NOTE_COMPANY: DebitNoteCompanyInfo = resolveDebitNoteCompanyHeader(['label', 'elite']);
-
 /** RM prefix for debit note line items e.g. RM 204 */
 export function formatDebitNoteUnitLabel(unitName: string): string {
   const trimmed = unitName.trim();
@@ -1280,7 +1244,7 @@ export interface TenantProfileSummary {
   lastPaymentDate: string | null;
 }
 
-/** Per-unit billing row for tenant payment history. */
+/** Manual allocation amounts for one unit × billing period. */
 export interface PeriodPaymentAllocation {
   unitId: number;
   billingPeriod: string;
@@ -1400,19 +1364,6 @@ export function formatBillingPeriodLabel(period: string): string {
   const [y, m] = period.split('-');
   if (!y || !m) return period;
   return `${m}/${y}`;
-}
-
-/** Short period for reminder text e.g. 02-03/2026 */
-export function formatPeriodRangeShort(periods: string[]): string {
-  if (!periods.length) return '';
-  if (periods.length === 1) return formatBillingPeriodLabel(periods[0]);
-  const sorted = [...periods].sort();
-  const first = sorted[0].split('-');
-  const last = sorted[sorted.length - 1].split('-');
-  if (first[0] === last[0]) {
-    return `${first[1]}-${last[1]}/${first[0]}`;
-  }
-  return sorted.map(formatBillingPeriodLabel).join('、');
 }
 
 /** Arrear range for footer e.g. 02/2026-03/2026 (min–max unpaid past periods). */

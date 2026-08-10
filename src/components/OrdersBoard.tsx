@@ -9,6 +9,7 @@ import {
   STATUS_COLUMN_ACCENT,
   STATUS_DOT_COLORS,
   computeOrderPaidTotal,
+  getOrderType,
   type Order,
 } from '@/lib/orders';
 import { orderFileUrl } from '@/lib/image-url';
@@ -21,11 +22,6 @@ type Props = {
   onCreateInStatus: (status: string) => void;
   creatingStatus?: string | null;
 };
-
-function getOrderType(o: Order): string {
-  const t = o.fields?.order_type;
-  return typeof t === 'string' ? t : '';
-}
 
 function cardTitle(o: Order): string {
   const po = o.po_number?.trim();
@@ -71,7 +67,6 @@ function CalendarIcon({ className }: { className?: string }) {
   );
 }
 
-/** ClickUp-style status marker: dashed ring for OPEN, otherwise ring + center dot. */
 function StatusDot({ status, className = '' }: { status: string; className?: string }) {
   const color = STATUS_DOT_COLORS[status] || '#9CA3AF';
   if (status === 'OPEN') {

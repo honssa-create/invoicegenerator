@@ -371,7 +371,7 @@ export async function updateRentalUnit(id: number | string, userId: number, inpu
 // ---------------------------------------------------------------------------
 
 /** Apply lease base_rent to unpaid records within the lease month range. */
-export async function syncLeaseBaseRentToRecords(
+async function syncLeaseBaseRentToRecords(
   userId: number,
   unitId: number,
   lease: Pick<RentalLease, 'baseRent' | 'leaseStartDate' | 'leaseEndDate' | 'actualEndDate'>,
@@ -929,7 +929,6 @@ export async function markRentPaid(
   const chargeItems = await getChargeItemsForRecord(record.id, userId);
   const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
-  const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
   let allocations: { chargeItemId: number; amount: number }[] = [];
 
   if (input.chargeAllocations?.length) {
@@ -949,7 +948,7 @@ export async function markRentPaid(
       : outstandingBalance(record);
     if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
     let remaining = paymentAmount;
-    for (const type of CHARGE_ORDER) {
+    for (const type of CHARGE_DISPLAY_ORDER) {
       const item = chargeItems.find((c) => c.chargeType === type);
       if (!item || remaining <= 0) continue;
       const out = chargeOutstanding(item);

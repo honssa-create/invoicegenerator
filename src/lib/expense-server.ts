@@ -16,12 +16,6 @@ export const LEGACY_EXPENSE_REPORT_ID_RE = /^EXP-\d{6}$/;
 /** Child Receipt No.: EXP-YYYYMM-{CCS|CCC|AB|PB|CS}001 */
 export const EXPENSE_RECEIPT_RE = /^EXP-(\d{6})-(CCS|CCC|AB|PB|CS)(\d{3})$/;
 
-/** @deprecated Legacy batch format kept for old rows. */
-export const LEGACY_EXPENSE_BATCH_RE = /^EXP-\d{6}-\d{3}$/;
-
-/** @deprecated Legacy receipt format kept for old rows. */
-export const LEGACY_EXPENSE_RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
-
 export function normalizeNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -310,30 +304,6 @@ export function receiptNumberPrefix(
   const code = fundingSourceToCode(fundingSource);
   if (!code) throw new Error('Invalid funding source');
   return receiptPrefix(ym, code);
-}
-
-// ---------------------------------------------------------------------------
-// Legacy helpers (import / old payment_method rows)
-// ---------------------------------------------------------------------------
-
-export type ExpensePaymentCode = 'CC' | 'CS' | 'BT' | 'OT';
-
-/** @deprecated Use fundingSourceToCode for new receipt numbers. */
-export function paymentMethodCode(
-  method: string | null | undefined,
-  fundingSource?: string | null | undefined,
-): ExpensePaymentCode {
-  if (fundingSource) {
-    const code = fundingSourceToCode(fundingSource);
-    if (code === 'CCS' || code === 'CCC') return 'CC';
-    if (code === 'CS') return 'CS';
-    return 'OT';
-  }
-  const m = (method || '').toLowerCase();
-  if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
-  if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
-  if (/bank|transfer|轉帳|转账|fps|payme|wire|cheque|check/.test(m)) return 'BT';
-  return 'OT';
 }
 
 // Insert a custom dropdown option if it is not already a default or existing value.

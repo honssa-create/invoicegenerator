@@ -6,6 +6,7 @@ import { getQuotationWithDetails } from '@/lib/quotation-server';
 import { createInvoiceFromQuotation } from '@/lib/quotation-to-invoice-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
+import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -45,14 +46,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const itemPart =
       firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
     const orderName = [(q.customer_name || '').trim(), itemPart].filter(Boolean).join(' - ');
-    const orderId = await db.transaction(async () => {
+    const { orderId, referenceNumber } = await db.transaction(async () => {
+      const referenceNumber = await allocateGlobalRecordNumber('order');
       const result = await db
         .prepare(
-          `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json, quotation_id)
-           VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}', ?)`
+          `INSERT INTO orders (
+             user_id, reference_number, po_number, name, description, status,
+             customer_email, phone, shipping_address, notes, fields_json, quotation_id
+           ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, '{}', ?)`
         )
         .run(
           ownerId,
+          referenceNumber,
           (q.order_no || '').trim() || null,
           orderName || q.customer_name || null,
           null,
@@ -64,10 +69,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
           itemsSummary || null,
           q.id
         );
-      return result.lastInsertRowid as number;
+      return { orderId: result.lastInsertRowid as number, referenceNumber };
     });
     await db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
-    await logActivity('quotation', params.id, session.userId, 'activity', session.name, 'converted to an order');
+    await logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to order ${referenceNumber}`);
     await logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
     return NextResponse.json({ target: 'order', id: orderId });
   }

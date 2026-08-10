@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildExpenseExportQuery,
-  expenseExportFilenameSuffix,
   parseExpenseExportDate,
   parseExpenseExportFundingSource,
 } from '@/lib/expense-export';
@@ -23,17 +22,5 @@ describe('expense-export', () => {
     expect(parseExpenseExportDate('bad')).toBeNull();
     expect(parseExpenseExportFundingSource('cash')).toBe('cash');
     expect(parseExpenseExportFundingSource('invalid')).toBeNull();
-  });
-
-  it('builds filename suffix for active filters', () => {
-    expect(
-      expenseExportFilenameSuffix({
-        paidFrom: '2026-04-01',
-        paidTo: '',
-        createdFrom: '',
-        createdTo: '',
-        fundingSource: '',
-      })
-    ).toBe('-paid-2026-04-01-to-end');
   });
 });

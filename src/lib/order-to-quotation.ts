@@ -1,8 +1,9 @@
 import {
   BIRD_NEST_FLAVORS,
+  getNestieeLines,
   isBadgeOrderType,
   isBirdNestOrderType,
-  orderTitle,
+  isNestieeOrderType,
   parseHonourLines,
   type Order,
 } from './orders';
@@ -60,6 +61,17 @@ export function buildQuotationItemsFromOrder(
   const orderType = fieldStr(f, 'order_type');
   const unitPrice = parseNumericFromText(fieldStr(f, 'supplier_price'));
 
+  if (isNestieeOrderType(orderType)) {
+    const nestieeLines = getNestieeLines(f);
+    if (nestieeLines.length) {
+      return nestieeLines.map((line) => ({
+        description: line.name,
+        quantity: line.quantity || 1,
+        unit_price: line.unit_price || unitPrice,
+      }));
+    }
+  }
+
   if (isBirdNestOrderType(orderType)) {
     const items: QuotationLineDraft[] = [];
     for (const flavor of BIRD_NEST_FLAVORS) {
@@ -111,7 +123,6 @@ export function buildQuotationItemsFromOrder(
     order.description?.trim() ||
     fieldStr(f, 'name') ||
     order.name?.trim() ||
-    orderTitle(order) ||
     'Order items';
 
   return [{ description: desc, quantity: qty || 1, unit_price: unitPrice }];

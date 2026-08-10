@@ -57,6 +57,8 @@ import {
   pastLeaseStatusLabel,
   unitHasWaterMeterFormula,
   waterMeterDataFromInputs,
+  isVacantUnitName,
+  hydrateOtherUnitUsagesFromLegacy,
   type DebitNotePaymentTemplateId,
   type RentRecord,
   type RentalActivityLog,
@@ -91,6 +93,8 @@ interface DetailPayload {
   leaseDocuments?: RentalLeaseDocument[];
   suggestedPrevElectricityReading?: number | null;
   suggestedPrevWaterReading?: number | null;
+  portfolioUnits?: { id: number; unitName: string }[];
+  sharedMeterDeductionUnits?: { id: number; unitName: string }[];
 }
 
 interface UtilitySnapshot {
@@ -104,9 +108,7 @@ interface UtilitySnapshot {
   electricityPeriodTo: string;
   meterPrevReading: string;
   meterCurrReading: string;
-  meter213B: string;
-  meterStockRoom1: string;
-  meterStockRoom2: string;
+  otherUnitUsages: Record<string, string>;
   meterRatePerUnit: string;
   waterMeterPrev: string;
   waterMeterCurr: string;
@@ -185,6 +187,7 @@ function RentalDetailInner() {
   const [dueDateDay, setDueDateDay] = useState('1');
   const [baseRent, setBaseRent] = useState('');
   const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_shared_meter');
+  const [sharedMeterDeductionUnitIds, setSharedMeterDeductionUnitIds] = useState<number[]>([]);
   const [billingCompany, setBillingCompany] = useState<DebitNoteCompanyId | ''>('');
   const [leaseStartDate, setLeaseStartDate] = useState('');
   const [leaseEndDate, setLeaseEndDate] = useState('');
@@ -203,9 +206,7 @@ function RentalDetailInner() {
   const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
   const [meterPrevReading, setMeterPrevReading] = useState('');
   const [meterCurrReading, setMeterCurrReading] = useState('');
-  const [meter213B, setMeter213B] = useState('');
-  const [meterStockRoom1, setMeterStockRoom1] = useState('');
-  const [meterStockRoom2, setMeterStockRoom2] = useState('');
+  const [otherUnitUsages, setOtherUnitUsages] = useState<Record<string, string>>({});
   const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
   const [waterMeterPrev, setWaterMeterPrev] = useState('');
   const [waterMeterCurr, setWaterMeterCurr] = useState('');
@@ -299,6 +300,7 @@ function RentalDetailInner() {
           setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
           setBaseRent(String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)));
           setUtilityBillingMode(normalizeUtilityBillingMode(d.unit.utilityBillingMode));
+          setSharedMeterDeductionUnitIds(d.unit.sharedMeterDeductionUnitIds || []);
           setBillingCompany(
             d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
               ? d.unit.billingCompany
@@ -327,12 +329,19 @@ function RentalDetailInner() {
             setElectricityFee(String(rec.electricityFee || 0));
             setElectricityPeriodFrom(toFormDate(rec.electricityPeriodFrom));
             setElectricityPeriodTo(toFormDate(rec.electricityPeriodTo));
-            const meter = rec.electricityMeter;
+            const deductionMeta = (d.sharedMeterDeductionUnits || []) as { id: number; unitName: string }[];
+            const meterRaw = rec.electricityMeter;
+            const meter = meterRaw
+              ? hydrateOtherUnitUsagesFromLegacy(meterRaw, deductionMeta)
+              : null;
             setMeterPrevReading(meter?.prevReading != null ? String(meter.prevReading) : '');
             setMeterCurrReading(meter?.currReading != null ? String(meter.currReading) : '');
-            setMeter213B(meter?.meter213B != null ? String(meter.meter213B) : '');
-            setMeterStockRoom1(meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '');
-            setMeterStockRoom2(meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '');
+            const usageStrings: Record<string, string> = {};
+            for (const u of deductionMeta) {
+              const v = meter?.otherUnitUsages?.[String(u.id)];
+              usageStrings[String(u.id)] = v != null && Number.isFinite(v) ? String(v) : '';
+            }
+            setOtherUnitUsages(usageStrings);
             setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
             setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
             setSuggestedPrevWaterReading(d.suggestedPrevWaterReading ?? null);
@@ -359,9 +368,7 @@ function RentalDetailInner() {
               electricityPeriodTo: toFormDate(rec.electricityPeriodTo),
               meterPrevReading: meter?.prevReading != null ? String(meter.prevReading) : (d.suggestedPrevElectricityReading != null ? String(d.suggestedPrevElectricityReading) : ''),
               meterCurrReading: meter?.currReading != null ? String(meter.currReading) : '',
-              meter213B: meter?.meter213B != null ? String(meter.meter213B) : '',
-              meterStockRoom1: meter?.meterStockRoom1 != null ? String(meter.meterStockRoom1) : '',
-              meterStockRoom2: meter?.meterStockRoom2 != null ? String(meter.meterStockRoom2) : '',
+              otherUnitUsages: { ...usageStrings },
               meterRatePerUnit: meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '',
               waterMeterPrev: waterMeter?.prevReading != null ? String(waterMeter.prevReading) : (d.suggestedPrevWaterReading != null ? String(d.suggestedPrevWaterReading) : ''),
               waterMeterCurr: waterMeter?.currReading != null ? String(waterMeter.currReading) : '',
@@ -407,12 +414,12 @@ function RentalDetailInner() {
   useEffect(() => {
     if (!electricityFormula) return;
     const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
-      meter213B, meterStockRoom1, meterStockRoom2,
+      otherUnitUsages,
     });
     const fee = calcElectricityFeeForFormula(electricityFormula, meter);
     const hasInput = [meterPrevReading, meterCurrReading, meterRatePerUnit].some((v) => v.trim() !== '');
     setElectricityFee(hasInput ? String(fee) : '');
-  }, [electricityFormula, meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit]);
+  }, [electricityFormula, meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit]);
 
   const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
@@ -427,9 +434,7 @@ function RentalDetailInner() {
     electricityPeriodTo,
     meterPrevReading,
     meterCurrReading,
-    meter213B,
-    meterStockRoom1,
-    meterStockRoom2,
+    otherUnitUsages: { ...otherUnitUsages },
     meterRatePerUnit,
     waterMeterPrev,
     waterMeterCurr,
@@ -438,7 +443,7 @@ function RentalDetailInner() {
   }), [
     baseRentPeriodFrom, baseRentPeriodTo, waterFee, waterPeriodFrom, waterPeriodTo,
     electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit,
     waterMeterPrev, waterMeterCurr, waterMeterRate, utilityNote,
   ]);
 
@@ -453,9 +458,7 @@ function RentalDetailInner() {
     setElectricityPeriodTo(snap.electricityPeriodTo);
     setMeterPrevReading(snap.meterPrevReading);
     setMeterCurrReading(snap.meterCurrReading);
-    setMeter213B(snap.meter213B);
-    setMeterStockRoom1(snap.meterStockRoom1);
-    setMeterStockRoom2(snap.meterStockRoom2);
+    setOtherUnitUsages({ ...snap.otherUnitUsages });
     setMeterRatePerUnit(snap.meterRatePerUnit);
     setWaterMeterPrev(snap.waterMeterPrev);
     setWaterMeterCurr(snap.waterMeterCurr);
@@ -479,7 +482,7 @@ function RentalDetailInner() {
     if (electricityFormula) {
       payload.electricityMeter = meterDataFromInputs(
         s.meterPrevReading, s.meterCurrReading, s.meterRatePerUnit,
-        { meter213B: s.meter213B, meterStockRoom1: s.meterStockRoom1, meterStockRoom2: s.meterStockRoom2 },
+        { otherUnitUsages: s.otherUnitUsages },
       );
     }
     if (waterMeterFormula) {
@@ -542,7 +545,7 @@ function RentalDetailInner() {
     baseRentPeriodFrom, baseRentPeriodTo,
     waterFee, waterPeriodFrom, waterPeriodTo,
     electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, meter213B, meterStockRoom1, meterStockRoom2, meterRatePerUnit,
+    meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit,
     waterMeterPrev, waterMeterCurr, waterMeterRate,
     utilityNote,
   ]);
@@ -560,6 +563,9 @@ function RentalDetailInner() {
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
         utilityBillingMode,
+        sharedMeterDeductionUnitIds: utilityBillingMode === 'company_shared_meter'
+          ? sharedMeterDeductionUnitIds
+          : [],
         billingCompany: billingCompany || null,
         leaseStartDate: fromFormDate(leaseStartDate),
         leaseEndDate: fromFormDate(leaseEndDate),
@@ -876,12 +882,12 @@ function RentalDetailInner() {
     ? computeLeaseDisplayStatus(viewingLease)
     : currentLease
       ? computeLeaseDisplayStatus(currentLease)
-      : unit.tenantName?.trim() && unit.tenantName !== 'Vacant 空置' ? 'active' : 'vacant';
+      : !isVacantUnitName(unit.tenantName) ? 'active' : 'vacant';
   const contractEnded = readOnly || leaseStatus === 'ended' || leaseStatus === 'terminated';
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
   const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
   const liveElectricityMeter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
-    meter213B, meterStockRoom1, meterStockRoom2,
+    otherUnitUsages,
   });
   const liveElectricityFee = electricityFormula
     ? calcElectricityFeeForFormula(electricityFormula, liveElectricityMeter)
@@ -895,7 +901,10 @@ function RentalDetailInner() {
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
         <button onClick={() => router.push('/rentals')} className="text-sm text-brand-600 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to Rentals', '返回租金管理')}</button>
-        <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+        <label className="flex flex-col gap-0.5 w-full sm:w-auto">
+          <span className="text-xs font-medium text-gray-500">{bi('Billing period', '帳期')}</span>
+          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-full sm:w-auto`} />
+        </label>
       </div>
 
       {toast && <div onClick={() => setToast('')} className="mb-4 p-3 bg-brand-50 text-brand-700 text-sm rounded-lg cursor-pointer">{toast} ✕</div>}
@@ -1002,7 +1011,7 @@ function RentalDetailInner() {
             <input type="tel" className={fieldCls} value={tenantPhone} onChange={(e) => setTenantPhone(e.target.value)} placeholder="+852…" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Email 電郵</label>
             <input type="email" className={fieldCls} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div>
@@ -1076,8 +1085,39 @@ function RentalDetailInner() {
           <p className="text-xs text-gray-400 mb-3">Controls whether water &amp; electricity appear on debit notes for this unit</p>
           <UtilityBillingPicker
             value={utilityBillingMode}
-            onChange={setUtilityBillingMode}
+            onChange={(mode) => {
+              setUtilityBillingMode(mode);
+              if (mode !== 'company_shared_meter') setSharedMeterDeductionUnitIds([]);
+            }}
           />
+          {utilityBillingMode === 'company_shared_meter' && (
+            <div className="mt-3 rounded-lg border border-orange-100 bg-orange-50/40 p-3">
+              <p className="text-xs font-semibold text-orange-900 mb-2">
+                {bi('Other units’ electric dials to deduct', '需扣除的其他單位電錶度數')}
+              </p>
+              <div className="grid sm:grid-cols-2 gap-2">
+                {(data?.portfolioUnits || [])
+                  .filter((u) => u.id !== data?.unit.id)
+                  .map((u) => {
+                    const checked = sharedMeterDeductionUnitIds.includes(u.id);
+                    return (
+                      <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSharedMeterDeductionUnitIds((cur) =>
+                              checked ? cur.filter((x) => x !== u.id) : [...cur, u.id],
+                            );
+                          }}
+                        />
+                        <span className="font-medium text-gray-800">{u.unitName}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
         </div>
         )}
         {!readOnly && (
@@ -1151,16 +1191,15 @@ function RentalDetailInner() {
                         formula={electricityFormula}
                         prevReading={meterPrevReading}
                         currReading={meterCurrReading}
-                        meter213B={meter213B}
-                        meterStockRoom1={meterStockRoom1}
-                        meterStockRoom2={meterStockRoom2}
                         ratePerUnit={meterRatePerUnit}
+                        deductionUnits={data?.sharedMeterDeductionUnits || []}
+                        otherUnitUsages={otherUnitUsages}
                         onPrevReading={setMeterPrevReading}
                         onCurrReading={setMeterCurrReading}
-                        onMeter213B={setMeter213B}
-                        onMeterStockRoom1={setMeterStockRoom1}
-                        onMeterStockRoom2={setMeterStockRoom2}
                         onRatePerUnit={setMeterRatePerUnit}
+                        onOtherUnitUsage={(unitId, value) => {
+                          setOtherUnitUsages((prev) => ({ ...prev, [String(unitId)]: value }));
+                        }}
                         suggestedPrevReading={suggestedPrevReading}
                         inpClassName={fieldCls}
                         readOnly={readOnly}
@@ -1244,7 +1283,7 @@ function RentalDetailInner() {
                 )}
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Note (optional)</label>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Invoice note (optional)', '發票備註（選填）')}</label>
                     <input className={inp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} placeholder="e.g. Water meter 1234" />
                   </div>
                   <div className="flex flex-col items-end gap-1 pb-2.5 min-w-[5.5rem]">
@@ -1528,7 +1567,7 @@ function RentalDetailInner() {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Email Preview Note (optional)</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Email preview note (optional)', '電郵預覽備註（選填）')}</label>
               <textarea className={inp} rows={3} value={invoiceNote} onChange={(e) => setInvoiceNote(e.target.value)} placeholder={`Dear ${unit.tenantName},…`} />
               <p className="text-xs text-gray-400 mt-1">Send to: {unit.tenantEmail || 'No email set — log only'}</p>
             </div>
@@ -1570,7 +1609,7 @@ function RentalDetailInner() {
                   Multi-month allocation — arrears first, then future months for advance rent
                 </p>
               </div>
-              <button onClick={() => setShowPaidModal(false)} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+              <button type="button" onClick={() => setShowPaidModal(false)} className="text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
             </div>
 
             <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
@@ -1681,6 +1720,7 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1"
                                   value={row.billingPeriod}
                                   onChange={(e) => updatePeriodRow(idx, { billingPeriod: e.target.value })}
+                                  aria-label={bi('Period', '帳期')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -1689,6 +1729,7 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.rent}
                                   onChange={(e) => updatePeriodRow(idx, { rent: e.target.value })}
+                                  aria-label={bi('Rent', '租金')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -1697,6 +1738,7 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.electricity}
                                   onChange={(e) => updatePeriodRow(idx, { electricity: e.target.value })}
+                                  aria-label={bi('Electricity', '電費')}
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -1705,12 +1747,14 @@ function RentalDetailInner() {
                                   className="w-full text-xs border rounded px-2 py-1 text-right"
                                   value={row.water}
                                   onChange={(e) => updatePeriodRow(idx, { water: e.target.value })}
+                                  aria-label={bi('Water', '水費')}
                                 />
                               </td>
                               <td className="px-1 py-2">
                                 <button
                                   type="button"
                                   className="text-gray-400 hover:text-red-600 text-xs"
+                                  aria-label={bi('Remove row', '刪除列')}
                                   onClick={() => {
                                     setPeriodRows((prev) => {
                                       const next = prev.filter((_, i) => i !== idx);
@@ -1782,13 +1826,23 @@ function RentalDetailInner() {
                 <div>
                   <p className="text-sm font-medium text-gray-700 mb-2">Upload Bank Slip / 收款憑證 (optional)</p>
                   <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={bi('Upload bank slip', '上傳收款憑證')}
                     onClick={() => receiptInputRef.current?.click()}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); receiptInputRef.current?.click(); } }}
                     onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleReceiptUpload(f); }}
                     onDragOver={(e) => e.preventDefault()}
                     className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
                   >
-                    <input ref={receiptInputRef} type="file" accept="image/*" className="hidden"
-                      onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }} />
+                    <input
+                      ref={receiptInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      aria-label={bi('Upload bank slip', '上傳收款憑證')}
+                      onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }}
+                    />
                     {ocrLoading ? (
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" />
                     ) : receiptFile ? (
@@ -1845,12 +1899,24 @@ function RentalDetailInner() {
             </label>
             {endContractForm.startNew && (
               <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/50">
-                <input className={inp} placeholder="New tenant name" value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={inp} placeholder="Start DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
-                  <input className={inp} placeholder="End DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{bi('New tenant name', '新租客姓名')}</label>
+                  <input className={inp} value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
                 </div>
-                <input type="number" className={inp} placeholder="Base rent" value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{bi('Lease start', '起租日')}</label>
+                    <input className={inp} placeholder="DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{bi('Lease end', '完租日')}</label>
+                    <input className={inp} placeholder="DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{bi('Base rent', '基本租金')}</label>
+                  <input type="number" className={inp} value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
+                </div>
               </div>
             )}
             <div className="flex justify-end gap-3 pt-2">
@@ -1866,6 +1932,7 @@ function RentalDetailInner() {
       {/* Note modal */}
       {showNoteModal && (
         <Modal title={bi('Log Activity Note', '記錄活動備註')} onClose={() => setShowNoteModal(false)}>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Activity note', '活動備註')}</label>
           <textarea className={inp} rows={4} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="e.g. Tenant called about late payment…" />
           <div className="flex justify-end gap-3 mt-4">
             <button onClick={() => setShowNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
@@ -1885,7 +1952,7 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
       <div className="modal-panel max-h-[92vh]">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-xl font-bold">{title}</h2>
-          <button onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-700 text-xl">✕</button>
+          <button type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
         </div>
         {children}
       </div>

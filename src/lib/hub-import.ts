@@ -1,10 +1,3 @@
-/** Date range options for manual hub imports. */
-
-export interface HubImportOptions {
-  dateFrom?: string;
-  dateTo?: string;
-}
-
 export interface HubImportDateRange {
   dateFrom: string;
   dateTo: string;

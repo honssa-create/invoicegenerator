@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseChineseDate, parseWeddingGiftConfirmation } from './wedding-gift-confirmation';
+import {
+  addCalendarDays,
+  parseChineseDate,
+  parseWeddingGiftConfirmation,
+} from './wedding-gift-confirmation';
 
 const SAMPLE = `【📩*即食燕窩回禮 𝑪𝒐𝒏𝒇𝒊𝒓𝒎𝒂𝒕𝒊𝒐𝒏*】
 
@@ -34,6 +38,14 @@ FPS 識別碼: 110700226
 ♡ 人數及味道都可以於 𝒃𝒊𝒈 𝒅𝒂𝒚 前1個月前隨時進行調整
 ♡ 尾數會於 𝒃𝒊𝒈 𝒅𝒂𝒚 前1個月再次聯絡啊～`;
 
+describe('addCalendarDays', () => {
+  it('adds and subtracts without timezone drift', () => {
+    expect(addCalendarDays('2026-07-31', 28)).toBe('2026-08-28');
+    expect(addCalendarDays('2026-07-31', -10)).toBe('2026-07-21');
+    expect(addCalendarDays('2026-03-01', -1)).toBe('2026-02-28');
+  });
+});
+
 describe('parseChineseDate', () => {
   it('parses YYYY年M月D日', () => {
     expect(parseChineseDate('2026年7月31日 (Friday)')).toBe('2026-07-31');
@@ -48,6 +60,7 @@ describe('parseWeddingGiftConfirmation', () => {
     expect(result.fields).toMatchObject({
       big_day: '2026-07-31',
       expiry_date: '2026-08-28',
+      production_date: '2026-07-21',
       bottle_capacity: '45g',
       qty_red_date: '50',
       qty_rock_sugar: '50',
@@ -94,5 +107,7 @@ Somewhere, HK
     expect(result.fields.unit_bottle_price).toBe('40');
     expect(result.core.name).toBe('Amy Chan');
     expect(result.fields.receiving_time).toBe('2-6pm');
+    expect(result.fields.production_date).toBe('2024-12-26');
+    expect(result.fields.expiry_date).toBe('2025-02-02');
   });
 });

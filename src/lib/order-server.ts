@@ -6,6 +6,7 @@ import { getInvoiceWithDetails } from './invoices';
 interface OrderRow {
   id: number;
   user_id: number;
+  reference_number: string;
   po_number: string | null;
   name: string | null;
   description: string | null;
@@ -79,10 +80,11 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   return {
     id: row.id,
     user_id: row.user_id,
+    reference_number: row.reference_number,
     po_number: row.po_number || '',
     name: row.name || '',
     description: row.description || '',
-    status: row.status || '草稿',
+    status: row.status || 'OPEN',
     delivery_date: row.delivery_date || '',
     customer_email: row.customer_email || '',
     phone: row.phone || '',
@@ -112,7 +114,27 @@ export async function listOrders(userId: number): Promise<Order[]> {
   const rows = await db
     .prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY updated_at DESC, id DESC')
     .all(userId) as OrderRow[];
-  return await Promise.all(rows.map(async (r) => await hydrate(r, false)));
+  const orders = await Promise.all(rows.map(async (r) => await hydrate(r, false)));
+  if (!orders.length) return orders;
+
+  const ids = orders.map((o) => o.id);
+  const placeholders = ids.map(() => '?').join(', ');
+  const fileRows = (await db
+    .prepare(
+      `SELECT id, order_id, path, original_name FROM order_files WHERE order_id IN (${placeholders}) ORDER BY id`
+    )
+    .all(...ids)) as Array<{ id: number; order_id: number; path: string; original_name: string | null }>;
+
+  const byOrder = new Map<number, Order['files']>();
+  for (const f of fileRows) {
+    const list = byOrder.get(f.order_id) || [];
+    list.push({ id: f.id, path: f.path, original_name: f.original_name });
+    byOrder.set(f.order_id, list);
+  }
+  for (const order of orders) {
+    order.files = byOrder.get(order.id) || [];
+  }
+  return orders;
 }
 
 export async function logActivity(

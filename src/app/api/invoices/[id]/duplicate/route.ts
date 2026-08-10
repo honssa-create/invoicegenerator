@@ -18,10 +18,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const source = await getInvoiceWithDetails(params.id, ownerId);
   if (!source) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 
-  const invoiceNumber = await nextInvoiceNumberAfter(ownerId, source.invoice_number);
-
   try {
-    const newId = await db.transaction(async () => {
+    const { newId, invoiceNumber } = await db.transaction(async () => {
+      const invoiceNumber = await nextInvoiceNumberAfter(ownerId, source.invoice_number);
       const result = await db
         .prepare(
           `INSERT INTO invoices (
@@ -81,7 +80,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         await insertFile.run(invId, ownerId, f.path, f.original_name);
       }
 
-      return invId;
+      return { newId: invId, invoiceNumber };
     });
 
     await logActivity(

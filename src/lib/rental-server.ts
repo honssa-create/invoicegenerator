@@ -60,9 +60,12 @@ import {
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
+  parseSharedMeterDeductionUnitIds,
   calcElectricityFeeForFormula,
   unitHasWaterMeterFormula,
   calcWaterFeeFromMeter,
+  isVacantUnitName,
+  VACANT_TENANT_NAME,
   type ElectricityMeterData,
   type WaterMeterData,
   type PeriodPaymentAllocation,
@@ -95,6 +98,7 @@ interface UnitRow {
   automation_enabled: number;   utility_billing_mode?: string | null;
   address?: string | null;
   billing_company?: string | null;
+  shared_meter_deduction_unit_ids_json?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -147,6 +151,7 @@ function hydrateUnit(row: UnitRow): RentalUnit {
       ? row.billing_company
       : null,
     address: row.address || '',
+    sharedMeterDeductionUnitIds: parseSharedMeterDeductionUnitIds(row.shared_meter_deduction_unit_ids_json),
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -248,12 +253,35 @@ export async function ensureDefaultRentalUnits(userId: number) {
     if (!existing) {
       await createRentalUnit(userId, {
         unitName: def.unitName,
-        tenantName: def.tenantName || 'Vacant 空置',
+        tenantName: def.tenantName || VACANT_TENANT_NAME,
+        vacant: isVacantUnitName(def.tenantName),
         utilityBillingMode: def.utilityBillingMode,
-        automationEnabled: true,
+        automationEnabled: !isVacantUnitName(def.tenantName),
       });
     }
   }
+  await seedSharedMeterDeductionIds(userId);
+}
+
+/** Ensure 213A (shared meter) has deduction unit ids for 213B + Stock Rooms when empty. */
+async function seedSharedMeterDeductionIds(userId: number) {
+  const rows = await db.prepare(
+    'SELECT id, unit_name, shared_meter_deduction_unit_ids_json FROM rental_units WHERE user_id = ?'
+  ).all(userId) as { id: number; unit_name: string; shared_meter_deduction_unit_ids_json?: string | null }[];
+  const byName = new Map(rows.map((r) => [r.unit_name.trim().toLowerCase(), r]));
+  const shared = byName.get('213a');
+  if (!shared) return;
+  const existing = parseSharedMeterDeductionUnitIds(shared.shared_meter_deduction_unit_ids_json);
+  if (existing.length) return;
+  const names = ['213b', 'stock room 1', 'stock room 2'];
+  const ids = names
+    .map((n) => byName.get(n)?.id)
+    .filter((id): id is number => id != null && Number.isFinite(id));
+  if (!ids.length) return;
+  await db.prepare(
+    `UPDATE rental_units SET shared_meter_deduction_unit_ids_json = ?, updated_at = datetime('now')
+     WHERE id = ? AND user_id = ?`
+  ).run(JSON.stringify(ids), shared.id, userId);
 }
 
 export async function getSuggestedPrevElectricityReading(
@@ -278,28 +306,47 @@ export async function getSuggestedPrevElectricityReading(
 // Unit CRUD
 // ---------------------------------------------------------------------------
 
-export async function createRentalUnit(userId: number, input: Partial<RentalUnit>): Promise<RentalUnit> {
+export async function createRentalUnit(
+  userId: number,
+  input: Partial<RentalUnit> & { vacant?: boolean },
+): Promise<RentalUnit> {
+  const vacant = input.vacant === true || isVacantUnitName(input.tenantName);
+  const tenantName = vacant ? VACANT_TENANT_NAME : (input.tenantName?.trim() || '');
+  if (!vacant && !tenantName) throw new Error('Tenant name is required');
+
+  const deductionIds = Array.isArray(input.sharedMeterDeductionUnitIds)
+    ? input.sharedMeterDeductionUnitIds.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+  const mode = normalizeUtilityBillingMode(input.utilityBillingMode);
+  const storedDeductionIds = mode === 'company_shared_meter' ? deductionIds : [];
+
   const res = await db.prepare(
     `INSERT INTO rental_units
       (user_id, unit_name, tenant_name, tenant_phone, tenant_email, current_year_rent,
        previous_years_rent_json, lease_start_date, lease_end_date, due_date_day,
-       auto_send_receipt_email, automation_enabled, utility_billing_mode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       auto_send_receipt_email, automation_enabled, utility_billing_mode,
+       shared_meter_deduction_unit_ids_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    userId, input.unitName?.trim() || 'New Unit', input.tenantName?.trim() || 'Tenant',
-    input.tenantPhone?.trim() || null, input.tenantEmail?.trim() || null,
+    userId, input.unitName?.trim() || 'New Unit', tenantName,
+    vacant ? null : (input.tenantPhone?.trim() || null),
+    vacant ? null : (input.tenantEmail?.trim() || null),
     Number(input.currentYearRent) || 0, JSON.stringify(input.previousYearsRent || []),
     normalizeStoredDate(input.leaseStartDate) || null,
     normalizeStoredDate(input.leaseEndDate) || null,
-    Number(input.dueDateDay) || 1, input.autoSendReceiptEmail ? 1 : 0,
-    input.automationEnabled === false ? 0 : 1,
-    normalizeUtilityBillingMode(input.utilityBillingMode),
+    Number(input.dueDateDay) || 1,
+    vacant ? 0 : (input.autoSendReceiptEmail ? 1 : 0),
+    vacant ? 0 : (input.automationEnabled === false ? 0 : 1),
+    mode,
+    JSON.stringify(storedDeductionIds),
   );
   const unit = (await getRentalUnit(Number(res.lastInsertRowid), userId))!;
-  await logRentalActivity(userId, unit.id, 'Unit created');
-  await ensureUnitTenantLink(unit);
-  await ensureCurrentLeaseFromUnit(unit);
-  return unit;
+  await logRentalActivity(userId, unit.id, vacant ? 'Vacant unit created' : 'Unit created');
+  if (!vacant) {
+    await ensureUnitTenantLink(unit);
+    await ensureCurrentLeaseFromUnit(unit);
+  }
+  return (await getRentalUnit(unit.id, userId))!;
 }
 
 export async function getRentalUnit(id: number | string, userId: number): Promise<RentalUnit | null> {
@@ -321,36 +368,78 @@ async function syncRentPeriodsForUnit(unit: RentalUnit) {
   }
 }
 
-export async function updateRentalUnit(id: number | string, userId: number, input: Partial<RentalUnit> & { depositAmount?: number }): Promise<RentalUnit | null> {
+export async function updateRentalUnit(
+  id: number | string,
+  userId: number,
+  input: Partial<RentalUnit> & { depositAmount?: number; vacant?: boolean },
+): Promise<RentalUnit | null> {
   const existing = await getRentalUnit(id, userId);
   if (!existing) return null;
+
+  const nextName = input.tenantName !== undefined ? input.tenantName : existing.tenantName;
+  const vacant = input.vacant === true || isVacantUnitName(nextName);
+  if (!vacant && !(nextName || '').trim()) throw new Error('Tenant name is required');
+
+  const tenantName = vacant ? VACANT_TENANT_NAME : nextName.trim();
+  const tenantPhone = vacant ? null : ((input.tenantPhone ?? existing.tenantPhone) || null);
+  const tenantEmail = vacant ? null : ((input.tenantEmail ?? existing.tenantEmail) || null);
+  const automationEnabled = vacant
+    ? false
+    : (input.automationEnabled ?? existing.automationEnabled);
+  const autoSendReceiptEmail = vacant
+    ? false
+    : (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail);
+
   const newDueDay = Number(input.dueDateDay ?? existing.dueDateDay) || 1;
+  const nextMode = normalizeUtilityBillingMode(input.utilityBillingMode ?? existing.utilityBillingMode);
+  let deductionIds = existing.sharedMeterDeductionUnitIds;
+  if (input.sharedMeterDeductionUnitIds !== undefined) {
+    deductionIds = input.sharedMeterDeductionUnitIds.map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  }
+  if (nextMode !== 'company_shared_meter') deductionIds = [];
+  deductionIds = deductionIds.filter((uid) => uid !== Number(id));
+
   await db.prepare(
     `UPDATE rental_units SET
       unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
       utility_billing_mode = ?, address = ?, billing_company = ?,
+      shared_meter_deduction_unit_ids_json = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
-    input.unitName ?? existing.unitName, input.tenantName ?? existing.tenantName,
-    (input.tenantPhone ?? existing.tenantPhone) || null,
-    (input.tenantEmail ?? existing.tenantEmail) || null,
+    input.unitName ?? existing.unitName, tenantName,
+    tenantPhone, tenantEmail,
     Number(input.currentYearRent ?? existing.currentYearRent) || 0,
     JSON.stringify(input.previousYearsRent ?? existing.previousYearsRent),
     normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null,
     normalizeStoredDate(input.leaseEndDate ?? existing.leaseEndDate) || null,
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
-    (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
-    (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
-    normalizeUtilityBillingMode(input.utilityBillingMode ?? existing.utilityBillingMode),
+    autoSendReceiptEmail ? 1 : 0,
+    automationEnabled ? 1 : 0,
+    nextMode,
     (input.address ?? existing.address)?.trim() || null,
     input.billingCompany !== undefined
       ? (input.billingCompany === 'label' || input.billingCompany === 'elite' ? input.billingCompany : null)
       : existing.billingCompany,
+    JSON.stringify(deductionIds),
     id, userId
   );
+
+  if (vacant) {
+    await db.prepare(
+      `UPDATE rental_leases SET is_current = 0, status = 'vacant', automation_enabled = 0,
+        updated_at = datetime('now')
+       WHERE unit_id = ? AND user_id = ? AND is_current = 1`
+    ).run(id, userId);
+    await db.prepare(
+      `UPDATE rental_units SET tenant_id = NULL, current_lease_id = NULL, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    ).run(id, userId);
+    return await getRentalUnit(id, userId);
+  }
+
   const updated = (await getRentalUnit(id, userId))!;
   if (input.dueDateDay !== undefined && newDueDay !== existing.dueDateDay) {
     await syncRentPeriodsForUnit(updated);
@@ -363,7 +452,7 @@ export async function updateRentalUnit(id: number | string, userId: number, inpu
     const lease = await getCurrentLeaseForUnit(updated.id, userId);
     if (lease) await syncLeaseBaseRentToRecords(userId, updated.id, lease);
   }
-  return updated;
+  return (await getRentalUnit(id, userId))!;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +460,7 @@ export async function updateRentalUnit(id: number | string, userId: number, inpu
 // ---------------------------------------------------------------------------
 
 /** Apply lease base_rent to unpaid records within the lease month range. */
-export async function syncLeaseBaseRentToRecords(
+async function syncLeaseBaseRentToRecords(
   userId: number,
   unitId: number,
   lease: Pick<RentalLease, 'baseRent' | 'leaseStartDate' | 'leaseEndDate' | 'actualEndDate'>,
@@ -652,6 +741,14 @@ export async function getRentalUnitDetail(
   if (isHistoricalView && displayLease?.tenantId) {
     paymentHistory = paymentHistory.filter((p) => p.tenantId === displayLease.tenantId);
   }
+  const allUnitRows = await db.prepare(
+    'SELECT id, unit_name FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE'
+  ).all(userId) as { id: number; unit_name: string }[];
+  const portfolioUnits = allUnitRows.map((r) => ({ id: r.id, unitName: r.unit_name }));
+  const byId = new Map(portfolioUnits.map((u) => [u.id, u]));
+  const sharedMeterDeductionUnits = unit.sharedMeterDeductionUnitIds
+    .map((uid) => byId.get(uid) || { id: uid, unitName: `#${uid}` });
+
   return {
     unit, currentRecord, history, activities,
     chargeItems,
@@ -668,6 +765,8 @@ export async function getRentalUnitDetail(
     leaseDocuments: displayLease ? await getLeaseDocuments(displayLease.id, userId) : [],
     suggestedPrevElectricityReading,
     suggestedPrevWaterReading,
+    portfolioUnits,
+    sharedMeterDeductionUnits,
   };
 }
 
@@ -929,7 +1028,6 @@ export async function markRentPaid(
   const chargeItems = await getChargeItemsForRecord(record.id, userId);
   const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
 
-  const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
   let allocations: { chargeItemId: number; amount: number }[] = [];
 
   if (input.chargeAllocations?.length) {
@@ -949,7 +1047,7 @@ export async function markRentPaid(
       : outstandingBalance(record);
     if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
     let remaining = paymentAmount;
-    for (const type of CHARGE_ORDER) {
+    for (const type of CHARGE_DISPLAY_ORDER) {
       const item = chargeItems.find((c) => c.chargeType === type);
       if (!item || remaining <= 0) continue;
       const out = chargeOutstanding(item);

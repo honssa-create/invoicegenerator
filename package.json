@@ -14,7 +14,8 @@
     "lint": "next lint",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:migrate-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts"
+    "db:migrate-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts",
+    "db:clear": "tsx scripts/clear-db.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

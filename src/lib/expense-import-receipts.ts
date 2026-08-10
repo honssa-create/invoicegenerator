@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { saveReceipt } from './receipt';
+import { shouldKeepRemoteUrlInsteadOfEphemeralSave } from './receipt-storage';
 
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -334,6 +335,11 @@ export async function fetchAndStoreReceiptFromUrl(
     }
 
     const sourceUrl = url.trim();
+
+    // On ephemeral production disk, keep the remote URL as path so redeploys don't orphan files.
+    if (shouldKeepRemoteUrlInsteadOfEphemeralSave()) {
+      return { path: sourceUrl, sourceUrl };
+    }
 
     const path = await saveReceipt(buf, mimeType, filename);
     return { path, sourceUrl };

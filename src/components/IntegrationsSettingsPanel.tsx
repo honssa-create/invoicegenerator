@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
   WOO_PLATFORM_LABELS,
   type IntegrationSettingsMasked,
   type WooPlatformKey,
@@ -25,6 +26,21 @@ const EMPTY_MASKED: IntegrationSettingsMasked = {
     environment: 'sandbox',
   },
   yedpay: { user_id: '', access_token_set: false, access_token_hint: '' },
+  sf_express: {
+    partner_id: '',
+    partner_id_set: false,
+    checkword_set: false,
+    checkword_hint: '',
+    monthly_card: '',
+    environment: 'sandbox',
+    express_type_id: '1',
+    pay_method: '1',
+    print_template_code: SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+    sender_company: '',
+    sender_contact: '',
+    sender_tel: '',
+    sender_address: '',
+  },
 };
 
 type WooForm = Record<WooPlatformKey, { url: string; key: string; secret: string }>;
@@ -49,6 +65,48 @@ export default function IntegrationsSettingsPanel({
     environment: 'sandbox' as 'sandbox' | 'production',
   });
   const [yedpay, setYedpay] = useState({ user_id: '', access_token: '' });
+  const [sf, setSf] = useState({
+    partner_id: '',
+    checkword: '',
+    monthly_card: '',
+    environment: 'sandbox' as 'sandbox' | 'production',
+    express_type_id: '1',
+    pay_method: '1',
+    print_template_code: SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+    sender_company: '',
+    sender_contact: '',
+    sender_tel: '',
+    sender_address: '',
+  });
+
+  const applyMasked = (s: IntegrationSettingsMasked) => {
+    setMasked(s);
+    setWoo({
+      nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '' },
+      honour: { url: s.woocommerce.honour.url, key: '', secret: '' },
+      cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '' },
+    });
+    setQb({
+      client_id: s.quickbooks.client_id,
+      client_secret: '',
+      redirect_uri: s.quickbooks.redirect_uri,
+      environment: s.quickbooks.environment,
+    });
+    setYedpay({ user_id: s.yedpay.user_id, access_token: '' });
+    setSf({
+      partner_id: s.sf_express.partner_id,
+      checkword: '',
+      monthly_card: s.sf_express.monthly_card,
+      environment: s.sf_express.environment,
+      express_type_id: s.sf_express.express_type_id || '1',
+      pay_method: s.sf_express.pay_method || '1',
+      print_template_code: s.sf_express.print_template_code || SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+      sender_company: s.sf_express.sender_company,
+      sender_contact: s.sf_express.sender_contact,
+      sender_tel: s.sf_express.sender_tel,
+      sender_address: s.sf_express.sender_address,
+    });
+  };
 
   const load = async () => {
     setLoading(true);
@@ -59,20 +117,7 @@ export default function IntegrationsSettingsPanel({
         onToast(data.error || 'Failed to load integration settings', 'error');
         return;
       }
-      const s = data.settings as IntegrationSettingsMasked;
-      setMasked(s);
-      setWoo({
-        nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '' },
-        honour: { url: s.woocommerce.honour.url, key: '', secret: '' },
-        cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '' },
-      });
-      setQb({
-        client_id: s.quickbooks.client_id,
-        client_secret: '',
-        redirect_uri: s.quickbooks.redirect_uri,
-        environment: s.quickbooks.environment,
-      });
-      setYedpay({ user_id: s.yedpay.user_id, access_token: '' });
+      applyMasked(data.settings as IntegrationSettingsMasked);
     } catch {
       onToast('Failed to load integration settings', 'error');
     } finally {
@@ -103,6 +148,19 @@ export default function IntegrationsSettingsPanel({
           user_id: yedpay.user_id,
           ...(yedpay.access_token ? { access_token: yedpay.access_token } : {}),
         },
+        sf_express: {
+          partner_id: sf.partner_id,
+          monthly_card: sf.monthly_card,
+          environment: sf.environment,
+          express_type_id: sf.express_type_id,
+          pay_method: sf.pay_method,
+          print_template_code: sf.print_template_code,
+          sender_company: sf.sender_company,
+          sender_contact: sf.sender_contact,
+          sender_tel: sf.sender_tel,
+          sender_address: sf.sender_address,
+          ...(sf.checkword ? { checkword: sf.checkword } : {}),
+        },
       };
 
       const res = await fetch('/api/settings/integrations', {
@@ -115,14 +173,10 @@ export default function IntegrationsSettingsPanel({
         onToast(data.error || 'Failed to save', 'error');
         return;
       }
-      setMasked(data.settings);
-      setWoo({
-        nestiee: { url: data.settings.woocommerce.nestiee.url, key: '', secret: '' },
-        honour: { url: data.settings.woocommerce.honour.url, key: '', secret: '' },
-        cupmoka: { url: data.settings.woocommerce.cupmoka.url, key: '', secret: '' },
-      });
+      applyMasked(data.settings);
       setQb((prev) => ({ ...prev, client_secret: '' }));
       setYedpay((prev) => ({ ...prev, access_token: '' }));
+      setSf((prev) => ({ ...prev, checkword: '' }));
       onToast('Integration settings saved', 'success');
     } catch {
       onToast('Failed to save integration settings', 'error');
@@ -293,6 +347,132 @@ export default function IntegrationsSettingsPanel({
               value={yedpay.access_token}
               onChange={(e) => setYedpay({ ...yedpay, access_token: e.target.value })}
               placeholder={masked.yedpay.access_token_set ? masked.yedpay.access_token_hint : 'Bearer token'}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* SF Express */}
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
+          <h2 className="text-lg font-semibold text-gray-900">SF Express 順豐</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            From{' '}
+            <a href="https://qiao.sf-express.com" target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
+              丰桥 / SF Open Platform
+            </a>{' '}
+            — partner ID, checkword, monthly card, and sender printed on HK local labels.
+          </p>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500">Partner ID 顾客编码</label>
+            <input
+              type="text"
+              value={sf.partner_id}
+              onChange={(e) => setSf({ ...sf, partner_id: e.target.value })}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Checkword 校验码</label>
+            <input
+              type="password"
+              value={sf.checkword}
+              onChange={(e) => setSf({ ...sf, checkword: e.target.value })}
+              placeholder={masked.sf_express.checkword_set ? masked.sf_express.checkword_hint : 'Sandbox or prod checkword'}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Monthly Card 月结卡号</label>
+            <input
+              type="text"
+              value={sf.monthly_card}
+              onChange={(e) => setSf({ ...sf, monthly_card: e.target.value })}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Environment</label>
+            <select
+              value={sf.environment}
+              onChange={(e) => setSf({ ...sf, environment: e.target.value as 'sandbox' | 'production' })}
+              className={`${inputCls} mt-1`}
+            >
+              <option value="sandbox">Sandbox (testing)</option>
+              <option value="production">Production (live)</option>
+            </select>
+            {sf.environment === 'sandbox' ? (
+              <p className="text-xs text-amber-700 mt-1">Uses sandbox API — no real courier pickup. Match sandbox checkword.</p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-1">Live shipments — use production checkword and monthly card.</p>
+            )}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Express Type ID</label>
+            <input
+              type="text"
+              value={sf.express_type_id}
+              onChange={(e) => setSf({ ...sf, express_type_id: e.target.value })}
+              placeholder="1"
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Pay Method (1 寄方付 / 2 收方付 / 3 第三方)</label>
+            <input
+              type="text"
+              value={sf.pay_method}
+              onChange={(e) => setSf({ ...sf, pay_method: e.target.value })}
+              placeholder="1"
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-medium text-gray-500">Cloud Print Template Code</label>
+            <input
+              type="text"
+              value={sf.print_template_code}
+              onChange={(e) => setSf({ ...sf, print_template_code: e.target.value })}
+              placeholder={SF_EXPRESS_DEFAULT_PRINT_TEMPLATE}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Sender Company</label>
+            <input
+              type="text"
+              value={sf.sender_company}
+              onChange={(e) => setSf({ ...sf, sender_company: e.target.value })}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Sender Contact</label>
+            <input
+              type="text"
+              value={sf.sender_contact}
+              onChange={(e) => setSf({ ...sf, sender_contact: e.target.value })}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">Sender Phone</label>
+            <input
+              type="text"
+              value={sf.sender_tel}
+              onChange={(e) => setSf({ ...sf, sender_tel: e.target.value })}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-medium text-gray-500">Sender Address</label>
+            <textarea
+              value={sf.sender_address}
+              onChange={(e) => setSf({ ...sf, sender_address: e.target.value })}
+              rows={2}
               className={`${inputCls} mt-1`}
             />
           </div>

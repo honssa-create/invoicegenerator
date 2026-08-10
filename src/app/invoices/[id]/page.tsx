@@ -350,6 +350,11 @@ export default function InvoiceDetailPage() {
             <h1 className="page-title">{invoice.invoice_number}</h1>
             <StatusBadge status={status} />
           </div>
+          {invoice.external_invoice_number && (
+            <p className="mt-1 text-sm text-gray-500">
+              {bi('External invoice number', '外部發票編號')}: {invoice.external_invoice_number}
+            </p>
+          )}
         </div>
         <div className="page-actions">
           <Link

@@ -1,37 +1,15 @@
 import db from './db';
+import { allocateGlobalRecordNumber } from './record-numbering';
 import { calculateQuotationTotals, type QuotationFile, type QuotationItem, type QuotationWithDetails } from './quotations';
 
-const QUOTE_NUMBER_START = 1001001;
-
-/** Next 7-digit quotation number for this user (1001001, 1001002, …). */
-export async function generateQuoteNumber(userId: number): Promise<string> {
-  const rows = (await db
-    .prepare('SELECT quote_number FROM quotations WHERE user_id = ?')
-    .all(userId)) as { quote_number: string }[];
-
-  let max = QUOTE_NUMBER_START - 1;
-  for (const { quote_number } of rows) {
-    if (!/^\d{7}$/.test(quote_number)) continue;
-    const n = Number(quote_number);
-    if (Number.isFinite(n) && n > max) max = n;
-  }
-  return String(max + 1);
+/** Reserve the next office-wide 8-digit quotation number. */
+export async function generateQuoteNumber(_userId?: number): Promise<string> {
+  return allocateGlobalRecordNumber('quotation');
 }
 
-/** Quote number = source + 1 (or the next free number if that is taken). */
-export async function nextQuoteNumberAfter(userId: number, current: string): Promise<string> {
-  let n = /^\d{7}$/.test(current.trim())
-    ? Number(current.trim()) + 1
-    : Number(await generateQuoteNumber(userId));
-  if (!Number.isFinite(n) || n < QUOTE_NUMBER_START) n = Number(await generateQuoteNumber(userId));
-
-  const exists = db.prepare(
-    'SELECT 1 FROM quotations WHERE user_id = ? AND quote_number = ?',
-  );
-  while (await exists.get(userId, String(n))) {
-    n += 1;
-  }
-  return String(n);
+/** Duplicates also use the next office-wide number rather than source + 1. */
+export async function nextQuoteNumberAfter(_userId?: number, _current?: string): Promise<string> {
+  return allocateGlobalRecordNumber('quotation');
 }
 
 export async function getQuotationWithDetails(

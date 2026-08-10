@@ -1,11 +1,3 @@
-export interface User {
-  id: number;
-  email: string;
-  name: string;
-  company_name: string | null;
-  created_at: string;
-}
-
 export interface Customer {
   id: number;
   user_id: number;
@@ -28,6 +20,7 @@ export interface Invoice {
   customer_id: number;
   order_id: number | null;
   invoice_number: string;
+  external_invoice_number: string | null;
   status: InvoiceStatus;
   issue_date: string;
   due_date: string;
@@ -54,6 +47,7 @@ export interface Invoice {
 
 export interface LinkedOrderSummary {
   id: number;
+  reference_number: string;
   po_number: string | null;
   name: string | null;
   description: string | null;
@@ -135,12 +129,4 @@ export interface ReceiptScanResult {
   receipt_path: string | null;
   raw_text: string;
   source: 'ai' | 'ocr';
-}
-
-export interface DashboardStats {
-  totalInvoices: number;
-  totalRevenue: number;
-  pendingAmount: number;
-  overdueCount: number;
-  recentInvoices: InvoiceWithDetails[];
 }

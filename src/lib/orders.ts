@@ -32,21 +32,95 @@ export interface CoreColumns {
 }
 
 export const ORDER_STATUSES = [
-  '草稿',
-  '已到公司',
-  '圖稿已給客戶',
-  '已搬到生產中',
-  '製作中',
+  'OPEN',
+  '快遞到件',
+  'IN PROGRESS 安排中',
+  '需長時間處理',
+  '起版中 SAMPLE',
+  'PRODUCTION 生產中',
+  '有問題',
+  '已到公司 BACK TO OFFICE',
+  '已到公司 - 請安排包裝/PACK箱',
+  '已到公司 - 已完成包裝',
+  '可以寄出 READY TO SEND',
   '已寄出 SENT',
-];
+  '客退貨/客原版',
+  '已處理',
+  'FAIL',
+] as const;
+
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+export const STATUS_DOT_COLORS: Record<string, string> = {
+  'OPEN': '#9CA3AF',
+  '快遞到件': '#5BA4CF',
+  'IN PROGRESS 安排中': '#8B6CC1',
+  '需長時間處理': '#C23A8A',
+  '起版中 SAMPLE': '#A02D2D',
+  'PRODUCTION 生產中': '#5BC0DE',
+  '有問題': '#E04B8A',
+  '已到公司 BACK TO OFFICE': '#8FA03A',
+  '已到公司 - 請安排包裝/PACK箱': '#7DBFAE',
+  '已到公司 - 已完成包裝': '#7DBFAE',
+  '可以寄出 READY TO SEND': '#6B8FD4',
+  '已寄出 SENT': '#C9A227',
+  '客退貨/客原版': '#8B7D72',
+  '已處理': '#5C5C5C',
+  'FAIL': '#E91E8C',
+};
 
 export const STATUS_COLORS: Record<string, string> = {
-  '草稿': 'bg-gray-100 text-gray-700',
-  '已到公司': 'bg-blue-100 text-blue-700',
-  '圖稿已給客戶': 'bg-purple-100 text-purple-700',
-  '已搬到生產中': 'bg-teal-100 text-teal-700',
-  '製作中': 'bg-amber-100 text-amber-700',
-  '已寄出 SENT': 'bg-yellow-100 text-yellow-800',
+  'OPEN': 'bg-[#F3F4F6] text-[#6B7280]',
+  '快遞到件': 'bg-[#E8F4FA] text-[#3D7FA8]',
+  'IN PROGRESS 安排中': 'bg-[#F0EBF8] text-[#6B4FA0]',
+  '需長時間處理': 'bg-[#F9E8F2] text-[#9A2D6C]',
+  '起版中 SAMPLE': 'bg-[#F8EAEA] text-[#7A2222]',
+  'PRODUCTION 生產中': 'bg-[#E8F7FB] text-[#2F8FA8]',
+  '有問題': 'bg-[#FCE8F1] text-[#B8306A]',
+  '已到公司 BACK TO OFFICE': 'bg-[#F2F5E6] text-[#6A7A2C]',
+  '已到公司 - 請安排包裝/PACK箱': 'bg-[#EAF6F3] text-[#4A8F80]',
+  '已到公司 - 已完成包裝': 'bg-[#EAF6F3] text-[#4A8F80]',
+  '可以寄出 READY TO SEND': 'bg-[#EAF0FA] text-[#4A6BB0]',
+  '已寄出 SENT': 'bg-[#F8F3E0] text-[#8A7018]',
+  '客退貨/客原版': 'bg-[#F0EDEB] text-[#6B6058]',
+  '已處理': 'bg-[#EBEBEB] text-[#3F3F3F]',
+  'FAIL': 'bg-[#FCE4F2] text-[#C01070]',
+};
+
+export const STATUS_COLUMN_BG: Record<string, string> = {
+  'OPEN': 'bg-[#E8EAED]',
+  '快遞到件': 'bg-[#D4EAF6]',
+  'IN PROGRESS 安排中': 'bg-[#E4D9F4]',
+  '需長時間處理': 'bg-[#F5D6E8]',
+  '起版中 SAMPLE': 'bg-[#F3D6D6]',
+  'PRODUCTION 生產中': 'bg-[#D4EFF6]',
+  '有問題': 'bg-[#F9D6E7]',
+  '已到公司 BACK TO OFFICE': 'bg-[#E4EBC8]',
+  '已到公司 - 請安排包裝/PACK箱': 'bg-[#D5EEE7]',
+  '已到公司 - 已完成包裝': 'bg-[#D5EEE7]',
+  '可以寄出 READY TO SEND': 'bg-[#D8E3F6]',
+  '已寄出 SENT': 'bg-[#F3E9C4]',
+  '客退貨/客原版': 'bg-[#E6E0DB]',
+  '已處理': 'bg-[#DDDDDD]',
+  'FAIL': 'bg-[#F9D0E8]',
+};
+
+export const STATUS_COLUMN_ACCENT: Record<string, string> = {
+  'OPEN': 'border-t-[#9CA3AF]',
+  '快遞到件': 'border-t-[#5BA4CF]',
+  'IN PROGRESS 安排中': 'border-t-[#8B6CC1]',
+  '需長時間處理': 'border-t-[#C23A8A]',
+  '起版中 SAMPLE': 'border-t-[#A02D2D]',
+  'PRODUCTION 生產中': 'border-t-[#5BC0DE]',
+  '有問題': 'border-t-[#E04B8A]',
+  '已到公司 BACK TO OFFICE': 'border-t-[#8FA03A]',
+  '已到公司 - 請安排包裝/PACK箱': 'border-t-[#7DBFAE]',
+  '已到公司 - 已完成包裝': 'border-t-[#7DBFAE]',
+  '可以寄出 READY TO SEND': 'border-t-[#6B8FD4]',
+  '已寄出 SENT': 'border-t-[#C9A227]',
+  '客退貨/客原版': 'border-t-[#8B7D72]',
+  '已處理': 'border-t-[#5C5C5C]',
+  'FAIL': 'border-t-[#E91E8C]',
 };
 
 // The full custom-field list shown in the order detail "Fields" panel, in order.
@@ -82,7 +156,7 @@ export const ORDER_FIELDS: OrderFieldDef[] = [
   { key: 'card_size', label: '紙卡尺寸', type: 'text' },
   { key: 'tracking_no', label: 'Tracking Number 運單號', type: 'text', placeholder: 'e.g. SF5120793357800' },
   { key: 'shipping_method', label: 'Shipping 寄出方式', type: 'select', options: ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] },
-  { key: 'other_craft', label: '其他加工', type: 'text' },
+  { key: 'other_craft', label: '其他加工', type: 'textarea' },
   { key: 'carton_count', label: 'Number of Cartons / 箱數', type: 'text', col: 'carton_count', placeholder: 'e.g. 5' },
   { key: 'extra_actions', label: '額外動作', type: 'textarea' },
 ];
@@ -205,6 +279,7 @@ export interface LinkedQuotation {
 export interface Order extends CoreColumns {
   id: number;
   user_id: number;
+  reference_number: string;
   total_amount: number | null;
   fields: Record<string, string | boolean>;
   files: OrderFile[];
@@ -225,6 +300,11 @@ export const ORDER_TYPES = [
 ] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
+export function getOrderType(o: Pick<Order, 'fields'>): string {
+  const t = o.fields?.order_type;
+  return typeof t === 'string' ? t : '';
+}
+
 /** Badge-style custom orders (honour訂製 / honour en訂製) share the curated Order Detail form. */
 export const BADGE_ORDER_TYPES = ['honour訂製', 'honour en訂製'] as const;
 export type BadgeOrderType = (typeof BADGE_ORDER_TYPES)[number];
@@ -232,17 +312,346 @@ export function isBadgeOrderType(t: string): t is BadgeOrderType {
   return (BADGE_ORDER_TYPES as readonly string[]).includes(t);
 }
 
-/** Bird's-nest stewing orders share dates, flavor qty, and production formulas. */
-export const BIRD_NEST_ORDER_TYPES = ['燕窩回禮燉製', 'Nestiee 燕窩訂單'] as const;
+/** Bird's-nest stewing orders (燕窩回禮燉製) share dates, flavor qty, and production formulas. */
+export const BIRD_NEST_ORDER_TYPES = ['燕窩回禮燉製'] as const;
 export type BirdNestOrderType = (typeof BIRD_NEST_ORDER_TYPES)[number];
 export function isBirdNestOrderType(t: string): t is BirdNestOrderType {
   return (BIRD_NEST_ORDER_TYPES as readonly string[]).includes(t);
 }
 
+export const NESTIEE_ORDER_TYPE = 'Nestiee 燕窩訂單' as const;
+export function isNestieeOrderType(t: string): boolean {
+  return t === NESTIEE_ORDER_TYPE;
+}
+
+/** Manual “所需禮盒” qty inputs on Nestiee Order Detail (not from Woo). */
+export const NESTIEE_GIFT_BOX_TYPES: { id: string; label: string; qtyKey: string }[] = [
+  { id: 'star_gold', label: '星空金', qtyKey: 'nestiee_gift_qty_star_gold' },
+  { id: 'star_silver', label: '星空銀', qtyKey: 'nestiee_gift_qty_star_silver' },
+  { id: 'red_gold', label: '紅色金', qtyKey: 'nestiee_gift_qty_red_gold' },
+  { id: 'red_silver', label: '紅色銀', qtyKey: 'nestiee_gift_qty_red_silver' },
+  { id: 'pink_osmanthus', label: '粉紅心意 - 桂花味', qtyKey: 'nestiee_gift_qty_pink_osmanthus' },
+  { id: 'pink_red_date', label: '粉紅心意 - 紅棗味', qtyKey: 'nestiee_gift_qty_pink_red_date' },
+  { id: 'sui_xin_7', label: '隨心燉 - 7份裝', qtyKey: 'nestiee_gift_qty_sui_xin_7' },
+  { id: 'sui_xin_14', label: '隨心燉 - 14份裝', qtyKey: 'nestiee_gift_qty_sui_xin_14' },
+  { id: 'sui_xin_18', label: '隨心燉 - 18份裝', qtyKey: 'nestiee_gift_qty_sui_xin_18' },
+];
+
+/** Auto-map Woo line + EPO options → 所需禮盒 qty keys. */
+const NESTIEE_STAR_BOX_NAME = '🌕⚪星空禮盒 · 即食燕窩';
+const NESTIEE_STAR_SILVER_OPTION = '⚪冰糖原味【最勁典】';
+const NESTIEE_STAR_GOLD_OPTION = '🌻 桂花味【花香餘韻】';
+
+const NESTIEE_RED_BOX_NAME = '即食燕窩心意禮盒 ‧ 金銀套裝';
+const NESTIEE_RED_BOX_NAME_ALT = '即食燕窩心意禮盒 · 金銀套裝';
+const NESTIEE_RED_SINGLE_FLAVOR_OPTION = '⚪️ 只選單味（紅棗或冰糖）';
+const NESTIEE_RED_GOLD_OPTION = '🟡 金盒｜紅棗・暖潤';
+const NESTIEE_RED_SILVER_OPTION = '⚪ 銀盒｜冰糖・清潤';
+
+const NESTIEE_PINK_BOX_NAME = '心意即食燕窩禮盒 ‧ 𝑫𝒆𝒂𝒓𝒆𝒔𝒕 𝑴𝒐𝒎𝒆𝒏𝒕';
+const NESTIEE_PINK_BOX_NAME_ALT = '心意即食燕窩禮盒 · 𝑫𝒆𝒂𝒓𝒆𝒔𝒕 𝑴𝒐𝒎𝒆𝒏𝒕';
+const NESTIEE_PINK_SINGLE_OPTION = '👑👩 單盒就夠';
+const NESTIEE_PINK_DOUBLE_OPTION = '🌷雙盒更優惠';
+const NESTIEE_PINK_OSMANTHUS_OPTION = '⚪ 經典滋潤 (桂花&冰糖)';
+const NESTIEE_PINK_RED_DATE_OPTION = '🟡 暖心補氣: (紅棗&冰糖)';
+const NESTIEE_PINK_BOTH_OPTION = '兩味各一盒';
+
+function normalizeNestieeMatchText(text: string): string {
+  return text
+    .replace(/\u2027|\u00b7/g, '·') // hyphenation / middle dots → ·
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Derive 所需禮盒 quantities from Nestiee Woo lines.
+ * - 星空禮盒 + first EPO flavour → 星空銀 / 星空金
+ * - 金銀套裝 + 只選單味 + 金/銀盒 → 紅色金 / 紅色銀
+ * - Dearest Moment 單盒/雙盒/兩味 → 粉紅心意 桂花 / 紅棗
+ */
+export function computeNestieeGiftBoxQtysFromLines(
+  lines: NestieeLineItem[]
+): Record<string, number> {
+  const qtys: Record<string, number> = {
+    nestiee_gift_qty_star_gold: 0,
+    nestiee_gift_qty_star_silver: 0,
+    nestiee_gift_qty_red_gold: 0,
+    nestiee_gift_qty_red_silver: 0,
+    nestiee_gift_qty_pink_osmanthus: 0,
+    nestiee_gift_qty_pink_red_date: 0,
+  };
+  const starName = normalizeNestieeMatchText(NESTIEE_STAR_BOX_NAME);
+  const silverOpt = normalizeNestieeMatchText(NESTIEE_STAR_SILVER_OPTION);
+  const goldOpt = normalizeNestieeMatchText(NESTIEE_STAR_GOLD_OPTION);
+  const redNames = new Set([
+    normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME),
+    normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME_ALT),
+  ]);
+  const redSingle = normalizeNestieeMatchText(NESTIEE_RED_SINGLE_FLAVOR_OPTION);
+  const redGoldOpt = normalizeNestieeMatchText(NESTIEE_RED_GOLD_OPTION);
+  const redSilverOpt = normalizeNestieeMatchText(NESTIEE_RED_SILVER_OPTION);
+  const pinkNames = new Set([
+    normalizeNestieeMatchText(NESTIEE_PINK_BOX_NAME),
+    normalizeNestieeMatchText(NESTIEE_PINK_BOX_NAME_ALT),
+  ]);
+  const pinkSingle = normalizeNestieeMatchText(NESTIEE_PINK_SINGLE_OPTION);
+  const pinkDouble = normalizeNestieeMatchText(NESTIEE_PINK_DOUBLE_OPTION);
+  const pinkOsmanthus = normalizeNestieeMatchText(NESTIEE_PINK_OSMANTHUS_OPTION);
+  const pinkRedDate = normalizeNestieeMatchText(NESTIEE_PINK_RED_DATE_OPTION);
+  const pinkBoth = normalizeNestieeMatchText(NESTIEE_PINK_BOTH_OPTION);
+
+  for (const line of lines) {
+    const name = normalizeNestieeMatchText(line.name);
+    const qty = Math.max(0, line.quantity || 0);
+    if (!qty) continue;
+    const firstOpt = normalizeNestieeMatchText(line.options?.[0]?.value || '');
+    const secondOpt = normalizeNestieeMatchText(line.options?.[1]?.value || '');
+
+    if (name === starName) {
+      if (firstOpt === silverOpt) qtys.nestiee_gift_qty_star_silver += qty;
+      else if (firstOpt === goldOpt) qtys.nestiee_gift_qty_star_gold += qty;
+      continue;
+    }
+
+    if (redNames.has(name) && firstOpt === redSingle) {
+      if (secondOpt === redGoldOpt) qtys.nestiee_gift_qty_red_gold += qty;
+      else if (secondOpt === redSilverOpt) qtys.nestiee_gift_qty_red_silver += qty;
+      continue;
+    }
+
+    if (pinkNames.has(name)) {
+      if (firstOpt === pinkSingle) {
+        if (secondOpt === pinkOsmanthus) qtys.nestiee_gift_qty_pink_osmanthus += qty;
+        else if (secondOpt === pinkRedDate) qtys.nestiee_gift_qty_pink_red_date += qty;
+      } else if (firstOpt === pinkDouble) {
+        if (secondOpt === pinkBoth) {
+          qtys.nestiee_gift_qty_pink_osmanthus += qty;
+          qtys.nestiee_gift_qty_pink_red_date += qty;
+        } else if (secondOpt === pinkOsmanthus) {
+          qtys.nestiee_gift_qty_pink_osmanthus += qty * 2;
+        } else if (secondOpt === pinkRedDate) {
+          qtys.nestiee_gift_qty_pink_red_date += qty * 2;
+        }
+      }
+    }
+  }
+  return qtys;
+}
+
+/** Manual-edit flag key for a 所需禮盒 qty field. */
+export function nestieeGiftQtyManualKey(qtyKey: string): string {
+  return `${qtyKey}_manual`;
+}
+
+export function isNestieeGiftQtyManual(
+  fields: Record<string, unknown>,
+  qtyKey: string
+): boolean {
+  const v = fields[nestieeGiftQtyManualKey(qtyKey)];
+  return v === true || v === 'true' || v === 1 || v === '1';
+}
+
+/**
+ * Apply auto gift-box qtys onto fields, skipping keys the user has manually edited.
+ * Returns the keys that were written.
+ */
+export function applyNestieeGiftBoxAutoQtys(
+  fields: Record<string, unknown>,
+  lines: NestieeLineItem[]
+): string[] {
+  const giftQtys = computeNestieeGiftBoxQtysFromLines(lines);
+  const written: string[] = [];
+  for (const [key, qty] of Object.entries(giftQtys)) {
+    if (isNestieeGiftQtyManual(fields, key)) continue;
+    fields[key] = String(qty);
+    written.push(key);
+  }
+  return written;
+}
+
+export interface NestieeLineOption {
+  label: string;
+  value: string;
+  price: number;
+}
+
+/** Normalized Woo line item stored on Nestiee orders as `fields.nestiee_lines` JSON. */
+export interface NestieeLineItem {
+  name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  options?: NestieeLineOption[];
+}
+
+export type WooAddressLike = {
+  first_name?: string | null;
+  last_name?: string | null;
+  company?: string | null;
+  address_1?: string | null;
+  address_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+export type WooMetaDatum = {
+  key?: string | null;
+  value?: unknown;
+  display_key?: string | null;
+  display_value?: unknown;
+};
+
+export type WooLineItemLike = {
+  name?: string | null;
+  quantity?: number | string | null;
+  price?: number | string | null;
+  total?: number | string | null;
+  meta_data?: WooMetaDatum[] | null;
+};
+
+function nestieeNum(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value !== 'string' || !value.trim()) return 0;
+  const n = Number(value.replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Strip simple HTML tags from TM EPO labels. */
+export function stripHtml(text: string): string {
+  return text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+}
+
+/** Join non-empty Woo address parts into a multiline string. */
+export function formatWooAddress(addr: WooAddressLike | null | undefined): string {
+  if (!addr) return '';
+  const name = [addr.first_name, addr.last_name].filter(Boolean).join(' ').trim();
+  const lines = [
+    name,
+    String(addr.company || '').trim(),
+    String(addr.address_1 || '').trim(),
+    String(addr.address_2 || '').trim(),
+    [addr.city, addr.state, addr.postcode].filter(Boolean).join(', ').trim(),
+    String(addr.country || '').trim(),
+    addr.phone ? `Tel: ${String(addr.phone).trim()}` : '',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+function parseNestieeOptionsFromMeta(meta: WooMetaDatum[] | null | undefined): NestieeLineOption[] {
+  if (!Array.isArray(meta)) return [];
+  const epo = meta.find((m) => m?.key === '_tmcartepo_data');
+  const raw = epo?.value;
+  if (!Array.isArray(raw)) return [];
+  const out: NestieeLineOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const label = stripHtml(String(e.name ?? ''));
+    const value = stripHtml(String(e.value ?? ''));
+    if (!label && !value) continue;
+    out.push({
+      label: label || 'Option',
+      value,
+      price: Math.round(nestieeNum(e.price) * 100) / 100,
+    });
+  }
+  return out;
+}
+
+function parseNestieeOptionsStored(raw: unknown): NestieeLineOption[] | undefined {
+  if (!Array.isArray(raw) || !raw.length) return undefined;
+  const out: NestieeLineOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const label = String(e.label ?? '').trim();
+    const value = String(e.value ?? '').trim();
+    if (!label && !value) continue;
+    out.push({
+      label: label || 'Option',
+      value,
+      price: Math.round(nestieeNum(e.price) * 100) / 100,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+/** Normalize WooCommerce `line_items` into Nestiee product rows (incl. TM EPO options). */
+export function parseNestieeLinesFromWoo(lineItems: WooLineItemLike[] | null | undefined): NestieeLineItem[] {
+  if (!Array.isArray(lineItems) || !lineItems.length) return [];
+  const out: NestieeLineItem[] = [];
+  for (const li of lineItems) {
+    const name = String(li?.name ?? '').trim();
+    if (!name) continue;
+    const quantity = nestieeNum(li.quantity);
+    const unit_price = Math.round(nestieeNum(li.price) * 100) / 100;
+    const rawTotal = nestieeNum(li.total);
+    const line_total =
+      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const options = parseNestieeOptionsFromMeta(li.meta_data);
+    const row: NestieeLineItem = { name, quantity, unit_price, line_total };
+    if (options.length) row.options = options;
+    out.push(row);
+  }
+  return out;
+}
+
+/** Read `fields.nestiee_lines` (JSON string or already-parsed array). */
+export function getNestieeLines(
+  fields: Record<string, string | boolean | unknown>
+): NestieeLineItem[] {
+  const raw = fields.nestiee_lines;
+  if (raw == null || raw === false || raw === '') return [];
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const out: NestieeLineItem[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const name = String(r.name ?? '').trim();
+    if (!name) continue;
+    const quantity = nestieeNum(r.quantity);
+    const unit_price = Math.round(nestieeNum(r.unit_price ?? r.price) * 100) / 100;
+    const rawTotal = nestieeNum(r.line_total ?? r.total);
+    const line_total =
+      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const item: NestieeLineItem = { name, quantity, unit_price, line_total };
+    const options = parseNestieeOptionsStored(r.options);
+    if (options) item.options = options;
+    out.push(item);
+  }
+  return out;
+}
+
+/** Billing for quotations: prefer fields.billing_address, else shipping. */
+export function resolveOrderAddressesForQuotation(order: {
+  shipping_address?: string | null;
+  fields?: Record<string, string | boolean | unknown>;
+}): { billingAddress: string | null; shippingAddress: string | null } {
+  const billing = String(order.fields?.billing_address ?? '').trim() || null;
+  const shipping = order.shipping_address?.trim() || null;
+  return {
+    billingAddress: billing || shipping,
+    shippingAddress: shipping || billing,
+  };
+}
+
 /** Default order_type when ingesting from a WooCommerce store platform. */
 export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
   honour: 'honour訂製',
-  nestiee: 'Nestiee 燕窩訂單',
+  nestiee: NESTIEE_ORDER_TYPE,
 };
 
 export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'] as const;
@@ -278,8 +687,352 @@ export function normalizeOrderPaymentMethod(raw: string | null | undefined): {
   if (/yedpay/.test(lower) && /(alipay|支付寶|支付宝)/.test(lower)) {
     return { method: 'Yedpay Alipay', note: '' };
   }
+  if (/(alipay|支付寶|支付宝)/.test(lower) && /online|yedpay|線上/.test(lower)) {
+    return { method: 'Yedpay Alipay', note: '' };
+  }
   if (/現金|cash/.test(lower)) return { method: '現金', note: '' };
   return { method: ORDER_PAYMENT_METHOD_OTHER, note: text };
+}
+
+/** Extract Nestiee payment bank/method from a Woo order payload. */
+export function parseNestieePaymentFromWoo(payload: Record<string, unknown> | null | undefined): {
+  bank: string;
+  method: OrderPaymentMethod | '';
+  note: string;
+} {
+  const meta = Array.isArray(payload?.meta_data) ? (payload!.meta_data as WooMetaDatum[]) : [];
+  const yedpayMethod = String(
+    meta.find((m) => String(m?.key || '') === 'yedpay_payment_method')?.value ?? ''
+  ).trim();
+  const title = String(payload?.payment_method_title ?? '').trim();
+  const combined = [title, yedpayMethod].filter(Boolean).join(' ');
+  const primary = normalizeOrderPaymentMethod(combined || yedpayMethod || title);
+  return {
+    bank: title,
+    method: primary.method,
+    note: primary.note,
+  };
+}
+
+/** Synthetic Nestiee line name for Woo shipping fees. */
+export const NESTIEE_SHIPPING_LINE_NAME = 'Shipping';
+
+type WooShippingLineLike = {
+  method_title?: string | null;
+  method_id?: string | null;
+  total?: string | number | null;
+};
+
+/** Prefer top-level shipping_total; else sum shipping_lines[].total. */
+export function parseWooShippingTotal(payload: Record<string, unknown> | null | undefined): number {
+  if (!payload) return 0;
+  const top = nestieeNum(payload.shipping_total);
+  if (top > 0) return Math.round(top * 100) / 100;
+  const lines = Array.isArray(payload.shipping_lines)
+    ? (payload.shipping_lines as WooShippingLineLike[])
+    : [];
+  let sum = 0;
+  for (const line of lines) {
+    sum += nestieeNum(line?.total);
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+/** First non-empty shipping_lines[].method_title. */
+export function parseWooShippingMethod(payload: Record<string, unknown> | null | undefined): string {
+  if (!payload) return '';
+  const lines = Array.isArray(payload.shipping_lines)
+    ? (payload.shipping_lines as WooShippingLineLike[])
+    : [];
+  for (const line of lines) {
+    const title = String(line?.method_title ?? '').trim();
+    if (title) return title;
+  }
+  return '';
+}
+
+const ORDER_SHIPPING_METHODS = ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] as const;
+
+/** Map Woo shipping titles onto Shipment Detail select options when possible. */
+export function normalizeOrderShippingMethod(raw: string | null | undefined): string {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  if ((ORDER_SHIPPING_METHODS as readonly string[]).includes(text)) return text;
+  const lower = text.toLowerCase();
+  if (/sf\s*express|\bsf\b|順豐速運|顺丰/.test(lower) || /順豐/.test(text)) {
+    if (/sf\s*順豐|^sf\b/i.test(text) || /sf\s*express/i.test(lower)) return 'SF 順豐';
+    return '順豐';
+  }
+  if (/\bems\b/i.test(text)) return 'EMS';
+  if (/香港郵政|hong\s*kong\s*post|hkpost/i.test(text)) return '香港郵政';
+  if (/其他|other/i.test(text)) return '其他';
+  // Preserve unknown Woo titles so nothing is lost (select still shows the value).
+  return text;
+}
+
+/**
+ * Strip any existing Shipping rows, then append one when shippingTotal > 0.
+ * Keeps Nestiee re-imports idempotent.
+ */
+export function appendNestieeShippingLine(
+  lines: NestieeLineItem[],
+  shippingTotal: number
+): NestieeLineItem[] {
+  const withoutShipping = lines.filter(
+    (line) => normalizeNestieeMatchText(line.name) !== normalizeNestieeMatchText(NESTIEE_SHIPPING_LINE_NAME)
+  );
+  const amount = Math.round(Math.max(0, shippingTotal) * 100) / 100;
+  if (amount <= 0) return withoutShipping;
+  return [
+    ...withoutShipping,
+    {
+      name: NESTIEE_SHIPPING_LINE_NAME,
+      quantity: 1,
+      unit_price: amount,
+      line_total: amount,
+    },
+  ];
+}
+
+/** Synthetic Honour line style for Woo shipping fees. */
+export const HONOUR_SHIPPING_LINE_STYLE = 'Shipping';
+
+export interface HonourCpoOption {
+  label: string;
+  value: string;
+  key: string;
+}
+
+function honourMetaLabel(m: WooMetaDatum): string {
+  const display = stripHtml(String(m.display_key ?? '')).trim();
+  if (display && !display.startsWith('_')) return display;
+  return String(m.key ?? '').trim();
+}
+
+function honourMetaValue(m: WooMetaDatum): string {
+  const display = stripHtml(String(m.display_value ?? '')).trim();
+  if (display) return display;
+  return stripHtml(String(m.value ?? '')).trim();
+}
+
+function isHonourCpoInternalKey(key: string): boolean {
+  if (!key) return true;
+  if (key.startsWith('_cpo_')) return true;
+  if (key.startsWith('_uni_item_')) return true;
+  if (key.startsWith('_uni_custom_')) return true;
+  if (key.startsWith('pi_')) return true;
+  if (key === '_add-to-cart') return true;
+  if (/_upload(_file)?$/i.test(key)) return true;
+  if (/_notes$/i.test(key)) return true;
+  return false;
+}
+
+/** Digits from CPO qty display values like "300個" / "300pcs". */
+export function parseHonourCpoQuantityDigits(raw: string): string {
+  const m = String(raw || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
+  return m ? m[1] : '';
+}
+
+function honourCpoQuantityFromMeta(meta: WooMetaDatum[] | null | undefined): string {
+  if (!Array.isArray(meta)) return '';
+  for (const m of meta) {
+    const key = String(m?.key ?? '');
+    if (/_(quantity|qty)$/i.test(key)) {
+      const digits = parseHonourCpoQuantityDigits(honourMetaValue(m));
+      if (digits) return digits;
+    }
+  }
+  for (const m of meta) {
+    const label = honourMetaLabel(m);
+    if (!label || /顏色數量|人數/.test(label)) continue;
+    if (/數量|quantity|pcs/i.test(label)) {
+      const digits = parseHonourCpoQuantityDigits(honourMetaValue(m));
+      if (digits) return digits;
+    }
+  }
+  return '';
+}
+
+/**
+ * Visible Uni CPO options from line meta (excludes internals / uploads / pi_*).
+ */
+export function extractHonourCpoOptions(meta: WooMetaDatum[] | null | undefined): HonourCpoOption[] {
+  if (!Array.isArray(meta)) return [];
+  const out: HonourCpoOption[] = [];
+  for (const m of meta) {
+    const key = String(m?.key ?? '').trim();
+    if (isHonourCpoInternalKey(key)) continue;
+    // Keep _uni_cpo_* product options; skip other underscore internals without display labels.
+    const label = honourMetaLabel(m);
+    const value = honourMetaValue(m);
+    if (!value) continue;
+    if (!key.startsWith('_uni_cpo_') && label.startsWith('_')) continue;
+    if (!label || label.startsWith('_')) continue;
+    out.push({ label, value, key });
+  }
+  return out;
+}
+
+function honourCardSizeFromMeta(meta: WooMetaDatum[] | null | undefined): string {
+  if (!Array.isArray(meta)) return '';
+  let length = '';
+  let width = '';
+  let size = '';
+  for (const m of meta) {
+    const key = String(m?.key ?? '');
+    const value = honourMetaValue(m);
+    if (!value) continue;
+    if (/custom_length/i.test(key)) length = value;
+    else if (/custom_width/i.test(key)) width = value;
+    else if (/_size$/i.test(key) || /尺寸|size/i.test(honourMetaLabel(m))) {
+      if (!/^自訂|custom$/i.test(value)) size = value;
+    }
+  }
+  if (length && width) return `${length}×${width}`;
+  return size;
+}
+
+/**
+ * Map CPO options onto Honour Order Detail craft fields.
+ * Only fills empty fields so local edits survive re-import.
+ */
+export function applyHonourOptionsToFields(
+  fields: Record<string, unknown>,
+  options: HonourCpoOption[],
+  metaForSize?: WooMetaDatum[] | null
+): string[] {
+  const written: string[] = [];
+  const setIfEmpty = (key: string, value: string) => {
+    if (!value.trim()) return;
+    if (String(fields[key] ?? '').trim()) return;
+    fields[key] = value.trim();
+    written.push(key);
+  };
+
+  const cardSize = honourCardSizeFromMeta(metaForSize || null);
+  if (cardSize) setIfEmpty('card_size', cardSize);
+
+  const dumpLines: string[] = [];
+  for (const opt of options) {
+    const label = opt.label;
+    const value = opt.value;
+    // Notes go to order notes, not the craft dump.
+    if (/備註|notes?/i.test(label)) continue;
+    dumpLines.push(`${label}: ${value}`);
+
+    // Exact Honour craft labels only — other colours/options stay in the dump.
+    if (label === '金屬電鍍色') {
+      setIfEmpty('plating_color', value);
+      continue;
+    }
+    if (label === '背面配件') {
+      setIfEmpty('clasp', value);
+      continue;
+    }
+    if (label === '做法') {
+      setIfEmpty('craft', value);
+      continue;
+    }
+  }
+  if (dumpLines.length) setIfEmpty('other_craft', dumpLines.join('\n'));
+  return written;
+}
+
+/** Normalize Woo line_items into Honour style/qty/price rows (Uni CPO qty preferred). */
+export function parseHonourLinesFromWoo(lineItems: WooLineItemLike[] | null | undefined): HonourLineItem[] {
+  if (!Array.isArray(lineItems) || !lineItems.length) return [];
+  const out: HonourLineItem[] = [];
+  for (const li of lineItems) {
+    const style = String(li?.name ?? '').trim();
+    if (!style) continue;
+    const cpoQty = honourCpoQuantityFromMeta(li.meta_data);
+    const wooQty = nestieeNum(li.quantity);
+    const quantity = cpoQty || (wooQty > 0 ? String(wooQty) : '');
+    const parsedQuantity = nestieeNum(quantity);
+    const linePrice = nestieeNum(li.price);
+    const unitPrice = parsedQuantity > 0 ? linePrice / parsedQuantity : linePrice;
+    const unit_price = String(Math.round(unitPrice * 10_000) / 10_000);
+    out.push({ style, quantity, unit_price });
+  }
+  return out;
+}
+
+/**
+ * Strip any existing Shipping rows, then append one when shippingTotal > 0.
+ */
+export function appendHonourShippingLine(
+  lines: HonourLineItem[],
+  shippingTotal: number
+): HonourLineItem[] {
+  const withoutShipping = lines.filter(
+    (line) => line.style.trim().toLowerCase() !== HONOUR_SHIPPING_LINE_STYLE.toLowerCase()
+  );
+  const amount = Math.round(Math.max(0, shippingTotal) * 100) / 100;
+  if (amount <= 0) return withoutShipping;
+  return [
+    ...withoutShipping,
+    {
+      style: HONOUR_SHIPPING_LINE_STYLE,
+      quantity: '1',
+      unit_price: String(amount),
+    },
+  ];
+}
+
+/** Same Woo payment shape as Nestiee. */
+export function parseHonourPaymentFromWoo(
+  payload: Record<string, unknown> | null | undefined
+): ReturnType<typeof parseNestieePaymentFromWoo> {
+  return parseNestieePaymentFromWoo(payload);
+}
+
+/** Build requested_delivery from pi_overall_estimate_min/max_date. */
+export function parseHonourEstimateDelivery(
+  payload: Record<string, unknown> | null | undefined
+): string {
+  if (!payload) return '';
+  const meta = Array.isArray(payload.meta_data) ? (payload.meta_data as WooMetaDatum[]) : [];
+  const min = String(
+    meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_min_date')?.value ?? ''
+  ).trim();
+  const max = String(
+    meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_max_date')?.value ?? ''
+  ).trim();
+  if (min && max && min !== max) return `${min} - ${max}`;
+  return min || max || '';
+}
+
+/** Collect CPO options across all product line items. */
+export function collectHonourCpoOptionsFromLines(
+  lineItems: WooLineItemLike[] | null | undefined
+): { options: HonourCpoOption[]; sizeMeta: WooMetaDatum[] } {
+  if (!Array.isArray(lineItems)) return { options: [], sizeMeta: [] };
+  const options: HonourCpoOption[] = [];
+  const sizeMeta: WooMetaDatum[] = [];
+  for (const li of lineItems) {
+    const meta = li.meta_data || [];
+    sizeMeta.push(...meta);
+    options.push(...extractHonourCpoOptions(meta));
+  }
+  return { options, sizeMeta };
+}
+
+/** Collect non-empty CPO 備註 values for the order's customer notes. */
+export function parseHonourCpoNotesFromLines(
+  lineItems: WooLineItemLike[] | null | undefined
+): string {
+  if (!Array.isArray(lineItems)) return '';
+  const notes: string[] = [];
+  for (const li of lineItems) {
+    for (const meta of li.meta_data || []) {
+      const key = String(meta?.key ?? '');
+      const label = honourMetaLabel(meta);
+      if (!/備註|notes?/i.test(label) && !/_notes?$/i.test(key)) continue;
+      const value = honourMetaValue(meta);
+      if (value && !notes.includes(value)) notes.push(value);
+    }
+  }
+  return notes.join('\n');
 }
 
 /** Parse a free-form payment amount field into a finite number (else 0). */
@@ -622,9 +1375,10 @@ export function computeBirdNestTotals(fields: Record<string, string | boolean>):
 }
 
 export function orderTitle(o: {
+  reference_number?: string | null;
   po_number?: string | null;
   name?: string | null;
   description?: string | null;
 }): string {
-  return [o.po_number, o.name, o.description].filter(Boolean).join(' - ') || 'Untitled order';
+  return [o.reference_number, o.po_number, o.name, o.description].filter(Boolean).join(' - ') || 'Untitled order';
 }

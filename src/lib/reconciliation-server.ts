@@ -7,9 +7,18 @@ import {
   type YedpayTransaction,
   yedpayConfigured,
 } from './yedpay';
-import type { PaymentMethod, ReconciliationRecord, ReconciliationStatus } from './reconciliation';
-
-const AMOUNT_TOLERANCE = 0.02;
+import {
+  amountsClose,
+  classifyMediumCandidates,
+  isWithinHours,
+  MEDIUM_MATCH_WINDOW_HOURS,
+  paymentMethodMatches,
+  type PaymentMethod,
+  type ReconCandidateSummary,
+  type ReconConfidence,
+  type ReconciliationRecord,
+  type ReconciliationStatus,
+} from './reconciliation';
 
 export interface ReconciliationInput {
   deposit_time: string;
@@ -30,6 +39,7 @@ export interface MatchCandidate {
   invoice_total: number | null;
   invoice_status: string | null;
   customer_name: string | null;
+  phone: string | null;
 }
 
 interface OrderMatch {
@@ -38,6 +48,7 @@ interface OrderMatch {
   invoice_id: number | null;
   invoice_number: string | null;
   expected_amount: number | null;
+  customer_name?: string | null;
 }
 
 function round2(n: number): number {
@@ -48,7 +59,7 @@ function netAmount(gross: number, fee: number): number {
   return round2(gross - fee);
 }
 
-function parseDateTime(value: string): Date | null {
+export function parseDateTime(value: string): Date | null {
   const s = value.trim().replace('T', ' ');
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
   if (!m) return null;
@@ -64,8 +75,10 @@ function toIsoDateTime(value: string): string {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
 }
 
-function amountsClose(a: number, b: number): boolean {
-  return Math.abs(a - b) <= AMOUNT_TOLERANCE;
+function nowIso(): string {
+  const dt = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())} ${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}`;
 }
 
 /** Pull plausible order / invoice numbers from bank remarks. */
@@ -88,6 +101,16 @@ export function extractOrderNoFromRemarks(remarks: string): string | null {
   return null;
 }
 
+function parseCandidatesJson(raw: unknown): ReconCandidateSummary[] {
+  if (!raw || typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function rowToRecord(row: Record<string, unknown>): ReconciliationRecord {
   return {
     id: row.id as number,
@@ -105,33 +128,60 @@ function rowToRecord(row: Record<string, unknown>): ReconciliationRecord {
     source: row.source as 'yedpay' | 'bank_upload',
     external_id: (row.external_id as string) || null,
     matched_at: (row.matched_at as string) || null,
+    confidence: (row.confidence as ReconConfidence) || null,
+    suggested_order_id: (row.suggested_order_id as number) || null,
+    suggested_invoice_id: (row.suggested_invoice_id as number) || null,
+    candidates: parseCandidatesJson(row.candidate_order_ids_json),
+    approved_by: (row.approved_by as string) || null,
+    approved_at: (row.approved_at as string) || null,
     created_at: row.created_at as string,
+    suggested_order_no: (row.suggested_order_no as string) || null,
+    suggested_customer_name: (row.suggested_customer_name as string) || null,
+    suggested_invoice_number: (row.suggested_invoice_number as string) || null,
   };
 }
+
+const LIST_SELECT = `SELECT r.*,
+       COALESCE(i.invoice_number, si.invoice_number) AS invoice_number,
+       so.po_number AS suggested_order_no,
+       so.name AS suggested_customer_name,
+       si.invoice_number AS suggested_invoice_number
+       FROM reconciliation_records r
+       LEFT JOIN invoices i ON i.id = r.invoice_id
+       LEFT JOIN orders so ON so.id = r.suggested_order_id
+       LEFT JOIN invoices si ON si.id = r.suggested_invoice_id`;
 
 export async function listReconciliationRecords(userId: number): Promise<ReconciliationRecord[]> {
   const rows = await db
     .prepare(
-      `SELECT r.*, i.invoice_number
-       FROM reconciliation_records r
-       LEFT JOIN invoices i ON i.id = r.invoice_id
+      `${LIST_SELECT}
        WHERE r.user_id = ?
        ORDER BY r.deposit_time DESC, r.id DESC`
     )
     .all(userId) as Record<string, unknown>[];
-  return rows.map(rowToRecord);
+
+  const records = rows.map(rowToRecord);
+  for (const r of records) {
+    if (r.suggested_invoice_id) {
+      r.suggested_amount = (await getInvoiceWithDetails(r.suggested_invoice_id, userId))?.total ?? null;
+    }
+  }
+  return records;
 }
 
 export async function getReconciliationRecord(userId: number, id: number): Promise<ReconciliationRecord | null> {
   const row = await db
     .prepare(
-      `SELECT r.*, i.invoice_number
-       FROM reconciliation_records r
-       LEFT JOIN invoices i ON i.id = r.invoice_id
+      `${LIST_SELECT}
        WHERE r.id = ? AND r.user_id = ?`
     )
     .get(id, userId) as Record<string, unknown> | undefined;
-  return row ? rowToRecord(row) : null;
+  if (!row) return null;
+  const record = rowToRecord(row);
+  if (record.suggested_invoice_id) {
+    record.suggested_amount = (await getInvoiceWithDetails(record.suggested_invoice_id, userId))?.total ?? null;
+  }
+  return record;
 }
 
 async function findOrderByOrderNo(userId: number, orderNo: string): Promise<OrderMatch | null> {
@@ -140,43 +190,78 @@ async function findOrderByOrderNo(userId: number, orderNo: string): Promise<Orde
 
   const byPo = await db
     .prepare(
-      `SELECT o.id AS order_id, o.po_number AS order_no, o.system_order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
+      `SELECT o.id AS order_id, o.po_number AS order_no, o.system_order_no, o.reference_number, o.name AS customer_name,
+              i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM orders o
        LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id
        WHERE o.user_id = ? AND (
          LOWER(TRIM(o.po_number)) = LOWER(?)
          OR LOWER(TRIM(o.system_order_no)) = LOWER(?)
+         OR LOWER(TRIM(o.reference_number)) = LOWER(?)
        )
-       ORDER BY i.id DESC
+       ORDER BY CASE WHEN i.status IS NOT NULL AND i.status != 'paid' THEN 0 ELSE 1 END, i.id DESC
        LIMIT 1`
     )
-    .get(userId, normalized, normalized) as
-    | { order_id: number; order_no: string | null; invoice_id: number | null; invoice_number: string | null; invoice_status: string | null }
+    .get(userId, normalized, normalized, normalized) as
+    | {
+        order_id: number;
+        order_no: string | null;
+        invoice_id: number | null;
+        invoice_number: string | null;
+        invoice_status: string | null;
+        customer_name: string | null;
+        reference_number?: string;
+        system_order_no?: string;
+      }
     | undefined;
 
   if (byPo) {
-    const expected = byPo.invoice_id
+    let expected = byPo.invoice_id
       ? (await getInvoiceWithDetails(byPo.invoice_id, userId))?.total ?? null
       : null;
+    if (expected === null) {
+      const fieldsRow = (await db
+        .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
+        .get(byPo.order_id, userId)) as { fields_json: string } | undefined;
+      try {
+        const fields = fieldsRow?.fields_json ? JSON.parse(fieldsRow.fields_json) : {};
+        const amt = Number(String(fields.payment_amount || '').replace(/[^0-9.\-]/g, ''));
+        if (Number.isFinite(amt) && amt > 0) expected = amt;
+      } catch {
+        /* ignore */
+      }
+    }
     return {
       order_id: byPo.order_id,
-      order_no: byPo.order_no || (byPo as { system_order_no?: string }).system_order_no || normalized,
+      order_no: byPo.reference_number || byPo.order_no || byPo.system_order_no || normalized,
       invoice_id: byPo.invoice_id,
       invoice_number: byPo.invoice_number,
       expected_amount: expected,
+      customer_name: byPo.customer_name,
     };
   }
 
   const byInvoice = await db
     .prepare(
-      `SELECT o.id AS order_id, o.po_number AS order_no, i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
+      `SELECT o.id AS order_id, o.po_number AS order_no, o.name AS customer_name,
+              i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM invoices i
        LEFT JOIN orders o ON o.id = i.order_id AND o.user_id = i.user_id
-       WHERE i.user_id = ? AND LOWER(TRIM(i.invoice_number)) = LOWER(?)
+       WHERE i.user_id = ? AND (
+         LOWER(TRIM(i.invoice_number)) = LOWER(?)
+         OR LOWER(TRIM(i.external_invoice_number)) = LOWER(?)
+       )
        LIMIT 1`
     )
-    .get(userId, normalized) as
-    | { order_id: number | null; order_no: string | null; invoice_id: number; invoice_number: string; invoice_status: string }
+    .get(userId, normalized, normalized) as
+    | {
+        order_id: number | null;
+        order_no: string | null;
+        invoice_id: number;
+        invoice_number: string;
+        invoice_status: string;
+        customer_name: string | null;
+      }
     | undefined;
 
   if (byInvoice) {
@@ -187,51 +272,56 @@ async function findOrderByOrderNo(userId: number, orderNo: string): Promise<Orde
       invoice_id: byInvoice.invoice_id,
       invoice_number: byInvoice.invoice_number,
       expected_amount: expected,
+      customer_name: byInvoice.customer_name,
     };
   }
 
   return null;
 }
 
-async function findSecondaryMatch(
+async function findMediumCandidates(
   userId: number,
   grossAmount: number,
   paymentMethod: PaymentMethod,
   depositTime: string
-): Promise<OrderMatch | null> {
+): Promise<OrderMatch[]> {
   const dt = parseDateTime(depositTime);
-  if (!dt) return null;
-
-  const windowStart = new Date(dt.getTime() - 24 * 60 * 60 * 1000);
-  const windowEnd = new Date(dt.getTime() + 24 * 60 * 60 * 1000);
+  if (!dt) return [];
 
   const rows = await db
     .prepare(
-      `SELECT o.id AS order_id, o.po_number AS order_no, o.fields_json,
+      `SELECT o.id AS order_id, o.po_number AS order_no, o.reference_number, o.system_order_no,
+              o.name AS customer_name, o.fields_json, o.created_at,
               i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM orders o
        LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id
+         AND i.status != 'paid'
        WHERE o.user_id = ?
-         AND (i.status IS NULL OR i.status != 'paid')
-       ORDER BY o.id DESC`
+       ORDER BY o.id DESC, i.id DESC`
     )
     .all(userId) as {
     order_id: number;
     order_no: string | null;
+    reference_number: string | null;
+    system_order_no: string | null;
+    customer_name: string | null;
     fields_json: string;
+    created_at: string;
     invoice_id: number | null;
     invoice_number: string | null;
     invoice_status: string | null;
   }[];
 
-  const methodHints: Record<PaymentMethod, string[]> = {
-    Yedpay: ['yedpay', 'yed pay'],
-    FPS: ['fps', '轉數快', '轉数快', 'faster payment'],
-    Payme: ['payme', 'pay me'],
-  };
-  const hints = methodHints[paymentMethod];
+  // Prefer one row per order (latest unpaid invoice already filtered in JOIN).
+  const seenOrders = new Set<number>();
+  const candidates: OrderMatch[] = [];
 
   for (const row of rows) {
+    if (seenOrders.has(row.order_id)) continue;
+
+    const created = parseDateTime(row.created_at);
+    if (!created || !isWithinHours(dt, created, MEDIUM_MATCH_WINDOW_HOURS)) continue;
+
     let fields: Record<string, unknown> = {};
     try {
       fields = row.fields_json ? JSON.parse(row.fields_json) : {};
@@ -239,89 +329,160 @@ async function findSecondaryMatch(
       fields = {};
     }
 
-    const paymentDate = String(fields.payment_date || '').trim();
     const paymentAmount = Number(String(fields.payment_amount || '').replace(/[^0-9.\-]/g, ''));
-    const paymentOption = String(fields.payment_option || fields.payment_method_detail || fields.payment_bank || '')
+    const paymentOption = [
+      fields.payment_option,
+      fields.payment_method_detail,
+      fields.payment_bank,
+      fields.payment2_bank,
+      fields.payment3_bank,
+    ]
+      .map((v) => String(v || ''))
+      .join(' ')
       .toLowerCase();
 
-    const methodOk = hints.some((h) => paymentOption.includes(h));
+    if (!paymentMethodMatches(paymentMethod, paymentOption, { allowEmptyForBankMethods: true })) {
+      continue;
+    }
 
     const invoiceTotal = row.invoice_id
       ? (await getInvoiceWithDetails(row.invoice_id, userId))?.total ?? null
       : null;
-    const compareAmount = invoiceTotal ?? (Number.isFinite(paymentAmount) && paymentAmount > 0 ? paymentAmount : null);
+    const compareAmount =
+      invoiceTotal ?? (Number.isFinite(paymentAmount) && paymentAmount > 0 ? paymentAmount : null);
     if (compareAmount === null || !amountsClose(compareAmount, grossAmount)) continue;
 
-    if (paymentDate) {
-      const pd = parseDateTime(paymentDate);
-      if (pd && (pd < windowStart || pd > windowEnd)) continue;
-    } else if (paymentMethod === 'Yedpay') {
-      continue;
-    }
+    // Skip orders that already have a paid linked invoice only (no unpaid invoice and no amount).
+    if (!row.invoice_id && !(Number.isFinite(paymentAmount) && paymentAmount > 0)) continue;
 
-    if (paymentMethod === 'Yedpay' && !methodOk) continue;
-    if (paymentMethod === 'Payme' && !methodOk) continue;
-
-    return {
+    seenOrders.add(row.order_id);
+    candidates.push({
       order_id: row.order_id,
-      order_no: row.order_no || `#${row.order_id}`,
+      order_no: row.reference_number || row.order_no || row.system_order_no || `#${row.order_id}`,
       invoice_id: row.invoice_id,
       invoice_number: row.invoice_number,
-      expected_amount: invoiceTotal,
-    };
+      expected_amount: compareAmount,
+      customer_name: row.customer_name,
+    });
   }
 
-  return null;
+  return candidates;
 }
 
-function resolveStatus(grossAmount: number, expected: number | null): ReconciliationStatus {
-  if (expected === null) return 'Matched';
-  return amountsClose(grossAmount, expected) ? 'Matched' : 'Discrepancy';
+async function suggestMatch(
+  userId: number,
+  recordId: number,
+  opts: {
+    status: 'Pending Approval' | 'Discrepancy';
+    confidence: ReconConfidence | null;
+    match?: OrderMatch | null;
+    candidates?: OrderMatch[];
+    orderNoHint?: string | null;
+  }
+): Promise<void> {
+  const match = opts.match || null;
+  const candidates = opts.candidates || [];
+  const candidatesJson =
+    candidates.length > 0
+      ? JSON.stringify(
+          candidates.map(
+            (c): ReconCandidateSummary => ({
+              order_id: c.order_id,
+              order_no: c.order_no,
+              invoice_id: c.invoice_id,
+              invoice_number: c.invoice_number,
+              amount: c.expected_amount,
+              customer_name: c.customer_name ?? null,
+            })
+          )
+        )
+      : null;
+
+  await db
+    .prepare(
+      `UPDATE reconciliation_records
+       SET status = ?,
+           confidence = ?,
+           order_no = COALESCE(?, order_no),
+           suggested_order_id = ?,
+           suggested_invoice_id = ?,
+           candidate_order_ids_json = ?,
+           order_id = NULL,
+           invoice_id = NULL,
+           matched_at = NULL,
+           approved_by = NULL,
+           approved_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    )
+    .run(
+      opts.status,
+      opts.confidence,
+      match?.order_no || opts.orderNoHint || null,
+      match?.order_id || null,
+      match?.invoice_id || null,
+      candidatesJson,
+      recordId,
+      userId
+    );
 }
 
-async function applyMatchToInvoiceAndOrder(
+async function commitApproval(
   userId: number,
   recordId: number,
   match: OrderMatch,
   input: ReconciliationInput,
-  status: ReconciliationStatus,
-  actorName = 'System'
+  actorName: string
 ): Promise<void> {
   const depositTime = toIsoDateTime(input.deposit_time);
   const fee = input.transaction_fee ?? 0;
   const net = netAmount(input.gross_amount, fee);
+  const approvedAt = nowIso();
 
-  await db.prepare(
-    `UPDATE reconciliation_records
-     SET order_no = ?, order_id = ?, invoice_id = ?, status = ?, matched_at = datetime('now'), updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(
-    match.order_no,
-    match.order_id || null,
-    match.invoice_id,
-    status,
-    recordId,
-    userId
-  );
+  await db
+    .prepare(
+      `UPDATE reconciliation_records
+       SET order_no = ?, order_id = ?, invoice_id = ?, status = 'Matched',
+           confidence = COALESCE(confidence, 'high'),
+           suggested_order_id = ?, suggested_invoice_id = ?,
+           candidate_order_ids_json = NULL,
+           matched_at = datetime('now'),
+           approved_by = ?, approved_at = ?,
+           updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    )
+    .run(
+      match.order_no,
+      match.order_id || null,
+      match.invoice_id,
+      match.order_id || null,
+      match.invoice_id,
+      actorName,
+      approvedAt,
+      recordId,
+      userId
+    );
 
-  if (match.invoice_id && status === 'Matched') {
-    await db.prepare(
-      `UPDATE invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ? AND user_id = ? AND status != 'paid'`
-    ).run(match.invoice_id, userId);
+  if (match.invoice_id) {
+    await db
+      .prepare(
+        `UPDATE invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ? AND user_id = ? AND status != 'paid'`
+      )
+      .run(match.invoice_id, userId);
     await logActivity(
       'invoice',
       match.invoice_id,
       userId,
       'activity',
       actorName,
-      `Reconciliation #${recordId}: marked invoice paid via ${input.payment_method} (${input.gross_amount.toFixed(2)} HKD)`
+      `Reconciliation #${recordId}: approved — marked invoice paid via ${input.payment_method} (${input.gross_amount.toFixed(2)} HKD)`
     );
   }
 
   if (match.order_id) {
-    const existing = await db
+    const existing = (await db
       .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
-      .get(match.order_id, userId) as { fields_json: string } | undefined;
+      .get(match.order_id, userId)) as { fields_json: string } | undefined;
     if (existing) {
       let fields: Record<string, unknown> = {};
       try {
@@ -334,21 +495,19 @@ async function applyMatchToInvoiceAndOrder(
         payment_date: depositTime.slice(0, 10),
         payment_amount: String(input.gross_amount),
         payment_method_detail: input.payment_method,
-        payment_verified: status === 'Matched',
-        payment_status_label: status === 'Matched' ? 'Full Paid' : fields.payment_status_label,
+        payment_verified: true,
+        payment_status_label: 'Full Paid',
       };
-      await db.prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`).run(
-        JSON.stringify(merged),
-        match.order_id,
-        userId
-      );
+      await db
+        .prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`)
+        .run(JSON.stringify(merged), match.order_id, userId);
       await logActivity(
         'order',
         match.order_id,
         userId,
         'activity',
         actorName,
-        `Reconciliation #${recordId}: ${status} with ${input.payment_method} deposit ${input.gross_amount.toFixed(2)} HKD (net ${net.toFixed(2)})`
+        `Reconciliation #${recordId}: approved Matched with ${input.payment_method} deposit ${input.gross_amount.toFixed(2)} HKD (net ${net.toFixed(2)})`
       );
     }
   }
@@ -389,56 +548,158 @@ async function recordExistsByExternalId(userId: number, externalId: string): Pro
   return Boolean(row);
 }
 
-export async function attemptAutoMatch(userId: number, recordId: number, input: ReconciliationInput): Promise<ReconciliationStatus> {
-  const orderNo =
-    input.order_no?.trim() ||
-    (input.remarks ? extractOrderNoFromRemarks(input.remarks) : null);
-
-  let match: OrderMatch | null = null;
-  if (orderNo) match = await findOrderByOrderNo(userId, orderNo);
-  if (!match) match = await findSecondaryMatch(userId, input.gross_amount, input.payment_method, input.deposit_time);
-
-  if (!match) return 'Unmatched';
-
-  const status = resolveStatus(input.gross_amount, match.expected_amount);
-  await applyMatchToInvoiceAndOrder(userId, recordId, match, input, status);
-  return status;
-}
-
-export async function manualMatchRecord(
+/** Auto-score a deposit: suggest Pending Approval / Discrepancy — never marks invoice paid. */
+export async function scoreAndSuggest(
   userId: number,
   recordId: number,
-  invoiceId: number,
-  actorName: string
-): Promise<ReconciliationRecord | null> {
-  const record = await getReconciliationRecord(userId, recordId);
-  if (!record) return null;
+  input: ReconciliationInput
+): Promise<ReconciliationStatus> {
+  const orderNo =
+    input.order_no?.trim() || (input.remarks ? extractOrderNoFromRemarks(input.remarks) : null);
 
-  const invoice = await getInvoiceWithDetails(invoiceId, userId);
-  if (!invoice) return null;
-
-  let orderNo = record.order_no;
-  let orderId = invoice.order_id || 0;
-  if (invoice.order_id) {
-    const orderRow = await db
-      .prepare('SELECT id, po_number FROM orders WHERE id = ? AND user_id = ?')
-      .get(invoice.order_id, userId) as { id: number; po_number: string | null } | undefined;
-    if (orderRow) {
-      orderId = orderRow.id;
-      orderNo = orderRow.po_number || orderNo;
+  if (orderNo) {
+    const match = await findOrderByOrderNo(userId, orderNo);
+    if (match) {
+      if (match.expected_amount === null || amountsClose(input.gross_amount, match.expected_amount)) {
+        await suggestMatch(userId, recordId, {
+          status: 'Pending Approval',
+          confidence: 'high',
+          match,
+          orderNoHint: orderNo,
+        });
+        return 'Pending Approval';
+      }
+      await suggestMatch(userId, recordId, {
+        status: 'Discrepancy',
+        confidence: null,
+        match,
+        orderNoHint: orderNo,
+      });
+      return 'Discrepancy';
     }
   }
 
-  const match: OrderMatch = {
+  const medium = await findMediumCandidates(
+    userId,
+    input.gross_amount,
+    input.payment_method,
+    input.deposit_time
+  );
+  const classified = classifyMediumCandidates(medium);
+
+  if (classified.kind === 'unique' && classified.pick) {
+    await suggestMatch(userId, recordId, {
+      status: 'Pending Approval',
+      confidence: 'medium',
+      match: classified.pick,
+    });
+    return 'Pending Approval';
+  }
+
+  if (classified.kind === 'collision') {
+    await suggestMatch(userId, recordId, {
+      status: 'Discrepancy',
+      confidence: null,
+      candidates: medium,
+    });
+    return 'Discrepancy';
+  }
+
+  return 'Unmatched';
+}
+
+async function resolveMatchFromInvoice(
+  userId: number,
+  invoiceId: number,
+  fallbackOrderNo: string | null
+): Promise<OrderMatch | null> {
+  const invoice = await getInvoiceWithDetails(invoiceId, userId);
+  if (!invoice) return null;
+
+  let orderNo = fallbackOrderNo;
+  let orderId = invoice.order_id || 0;
+  if (invoice.order_id) {
+    const orderRow = (await db
+      .prepare('SELECT id, po_number, reference_number, system_order_no FROM orders WHERE id = ? AND user_id = ?')
+      .get(invoice.order_id, userId)) as
+      | { id: number; po_number: string | null; reference_number: string | null; system_order_no: string | null }
+      | undefined;
+    if (orderRow) {
+      orderId = orderRow.id;
+      orderNo = orderRow.reference_number || orderRow.po_number || orderRow.system_order_no || orderNo;
+    }
+  }
+
+  return {
     order_id: orderId,
     order_no: orderNo || invoice.invoice_number,
     invoice_id: invoice.id,
     invoice_number: invoice.invoice_number,
     expected_amount: invoice.total,
   };
+}
 
-  const status = resolveStatus(record.gross_amount, invoice.total);
-  await applyMatchToInvoiceAndOrder(
+export async function approveRecord(
+  userId: number,
+  recordId: number,
+  actorName: string,
+  invoiceIdOverride?: number | null
+): Promise<ReconciliationRecord | null> {
+  const record = await getReconciliationRecord(userId, recordId);
+  if (!record) return null;
+  if (record.status === 'Matched') return record;
+
+  let match: OrderMatch | null = null;
+
+  if (invoiceIdOverride) {
+    match = await resolveMatchFromInvoice(userId, invoiceIdOverride, record.order_no);
+  } else if (record.suggested_invoice_id) {
+    match = await resolveMatchFromInvoice(userId, record.suggested_invoice_id, record.order_no);
+  } else if (record.suggested_order_id) {
+    const orderRow = (await db
+      .prepare(
+        `SELECT o.id, o.po_number, o.reference_number, o.system_order_no,
+                i.id AS invoice_id, i.invoice_number
+         FROM orders o
+         LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id AND i.status != 'paid'
+         WHERE o.id = ? AND o.user_id = ?
+         ORDER BY i.id DESC
+         LIMIT 1`
+      )
+      .get(record.suggested_order_id, userId)) as
+      | {
+          id: number;
+          po_number: string | null;
+          reference_number: string | null;
+          system_order_no: string | null;
+          invoice_id: number | null;
+          invoice_number: string | null;
+        }
+      | undefined;
+    if (orderRow) {
+      const expected = orderRow.invoice_id
+        ? (await getInvoiceWithDetails(orderRow.invoice_id, userId))?.total ?? null
+        : null;
+      match = {
+        order_id: orderRow.id,
+        order_no:
+          orderRow.reference_number ||
+          orderRow.po_number ||
+          orderRow.system_order_no ||
+          record.order_no ||
+          `#${orderRow.id}`,
+        invoice_id: orderRow.invoice_id,
+        invoice_number: orderRow.invoice_number,
+        expected_amount: expected,
+      };
+    }
+  }
+
+  if (!match || (!match.invoice_id && !match.order_id)) {
+    return null;
+  }
+
+  await commitApproval(
     userId,
     recordId,
     match,
@@ -451,41 +712,124 @@ export async function manualMatchRecord(
       remarks: record.remarks,
       source: record.source,
     },
-    status,
     actorName
   );
 
   return await getReconciliationRecord(userId, recordId);
 }
 
-export async function listMatchCandidates(userId: number): Promise<MatchCandidate[]> {
-  const rows = await db
+export async function approveAllHighConfidence(
+  userId: number,
+  actorName: string
+): Promise<{ approved: number }> {
+  const rows = (await db
     .prepare(
-      `SELECT o.id AS order_id, o.po_number AS order_no, o.name AS customer_name,
+      `SELECT id FROM reconciliation_records
+       WHERE user_id = ? AND status = 'Pending Approval' AND confidence = 'high'
+       ORDER BY id ASC`
+    )
+    .all(userId)) as { id: number }[];
+
+  let approved = 0;
+  for (const row of rows) {
+    const result = await approveRecord(userId, row.id, actorName);
+    if (result?.status === 'Matched') approved += 1;
+  }
+  return { approved };
+}
+
+export async function rejectRecord(
+  userId: number,
+  recordId: number
+): Promise<ReconciliationRecord | null> {
+  const record = await getReconciliationRecord(userId, recordId);
+  if (!record) return null;
+  if (record.status === 'Matched') return record;
+
+  await db
+    .prepare(
+      `UPDATE reconciliation_records
+       SET status = 'Unmatched',
+           confidence = NULL,
+           suggested_order_id = NULL,
+           suggested_invoice_id = NULL,
+           candidate_order_ids_json = NULL,
+           order_id = NULL,
+           invoice_id = NULL,
+           matched_at = NULL,
+           approved_by = NULL,
+           approved_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    )
+    .run(recordId, userId);
+
+  return await getReconciliationRecord(userId, recordId);
+}
+
+/** Manual link: operator picks unpaid invoice and commits approval in one step. */
+export async function manualMatchRecord(
+  userId: number,
+  recordId: number,
+  invoiceId: number,
+  actorName: string
+): Promise<ReconciliationRecord | null> {
+  const record = await getReconciliationRecord(userId, recordId);
+  if (!record) return null;
+  if (record.status === 'Matched') return record;
+
+  return approveRecord(userId, recordId, actorName, invoiceId);
+}
+
+export async function listMatchCandidates(
+  userId: number,
+  search?: string
+): Promise<MatchCandidate[]> {
+  const q = search?.trim().toLowerCase() || '';
+  const rows = (await db
+    .prepare(
+      `SELECT o.id AS order_id, o.po_number AS order_no, o.reference_number, o.system_order_no,
+              o.name AS customer_name, o.phone,
               i.id AS invoice_id, i.invoice_number, i.status AS invoice_status
        FROM invoices i
        LEFT JOIN orders o ON o.id = i.order_id AND o.user_id = i.user_id
        WHERE i.user_id = ? AND i.status != 'paid'
        ORDER BY i.issue_date DESC, i.id DESC`
     )
-    .all(userId) as {
+    .all(userId)) as {
     order_id: number | null;
     order_no: string | null;
+    reference_number: string | null;
+    system_order_no: string | null;
     customer_name: string | null;
+    phone: string | null;
     invoice_id: number;
     invoice_number: string;
     invoice_status: string;
   }[];
 
-  return await Promise.all(rows.map(async (r) => ({
-    order_id: r.order_id || 0,
-    order_no: r.order_no || '',
-    invoice_id: r.invoice_id,
-    invoice_number: r.invoice_number,
-    invoice_total: (await getInvoiceWithDetails(r.invoice_id, userId))?.total ?? null,
-    invoice_status: r.invoice_status,
-    customer_name: r.customer_name,
-  })));
+  const mapped = await Promise.all(
+    rows.map(async (r) => ({
+      order_id: r.order_id || 0,
+      order_no: r.reference_number || r.order_no || r.system_order_no || '',
+      invoice_id: r.invoice_id,
+      invoice_number: r.invoice_number,
+      invoice_total: (await getInvoiceWithDetails(r.invoice_id, userId))?.total ?? null,
+      invoice_status: r.invoice_status,
+      customer_name: r.customer_name,
+      phone: r.phone,
+    }))
+  );
+
+  if (!q) return mapped;
+
+  return mapped.filter((c) =>
+    [c.order_no, c.invoice_number, c.customer_name, c.phone, c.invoice_total != null ? String(c.invoice_total) : '']
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(q)
+  );
 }
 
 function yedpayTxnToInput(txn: YedpayTransaction): ReconciliationInput {
@@ -507,25 +851,25 @@ function yedpayTxnToInput(txn: YedpayTransaction): ReconciliationInput {
 export async function syncYedpayForUser(userId: number): Promise<{
   fetched: number;
   imported: number;
-  matched: number;
+  suggested: number;
   skipped: number;
 }> {
   if (!(await yedpayConfigured(userId))) {
     throw new Error('Yedpay is not configured — add credentials in Settings → API Integrations');
   }
 
-  const sinceRow = await db
+  const sinceRow = (await db
     .prepare(
       `SELECT MAX(deposit_time) AS last FROM reconciliation_records WHERE user_id = ? AND source = 'yedpay'`
     )
-    .get(userId) as { last: string | null };
+    .get(userId)) as { last: string | null };
 
   const transactions = await fetchYedpayTransactions(userId, {
     since: sinceRow.last || undefined,
   });
 
   let imported = 0;
-  let matched = 0;
+  let suggested = 0;
   let skipped = 0;
 
   await db.transaction(async () => {
@@ -542,25 +886,25 @@ export async function syncYedpayForUser(userId: number): Promise<{
       const input = yedpayTxnToInput(txn);
       const id = await insertReconciliationRecord(userId, input);
       imported += 1;
-      const status = await attemptAutoMatch(userId, id, input);
-      if (status === 'Matched' || status === 'Discrepancy') matched += 1;
+      const status = await scoreAndSuggest(userId, id, input);
+      if (status === 'Pending Approval' || status === 'Discrepancy') suggested += 1;
     }
   });
-  return { fetched: transactions.length, imported, matched, skipped };
+  return { fetched: transactions.length, imported, suggested, skipped };
 }
 
 export async function importBankStatementRows(
   userId: number,
   paymentMethod: PaymentMethod,
   rows: ReconciliationInput[]
-): Promise<{ imported: number; matched: number; skipped: number }> {
+): Promise<{ imported: number; suggested: number; skipped: number }> {
   let imported = 0;
-  let matched = 0;
+  let suggested = 0;
   let skipped = 0;
 
   await db.transaction(async () => {
     for (const row of rows) {
-      if (row.external_id && await recordExistsByExternalId(userId, row.external_id)) {
+      if (row.external_id && (await recordExistsByExternalId(userId, row.external_id))) {
         skipped += 1;
         continue;
       }
@@ -572,9 +916,9 @@ export async function importBankStatementRows(
       };
       const id = await insertReconciliationRecord(userId, input);
       imported += 1;
-      const status = await attemptAutoMatch(userId, id, input);
-      if (status === 'Matched' || status === 'Discrepancy') matched += 1;
+      const status = await scoreAndSuggest(userId, id, input);
+      if (status === 'Pending Approval' || status === 'Discrepancy') suggested += 1;
     }
   });
-  return { imported, matched, skipped };
+  return { imported, suggested, skipped };
 }

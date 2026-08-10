@@ -29,10 +29,17 @@ export function parseChineseDate(text: string): string | null {
   return `${y}-${mo}-${d}`;
 }
 
+/** Add calendar days to a YYYY-MM-DD string (UTC date arithmetic — no TZ drift). */
+export function addCalendarDays(iso: string, days: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return iso;
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
 function addDaysIso(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addCalendarDays(iso, days);
 }
 
 function mapCapacity(rawNum: string, _unit: string): string | null {
@@ -176,6 +183,7 @@ export function parseWeddingGiftConfirmation(text: string): WeddingGiftConfirmat
   if (bigDay) {
     fields.big_day = bigDay;
     fields.expiry_date = addDaysIso(bigDay, 28);
+    fields.production_date = addDaysIso(bigDay, -10);
   }
 
   const { name, phone } = extractNamePhone(raw);

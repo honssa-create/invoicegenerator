@@ -23,9 +23,8 @@ export async function createInvoiceFromQuotation(
   const today = new Date().toISOString().slice(0, 10);
   const issueDate = (quote.issue_date || '').trim() || today;
   const dueDate = (quote.valid_until || '').trim() || addDaysIso(issueDate, 30);
-  const invoiceNumber = await generateInvoiceNumber(ownerId);
-
   return await db.transaction(async () => {
+    const invoiceNumber = await generateInvoiceNumber(ownerId);
     const result = await db
       .prepare(
         `INSERT INTO invoices (

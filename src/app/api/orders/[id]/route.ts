@@ -6,6 +6,8 @@ import { getOrder, logActivity } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
+import { isWeddingGiftOrderType } from '@/lib/orders';
+import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 
 const CORE_COLUMNS = [
   'po_number',
@@ -21,6 +23,18 @@ const CORE_COLUMNS = [
   'quotation_id',
   'total_amount',
 ];
+
+const PREP_SYNC_FIELD_KEYS = new Set([
+  'order_type',
+  'production_date',
+  'expiry_date',
+  'client_delivery_date',
+  'bottle_capacity',
+  'qty_osmanthus',
+  'qty_red_date',
+  'qty_rock_sugar',
+  'big_day',
+]);
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -45,8 +59,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const ownerId = await getDataOwnerId(session.userId);
 
   const existing = await db
-    .prepare('SELECT status, fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, ownerId) as { status: string; fields_json: string } | undefined;
+    .prepare('SELECT reference_number, status, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .get(params.id, ownerId) as { reference_number: string; status: string; fields_json: string } | undefined;
   if (!existing) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   try {
@@ -67,6 +81,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       }
     }
 
+    let mergedFields: Record<string, unknown> | null = null;
     // Merge custom fields into fields_json.
     if (Object.keys(fields).length) {
       let current: Record<string, unknown> = {};
@@ -75,9 +90,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       } catch {
         current = {};
       }
-      const merged = { ...current, ...fields };
+      mergedFields = { ...current, ...fields };
       setClauses.push('fields_json = ?');
-      values.push(JSON.stringify(merged));
+      values.push(JSON.stringify(mergedFields));
     }
 
     if (setClauses.length) {
@@ -90,8 +105,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const invoiceId = linkedInvoiceId ? Number(linkedInvoiceId) : null;
       if (invoiceId) {
         const invoice = await db
-          .prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?')
-          .get(invoiceId, ownerId);
+          .prepare('SELECT id, invoice_number FROM invoices WHERE id = ? AND user_id = ?')
+          .get(invoiceId, ownerId) as { id: number; invoice_number: string } | undefined;
         if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
       }
 
@@ -100,7 +115,16 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (invoiceId) {
         await db.prepare('UPDATE invoices SET order_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
           .run(params.id, invoiceId, ownerId);
-        await logActivity(params.id, session.userId, 'activity', session.name, `linked invoice #${invoiceId}`);
+        const invoice = await db
+          .prepare('SELECT invoice_number FROM invoices WHERE id = ?')
+          .get(invoiceId) as { invoice_number: string } | undefined;
+        await logActivity(
+          params.id,
+          session.userId,
+          'activity',
+          session.name,
+          `linked invoice ${invoice?.invoice_number || invoiceId}`,
+        );
       } else {
         await logActivity(params.id, session.userId, 'activity', session.name, 'unlinked invoice');
       }
@@ -116,7 +140,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         await db.prepare('UPDATE orders SET quotation_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
           .run(quotationId, params.id, ownerId);
         await logActivity(params.id, session.userId, 'activity', session.name, `linked quotation ${quote.quote_number}`);
-        await logUnifiedActivity('quotation', quotationId, session.userId, 'activity', session.name, `linked order #${params.id}`);
+        await logUnifiedActivity(
+          'quotation',
+          quotationId,
+          session.userId,
+          'activity',
+          session.name,
+          `linked order ${existing.reference_number}`,
+        );
       } else {
         await db.prepare('UPDATE orders SET quotation_id = NULL, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?')
           .run(params.id, ownerId);
@@ -127,6 +158,29 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     // Log a status change to the activity feed.
     if ('status' in core && core.status && core.status !== existing.status) {
       await logActivity(params.id, session.userId, 'activity', session.name, `changed status to ${core.status}`);
+    }
+
+    // Sync kitchen prep when 回禮 fields change (or order becomes 回禮).
+    const shouldSyncPrep = Object.keys(fields).some((k) => PREP_SYNC_FIELD_KEYS.has(k));
+    if (shouldSyncPrep) {
+      let orderType = '';
+      if (mergedFields) {
+        orderType = String(mergedFields.order_type || '');
+      } else {
+        try {
+          const cur = existing.fields_json ? JSON.parse(existing.fields_json) : {};
+          orderType = String(cur.order_type || '');
+        } catch {
+          orderType = '';
+        }
+      }
+      if (isWeddingGiftOrderType(orderType)) {
+        try {
+          await ensurePrepFromWeddingOrder(ownerId, Number(params.id));
+        } catch {
+          // Non-fatal — cron catch-up can retry.
+        }
+      }
     }
 
     return NextResponse.json({ order: await getOrder(params.id, ownerId) });

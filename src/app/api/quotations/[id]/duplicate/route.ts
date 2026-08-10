@@ -18,10 +18,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const source = await getQuotationWithDetails(params.id, ownerId);
   if (!source) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
-  const quoteNumber = await nextQuoteNumberAfter(ownerId, source.quote_number);
-
   try {
-    const newId = await db.transaction(async () => {
+    const { newId, quoteNumber } = await db.transaction(async () => {
+      const quoteNumber = await nextQuoteNumberAfter(ownerId, source.quote_number);
       const result = await db
         .prepare(
           `INSERT INTO quotations (
@@ -80,7 +79,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         await insertFile.run(qid, ownerId, f.path, f.original_name);
       }
 
-      return qid;
+      return { newId: qid, quoteNumber };
     });
 
     await logActivity(

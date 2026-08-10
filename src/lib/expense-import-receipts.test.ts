@@ -13,33 +13,65 @@ describe('fetchAndStoreReceiptFromUrl', () => {
   });
 
   it('saves downloaded images via saveReceipt and keeps source_url as metadata', async () => {
-    vi.stubEnv('NODE_ENV', 'production');
-    vi.stubEnv('R2_ENDPOINT', '');
-
+    vi.resetModules();
     const png = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
     ]);
 
-    vi.doMock('./receipt', () => ({
-      saveReceipt: vi.fn(async () => 'saved-receipt.png'),
+    const saveReceipt = vi.fn(async () => 'saved-receipt.png');
+    vi.doMock('./receipt', () => ({ saveReceipt }));
+    vi.doMock('./receipt-storage', () => ({
+      shouldKeepRemoteUrlInsteadOfEphemeralSave: () => false,
     }));
 
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      headers: { get: () => 'image/png' },
-      arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
+      }))
+    );
 
     const { fetchAndStoreReceiptFromUrl } = await import('./expense-import-receipts');
     const result = await fetchAndStoreReceiptFromUrl('https://cdn.test/receipt.png', '2');
 
-    expect('path' in result).toBe(true);
-    if ('path' in result) {
-      expect(result.path).not.toBe('https://cdn.test/receipt.png');
-      expect(result.path).toMatch(/\.png$/);
-      expect(result.sourceUrl).toBe('https://cdn.test/receipt.png');
-    }
+    expect(saveReceipt).toHaveBeenCalled();
+    expect(result).toEqual({
+      path: 'saved-receipt.png',
+      sourceUrl: 'https://cdn.test/receipt.png',
+    });
+  });
+
+  it('keeps the remote URL as path on ephemeral production storage', async () => {
+    vi.resetModules();
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    ]);
+
+    const saveReceipt = vi.fn(async () => 'saved-receipt.png');
+    vi.doMock('./receipt', () => ({ saveReceipt }));
+    vi.doMock('./receipt-storage', () => ({
+      shouldKeepRemoteUrlInsteadOfEphemeralSave: () => true,
+    }));
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
+      }))
+    );
+
+    const { fetchAndStoreReceiptFromUrl } = await import('./expense-import-receipts');
+    const result = await fetchAndStoreReceiptFromUrl('https://cdn.test/receipt.png', '2');
+
+    expect(saveReceipt).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      path: 'https://cdn.test/receipt.png',
+      sourceUrl: 'https://cdn.test/receipt.png',
+    });
   });
 });
 

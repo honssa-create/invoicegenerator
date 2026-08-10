@@ -4,6 +4,9 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrders, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
+import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
+import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
+import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -27,25 +30,48 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const result = await db
-      .prepare(
-        `INSERT INTO orders (user_id, po_number, name, description, status, delivery_date, customer_email, phone, shipping_address, notes, fields_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')`
-      )
-      .run(
-        ownerId,
-        body.po_number?.trim() || null,
-        body.name?.trim() || null,
-        body.description?.trim() || null,
-        body.status?.trim() || '草稿',
-        body.delivery_date?.trim() || null,
-        body.customer_email?.trim() || null,
-        body.phone?.trim() || null,
-        body.shipping_address?.trim() || null,
-        body.notes?.trim() || null
-      );
-    const id = result.lastInsertRowid as number;
-    await logActivity(id, session.userId, 'activity', session.name, 'created this order');
+    const orderType =
+      typeof body.order_type === 'string' &&
+      (ORDER_TYPES as readonly string[]).includes(body.order_type.trim())
+        ? body.order_type.trim()
+        : '';
+    const statusRaw = typeof body.status === 'string' ? body.status.trim() : '';
+    const status =
+      statusRaw && (ORDER_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : 'OPEN';
+    const fieldsJson = JSON.stringify(orderType ? { order_type: orderType } : {});
+    const { id, referenceNumber } = await db.transaction(async () => {
+      const referenceNumber = await allocateGlobalRecordNumber('order');
+      const result = await db
+        .prepare(
+          `INSERT INTO orders (
+             user_id, reference_number, po_number, name, description, status, delivery_date,
+             customer_email, phone, shipping_address, notes, fields_json
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          ownerId,
+          referenceNumber,
+          body.po_number?.trim() || null,
+          body.name?.trim() || null,
+          body.description?.trim() || null,
+          status,
+          body.delivery_date?.trim() || null,
+          body.customer_email?.trim() || null,
+          body.phone?.trim() || null,
+          body.shipping_address?.trim() || null,
+          body.notes?.trim() || null,
+          fieldsJson
+        );
+      return { id: result.lastInsertRowid as number, referenceNumber };
+    });
+    await logActivity(id, session.userId, 'activity', session.name, `created order ${referenceNumber}`);
+    if (orderType === WEDDING_GIFT_ORDER_TYPE) {
+      try {
+        await ensurePrepFromWeddingOrder(ownerId, id);
+      } catch {
+        // Order still created; prep can be caught up by cron.
+      }
+    }
     return NextResponse.json({ order: await getOrder(id, ownerId) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });

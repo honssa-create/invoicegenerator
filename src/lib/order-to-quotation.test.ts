@@ -60,6 +60,25 @@ describe('buildQuotationItemsFromOrder', () => {
     expect(items[1]).toMatchObject({ description: 'Custom badges — Acrylic B', quantity: 20, unit_price: 12.5 });
   });
 
+  it('includes Shipping honour line as its own quotation item', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: '',
+      name: '',
+      po_number: '',
+      fields: {
+        order_type: 'honour訂製',
+        honour_lines: JSON.stringify([
+          { style: '燙貼織嘜', quantity: '300', unit_price: '861' },
+          { style: 'Shipping', quantity: '1', unit_price: '35' },
+        ]),
+      },
+    });
+    expect(items).toEqual([
+      { description: '燙貼織嘜', quantity: 300, unit_price: 861 },
+      { description: 'Shipping', quantity: 1, unit_price: 35 },
+    ]);
+  });
+
   it('maps bird nest flavors', () => {
     const items = buildQuotationItemsFromOrder({
       description: '',
@@ -78,22 +97,53 @@ describe('buildQuotationItemsFromOrder', () => {
     expect(items[1].quantity).toBe(5);
   });
 
-  it('maps Nestiee bird nest flavors like 燕窩回禮燉製', () => {
+  it('maps Nestiee lines from Woo nestiee_lines', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: 'fallback desc',
+      name: '',
+      po_number: '',
+      fields: {
+        order_type: 'Nestiee 燕窩訂單',
+        nestiee_lines: JSON.stringify([
+          { name: '星空金', quantity: 2, unit_price: 344, line_total: 688 },
+          { name: '粉紅心意 - 桂花味', quantity: 1, unit_price: 128.5, line_total: 128.5 },
+        ]),
+      },
+    });
+    expect(items).toEqual([
+      { description: '星空金', quantity: 2, unit_price: 344 },
+      { description: '粉紅心意 - 桂花味', quantity: 1, unit_price: 128.5 },
+    ]);
+  });
+
+  it('includes Shipping nestiee line as its own quotation item', () => {
     const items = buildQuotationItemsFromOrder({
       description: '',
       name: '',
       po_number: '',
       fields: {
         order_type: 'Nestiee 燕窩訂單',
-        qty_rock_sugar: '3',
-        qty_osmanthus: '7',
-        qty_red_date: '2',
-        supplier_price: '50',
+        nestiee_lines: JSON.stringify([
+          { name: '星空金', quantity: 1, unit_price: 344, line_total: 344 },
+          { name: 'Shipping', quantity: 1, unit_price: 35, line_total: 35 },
+        ]),
       },
     });
-    expect(items).toHaveLength(3);
-    expect(items.map((i) => i.quantity)).toEqual([3, 7, 2]);
-    expect(items[0].unit_price).toBe(50);
+    expect(items).toEqual([
+      { description: '星空金', quantity: 1, unit_price: 344 },
+      { description: 'Shipping', quantity: 1, unit_price: 35 },
+    ]);
+  });
+
+  it('falls back to description when Nestiee has no nestiee_lines', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: '星空銀 x1',
+      name: '',
+      po_number: '',
+      fields: { order_type: 'Nestiee 燕窩訂單' },
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].description).toBe('星空銀 x1');
   });
 });
 

@@ -11,6 +11,8 @@ import {
   normalizeStoredDate,
   outstandingBalance,
   pastLeaseStatusLabel,
+  isVacantUnitName,
+  VACANT_TENANT_NAME,
   type PreviousLeaseRecord,
   type LeaseDocumentType,
   type LeaseStoredStatus,
@@ -198,7 +200,7 @@ export async function createLeaseForUnit(
 export async function ensureCurrentLeaseFromUnit(unit: RentalUnit): Promise<RentalLease | null> {
   const existing = await getCurrentLeaseForUnit(unit.id, unit.user_id);
   if (existing) return existing;
-  if (!unit.tenantName?.trim()) return null;
+  if (isVacantUnitName(unit.tenantName)) return null;
   return await createLeaseForUnit(unit.user_id, unit.id, {
     tenantName: unit.tenantName,
     tenantPhone: unit.tenantPhone,
@@ -282,11 +284,11 @@ export async function endRentalContract(
 
   await syncUnitFromLease(unitId, userId, null);
   await db.prepare(
-    `UPDATE rental_units SET tenant_id = NULL, tenant_name = 'Vacant 空置',
+    `UPDATE rental_units SET tenant_id = NULL, tenant_name = ?,
       tenant_phone = NULL, tenant_email = NULL, automation_enabled = 0,
       current_lease_id = NULL, updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(unitId, userId);
+  ).run(VACANT_TENANT_NAME, unitId, userId);
 
   let newLease: RentalLease | null = null;
   if (input.startNewLease?.tenantName?.trim()) {

@@ -101,8 +101,11 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-panel sm:max-w-2xl max-h-[96vh] p-0 sm:p-0" onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 sm:px-6 py-5 border-b border-gray-200 bg-brand-50 rounded-t-2xl">
+      <div
+        className="modal-panel sm:max-w-2xl max-h-[96vh] p-0 sm:p-0 flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 sm:px-6 py-5 border-b border-gray-200 bg-brand-50 rounded-t-2xl shrink-0">
           <p className="text-sm font-semibold text-brand-800 uppercase tracking-wide">完成與匯報</p>
           <h2 className="text-2xl font-bold text-gray-900 mt-1">Mark as Completed 完成燉製</h2>
           <p className="text-base text-gray-600 mt-2 font-mono">{order.order_code}</p>
@@ -111,7 +114,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
           </p>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 overflow-y-auto flex-1 min-h-0">
           {error && (
             <div className="p-4 bg-red-50 text-red-700 text-base rounded-xl border border-red-200">{error}</div>
           )}
@@ -234,7 +237,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
           </div>
         </div>
 
-        <div className="sticky bottom-0 px-6 py-5 border-t border-gray-200 bg-white flex flex-col sm:flex-row gap-3">
+        <div className="sticky bottom-0 px-6 py-5 border-t border-gray-200 bg-white flex flex-col sm:flex-row gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}

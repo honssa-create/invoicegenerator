@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapWooStatus } from './woocommerce';
+import { isWooDraftOrder, mapWooStatus } from './woocommerce';
 import { extractOrderNoFromRemarks } from './reconciliation-server';
 
 describe('mapWooStatus', () => {
@@ -7,8 +7,32 @@ describe('mapWooStatus', () => {
     expect(mapWooStatus('completed')).toBe('已寄出 SENT');
   });
 
-  it('maps processing to in production', () => {
-    expect(mapWooStatus('processing')).toBe('製作中');
+  it('maps processing and on-hold to in progress', () => {
+    expect(mapWooStatus('processing')).toBe('IN PROGRESS 安排中');
+    expect(mapWooStatus('on-hold')).toBe('IN PROGRESS 安排中');
+  });
+
+  it('maps pending and terminal failures to open', () => {
+    expect(mapWooStatus('pending')).toBe('OPEN');
+    expect(mapWooStatus('cancelled')).toBe('OPEN');
+    expect(mapWooStatus('refunded')).toBe('OPEN');
+    expect(mapWooStatus('failed')).toBe('OPEN');
+  });
+
+  it('maps unknown Woo statuses to in progress', () => {
+    expect(mapWooStatus('custom-status')).toBe('IN PROGRESS 安排中');
+  });
+});
+
+describe('isWooDraftOrder', () => {
+  it('identifies Woo draft statuses', () => {
+    expect(isWooDraftOrder('draft')).toBe(true);
+    expect(isWooDraftOrder(' WC-DRAFT ')).toBe(true);
+  });
+
+  it('keeps non-draft Woo orders importable', () => {
+    expect(isWooDraftOrder('pending')).toBe(false);
+    expect(isWooDraftOrder('processing')).toBe(false);
   });
 });
 

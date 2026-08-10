@@ -6,8 +6,8 @@ export type PrepCapacity = (typeof PREP_CAPACITIES)[number];
 export const PREP_CAPACITY_LABELS: Record<PrepCapacity, string> = {
   '25g': '25g',
   '45g': '45g',
-  '75g': '75g (Normal)',
-  '75g_big_belly': '75g (Big Belly)',
+  '75g': '75g (高身樽)',
+  '75g_big_belly': '75g (大肚樽)',
 };
 
 export const PREP_FLAVORS = ['osmanthus', 'red_date', 'rock_sugar'] as const;
@@ -19,22 +19,58 @@ export const PREP_FLAVOR_LABELS: Record<PrepFlavor, string> = {
   rock_sugar: '冰糖 Rock Sugar',
 };
 
-export const PREP_ORDER_TYPES = ['daily', 'wedding'] as const;
+export const PREP_ORDER_TYPES = ['daily', 'wedding', 'restock'] as const;
 export type PrepOrderType = (typeof PREP_ORDER_TYPES)[number];
 
 export const PREP_ORDER_TYPE_LABELS: Record<PrepOrderType, string> = {
   daily: '日常訂單 Daily',
   wedding: '回禮訂單 Wedding',
+  restock: '補充存貨 Restock',
 };
 
-export const PREP_STATUSES = ['scheduled', 'in_prep', 'completed'] as const;
+export const PREP_STATUSES = ['inactive', 'scheduled', 'in_prep', 'completed'] as const;
 export type PrepStatus = (typeof PREP_STATUSES)[number];
 
 export const PREP_STATUS_LABELS: Record<PrepStatus, string> = {
+  inactive: 'Inactive 未開始',
   scheduled: 'Scheduled 已排程',
   in_prep: 'In Prep 備料中',
   completed: 'Completed 已完成',
 };
+
+/** Calendar date in Asia/Hong_Kong as YYYY-MM-DD. */
+export function hkTodayIso(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Hong_Kong',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+/**
+ * Default status when creating a prep row.
+ * Daily / 補充存貨 → in_prep. Wedding/回禮 → inactive until stewing/production date is due.
+ */
+export function defaultPrepStatusForCreate(
+  orderType: PrepOrderType,
+  stewingDate: string,
+  opts?: { hasProductionDate?: boolean; today?: string }
+): PrepStatus {
+  if (orderType === 'daily' || orderType === 'restock') return 'in_prep';
+  const today = opts?.today ?? hkTodayIso();
+  if (opts?.hasProductionDate === false) return 'inactive';
+  if (!stewingDate?.trim() || stewingDate > today) return 'inactive';
+  return 'scheduled';
+}
+
+/** Wedding/回禮 status from stewing date (does not touch in_prep / completed). */
+export function weddingPrepStatusFromDate(
+  stewingDate: string,
+  opts?: { hasProductionDate?: boolean; today?: string }
+): PrepStatus {
+  return defaultPrepStatusForCreate('wedding', stewingDate, opts);
+}
 
 /** Per-bottle weights (grams) for one flavor line at a given capacity. */
 export interface FlavorFormulaPerBottle {
@@ -122,15 +158,6 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
       slabSugar: 0,
     },
   },
-};
-
-/** @deprecated Use CAPACITY_FLAVOR_FORMULAS — kept for reference / 45g flat view. */
-export const FORMULA_45G = {
-  birdNest: 0.8,
-  osmanthus: 0.13,
-  redDate: 1.8,
-  rockSugar: 3.57,
-  slabSugar: 5.03,
 };
 
 export const WEDDING_BUFFER = 3;
@@ -357,6 +384,78 @@ export function computePrepCalculation(
   };
 }
 
+/**
+ * Raw grams consumed for 完成燉製 from actual split bottle counts × per-bottle formula.
+ * 桂花/紅棗 come from flavorIngredient; 冰糖 from rockSugar only (rock_sugar flavorIngredient
+ * is the same 冰糖 and must not be double-counted).
+ */
+export function computeStewingRawNeeds(
+  capacity: PrepCapacity,
+  splits: { flavor: PrepFlavor; qty: number }[]
+): { name: string; qty: number }[] {
+  const acc: Record<string, number> = {};
+  const add = (name: string, grams: number) => {
+    if (!(grams > 0)) return;
+    acc[name] = round2((acc[name] || 0) + grams);
+  };
+
+  for (const s of splits) {
+    const qty = Math.max(0, Math.round(s.qty));
+    if (!s.flavor || qty <= 0) continue;
+    const formula = getFlavorFormula(capacity, s.flavor);
+    if (!formula) continue;
+
+    add('燕餅', round2(qty * formula.birdNest));
+    if (s.flavor === 'osmanthus') add('桂花', round2(qty * formula.flavorIngredient));
+    if (s.flavor === 'red_date') add('紅棗', round2(qty * formula.flavorIngredient));
+    add('冰糖', round2(qty * formula.rockSugar));
+    add('片糖', round2(qty * formula.slabSugar));
+  }
+
+  return Object.keys(acc)
+    .filter((name) => (acc[name] || 0) > 0)
+    .map((name) => ({ name, qty: acc[name] }));
+}
+
+/** Raw grams needed for one prep order (uses actual production qty incl. wedding buffer). */
+export function computePrepOrderRawNeeds(
+  capacity: PrepCapacity,
+  orderType: PrepOrderType,
+  qtys: PrepFlavorQty
+): { name: string; qty: number }[] {
+  const calc = computePrepCalculation(capacity, orderType, qtys);
+  const splits = calc.rows
+    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .map((r) => ({ flavor: r.flavor, qty: r.actualQty }));
+  return computeStewingRawNeeds(capacity, splits);
+}
+
+/** Sum raw needs across unfinished prep orders (any status except completed). */
+export function aggregateRawNeedsFromPrepOrders(
+  orders: Array<{
+    capacity: PrepCapacity;
+    order_type: PrepOrderType;
+    status: PrepStatus;
+    qty_osmanthus: number;
+    qty_red_date: number;
+    qty_rock_sugar: number;
+  }>
+): Record<string, number> {
+  const raw: Record<string, number> = {};
+  for (const o of orders) {
+    if (o.status === 'completed') continue;
+    const lines = computePrepOrderRawNeeds(o.capacity, o.order_type, {
+      osmanthus: o.qty_osmanthus,
+      red_date: o.qty_red_date,
+      rock_sugar: o.qty_rock_sugar,
+    });
+    for (const line of lines) {
+      raw[line.name] = round2((raw[line.name] || 0) + line.qty);
+    }
+  }
+  return raw;
+}
+
 export function formatGrams(n: number): string {
   if (n === 0) return '—';
   return `${n.toFixed(2)}g`;
@@ -383,6 +482,31 @@ export function originalOrderQuantity(qtys: PrepFlavorQty): number {
   return Math.max(0, qtys.osmanthus) + Math.max(0, qtys.red_date) + Math.max(0, qtys.rock_sugar);
 }
 
+/** Deep-link to Kitchen Prep create form with capacity lines prefilled (e.g. gift-box shortfall). */
+export function buildKitchenPrepCreateHref(input: {
+  orderType?: PrepOrderType;
+  lines: Array<{
+    capacity: PrepCapacity;
+    qty_osmanthus?: number;
+    qty_red_date?: number;
+    qty_rock_sugar?: number;
+  }>;
+}): string {
+  const params = new URLSearchParams({ create: '1' });
+  if (input.orderType) params.set('order_type', input.orderType);
+  const lines = input.lines
+    .filter((l) => PREP_CAPACITIES.includes(l.capacity))
+    .map((l) => ({
+      capacity: l.capacity,
+      qty_osmanthus: Math.max(0, Math.round(Number(l.qty_osmanthus) || 0)),
+      qty_red_date: Math.max(0, Math.round(Number(l.qty_red_date) || 0)),
+      qty_rock_sugar: Math.max(0, Math.round(Number(l.qty_rock_sugar) || 0)),
+    }))
+    .filter((l) => l.qty_osmanthus + l.qty_red_date + l.qty_rock_sugar > 0);
+  if (lines.length) params.set('lines', JSON.stringify(lines));
+  return `/kitchen-prep?${params.toString()}`;
+}
+
 /** Rule A: 紅棗 & 冰糖 — no 片糖. Rule B: 桂花 — no 冰糖. */
 export function validateFormulaBusinessRules(
   flavor: PrepFlavor,
@@ -399,10 +523,11 @@ export function validateFormulaBusinessRules(
 
 export function validatePrepFlavorQtys(
   capacity: PrepCapacity,
-  qtys: PrepFlavorQty
+  qtys: PrepFlavorQty,
+  opts?: { allowEmpty?: boolean }
 ): string | null {
   if (qtys.red_date > 0 && !isRedDateAllowed(capacity)) {
-    return 'Red Date (紅棗) is not allowed for 25g capacity';
+    return `Red Date (紅棗) is not allowed for ${PREP_CAPACITY_LABELS[capacity]}`;
   }
   for (const flavor of PREP_FLAVORS) {
     const qty = qtys[flavor];
@@ -414,7 +539,7 @@ export function validatePrepFlavorQtys(
     const ruleErr = validateFormulaBusinessRules(flavor, formula);
     if (ruleErr) return ruleErr;
   }
-  if (originalOrderQuantity(qtys) === 0) {
+  if (!opts?.allowEmpty && originalOrderQuantity(qtys) === 0) {
     return 'At least one flavor quantity is required';
   }
   return null;

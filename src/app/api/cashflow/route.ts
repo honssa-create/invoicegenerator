@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { listOrders } from '@/lib/order-server';
-import { orderTitle } from '@/lib/orders';
 import type { LedgerEntry } from '@/lib/cashflow';
 import { orderPaymentReceiptUrl, otherIncomeReceiptUrl } from '@/lib/image-url';
 import { getDataOwnerId } from '@/lib/org-server';
@@ -27,7 +26,7 @@ export async function GET(request: Request) {
       kind: 'product',
       date,
       category: 'Product Sale',
-      ref: o.po_number || orderTitle(o),
+      ref: o.reference_number,
       account: (o.fields.payment_bank as string) || '',
       amount: amt,
       receiptUrl: orderPaymentReceiptUrl(o.id, o.fields.payment_receipt_path as string | undefined),

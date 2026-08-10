@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
 import { compressImage } from '@/lib/imageCompression';
 import { compressPdfToImages } from '@/lib/pdfCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
@@ -14,8 +15,6 @@ import {
   ORDER_TYPES,
   ORDER_PAYMENT_METHODS,
   ORDER_PAYMENT_METHOD_OTHER,
-  BIRD_NEST_FLAVORS,
-  BIRD_NEST_ACTUAL_FLAVORS,
   WEDDING_GIFT_BOTTLE_CAPACITIES,
   WEDDING_GIFT_CLIENT_FLAVORS,
   WEDDING_GIFT_ACTUAL_FLAVORS,
@@ -38,6 +37,9 @@ import {
   computeWeddingGiftPacking,
   normalizeOrderPaymentMethod,
   parseHonourLines,
+  getNestieeLines,
+  NESTIEE_GIFT_BOX_TYPES,
+  nestieeGiftQtyManualKey,
   weddingGiftFoilStickerKey,
   weddingGiftRoundTagKey,
   STATUS_COLORS,
@@ -47,7 +49,7 @@ import {
   type HonourLineItem,
   type Order,
 } from '@/lib/orders';
-import { parseWeddingGiftConfirmation } from '@/lib/wedding-gift-confirmation';
+import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 interface InvoiceOption {
@@ -72,6 +74,9 @@ export default function OrderDetailPage() {
   const [quotations, setQuotations] = useState<QuotationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameCancelledRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const payment1InputRef = useRef<HTMLInputElement>(null);
   const payment2InputRef = useRef<HTMLInputElement>(null);
@@ -83,11 +88,23 @@ export default function OrderDetailPage() {
   const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
   const [confirmPasteText, setConfirmPasteText] = useState('');
   const [confirmPasteError, setConfirmPasteError] = useState('');
+  const [sfModalOpen, setSfModalOpen] = useState(false);
+  /** Big Day value last persisted with derived dates (or loaded from server). */
+  const bigDayPersistedRef = useRef('');
+  /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
+  const bigDaySavedOnChangeRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/orders/${id}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setOrder(d?.order || null))
+      .then((d) => {
+        const o = d?.order || null;
+        setOrder(o);
+        if (o) {
+          bigDayPersistedRef.current = String(o.fields?.big_day || '');
+          bigDaySavedOnChangeRef.current = null;
+        }
+      })
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -103,6 +120,20 @@ export default function OrderDetailPage() {
   }, []);
 
   const patch = async (payload: { core?: Record<string, unknown>; fields?: Record<string, unknown>; linked_invoice_id?: string | number | null; linked_quotation_id?: string | number | null }) => {
+    // Keep UI in sync immediately so a later server response can't briefly wipe autofills.
+    if (payload.fields && Object.keys(payload.fields).length) {
+      setOrder((o) =>
+        o
+          ? {
+              ...o,
+              fields: {
+                ...o.fields,
+                ...(payload.fields as Record<string, string | boolean>),
+              },
+            }
+          : o
+      );
+    }
     const res = await fetch(`/api/orders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -110,7 +141,10 @@ export default function OrderDetailPage() {
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.order) setOrder(data.order);
+      if (data.order) {
+        setOrder(data.order);
+        bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
+      }
     }
   };
 
@@ -206,6 +240,77 @@ export default function OrderDetailPage() {
   const deleteFile = async (fileId: number) => {
     const res = await fetch(`/api/order-files/${fileId}`, { method: 'DELETE' });
     if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
+  };
+
+  const downloadFile = async (f: { id: number; path: string; original_name: string | null }) => {
+    try {
+      const res = await fetch(`${orderFileUrl(f)}?download=1`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.original_name || `order-file-${f.id}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const startRenameFile = (f: { id: number; original_name: string | null }) => {
+    renameCancelledRef.current = false;
+    setRenamingFileId(f.id);
+    setRenameDraft(f.original_name || `Image #${f.id}`);
+  };
+
+  const cancelRenameFile = () => {
+    renameCancelledRef.current = true;
+    setRenamingFileId(null);
+    setRenameDraft('');
+  };
+
+  const saveRenameFile = async (fileId: number) => {
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false;
+      setRenamingFileId(null);
+      setRenameDraft('');
+      return;
+    }
+    const name = renameDraft.trim();
+    if (!name) {
+      setRenamingFileId(null);
+      setRenameDraft('');
+      return;
+    }
+    const current = order?.files.find((f) => f.id === fileId);
+    if (current && (current.original_name || '').trim() === name) {
+      setRenamingFileId(null);
+      setRenameDraft('');
+      return;
+    }
+    const res = await fetch(`/api/order-files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ original_name: name }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.file) {
+        setOrder((o) =>
+          o
+            ? {
+                ...o,
+                files: o.files.map((f) => (f.id === fileId ? { ...f, original_name: data.file.original_name } : f)),
+              }
+            : o
+        );
+      }
+    }
+    setRenamingFileId(null);
+    setRenameDraft('');
   };
 
   const handlePaymentReceipt = async (rawFile: File, slot: 1 | 2 | 3) => {
@@ -531,14 +636,14 @@ export default function OrderDetailPage() {
     const fieldsPatch: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed.fields)) {
       if (!v) continue;
-      // Keep an existing expiry date; only auto-fill when empty
-      if (k === 'expiry_date' && fVal('expiry_date')) continue;
+      // Derived from Big Day — applied only when Big Day itself changes (below).
+      if (k === 'expiry_date' || k === 'production_date') continue;
       fieldsPatch[k] = v;
     }
-    if (fieldsPatch.big_day && !fieldsPatch.expiry_date && !fVal('expiry_date')) {
-      const d = new Date(`${fieldsPatch.big_day}T12:00:00`);
-      d.setDate(d.getDate() + 28);
-      fieldsPatch.expiry_date = d.toISOString().slice(0, 10);
+    if (fieldsPatch.big_day && fieldsPatch.big_day !== fVal('big_day')) {
+      // Big Day change always refreshes derived dates (overrides prior edits).
+      fieldsPatch.expiry_date = addCalendarDays(fieldsPatch.big_day, 28);
+      fieldsPatch.production_date = addCalendarDays(fieldsPatch.big_day, -10);
     }
 
     const corePatch: Record<string, unknown> = {};
@@ -662,6 +767,21 @@ export default function OrderDetailPage() {
           <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🚚 {bi('Generate Delivery Note', '產生出貨單')}
           </Link>
+          <button
+            type="button"
+            onClick={() => setSfModalOpen(true)}
+            className="btn bg-orange-600 text-white hover:bg-orange-700 w-full sm:w-auto"
+          >
+            {bi('Create SF Express', '建立順豐運單')}
+          </button>
+          {isBadgeOrderType(orderType) && (
+            <Link
+              href={`/orders/${order.id}/production-note`}
+              className="btn bg-slate-800 text-white hover:bg-slate-900 w-full sm:w-auto"
+            >
+              {bi('Prepare Production Note', '準備生產單')}
+            </Link>
+          )}
           <button
             type="button"
             onClick={deleteOrder}
@@ -983,8 +1103,18 @@ export default function OrderDetailPage() {
                   <div className="grid md:grid-cols-3 gap-5">
                     {labeled('內部包裝處理', fInput('internal_pack', 'text', 'e.g. 不需要'))}
                     {labeled('交貨包裝', fInput('pack_required', 'text', 'e.g. OPP 獨立包裝'))}
-                    {labeled('其他加工', fInput('other_craft', 'text'))}
                   </div>
+                  {labeled(
+                    '其他加工',
+                    <textarea
+                      value={fVal('other_craft')}
+                      onChange={(e) => setFieldLocal('other_craft', e.target.value)}
+                      onBlur={(e) => patch({ fields: { other_craft: e.target.value } })}
+                      rows={6}
+                      placeholder="Woo / CPO option dump for further processing…"
+                      className={softInput}
+                    />
+                  )}
                 </div>
 
                 {/* Supplier */}
@@ -1057,24 +1187,52 @@ export default function OrderDetailPage() {
                       <input
                         type="date"
                         value={fVal('big_day')}
-                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const prev = fVal('big_day');
+                          setFieldLocal('big_day', v);
+                          if (v && v !== prev) {
+                            const expiryIso = addCalendarDays(v, 28);
+                            const productionIso = addCalendarDays(v, -10);
+                            setFieldLocal('expiry_date', expiryIso);
+                            setFieldLocal('production_date', productionIso);
+                            // Persist all three immediately — a later blur that only sends
+                            // big_day would overwrite these via setOrder(server).
+                            bigDaySavedOnChangeRef.current = v;
+                            bigDayPersistedRef.current = v;
+                            void patch({
+                              fields: {
+                                big_day: v,
+                                expiry_date: expiryIso,
+                                production_date: productionIso,
+                              },
+                            });
+                          }
+                        }}
                         onBlur={(e) => {
                           const v = e.target.value;
-                          const upd: Record<string, string> = { big_day: v };
-                          if (v && !fVal('expiry_date')) {
-                            const d = new Date(v);
-                            d.setDate(d.getDate() + 28);
-                            const iso = d.toISOString().slice(0, 10);
-                            upd.expiry_date = iso;
-                            setFieldLocal('expiry_date', iso);
+                          // onChange already saved this value with derived dates.
+                          if (bigDaySavedOnChangeRef.current === v) {
+                            bigDaySavedOnChangeRef.current = null;
+                            return;
                           }
-                          patch({ fields: upd });
+                          const upd: Record<string, string> = { big_day: v };
+                          if (v && v !== bigDayPersistedRef.current) {
+                            const expiryIso = addCalendarDays(v, 28);
+                            const productionIso = addCalendarDays(v, -10);
+                            upd.expiry_date = expiryIso;
+                            upd.production_date = productionIso;
+                            setFieldLocal('expiry_date', expiryIso);
+                            setFieldLocal('production_date', productionIso);
+                            bigDayPersistedRef.current = v;
+                          }
+                          void patch({ fields: upd });
                         }}
                         className={softInput}
                       />
                     )}
                     {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
-                    {labeled('生產日期', fInput('production_date', 'date'))}
+                    {labeled('生產日期', fInput('production_date', 'date'), 'Big Day前10天')}
                   </div>
 
                   <h3 className="text-sm font-semibold text-gray-700">客人訂購數量</h3>
@@ -1210,90 +1368,96 @@ export default function OrderDetailPage() {
             {orderType === 'Nestiee 燕窩訂單' && (
               <div className="space-y-8">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Dates 日期</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
-                    {labeled(
-                      'Big Day',
-                      <input
-                        type="date"
-                        value={fVal('big_day')}
-                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
-                        onBlur={(e) => {
-                          const v = e.target.value;
-                          const upd: Record<string, string> = { big_day: v };
-                          if (v && !fVal('expiry_date')) {
-                            const d = new Date(v);
-                            d.setDate(d.getDate() + 28);
-                            const iso = d.toISOString().slice(0, 10);
-                            upd.expiry_date = iso;
-                            setFieldLocal('expiry_date', iso);
-                          }
-                          patch({ fields: upd });
-                        }}
-                        className={softInput}
-                      />
-                    )}
-                    {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
-                    {labeled('生產日期', fInput('production_date', 'date'))}
-                    {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Client Quantities 客人訂購數量</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
-                    {BIRD_NEST_FLAVORS.map((f) => (
-                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
-                    ))}
-                    {readOnly('客人訂總數量', bn.totalOrdered)}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">實際生產樽數</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
-                    {BIRD_NEST_ACTUAL_FLAVORS.map((f, i) => {
-                      const clientKey = BIRD_NEST_FLAVORS[i].key;
-                      const raw = fVal(f.key);
-                      const display = raw !== '' ? raw : fVal(clientKey);
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Ordered Products 訂購產品</h3>
+                  {(() => {
+                    const nestieeLines = getNestieeLines(order.fields);
+                    if (!nestieeLines.length) {
                       return (
-                        <div key={f.key}>
-                          {labeled(
-                            f.label,
-                            <input
-                              type="number"
-                              min={0}
-                              value={display}
-                              onChange={(e) => setFieldLocal(f.key, nonNeg(e.target.value))}
-                              onBlur={(e) => {
-                                const v = nonNeg(e.target.value);
-                                setFieldLocal(f.key, v);
-                                patch({ fields: { [f.key]: v } });
-                              }}
-                              placeholder="0"
-                              className={softInput}
-                            />
-                          )}
-                        </div>
+                        <p className="text-sm text-gray-400">
+                          No store line items yet. Import from Hub / Nestiee WooCommerce to fill products and prices.
+                          {order.description ? (
+                            <span className="block mt-1 text-gray-500">Description: {order.description}</span>
+                          ) : null}
+                        </p>
                       );
-                    })}
-                    {readOnly('實際生產總數量', computeBirdNestActualTotal(order.fields))}
-                  </div>
+                    }
+                    const fmt = (n: number) =>
+                      n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                    return (
+                      <div className="overflow-x-auto rounded-xl border border-gray-200">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-400">
+                            <tr>
+                              <th className="px-4 py-2.5 font-medium">Product</th>
+                              <th className="px-4 py-2.5 font-medium text-right">Qty</th>
+                              <th className="px-4 py-2.5 font-medium text-right">Unit price</th>
+                              <th className="px-4 py-2.5 font-medium text-right">Line total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {nestieeLines.map((line, i) => (
+                              <Fragment key={`${line.name}-${i}`}>
+                                <tr className="bg-white">
+                                  <td className="px-4 py-3 text-gray-900">{line.name}</td>
+                                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{line.quantity}</td>
+                                  <td className="px-4 py-3 text-right tabular-nums text-gray-700">{fmt(line.unit_price)}</td>
+                                  <td className="px-4 py-3 text-right tabular-nums font-medium text-gray-900">
+                                    {fmt(line.line_total)}
+                                  </td>
+                                </tr>
+                                {line.options?.length ? (
+                                  <tr className="bg-gray-50/80">
+                                    <td colSpan={4} className="px-4 py-2.5">
+                                      <ul className="space-y-1 text-xs text-gray-600">
+                                        {line.options.map((opt, oi) => (
+                                          <li key={`${opt.label}-${oi}`} className="flex flex-wrap gap-x-2">
+                                            <span className="font-medium text-gray-700">{opt.label}:</span>
+                                            <span>{opt.value}</span>
+                                            {opt.price > 0 ? (
+                                              <span className="tabular-nums text-gray-500">(+{fmt(opt.price)})</span>
+                                            ) : null}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Inventory & Production 本地模擬計算</h3>
-                  <div className="max-w-xs mb-4">
-                    {readOnly('總生產樽數', bn.productionBottles)}
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">所需禮盒</h3>
+                  <p className="text-xs text-gray-400 mb-3">Enter how many of each gift-box type are needed for this order.</p>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {NESTIEE_GIFT_BOX_TYPES.map((box) => (
+                      <div key={box.id}>
+                        {labeled(
+                          box.label,
+                          <input
+                            type="number"
+                            min={0}
+                            value={fVal(box.qtyKey)}
+                            onChange={(e) => setFieldLocal(box.qtyKey, nonNeg(e.target.value))}
+                            onBlur={(e) => {
+                              const v = nonNeg(e.target.value);
+                              const manualKey = nestieeGiftQtyManualKey(box.qtyKey);
+                              setFieldLocal(box.qtyKey, v);
+                              setFieldLocal(manualKey, 'true');
+                              patch({ fields: { [box.qtyKey]: v, [manualKey]: 'true' } });
+                            }}
+                            placeholder="0"
+                            className={softInput}
+                          />
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                    {readOnly('燕餅 (g)', `${bn.birdCakeGrams} g`)}
-                    {readOnly('圓形tag', bn.roundTag)}
-                    {readOnly('貼紙', bn.sticker)}
-                    {readOnly('金繩', bn.goldString)}
-                    {readOnly('Wedding Logo Tag', bn.weddingLogoTag)}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-3">Auto-derived from 實際生產樽數 (= {bn.productionBottles}) to simplify Tracy’s packing checklist. 燕餅 = 樽數 × {`${0.8}`}g.</p>
                 </div>
               </div>
             )}
@@ -1468,6 +1632,7 @@ export default function OrderDetailPage() {
                 {order.files.map((f) => {
                   const url = orderFileUrl(f);
                   const name = f.original_name || `Image #${f.id}`;
+                  const renaming = renamingFileId === f.id;
                   return (
                     <li
                       key={f.id}
@@ -1480,12 +1645,53 @@ export default function OrderDetailPage() {
                         onClick={() => setLightbox(url)}
                         className="h-14 w-14 rounded-md object-cover border border-gray-200 shrink-0 bg-white cursor-zoom-in hover:ring-2 hover:ring-brand-400"
                       />
+                      {renaming ? (
+                        <input
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          onBlur={() => saveRenameFile(f.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              (e.target as HTMLInputElement).blur();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              cancelRenameFile();
+                            }
+                          }}
+                          className="flex-1 min-w-0 rounded-md border border-brand-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                          aria-label={bi('Rename file', '重新命名檔案')}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setLightbox(url)}
+                          onDoubleClick={(e) => {
+                            e.preventDefault();
+                            startRenameFile(f);
+                          }}
+                          className="flex-1 min-w-0 text-left text-sm text-brand-700 hover:underline truncate"
+                          title={bi('Double-click to rename', '雙擊重新命名')}
+                        >
+                          {name}
+                        </button>
+                      )}
+                      {!renaming && (
+                        <button
+                          type="button"
+                          onClick={() => startRenameFile(f)}
+                          className="text-xs text-gray-600 hover:text-gray-800 font-medium shrink-0 px-2 py-1"
+                        >
+                          {bi('Rename', '重新命名')}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => setLightbox(url)}
-                        className="flex-1 min-w-0 text-left text-sm text-brand-700 hover:underline truncate"
+                        onClick={() => downloadFile(f)}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium shrink-0 px-2 py-1"
                       >
-                        {name}
+                        {bi('Download', '下載')}
                       </button>
                       <button
                         type="button"
@@ -1569,6 +1775,37 @@ export default function OrderDetailPage() {
             </div>
           </div>
         </div>
+      )}
+      {sfModalOpen && (
+        <SfExpressShipmentModal
+          orderId={order.id}
+          onClose={() => setSfModalOpen(false)}
+          onSuccess={(updated, meta) => {
+            setOrder(updated);
+            setSfModalOpen(false);
+            if (meta.pdfUrl) {
+              window.open(meta.pdfUrl, '_blank', 'noopener,noreferrer');
+            }
+            if (meta.printError) {
+              setQuoteToast({
+                kind: 'error',
+                text: bi(
+                  `Waybill ${meta.waybill} saved, but label print failed: ${meta.printError}`,
+                  `運單 ${meta.waybill} 已儲存，但面單列印失敗：${meta.printError}`
+                ),
+              });
+            } else {
+              setQuoteToast({
+                kind: 'success',
+                text: bi(
+                  `SF Express waybill ${meta.waybill} created.`,
+                  `已建立順豐運單 ${meta.waybill}。`
+                ),
+              });
+            }
+            setTimeout(() => setQuoteToast(null), 6000);
+          }}
+        />
       )}
     </AppLayout>
   );

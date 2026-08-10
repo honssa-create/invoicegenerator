@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     .filter((o) => PAYMENT_KEYS.some((k) => o.fields[k] !== undefined && String(o.fields[k]).trim() !== ''))
     .map((o) => ({
       order_id: o.id,
-      order_ref: o.po_number || `#${o.id}`,
+      order_ref: o.reference_number,
       title: orderTitle(o),
       customer: o.name || '',
       order_type: (o.fields.order_type as string) || '',

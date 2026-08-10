@@ -22,7 +22,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const unit = await createRentalUnit(await rentalOwnerId(session.userId), body);
     return NextResponse.json({ unit }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: 'Failed to create rental unit' }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create rental unit';
+    const status = message === 'Tenant name is required' ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

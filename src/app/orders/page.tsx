@@ -5,32 +5,28 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
-import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, orderTitle, type Order } from '@/lib/orders';
+import OrdersBoard from '@/components/OrdersBoard';
+import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, getOrderType, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
-const EMPTY = { po_number: '', name: '', description: '', delivery_date: '' };
-
-type SortKey = 'order' | 'type' | 'status' | 'delivery' | 'created';
-
-function getOrderType(o: Order): string {
-  const t = o.fields?.order_type;
-  return typeof t === 'string' ? t : '';
-}
+type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
 
 export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY);
-  const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [creatingStatus, setCreatingStatus] = useState<string | null>(null);
+  const [createError, setCreateError] = useState('');
 
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [orderType, setOrderType] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'created', dir: 'desc' });
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'reference', dir: 'desc' });
+  const [view, setView] = useState<'line' | 'board'>('line');
+  const [boardError, setBoardError] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -55,7 +51,7 @@ export default function OrdersPage() {
       if (orderType && getOrderType(o) !== orderType) return false;
       if (status && o.status !== status) return false;
       if (q) {
-        const hay = [orderTitle(o), o.po_number, o.name, o.description, getOrderType(o)]
+        const hay = [o.reference_number, o.po_number, o.name, o.description, getOrderType(o)]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -77,7 +73,10 @@ export default function OrdersPage() {
           base = (a.delivery_date || '').localeCompare(b.delivery_date || '');
           break;
         case 'order':
-          base = orderTitle(a).localeCompare(orderTitle(b), 'zh');
+          base = (a.po_number || '').localeCompare(b.po_number || '', 'zh');
+          break;
+        case 'reference':
+          base = a.reference_number.localeCompare(b.reference_number);
           break;
         default:
           base = (a.created_at || '').localeCompare(b.created_at || '');
@@ -88,7 +87,11 @@ export default function OrdersPage() {
   }, [orders, dateStart, dateEnd, orderType, status, search, sort]);
 
   const toggleSort = (key: SortKey) =>
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'reference' || key === 'created' || key === 'delivery' ? 'desc' : 'asc' }
+    );
   const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
   const sortTh = (key: SortKey, label: string) => (
     <th
@@ -108,20 +111,57 @@ export default function OrdersPage() {
     setSearch('');
   };
 
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (res.ok && data.order) router.push(`/orders/${data.order.id}`);
+  const create = async (status?: string) => {
+    if (creating) return;
+    setCreating(true);
+    setCreatingStatus(status || null);
+    setCreateError('');
+    setBoardError('');
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(status ? { status } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.order?.id) {
+        setCreateError(data.error || bi('Failed to create order', '無法建立訂單'));
+        return;
+      }
+      router.push(`/orders/${data.order.id}`);
+    } catch {
+      setCreateError(bi('Failed to create order', '無法建立訂單'));
+    } finally {
+      setCreating(false);
+      setCreatingStatus(null);
+    }
   };
 
-  const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm';
+  const changeBoardStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
+    const prev = orders.find((o) => o.id === orderId)?.status;
+    if (prev == null || prev === nextStatus) return true;
+    setBoardError('');
+    setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ core: { status: nextStatus } }),
+      });
+      if (!res.ok) {
+        setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prev } : o)));
+        const data = await res.json().catch(() => ({}));
+        setBoardError(data.error || bi('Failed to update status', '無法更新狀態'));
+        return false;
+      }
+      return true;
+    } catch {
+      setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prev } : o)));
+      setBoardError(bi('Failed to update status', '無法更新狀態'));
+      return false;
+    }
+  };
+
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
@@ -132,11 +172,42 @@ export default function OrdersPage() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Manage production orders with a ClickUp-style detail view', '以 ClickUp 風格詳情頁管理生產訂單')}</p>
         </div>
         <div className="page-actions">
-          <button onClick={() => { setForm(EMPTY); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
-            + {bi('New Order', '新增訂單')}
+          <div className="inline-flex rounded-lg border border-gray-300 p-0.5 text-sm bg-white">
+            <button
+              type="button"
+              onClick={() => setView('line')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                view === 'line' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {bi('Line', '列表')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('board')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                view === 'board' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {bi('Board', '看板')}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void create(); }}
+            disabled={creating}
+            className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            + {creating ? BTN.creating : bi('New Order', '新增訂單')}
           </button>
         </div>
       </div>
+
+      {(createError || boardError) && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {createError || boardError}
+        </div>
+      )}
 
       <FilterBar
         dateStart={dateStart}
@@ -145,7 +216,7 @@ export default function OrdersPage() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder={bi('Search PO#, name, description, type…', '搜尋 PO#、客戶、描述、類型…')}
+        searchPlaceholder={bi('Search reference, PO#, name, description, type…', '搜尋參考編號、PO#、客戶、描述、類型…')}
         onClear={clearFilters}
       >
         <div className="flex flex-col">
@@ -164,72 +235,66 @@ export default function OrdersPage() {
         </div>
       </FilterBar>
 
-      <div className="bg-white rounded-xl border border-gray-200">
-        {loading ? (
-          <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
-        ) : orders.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">{bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}</div>
-        ) : displayed.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">{bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}</div>
+      {view === 'board' ? (
+        loading ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
+          </div>
         ) : (
-          <div className="table-scroll">
-          <table className="w-full min-w-[720px]">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                {sortTh('order', bi('Order', '訂單'))}
-                {sortTh('type', bi('Order Type', '訂單類型'))}
-                {sortTh('status', bi('Status', '狀態'))}
-                {sortTh('delivery', bi('Delivery', '交貨'))}
-                {sortTh('created', bi('Created', '建立'))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {displayed.map((o) => (
-                <tr key={o.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{orderTitle(o)}</Link>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>{o.status}</span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{o.delivery_date || '—'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
+          <OrdersBoard
+            orders={displayed}
+            onStatusChange={changeBoardStatus}
+            onCreateInStatus={(status) => { void create(status); }}
+            creatingStatus={creatingStatus}
+          />
+        )
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200">
+          {loading ? (
+            <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
+          ) : orders.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">{bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}</div>
+          ) : displayed.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">{bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}</div>
+          ) : (
+            <div className="table-scroll">
+            <table className="w-full min-w-[840px]">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                  {sortTh('reference', bi('Reference Number', '參考編號'))}
+                  {sortTh('order', bi('Order Number', '訂單號碼'))}
+                  {sortTh('type', bi('Order Type', '訂單類型'))}
+                  {sortTh('status', bi('Status', '狀態'))}
+                  {sortTh('delivery', bi('Delivery', '交貨'))}
+                  {sortTh('created', bi('Created', '建立'))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </div>
-
-      {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel">
-            <h2 className="text-lg font-semibold mb-4">{bi('New Order', '新增訂單')}</h2>
-            <form onSubmit={create} className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">PO# *</label>
-                <input required value={form.po_number} onChange={(e) => setForm({ ...form, po_number: e.target.value })} className={inputCls} placeholder="e.g. H3219" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Name (客戶)</label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} placeholder="e.g. Hoi Yan Chan" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Description 描述</label>
-                <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputCls} placeholder="e.g. 4款亞加力" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Date 交貨日期</label>
-                <input value={form.delivery_date} onChange={(e) => setForm({ ...form, delivery_date: e.target.value })} className={inputCls} placeholder="e.g. 22/1" />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">{saving ? BTN.creating : BTN.create}</button>
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">{BTN.cancel}</button>
-              </div>
-            </form>
-          </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {displayed.map((o) => (
+                  <tr key={o.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
+                        {o.reference_number}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+                        {o.po_number || '—'}
+                      </Link>
+                      {o.name && <p className="mt-0.5 text-xs text-gray-400">{o.name}</p>}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>{o.status}</span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{o.delivery_date || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          )}
         </div>
       )}
     </AppLayout>

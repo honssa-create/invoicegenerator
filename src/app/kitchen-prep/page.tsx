@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import CompletionModal from '@/components/kitchen-prep/CompletionModal';
@@ -19,6 +19,7 @@ import {
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const STATUS_COLORS: Record<string, string> = {
+  inactive: 'bg-gray-100 text-gray-600',
   scheduled: 'bg-blue-100 text-blue-700',
   in_prep: 'bg-amber-100 text-amber-700',
   completed: 'bg-green-100 text-green-700',
@@ -52,11 +53,76 @@ const EMPTY: FormState = {
   lines: [emptyLine()],
 };
 
+function parsePrefillForm(searchParams: URLSearchParams): FormState | null {
+  if (searchParams.get('create') !== '1') return null;
+  const orderTypeRaw = searchParams.get('order_type') || 'restock';
+  const order_type: PrepOrderType = PREP_ORDER_TYPES.includes(orderTypeRaw as PrepOrderType)
+    ? (orderTypeRaw as PrepOrderType)
+    : 'restock';
+
+  let lines: CapacityLine[] = [emptyLine()];
+  const rawLines = searchParams.get('lines');
+  if (rawLines) {
+    try {
+      const parsed = JSON.parse(rawLines) as Array<{
+        capacity?: string;
+        qty_osmanthus?: number;
+        qty_red_date?: number;
+        qty_rock_sugar?: number;
+      }>;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const withNums = parsed
+          .filter((l) => PREP_CAPACITIES.includes(l.capacity as PrepCapacity))
+          .map((l) => {
+            const capacity = l.capacity as PrepCapacity;
+            const o = Math.max(0, Math.round(Number(l.qty_osmanthus) || 0));
+            const r = isRedDateAllowed(capacity)
+              ? Math.max(0, Math.round(Number(l.qty_red_date) || 0))
+              : 0;
+            const s = Math.max(0, Math.round(Number(l.qty_rock_sugar) || 0));
+            return {
+              capacity,
+              qty_osmanthus: o ? String(o) : '',
+              qty_red_date: r ? String(r) : '',
+              qty_rock_sugar: s ? String(s) : '',
+            };
+          })
+          .filter((l) => l.qty_osmanthus || l.qty_red_date || l.qty_rock_sugar);
+        if (withNums.length) lines = withNums;
+      }
+    } catch {
+      /* ignore bad lines param */
+    }
+  }
+
+  return {
+    stewing_date: new Date().toISOString().slice(0, 10),
+    order_type,
+    order_code: '',
+    lines,
+  };
+}
+
 type SortKey = 'stewing_date' | 'order_code' | 'capacity' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export default function KitchenPrepListPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+        </div>
+      }
+    >
+      <KitchenPrepListContent />
+    </Suspense>
+  );
+}
+
+function KitchenPrepListContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState<PrepOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -74,6 +140,15 @@ export default function KitchenPrepListPage() {
       .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const prefill = parsePrefillForm(searchParams);
+    if (!prefill) return;
+    setError('');
+    setForm(prefill);
+    setShowForm(true);
+    router.replace('/kitchen-prep', { scroll: false });
+  }, [searchParams, router]);
 
   const sortedOrders = useMemo(() => {
     const list = [...orders];
@@ -230,7 +305,7 @@ export default function KitchenPrepListPage() {
                         onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
                         className="inline-flex items-center justify-center min-h-[48px] px-4 py-2.5 text-sm sm:text-base font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
                       >
-                        {bi('完成燉製', '完成燉製')}
+                        {bi('Complete Stewing', '完成燉製')}
                       </button>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>

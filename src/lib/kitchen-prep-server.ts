@@ -1,13 +1,52 @@
 import db from './db';
 import { trashKitchenPrep } from '@/lib/trash';
-import type { PrepCapacity, PrepCompletionSplit, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
+import type { PrepCapacity, PrepCompletionSplit, PrepFlavor, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
 import {
+  PREP_FLAVORS,
   buildKitchenCompletionActivityBody,
   computePrepCalculation,
+  computeStewingRawNeeds,
+  defaultPrepStatusForCreate,
+  hkTodayIso,
   isRedDateAllowed,
   validatePrepFlavorQtys,
+  weddingPrepStatusFromDate,
 } from './kitchen-prep';
+import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
+import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
+import { finishedSku } from './kitchen-bom';
+import { addFinishedFromStewing } from './kitchen-server';
+import { getDataOwnerId } from './org-server';
+
+function normalizeCompletionSplits(
+  input: PrepCompletionSplit[] | undefined,
+  capacity: PrepCapacity,
+  fallbackQtys: { osmanthus: number; red_date: number; rock_sugar: number },
+  orderType: PrepOrderType
+): PrepCompletionSplit[] {
+  if (input && input.length > 0) {
+    return input.map((s, i) => {
+      const flavor =
+        s.flavor && (PREP_FLAVORS as readonly string[]).includes(s.flavor)
+          ? s.flavor
+          : null;
+      return {
+        label: s.label?.trim() || `Sub-order ${i + 1}`,
+        qty: Math.max(0, Math.round(s.qty)),
+        flavor: flavor || undefined,
+      };
+    });
+  }
+  const calc = computePrepCalculation(capacity, orderType, fallbackQtys);
+  return calc.rows
+    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .map((r) => ({
+      label: r.label,
+      qty: r.actualQty,
+      flavor: r.flavor,
+    }));
+}
 
 interface PrepRow {
   id: number;
@@ -113,6 +152,8 @@ export async function createPrepOrder(
     order_code?: string;
     notes?: string | null;
     status?: PrepStatus;
+    /** Linked 回禮 auto-create may have qtys filled later. */
+    allowEmptyQtys?: boolean;
   }
 ): Promise<PrepOrder> {
   const capacity = input.capacity;
@@ -120,12 +161,22 @@ export async function createPrepOrder(
   const qtyRed = isRedDateAllowed(capacity) ? Math.max(0, input.qty_red_date ?? 0) : 0;
   const qtyRock = Math.max(0, input.qty_rock_sugar ?? 0);
 
-  const validationErr = validatePrepFlavorQtys(capacity, {
-    osmanthus: qtyOsmanthus,
-    red_date: qtyRed,
-    rock_sugar: qtyRock,
-  });
+  const validationErr = validatePrepFlavorQtys(
+    capacity,
+    {
+      osmanthus: qtyOsmanthus,
+      red_date: qtyRed,
+      rock_sugar: qtyRock,
+    },
+    { allowEmpty: Boolean(input.allowEmptyQtys) }
+  );
   if (validationErr) throw new Error(validationErr);
+
+  const status =
+    input.status ??
+    defaultPrepStatusForCreate(input.order_type, input.stewing_date, {
+      hasProductionDate: true,
+    });
 
   const res = await db
     .prepare(
@@ -141,7 +192,7 @@ export async function createPrepOrder(
       input.stewing_date,
       input.order_type,
       capacity,
-      input.status || 'scheduled',
+      status,
       qtyOsmanthus,
       qtyRed,
       qtyRock,
@@ -170,10 +221,8 @@ export async function createPrepOrdersBatch(
   }
 ): Promise<PrepOrder[]> {
   const baseCode = input.order_code?.trim();
-  const created: PrepOrder[] = [];
 
-  for (let i = 0; i < input.lines.length; i++) {
-    const line = input.lines[i];
+  const prepared = input.lines.map((line) => {
     const qtys = {
       osmanthus: Math.max(0, line.qty_osmanthus ?? 0),
       red_date: Math.max(0, line.qty_red_date ?? 0),
@@ -181,31 +230,36 @@ export async function createPrepOrdersBatch(
     };
     const validationErr = validatePrepFlavorQtys(line.capacity, qtys);
     if (validationErr) throw new Error(validationErr);
+    return { line, qtys };
+  });
 
-    let orderCode: string | undefined;
-    if (baseCode) {
-      orderCode = input.lines.length > 1 ? `${baseCode}-${line.capacity}` : baseCode;
-    } else if (input.lines.length > 1) {
-      orderCode = `${await nextOrderCode(userId)}-${line.capacity}`;
+  return await db.transaction(async () => {
+    const created: PrepOrder[] = [];
+    for (const { line, qtys } of prepared) {
+      let orderCode: string | undefined;
+      if (baseCode) {
+        orderCode = input.lines.length > 1 ? `${baseCode}-${line.capacity}` : baseCode;
+      } else if (input.lines.length > 1) {
+        orderCode = `${await nextOrderCode(userId)}-${line.capacity}`;
+      }
+
+      created.push(
+        await createPrepOrder(userId, {
+          stewing_date: input.stewing_date,
+          order_type: input.order_type,
+          capacity: line.capacity,
+          qty_osmanthus: qtys.osmanthus,
+          qty_red_date: qtys.red_date,
+          qty_rock_sugar: qtys.rock_sugar,
+          linked_order_id: input.linked_order_id ?? null,
+          order_code: orderCode,
+          notes: input.notes,
+          status: input.status,
+        })
+      );
     }
-
-    created.push(
-      await createPrepOrder(userId, {
-        stewing_date: input.stewing_date,
-        order_type: input.order_type,
-        capacity: line.capacity,
-        qty_osmanthus: qtys.osmanthus,
-        qty_red_date: qtys.red_date,
-        qty_rock_sugar: qtys.rock_sugar,
-        linked_order_id: input.linked_order_id ?? null,
-        order_code: orderCode,
-        notes: input.notes,
-        status: input.status,
-      })
-    );
-  }
-
-  return created;
+    return created;
+  });
 }
 
 export async function updatePrepOrder(
@@ -220,6 +274,7 @@ export async function updatePrepOrder(
     qty_red_date: number;
     qty_rock_sugar: number;
     notes: string | null;
+    allowEmptyQtys: boolean;
   }>
 ): Promise<PrepOrder | null> {
   const existing = await getPrepOrder(id, userId);
@@ -232,11 +287,15 @@ export async function updatePrepOrder(
     : 0;
   const qtyRock = Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar);
 
-  const validationErr = validatePrepFlavorQtys(capacity, {
-    osmanthus: qtyOsmanthus,
-    red_date: qtyRed,
-    rock_sugar: qtyRock,
-  });
+  const validationErr = validatePrepFlavorQtys(
+    capacity,
+    {
+      osmanthus: qtyOsmanthus,
+      red_date: qtyRed,
+      rock_sugar: qtyRock,
+    },
+    { allowEmpty: Boolean(input.allowEmptyQtys) }
+  );
   if (validationErr) throw new Error(validationErr);
 
   await db.prepare(
@@ -286,10 +345,16 @@ export async function completePrepProduction(
   const expectedYield = calculation.totals.bottles;
   const actualYield = Math.max(0, Math.round(input.actual_yield));
   const remarks = input.completion_remarks?.trim() || null;
-  const splits = (input.splits ?? []).map((s, i) => ({
-    label: s.label?.trim() || `Sub-order ${i + 1}`,
-    qty: Math.max(0, Math.round(s.qty)),
-  }));
+  const splits = normalizeCompletionSplits(
+    input.splits,
+    existing.capacity,
+    {
+      osmanthus: existing.qty_osmanthus,
+      red_date: existing.qty_red_date,
+      rock_sugar: existing.qty_rock_sugar,
+    },
+    existing.order_type
+  );
 
   if (splits.length > 0) {
     const splitSum = splits.reduce((sum, s) => sum + s.qty, 0);
@@ -298,7 +363,41 @@ export async function completePrepProduction(
     }
   }
 
+  const finishedDeltas = splits
+    .filter((s): s is PrepCompletionSplit & { flavor: PrepFlavor } => Boolean(s.flavor) && s.qty > 0)
+    .map((s) => ({
+      sku: finishedSku(existing.capacity, s.flavor),
+      qty: s.qty,
+    }));
+
+  // Deduplicate SKUs (shouldn't happen, but keep stock math correct).
+  const merged = new Map<string, number>();
+  for (const d of finishedDeltas) {
+    merged.set(d.sku, (merged.get(d.sku) || 0) + d.qty);
+  }
+  const stockLines = Array.from(merged.entries()).map(([sku, qty]) => ({ sku, qty }));
+
+  const flavoredSplits = splits.filter(
+    (s): s is PrepCompletionSplit & { flavor: PrepFlavor } => Boolean(s.flavor) && s.qty > 0
+  );
+  const rawConsume = computeStewingRawNeeds(
+    existing.capacity,
+    flavoredSplits.map((s) => ({ flavor: s.flavor, qty: s.qty }))
+  );
+
   const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;
+  const ownerId = await getDataOwnerId(userId);
+
+  if (stockLines.length > 0 || rawConsume.length > 0) {
+    const stockResult = await addFinishedFromStewing(ownerId, userId, {
+      finishedDeltas: stockLines,
+      rawConsume,
+      prepOrderId: existing.id,
+      prepOrderCode: existing.order_code,
+      remarks,
+    });
+    if (stockResult.error) throw new Error(stockResult.error);
+  }
 
   await db.prepare(
     `UPDATE kitchen_prep_orders SET
@@ -328,42 +427,218 @@ export async function completePrepProduction(
   return await getPrepOrder(id, userId);
 }
 
-/** Import a bird's-nest order (燕窩回禮燉製 / Nestiee 燕窩訂單) into the prep schedule. */
-export async function importFromOrder(
-  userId: number,
-  orderId: number,
-  orderOwnerId: number = userId
+/** Find prep linked to an order (owner-scoped). */
+export async function getPrepByLinkedOrderId(
+  ownerId: number,
+  orderId: number
+): Promise<PrepOrder | null> {
+  const row = await db
+    .prepare(
+      `SELECT * FROM kitchen_prep_orders
+       WHERE user_id = ? AND linked_order_id = ?
+       ORDER BY id ASC LIMIT 1`
+    )
+    .get(ownerId, orderId) as PrepRow | undefined;
+  return row ? hydrate(row) : null;
+}
+
+function parseOrderFields(fieldsJson: string | null | undefined): Record<string, string> {
+  try {
+    const raw = fieldsJson ? JSON.parse(fieldsJson) : {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw || {})) {
+      if (v == null) continue;
+      out[k] = typeof v === 'string' ? v : String(v);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Create or sync a wedding kitchen-prep row for a 回禮 sales order.
+ * Idempotent on linked_order_id. Does not alter completed preps.
+ */
+export async function ensurePrepFromWeddingOrder(
+  ownerId: number,
+  orderId: number
 ): Promise<PrepOrder | null> {
   const order = await db
-    .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(orderId, orderOwnerId) as { id: number; po_number: string | null; fields_json: string } | undefined;
+    .prepare('SELECT id, po_number, status, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .get(orderId, ownerId) as
+    | { id: number; po_number: string | null; status: string | null; fields_json: string }
+    | undefined;
   if (!order) return null;
 
-  let fields: Record<string, string> = {};
-  try {
-    fields = order.fields_json ? JSON.parse(order.fields_json) : {};
-  } catch {
-    fields = {};
-  }
+  const fields = parseOrderFields(order.fields_json);
+  if (!isWeddingGiftOrderType(fields.order_type || '')) return null;
+
+  const existing = await getPrepByLinkedOrderId(ownerId, order.id);
+  if (existing?.status === 'completed') return existing;
 
   const n = (k: string) => {
     const v = Number(fields[k]);
     return Number.isFinite(v) ? v : 0;
   };
 
-  const stewingDate =
-    fields.production_date || fields.client_delivery_date || new Date().toISOString().slice(0, 10);
-  const isWedding = Boolean(fields.big_day) || fields.order_subtype === 'wedding';
-
-  return await createPrepOrder(userId, {
-    stewing_date: stewingDate,
-    order_type: isWedding ? 'wedding' : 'daily',
-    capacity: '45g',
-    qty_osmanthus: n('qty_osmanthus'),
-    qty_red_date: n('qty_red_date'),
-    qty_rock_sugar: n('qty_rock_sugar'),
-    linked_order_id: order.id,
-    order_code: order.po_number?.trim() || undefined,
-    notes: null,
+  const productionDate =
+    (fields.production_date || '').trim() ||
+    ((fields.big_day || '').trim() ? addCalendarDays(fields.big_day.trim(), -10) : '');
+  const stewingDate = productionDate || (fields.client_delivery_date || '').trim() || hkTodayIso();
+  const capacity = mapWeddingCapacityToPrep(fields.bottle_capacity || '') ?? '45g';
+  const qtyOsmanthus = n('qty_osmanthus');
+  const qtyRedDate = n('qty_red_date');
+  const qtyRockSugar = n('qty_rock_sugar');
+  const nextStatus = weddingPrepStatusFromDate(stewingDate, {
+    hasProductionDate: Boolean(productionDate),
   });
+  const orderCode = order.po_number?.trim() || undefined;
+
+  if (!existing) {
+    const created = await createPrepOrder(ownerId, {
+      stewing_date: stewingDate,
+      order_type: 'wedding',
+      capacity,
+      qty_osmanthus: qtyOsmanthus,
+      qty_red_date: qtyRedDate,
+      qty_rock_sugar: qtyRockSugar,
+      linked_order_id: order.id,
+      order_code: orderCode,
+      notes: null,
+      status: nextStatus,
+      allowEmptyQtys: true,
+    });
+    await logActivity(
+      'order',
+      order.id,
+      ownerId,
+      'activity',
+      'System',
+      `[System] Kitchen prep ${created.order_code} linked — stewing ${stewingDate} (${nextStatus})`
+    );
+    return created;
+  }
+
+  const prevStewing = existing.stewing_date;
+  const statusUpdate =
+    existing.status === 'inactive' || existing.status === 'scheduled'
+      ? nextStatus
+      : existing.status;
+
+  const updated = await updatePrepOrder(existing.id, ownerId, {
+    stewing_date: stewingDate,
+    order_type: 'wedding',
+    capacity,
+    qty_osmanthus: qtyOsmanthus,
+    qty_red_date: qtyRedDate,
+    qty_rock_sugar: qtyRockSugar,
+    status: statusUpdate,
+    allowEmptyQtys: true,
+  });
+
+  if (updated && (prevStewing !== stewingDate || existing.status !== statusUpdate)) {
+    await logActivity(
+      'order',
+      order.id,
+      ownerId,
+      'activity',
+      'System',
+      `[System] Kitchen prep ${updated.order_code} synced — stewing ${stewingDate} (${statusUpdate})`
+    );
+  }
+
+  return updated;
 }
+
+export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
+  processed: number;
+  created: number;
+  activated: number;
+  skipped: number;
+}> {
+  const today = hkTodayIso();
+  let created = 0;
+  let activated = 0;
+  let skipped = 0;
+
+  // Activate due inactive preps.
+  const inactiveRows = (await (userId == null
+    ? db.prepare(
+        `SELECT id, user_id, linked_order_id, stewing_date, order_code
+         FROM kitchen_prep_orders
+         WHERE status = 'inactive' AND stewing_date <= ?`
+      ).all(today)
+    : db.prepare(
+        `SELECT id, user_id, linked_order_id, stewing_date, order_code
+         FROM kitchen_prep_orders
+         WHERE user_id = ? AND status = 'inactive' AND stewing_date <= ?`
+      ).all(userId, today))) as {
+    id: number;
+    user_id: number;
+    linked_order_id: number | null;
+    stewing_date: string;
+    order_code: string;
+  }[];
+
+  for (const row of inactiveRows) {
+    await db
+      .prepare(
+        `UPDATE kitchen_prep_orders SET status = 'scheduled', updated_at = datetime('now')
+         WHERE id = ? AND user_id = ? AND status = 'inactive'`
+      )
+      .run(row.id, row.user_id);
+    activated += 1;
+    if (row.linked_order_id) {
+      await logActivity(
+        'order',
+        row.linked_order_id,
+        row.user_id,
+        'activity',
+        'System',
+        `[System] Kitchen prep ${row.order_code} activated (production date ${row.stewing_date})`
+      );
+    }
+  }
+
+  // Catch-up: open 回禮 orders missing a linked prep.
+  const orderRows = (await (userId == null
+    ? db.prepare(`SELECT id, user_id, status, fields_json FROM orders`).all()
+    : db.prepare(`SELECT id, user_id, status, fields_json FROM orders WHERE user_id = ?`).all(userId))) as {
+    id: number;
+    user_id: number;
+    status: string | null;
+    fields_json: string;
+  }[];
+
+  let processed = inactiveRows.length;
+  for (const o of orderRows) {
+    const status = (o.status || '').trim();
+    if (status === '已寄出 SENT' || /\bSENT\b/i.test(status)) continue;
+    const fields = parseOrderFields(o.fields_json);
+    if (!isWeddingGiftOrderType(fields.order_type || '')) continue;
+    processed += 1;
+    const existing = await getPrepByLinkedOrderId(o.user_id, o.id);
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    const prep = await ensurePrepFromWeddingOrder(o.user_id, o.id);
+    if (prep) {
+      created += 1;
+      await logActivity(
+        'order',
+        o.id,
+        o.user_id,
+        'activity',
+        'System',
+        `[System] Auto-created kitchen prep ${prep.order_code}`
+      );
+    } else {
+      skipped += 1;
+    }
+  }
+
+  return { processed, created, activated, skipped };
+}
+

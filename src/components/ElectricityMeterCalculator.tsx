@@ -9,20 +9,20 @@ import {
   type ElectricityFormula,
 } from '@/lib/rentals';
 
+export type SharedDeductionUnitOption = { id: number; unitName: string };
+
 interface Props {
   formula: ElectricityFormula;
   prevReading: string;
   currReading: string;
-  meter213B: string;
-  meterStockRoom1: string;
-  meterStockRoom2: string;
   ratePerUnit: string;
+  /** For shared-meter (213a) formula: configurable other-unit usage inputs. */
+  deductionUnits?: SharedDeductionUnitOption[];
+  otherUnitUsages?: Record<string, string>;
   onPrevReading: (v: string) => void;
   onCurrReading: (v: string) => void;
-  onMeter213B: (v: string) => void;
-  onMeterStockRoom1: (v: string) => void;
-  onMeterStockRoom2: (v: string) => void;
   onRatePerUnit: (v: string) => void;
+  onOtherUnitUsage?: (unitId: number, value: string) => void;
   suggestedPrevReading?: number | null;
   inpClassName?: string;
   readOnly?: boolean;
@@ -36,16 +36,13 @@ export default function ElectricityMeterCalculator({
   formula,
   prevReading,
   currReading,
-  meter213B,
-  meterStockRoom1,
-  meterStockRoom2,
   ratePerUnit,
+  deductionUnits = [],
+  otherUnitUsages = {},
   onPrevReading,
   onCurrReading,
-  onMeter213B,
-  onMeterStockRoom1,
-  onMeterStockRoom2,
   onRatePerUnit,
+  onOtherUnitUsage,
   suggestedPrevReading,
   inpClassName = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
   readOnly = false,
@@ -54,10 +51,12 @@ export default function ElectricityMeterCalculator({
   const curr = numOrNull(currReading);
   const rate = numOrNull(ratePerUnit);
 
+  const usageMap: Record<string, number | null> = {};
+  for (const u of deductionUnits) {
+    usageMap[String(u.id)] = numOrNull(otherUnitUsages[String(u.id)] || '');
+  }
   const meterPartial = {
-    meter213B: numOrNull(meter213B),
-    meterStockRoom1: numOrNull(meterStockRoom1),
-    meterStockRoom2: numOrNull(meterStockRoom2),
+    otherUnitUsages: usageMap,
     otherUnitsUsage: null as number | null,
   };
   const otherTotal = formula === '213a' ? otherUnitsUsageTotal(meterPartial) : 0;
@@ -68,15 +67,14 @@ export default function ElectricityMeterCalculator({
     ? calc213aElectricityFee({
       prevReading: prev,
       currReading: curr,
-      meter213B: meterPartial.meter213B,
-      meterStockRoom1: meterPartial.meterStockRoom1,
-      meterStockRoom2: meterPartial.meterStockRoom2,
+      otherUnitUsages: usageMap,
       ratePerUnit: rate,
     })
     : calcStockRoomElectricityFee({ prevReading: prev, currReading: curr, ratePerUnit: rate });
 
   const inputCls = `${inpClassName}${readOnly ? ' bg-gray-100/80 cursor-default' : ''}`;
   const inputProps = readOnly ? { readOnly: true as const } : {};
+  const showOther = formula === '213a' && deductionUnits.length > 0;
 
   return (
     <div className="space-y-4">
@@ -123,49 +121,28 @@ export default function ElectricityMeterCalculator({
         </div>
       </div>
 
-      {formula === '213a' && (
+      {showOther && (
         <div className="rounded-xl border border-orange-100 bg-orange-50/50 p-4">
           <p className="text-xs font-semibold text-orange-900 mb-3">
             其他單位用電度數 Other units usage
-            <span className="font-normal text-orange-700/80 ml-1">= 213B + Stock Room 1 + Stock Room 2</span>
           </p>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">213B電錶度數</label>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                className={inputCls}
-                value={meter213B}
-                {...inputProps}
-                onChange={(e) => onMeter213B(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Stock Room 1電錶度數</label>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                className={inputCls}
-                value={meterStockRoom1}
-                {...inputProps}
-                onChange={(e) => onMeterStockRoom1(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Stock Room 2電錶度數</label>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                className={inputCls}
-                value={meterStockRoom2}
-                {...inputProps}
-                onChange={(e) => onMeterStockRoom2(e.target.value)}
-              />
-            </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {deductionUnits.map((u) => (
+              <div key={u.id}>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  {u.unitName}{biSuffix(u.unitName)}
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className={inputCls}
+                  value={otherUnitUsages[String(u.id)] || ''}
+                  {...inputProps}
+                  onChange={(e) => onOtherUnitUsage?.(u.id, e.target.value)}
+                />
+              </div>
+            ))}
           </div>
           <p className="text-sm text-gray-700 mt-3 pt-3 border-t border-orange-100">
             <span className="text-gray-500">其他單位用電度數 Total</span>{' '}
@@ -203,4 +180,8 @@ export default function ElectricityMeterCalculator({
       </div>
     </div>
   );
+}
+
+function biSuffix(unitName: string): string {
+  return unitName.trim() ? '電錶度數' : '';
 }

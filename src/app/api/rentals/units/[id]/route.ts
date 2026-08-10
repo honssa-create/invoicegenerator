@@ -29,7 +29,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const body = await request.json();
     const unit = await updateRentalUnit(params.id, ownerId, body);
     return NextResponse.json({ unit });
-  } catch {
-    return NextResponse.json({ error: 'Failed to update rental unit' }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update rental unit';
+    const status = message === 'Tenant name is required' ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

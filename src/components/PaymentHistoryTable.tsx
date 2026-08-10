@@ -29,7 +29,9 @@ export default function PaymentHistoryTable({ payments, readOnly, onAllocate, on
     <table className="w-full text-sm">
       <thead className="bg-gray-50 text-xs uppercase text-gray-500">
         <tr>
-          <th className="px-4 py-3 text-left w-8" />
+          <th className="px-4 py-3 text-left w-8">
+            <span className="sr-only">{bi('Details', '明細')}</span>
+          </th>
           <th className="px-4 py-3 text-left">Paid Date 交租日</th>
           <th className="px-4 py-3 text-left">{bi('Method / Ref', '方式 / 參考')}</th>
           <th className="px-4 py-3 text-right">{bi('Total', '總額')}</th>

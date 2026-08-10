@@ -4,36 +4,36 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 
 ## Features
 
-- **Multi-user authentication** — Register and sign in with separate accounts; data is fully isolated per user
+- **Multi-user authentication** — First user bootstraps as admin via `/register`; further accounts are created by an admin under Administration → Users. Data is fully isolated per user / org owner
 - **Customer management** — Add, edit, and delete clients with contact details
 - **Invoice creation** — Line items, tax calculations, notes, and terms
 - **Invoice statuses** — Draft, Sent, Paid, Overdue
-- **Expense tracking (支出紀錄)** — Record expenses with expense reason (支出原因), merchant, HKD & RMB amounts, paid date, order no., payment method (支付方式), shopping platform (消費平台), notes, and payment status
+- **Expense tracking (支出紀錄)** — Record expenses with expense reason (支出原因), merchant, HKD & RMB amounts, paid date, order no., funding source / payment channel, shopping platform (消費平台), notes, and payment status
 - **Batch import (匯入 CSV/Excel)** — Drag-and-drop a `.csv`, `.xlsx`, or `.xls` file; columns map by Chinese/English headers (Date/日期, Payment/支付方式, Reason/支出原因, Platform/消費平台, Amount/金額, Supplier/供應商). Duplicates (same date+amount+supplier) are skipped and new options are auto-added; a toast summarizes imported vs skipped
 - **Custom dropdown options (自行增加選項)** — Payment method, expense reason, and platform are tag-style dropdowns with built-in defaults; type a new value and "+ Add" it to persist it for future use
-- **Smart receipt numbers (EXP-YYYYMM-XXX)** — Each expense gets a unique ID whose month comes from the expense date (not the upload date), with a per-month serial that continues correctly for backfilled historical records
+- **Expense ID + Receipt No.** — Each expense gets a global upload-order **Expense ID** (`EXP-0000001`, …) plus a **Receipt No.** `EXP-{paid_YYYYMM}-{FundingSourceCode}{serial}` (e.g. `EXP-202604-CCS001`; codes: CCS, CCC, AB, PB, CS). Serial increments per paid-date month + funding source
 - **Global filters & sorting** — Both the Expense and Invoice tables have a filter bar (date range, category/status/client, keyword search, Clear Filters) and sortable Date / Number / Amount columns; default sort is by date descending
 - **Order management (訂單管理)** — ClickUp-style order detail page: a two-pane layout with editable header/status/notes, client & shipping info, a design-proof image grid, a full custom-field list, and a live Activity feed with a comment composer
 - **Kitchen scheduling & two-tier inventory (智能廚房排程)** — Daily-order stock routing (auto-deduct or 無現貨 backlog), manual large-batch brewing with a live 大字報 raw-material calculator, and a two-tier inventory (finished goods + raw materials with Available = Total − Allocated); completing a batch restocks finished goods and auto-fulfils backlog orders
 - **Payment receipts + Accounting reconciliation (會計入帳一覽表)** — Upload a payment receipt on an order; AI (Gemini/OCR) extracts date, amount, bank/platform, method, and reference; a central Accounting dashboard aggregates all order payments with receipt thumbnails and one-click "Confirm Entry" verification
 - **Cash Flow & Reconciliation (營運收支中央看板)** — Monthly Product Sales / Other Income / Gross Revenue cards, an "Add Income" modal (category, date, amount, account, remarks, compressed voucher upload), and a unified ledger of all revenue (Product Sale vs Other Income badges) with receipt thumbnails and Pending/Verified toggles
-- **Quotations (報價單)** — Quotation dashboard + detail with line items; Generate PDF, Export to Excel, and one-click convert to an Order or Invoice (carries line items + client)
+- **Quotations (報價單)** — Quotation dashboard + detail with line items; Generate PDF, Export to Excel, convert to Order, or copy to Invoice (carries line items + client)
 - **Invoice ↔ Order linkage** — Link an invoice to its order; the order shows a live payment badge (green Paid / red Unpaid) derived from the linked invoice, and each page cross-links to the other
 - **Automated 30-day payment reminders** — A daily-runnable job emails clients whose invoices are unpaid after 30 days and logs a `[System]` entry into the invoice's and linked order's activity feed
-- **Isolated activity logs** — Every Order, Invoice, and Quotation has its own ClickUp-style activity sidebar that auto-logs creation, status/field changes, exports, and system events, plus free-text comments
-- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; **PaddleOCR** (when `PADDLE_OCR_URL` is set) extracts waybill / sender / addresses via SF 寄·收 region heuristics, else Gemini, else on-device OCR. Defaults arrival date to today; cargo photos are auto-compressed in the browser before upload
+- **Unified activity logs** — Orders, Invoices, and Quotations share one `activity_logs` table and ClickUp-style ActivityFeed sidebars that auto-log creation, status/field changes, exports, and system events, plus free-text comments
+- **Inbound shipment tracker (到件紀錄)** — Snap a courier waybill label; **PaddleOCR** (when `PADDLE_OCR_URL` is set) extracts waybill / sender / addresses via SF 寄·收 region heuristics, else Gemini, else on-device OCR. Defaults arrival date to today; cargo photos are auto-compressed in the browser (max **1600px**, &lt;300KB JPEG) before upload
 - **Scan to Table (掃描成表格)** — Upload an image or PDF of any printed table and extract it into an editable grid (Google Gemini vision when `GEMINI_API_KEY` is set, otherwise on-device OCR), then export it
 - **Receipt scanning (收據掃描)** — Upload one or more receipt images; the first is auto-scanned to extract merchant, date, and total (AI vision when `OPENAI_API_KEY` is set, otherwise on-device OCR); blanks are left for manual entry
 - **Multiple receipts per expense (多檔案上傳)** — Attach several receipt images; the table shows up to 3 thumbnails (2 + a `+N` badge when more), and a gallery modal shows all images with the receipt number
 - **Receipt preview & print (收據預覽與勾選列印)** — Click a thumbnail to open the gallery; select multiple expenses and open a print view where each receipt image is headed by its receipt number
-- **Export to Excel (匯出至 Excel)** — Download invoices or expenses as a formatted `.xlsx` file
+- **Export to Excel (匯出至 Excel)** — Download invoices or expenses as a SheetJS `.xlsx` file
 - **Dashboard** — Revenue, pending amounts, expense totals (HKD/RMB), net, and recent invoices
 - **Print / PDF** — Professional print-ready invoice view (use browser Print → Save as PDF)
 
 ## Tech Stack
 
 - **Next.js 14** (App Router)
-- **SQLite** via better-sqlite3
+- **PostgreSQL** via `pg` (`DATABASE_URL`)
 - **JWT** session cookies with bcrypt password hashing
 - **Tailwind CSS**
 
@@ -41,6 +41,8 @@ A QuickBooks-like financial dashboard with multi-user authentication. Each user 
 
 ```bash
 npm install
+npm run db:up          # starts local Postgres (Docker Compose)
+# create .env.local with DATABASE_URL=postgresql://invoiceflow:invoiceflow@127.0.0.1:5432/invoiceflow
 npm run dev
 ```
 
@@ -48,34 +50,37 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Demo Flow
 
-1. Register two different accounts (e.g. `alice@company.com` and `bob@company.com`)
-2. Each user adds their own customers and creates invoices
-3. Data is scoped per user — Alice cannot see Bob's invoices
+1. Register the first account (becomes admin). Later users are created under Administration → Users
+2. Add customers and create invoices / expenses
+3. Data is scoped per user / org owner
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string (required) | _(required)_ |
 | `JWT_SECRET` | Secret for signing session tokens | dev default (change in production) |
 | `OPENAI_API_KEY` | Enables AI vision receipt extraction; falls back to on-device OCR when unset | _(unset)_ |
 | `OPENAI_VISION_MODEL` | Vision model used when `OPENAI_API_KEY` is set | `gpt-4o-mini` |
 | `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng+chi_sim` |
 | `PADDLE_OCR_URL` | Base URL of the PaddleOCR sidecar for inbound waybill scan (e.g. `http://127.0.0.1:8000` or Railway private `http://…railway.internal:8000`) | _(unset — skip Paddle)_ |
 | `PADDLE_OCR_SECRET` | Optional shared secret; sent as `X-Paddle-OCR-Secret` (set the same value on the sidecar) | _(unset)_ |
-| `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table / inbound fallback / PDF parsing | _(unset)_ |
+| `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table / inbound fallback / payments (and PDF parsing); falls back to on-device OCR when unset | _(unset)_ |
 | `GEMINI_MODEL` | Gemini model used when `GEMINI_API_KEY` is set | `gemini-2.5-flash` |
 | `RESEND_API_KEY` | Enables sending real reminder emails via Resend; without it reminders are logged to activity feeds only | _(unset)_ |
 | `REMINDER_FROM_EMAIL` | From address for reminder emails | `InvoiceFlow <onboarding@resend.dev>` |
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
-| `CRON_SECRET` | Bearer token that lets an external scheduler run reminders for all users via `/api/cron/payment-reminders` | _(unset)_ |
-| `DB_PATH` | SQLite file path (use `/data/invoices.db` on Railway with a volume) | `data/invoices.db` |
-| `RESET_DB` | Set to `1` once to delete the SQLite file on boot (fresh empty DB). **Unset immediately after** and redeploy | unset |
-| `RECEIPTS_DIR` | Local receipt image folder; defaults to `{dirname(DB_PATH)}/receipts` when `DB_PATH` is set | `data/receipts` |
+| `CRON_SECRET` | Bearer token for external schedulers: `/api/cron/payment-reminders`, `/api/cron/hub-sync`, and other `/api/cron/*` routes | _(unset)_ |
+| `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |
+| `RECEIPTS_DIR` | Local/volume receipt image folder (use `/data/receipts` on Railway with a volume) | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
 | `R2_ACCESS_KEY_ID` | R2 access key | _(unset)_ |
 | `R2_SECRET_ACCESS_KEY` | R2 secret key | _(unset)_ |
 | `R2_BUCKET_NAME` | R2 bucket name | _(unset)_ |
 | `R2_PUBLIC_URL` | Public base URL for R2 objects (e.g. `https://pub-xxx.r2.dev`) | _(unset)_ |
+
+One-time SQLite → Postgres import (devDependency `better-sqlite3` only):  
+`DATABASE_URL=… SQLITE_PATH=/path/to/invoices.db npm run db:migrate-sqlite`
 
 ## Production
 
@@ -84,7 +89,7 @@ npm run build
 npm start
 ```
 
-Set `JWT_SECRET` to a strong random string in production.
+Set `JWT_SECRET` and `DATABASE_URL` in production.
 
 ## Deploy on Railway
 
@@ -93,24 +98,20 @@ Set `JWT_SECRET` to a strong random string in production.
    - Branch: **`main`** (must not be an empty feature branch)
    - Root Directory: leave **empty** (repo root contains `package.json`)
 
-2. **Add a Volume** (for SQLite + receipt images persistence)
-   - Mount path: `/data`
-   - Set env: `DB_PATH=/data/invoices.db`
-   - Receipt images are stored at `/data/receipts` automatically (same volume as the DB).
-   - To wipe the volume DB once: set `RESET_DB=1`, redeploy, confirm the app boots empty, then **unset `RESET_DB`** and redeploy again.
-   - Optional override: `RECEIPTS_DIR=/data/receipts`
+2. **Attach Railway Postgres** and set `DATABASE_URL` from the plugin
 
-3. **Image storage (pick one — required for production)**
+3. **Receipt image storage (pick one — required for production)**
 
    **Option A — Cloudflare R2 (recommended)**  
    Survives redeploys even without a volume. New uploads store a public `https://…` URL in the database.
    - `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL`
 
-   **Option B — Railway volume only**  
-   Works if `DB_PATH` points at the mounted volume (receipts co-locate under `/data/receipts`).  
-   ⚠️ If you only persisted the DB but receipts were saved to the container’s ephemeral disk, redeploy wipes images while DB rows remain — configure R2 or ensure both DB and receipts use `/data`.
+   **Option B — Railway volume for receipts**  
+   Mount path e.g. `/data`, set `RECEIPTS_DIR=/data/receipts`.  
+   ⚠️ Without R2 or a volume, redeploy wipes container-local images while DB rows remain. On ephemeral production storage, imported remote receipt links keep the URL as `path` instead of saving to disk.
 
 4. **Required environment variables**
+   - `DATABASE_URL` — Postgres connection string
    - `JWT_SECRET` — session signing secret
 
 5. **Optional — PaddleOCR second service** (better inbound waybill OCR without cloud AI)
@@ -123,3 +124,15 @@ Set `JWT_SECRET` to a strong random string in production.
 6. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
 
 This repo includes `railpack.json` and `railway.json` so Railpack detects **Node.js / Next.js** and runs `npm run build` + `npm start` automatically.
+
+## Order Hub auto-sync
+
+Incremental WooCommerce (and QuickBooks, if connected) import runs via `GET|POST /api/cron/hub-sync` with `Authorization: Bearer $CRON_SECRET`. The app pulls from the store using Railway’s **static outbound IPv4** addresses — allowlist **all** of them on the webstore host / CDN / WAF if API access is IP-restricted.
+
+**Railway**
+1. Set `CRON_SECRET` (and optional `HUB_OWNER_USER_ID`).
+2. Configure each store under **Settings → API Integrations**, or set `WOOCOMMERCE_{NESTIEE|HONOUR|CUPMOKA}_{URL,KEY,SECRET}`.
+
+**GitHub Actions** (workflow [`.github/workflows/hub-sync-cron.yml`](.github/workflows/hub-sync-cron.yml) — every 15 minutes + manual dispatch)
+1. Repo → Settings → Secrets and variables → Actions: add `APP_URL` (e.g. `https://your-app.up.railway.app`, no trailing slash required) and `CRON_SECRET` (same value as Railway).
+2. Actions → **Hub sync cron** → Run workflow once; confirm Order Hub “Last import” updates.

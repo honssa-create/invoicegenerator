@@ -151,7 +151,7 @@ export default function ChargeAllocationGrid({ rows, values, onChange, compact, 
           return (
             <div
               key={row.key}
-              className="grid grid-cols-[1fr_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3"
+              className="grid grid-cols-[1fr_auto] gap-3 items-center rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3"
             >
               <div>
                 <p className="font-semibold text-gray-900">{row.label}</p>
@@ -164,18 +164,21 @@ export default function ChargeAllocationGrid({ rows, values, onChange, compact, 
                   {CHARGE_STATUS_LABELS[status]}
                 </span>
               </div>
-              <label className="text-xs text-gray-500 sm:hidden">本次收款</label>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                max={outstanding}
-                disabled={outstanding <= 0}
-                className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-lg text-right font-semibold disabled:bg-gray-100 disabled:text-gray-400"
-                placeholder="0"
-                value={values[row.key] || ''}
-                onChange={(e) => onChange({ ...values, [row.key]: e.target.value })}
-              />
+              <div className="flex flex-col items-end gap-1">
+                <label className="text-xs text-gray-500 whitespace-nowrap">本次收款</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  max={outstanding}
+                  disabled={outstanding <= 0}
+                  className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-lg text-right font-semibold disabled:bg-gray-100 disabled:text-gray-400"
+                  placeholder="0"
+                  aria-label={`本次收款 ${row.label}`}
+                  value={values[row.key] || ''}
+                  onChange={(e) => onChange({ ...values, [row.key]: e.target.value })}
+                />
+              </div>
             </div>
           );
         })}
@@ -215,6 +218,7 @@ export default function ChargeAllocationGrid({ rows, values, onChange, compact, 
                 disabled={outstanding <= 0}
                 className="w-24 px-2 py-1 border border-gray-200 rounded text-right disabled:bg-gray-50 disabled:text-gray-400"
                 placeholder="0"
+                aria-label={`本次分配 ${row.label}${row.sublabel ? ` · ${row.sublabel}` : ''}`}
                 value={values[row.key] || ''}
                 onChange={(e) => onChange({ ...values, [row.key]: e.target.value })}
               />

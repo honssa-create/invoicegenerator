@@ -2,7 +2,29 @@ import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
 import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
-import { WOO_PLATFORM_ORDER_TYPE } from './orders';
+import { allocateGlobalRecordNumber } from './record-numbering';
+import {
+  formatWooAddress,
+  parseNestieeLinesFromWoo,
+  parseNestieePaymentFromWoo,
+  parsePaymentAmount,
+  parseWooShippingTotal,
+  parseWooShippingMethod,
+  normalizeOrderShippingMethod,
+  appendNestieeShippingLine,
+  applyNestieeGiftBoxAutoQtys,
+  parseHonourLinesFromWoo,
+  appendHonourShippingLine,
+  honourLinesDerivedFields,
+  applyHonourOptionsToFields,
+  collectHonourCpoOptionsFromLines,
+  parseHonourCpoNotesFromLines,
+  parseHonourPaymentFromWoo,
+  parseHonourEstimateDelivery,
+  WOO_PLATFORM_ORDER_TYPE,
+  type WooAddressLike,
+  type WooLineItemLike,
+} from './orders';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -15,6 +37,7 @@ export interface HubOrderUpsertInput {
   phone?: string | null;
   shipping_address?: string | null;
   description?: string | null;
+  notes?: string | null;
   external_po_number?: string | null;
   raw_payload?: Record<string, unknown>;
 }
@@ -89,11 +112,17 @@ export async function upsertHubOrder(
 ): Promise<{ id: number; inserted: boolean; system_order_no: string }> {
   const existing = await db
     .prepare(
-      `SELECT id, system_order_no, fields_json FROM orders
+      `SELECT id, system_order_no, fields_json, notes, shipping_address FROM orders
        WHERE user_id = ? AND source_platform = ? AND original_order_id = ?`
     )
     .get(userId, input.source_platform, input.original_order_id) as
-    | { id: number; system_order_no: string | null; fields_json: string | null }
+    | {
+        id: number;
+        system_order_no: string | null;
+        fields_json: string | null;
+        notes: string | null;
+        shipping_address: string | null;
+      }
     | undefined;
 
   let fields: Record<string, unknown> = {};
@@ -110,6 +139,107 @@ export async function upsertHubOrder(
   const mappedType = WOO_PLATFORM_ORDER_TYPE[input.source_platform as keyof typeof WOO_PLATFORM_ORDER_TYPE];
   if (mappedType) fields.order_type = mappedType;
 
+  let shippingAddress = input.shipping_address?.trim() || null;
+  let importedNotes = input.notes?.trim() || '';
+
+  if (input.source_platform === 'nestiee' && input.raw_payload) {
+    const payload = input.raw_payload;
+    const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
+    const shippingTotal = parseWooShippingTotal(payload);
+    const nestieeLines = appendNestieeShippingLine(
+      parseNestieeLinesFromWoo(rawLines),
+      shippingTotal
+    );
+    fields.nestiee_lines = JSON.stringify(nestieeLines);
+    applyNestieeGiftBoxAutoQtys(fields, nestieeLines);
+
+    const shipMethod = parseWooShippingMethod(payload);
+    if (shipMethod && !String(fields.shipping_method || '').trim()) {
+      fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
+    }
+
+    const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
+    if (billing) fields.billing_address = billing;
+    if (!shippingAddress && billing) shippingAddress = billing;
+
+    const verified = fields.payment_verified === true || fields.payment_verified === 'true';
+    const existingPay =
+      parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
+    if (!verified && existingPay <= 0 && input.total_amount > 0) {
+      const amount = String(Math.round(input.total_amount * 100) / 100);
+      fields.payment_amount = amount;
+      fields.payment1_amount = amount;
+    }
+
+    if (!verified) {
+      const pay = parseNestieePaymentFromWoo(payload);
+      const hasMethod = String(fields.payment_method_detail || '').trim();
+      if (!hasMethod && pay.method) {
+        fields.payment_method_detail = pay.method;
+        if (pay.note) fields.payment_method_note = pay.note;
+      }
+      if (!String(fields.payment_bank || '').trim() && pay.bank) {
+        fields.payment_bank = pay.bank;
+      }
+    }
+  }
+
+  if (input.source_platform === 'honour' && input.raw_payload) {
+    const payload = input.raw_payload;
+    const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
+    const shippingTotal = parseWooShippingTotal(payload);
+    const honourLines = appendHonourShippingLine(parseHonourLinesFromWoo(rawLines), shippingTotal);
+    Object.assign(fields, honourLinesDerivedFields(honourLines));
+
+    const { options, sizeMeta } = collectHonourCpoOptionsFromLines(rawLines);
+    applyHonourOptionsToFields(fields, options, sizeMeta);
+    const cpoNotes = parseHonourCpoNotesFromLines(rawLines);
+    if (cpoNotes && !importedNotes.includes(cpoNotes)) {
+      importedNotes = [importedNotes, cpoNotes].filter(Boolean).join('\n');
+    }
+
+    const shipMethod = parseWooShippingMethod(payload);
+    if (shipMethod && !String(fields.shipping_method || '').trim()) {
+      fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
+    }
+
+    const estimate = parseHonourEstimateDelivery(payload);
+    if (estimate && !String(fields.requested_delivery || '').trim()) {
+      fields.requested_delivery = estimate;
+    }
+
+    const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
+    if (billing) fields.billing_address = billing;
+    if (!shippingAddress && billing) shippingAddress = billing;
+
+    const verified = fields.payment_verified === true || fields.payment_verified === 'true';
+    const existingPay =
+      parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
+    if (!verified && existingPay <= 0 && input.total_amount > 0) {
+      const amount = String(Math.round(input.total_amount * 100) / 100);
+      fields.payment_amount = amount;
+      fields.payment1_amount = amount;
+    }
+
+    if (!verified) {
+      const pay = parseHonourPaymentFromWoo(payload);
+      const hasMethod = String(fields.payment_method_detail || '').trim();
+      if (!hasMethod && pay.method) {
+        fields.payment_method_detail = pay.method;
+        if (pay.note) fields.payment_method_note = pay.note;
+      }
+      if (!String(fields.payment_bank || '').trim() && pay.bank) {
+        fields.payment_bank = pay.bank;
+      }
+      if (!String(fields.payment_option || '').trim() && pay.bank) {
+        fields.payment_option = pay.bank;
+      }
+    }
+  }
+
+  const notesToWrite =
+    importedNotes && !(existing?.notes || '').trim() ? importedNotes : null;
+
   if (existing) {
     await db.prepare(
       `UPDATE orders SET
@@ -120,6 +250,7 @@ export async function upsertHubOrder(
          phone = COALESCE(?, phone),
          shipping_address = COALESCE(?, shipping_address),
          description = COALESCE(?, description),
+         notes = COALESCE(?, notes),
          po_number = COALESCE(?, po_number),
          fields_json = ?,
          updated_at = datetime('now')
@@ -130,8 +261,9 @@ export async function upsertHubOrder(
       input.total_amount,
       input.customer_email?.trim() || null,
       input.phone?.trim() || null,
-      input.shipping_address?.trim() || null,
+      shippingAddress,
       input.description?.trim() || null,
+      notesToWrite,
       input.external_po_number?.trim() || null,
       JSON.stringify(fields),
       existing.id,
@@ -145,30 +277,35 @@ export async function upsertHubOrder(
   }
 
   const systemOrderNo = await allocateSystemOrderNo(userId, input.source_platform);
-  const result = await db
-    .prepare(
-      `INSERT INTO orders (
-         user_id, source_platform, original_order_id, system_order_no,
-         po_number, name, description, status, customer_email, phone,
-         shipping_address, total_amount, fields_json, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    )
-    .run(
-      userId,
-      input.source_platform,
-      input.original_order_id,
-      systemOrderNo,
-      input.external_po_number?.trim() || systemOrderNo,
-      input.customer_name,
-      input.description?.trim() || null,
-      input.status,
-      input.customer_email?.trim() || null,
-      input.phone?.trim() || null,
-      input.shipping_address?.trim() || null,
-      input.total_amount,
-      JSON.stringify(fields),
-      input.created_at
-    );
+  const result = await db.transaction(async () => {
+    const referenceNumber = await allocateGlobalRecordNumber('order');
+    return db
+      .prepare(
+        `INSERT INTO orders (
+           user_id, source_platform, original_order_id, system_order_no, reference_number,
+           po_number, name, description, status, customer_email, phone,
+           shipping_address, total_amount, notes, fields_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      )
+      .run(
+        userId,
+        input.source_platform,
+        input.original_order_id,
+        systemOrderNo,
+        referenceNumber,
+        input.external_po_number?.trim() || null,
+        input.customer_name,
+        input.description?.trim() || null,
+        input.status,
+        input.customer_email?.trim() || null,
+        input.phone?.trim() || null,
+        shippingAddress,
+        input.total_amount,
+        importedNotes || null,
+        JSON.stringify(fields),
+        input.created_at
+      );
+  });
 
   return {
     id: Number(result.lastInsertRowid),
@@ -213,14 +350,14 @@ export async function upsertHubInvoice(
     .get(userId, input.source_platform, input.original_order_id) as { id: number } | undefined;
 
   const customerId = await findOrCreateCustomer(userId, input.customer_name, input.customer_email);
-  const invoiceNumber = input.invoice_number?.trim() || input.system_order_no;
+  const externalInvoiceNumber = input.invoice_number?.trim() || input.system_order_no;
   const orderId = input.order_id ?? null;
 
   if (existing) {
     await db.prepare(
       `UPDATE invoices SET
          customer_id = ?,
-         invoice_number = ?,
+         external_invoice_number = ?,
          status = ?,
          issue_date = ?,
          due_date = ?,
@@ -230,7 +367,7 @@ export async function upsertHubInvoice(
        WHERE id = ? AND user_id = ?`
     ).run(
       customerId,
-      invoiceNumber,
+      externalInvoiceNumber,
       input.status,
       input.issue_date,
       input.due_date,
@@ -245,32 +382,38 @@ export async function upsertHubInvoice(
     return { id: existing.id, inserted: false, order_id: linked?.order_id ?? orderId };
   }
 
-  const result = await db
-    .prepare(
-      `INSERT INTO invoices (
-         user_id, customer_id, source_platform, original_order_id, system_order_no,
-         invoice_number, status, issue_date, due_date, notes, order_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    )
-    .run(
-      userId,
-      customerId,
-      input.source_platform,
-      input.original_order_id,
-      input.system_order_no,
-      invoiceNumber,
-      input.status,
-      input.issue_date,
-      input.due_date,
-      `Synced from QuickBooks (ID ${input.original_order_id})`,
-      orderId
-    );
+  const invoiceId = await db.transaction(async () => {
+    const invoiceNumber = await allocateGlobalRecordNumber('invoice');
+    const result = await db
+      .prepare(
+        `INSERT INTO invoices (
+           user_id, customer_id, source_platform, original_order_id, system_order_no,
+           invoice_number, external_invoice_number, status, issue_date, due_date, notes,
+           order_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(
+        userId,
+        customerId,
+        input.source_platform,
+        input.original_order_id,
+        input.system_order_no,
+        invoiceNumber,
+        externalInvoiceNumber,
+        input.status,
+        input.issue_date,
+        input.due_date,
+        `Synced from QuickBooks (ID ${input.original_order_id})`,
+        orderId
+      );
 
-  const invoiceId = Number(result.lastInsertRowid);
-  await db.prepare(
-    `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
-     VALUES (?, ?, 1, ?, ?)`
-  ).run(invoiceId, 'QuickBooks imported total', 1, input.total_amount, input.total_amount);
+    const invoiceId = Number(result.lastInsertRowid);
+    await db.prepare(
+      `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
+       VALUES (?, ?, 1, ?, ?)`
+    ).run(invoiceId, 'QuickBooks imported total', input.total_amount, input.total_amount);
+    return invoiceId;
+  });
 
   return { id: invoiceId, inserted: true, order_id: orderId };
 }
@@ -278,10 +421,11 @@ export async function upsertHubInvoice(
 export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
   const rows = await db
     .prepare(
-      `SELECT o.id, o.source_platform, o.original_order_id, o.system_order_no,
+      `SELECT o.id, o.source_platform, o.original_order_id, o.system_order_no, o.reference_number,
               o.name AS customer_name, o.total_amount, o.status, o.po_number,
               o.created_at, o.updated_at,
-              i.id AS linked_invoice_id, i.invoice_number AS linked_invoice_number
+              i.id AS linked_invoice_id, i.invoice_number AS linked_invoice_number,
+              i.external_invoice_number AS linked_external_invoice_number
        FROM orders o
        LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id
        WHERE o.user_id = ?
@@ -294,6 +438,7 @@ export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
     source_platform: (r.source_platform as HubPlatform) || 'manual',
     original_order_id: (r.original_order_id as string) || null,
     system_order_no: (r.system_order_no as string) || null,
+    reference_number: (r.reference_number as string) || '',
     customer_name: (r.customer_name as string) || '',
     total_amount: r.total_amount as number | null,
     status: (r.status as string) || '',
@@ -302,6 +447,7 @@ export async function listHubOrders(userId: number): Promise<HubOrderRow[]> {
     updated_at: r.updated_at as string,
     linked_invoice_id: (r.linked_invoice_id as number) || null,
     linked_invoice_number: (r.linked_invoice_number as string) || null,
+    linked_external_invoice_number: (r.linked_external_invoice_number as string) || null,
   }));
 }
 

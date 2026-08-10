@@ -18,12 +18,26 @@ import { BTN, TITLE, bi } from '@/lib/ui-labels';
 export default function KitchenPrepPrintPage() {
   const { id } = useParams();
   const [order, setOrder] = useState<PrepOrder | null>(null);
+  const [loggingPrint, setLoggingPrint] = useState(false);
 
   useEffect(() => {
     fetch(`/api/kitchen-prep/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.order && setOrder(d.order));
   }, [id]);
+
+  const handlePrint = async () => {
+    if (loggingPrint) return;
+    setLoggingPrint(true);
+    try {
+      await fetch(`/api/kitchen-prep/${id}/print-log`, { method: 'POST' });
+    } catch {
+      /* still allow print if log fails */
+    } finally {
+      setLoggingPrint(false);
+    }
+    window.print();
+  };
 
   if (!order) {
     return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>;
@@ -39,7 +53,14 @@ export default function KitchenPrepPrintPage() {
     <div className="min-h-screen bg-gray-100 print:bg-white">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <Link href={`/kitchen-prep/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to calculator', '返回計算器')}</Link>
-        <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">{BTN.printPdf}</button>
+        <button
+          type="button"
+          onClick={handlePrint}
+          disabled={loggingPrint}
+          className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50"
+        >
+          {loggingPrint ? bi('Preparing…', '準備中…') : BTN.printPdf}
+        </button>
       </div>
 
       <div className="max-w-5xl mx-auto my-8 bg-white shadow-lg print:shadow-none print:my-0 print:max-w-none">
@@ -72,7 +93,7 @@ export default function KitchenPrepPrintPage() {
 
           {!calc.formulaReady ? (
             <p className="text-amber-800 bg-amber-50 p-4 rounded text-[15px]">
-              {PREP_CAPACITY_LABELS[order.capacity]} formula pending configuration (25g and 45g are ready).
+              Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet.
             </p>
           ) : (
             <PrepSummaryTable calc={calc} capacity={order.capacity} variant="print" />

@@ -1,5 +1,7 @@
 import db from './db';
 import { saveReceipt, ocrImageText } from './receipt';
+import { paddleOcrBoxes } from './paddle-ocr';
+import { parseMeterReadingFromBoxes, parseMeterReadingFromText } from './meter-ocr';
 import {
   ensureDefaultRentalUnits,
   ensureRentRecord,
@@ -449,19 +451,6 @@ export async function getUtilityMeterItemPhoto(
   return { path: row.photo_path };
 }
 
-function parseMeterReadingFromText(text: string): number | null {
-  const cleaned = text.replace(/,/g, '');
-  const matches = cleaned.match(/\d+(?:\.\d+)?/g);
-  if (!matches?.length) return null;
-  // Prefer the longest digit run (typical dial reading).
-  let best = matches[0];
-  for (const m of matches) {
-    if (m.replace(/\D/g, '').length > best.replace(/\D/g, '').length) best = m;
-  }
-  const n = Number(best);
-  return Number.isFinite(n) ? n : null;
-}
-
 async function geminiMeterReading(
   buffer: Buffer,
   mimeType: string,
@@ -470,11 +459,12 @@ async function geminiMeterReading(
   if (!apiKey) return null;
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const prompt = `You are reading a utility meter dial photo (water or electricity meter in Hong Kong).
-Extract the numeric meter reading shown on the dial/display.
+Extract the numeric meter reading shown on the main digital/roller display (not the small analog sub-dials, not voltage/current ratings).
+Examples of valid readings: 038429, 05731.8, 0031622, 00007, 00021.2.
 Return ONLY JSON: {"reading": number|null, "raw": string|null}.
-- reading: the numeric value (ignore units like kWh, m³). Use null if unreadable.
-- raw: the digits as seen, or null.
-Do not invent values.`;
+- reading: the numeric value (ignore units like kWh, m³). Preserve decimals when the last digit is tenths (red window). Use null if unreadable.
+- raw: the digits as seen (keep leading zeros if visible), or null.
+Do not invent values. Ignore labels like 10000/1000/100/10/1/0.1, 220V, 50Hz, imp/kWh.`;
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -513,16 +503,35 @@ export async function ocrUtilityMeterPhoto(
   buffer: Buffer,
   mimeType: string,
   originalName = 'meter.jpg',
-): Promise<{ reading: number | null; ocr_text: string; photo_path: string }> {
+): Promise<{ reading: number | null; ocr_text: string; photo_path: string; source?: string }> {
   const photo_path = await saveReceipt(buffer, mimeType, originalName);
+
+  // 1) PaddleOCR sidecar — digit clustering for roller/LCD dials
+  const boxes = await paddleOcrBoxes(buffer, mimeType);
+  if (boxes?.length) {
+    const paddle = parseMeterReadingFromBoxes(boxes);
+    if (paddle.reading != null) {
+      return {
+        reading: paddle.reading,
+        ocr_text: (paddle.raw || String(paddle.reading)).slice(0, 500),
+        photo_path,
+        source: 'paddle',
+      };
+    }
+  }
+
+  // 2) Gemini (optional cloud)
   const gemini = await geminiMeterReading(buffer, mimeType);
   if (gemini) {
-    return { reading: gemini.reading, ocr_text: gemini.ocr_text, photo_path };
+    return { ...gemini, photo_path, source: 'ai' };
   }
+
+  // 3) tesseract.js
   const text = await ocrImageText(buffer);
   return {
     reading: parseMeterReadingFromText(text),
     ocr_text: text.slice(0, 500),
     photo_path,
+    source: 'ocr',
   };
 }

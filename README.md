@@ -63,7 +63,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `OPENAI_API_KEY` | Enables AI vision receipt extraction; falls back to on-device OCR when unset | _(unset)_ |
 | `OPENAI_VISION_MODEL` | Vision model used when `OPENAI_API_KEY` is set | `gpt-4o-mini` |
 | `OCR_LANGS` | tesseract.js OCR languages (e.g. `eng+chi_tra+chi_sim`) | `eng+chi_sim` |
-| `PADDLE_OCR_URL` | Base URL of the PaddleOCR sidecar for inbound waybill scan (e.g. `http://127.0.0.1:8000` or Railway private `http://…railway.internal:8000`) | _(unset — skip Paddle)_ |
+| `PADDLE_OCR_URL` | Base URL of the PaddleOCR sidecar for inbound waybills and rental meter dial OCR | _(unset — skip Paddle)_ |
 | `PADDLE_OCR_SECRET` | Optional shared secret; sent as `X-Paddle-OCR-Secret` (set the same value on the sidecar) | _(unset)_ |
 | `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table / inbound fallback / payments (and PDF parsing); falls back to on-device OCR when unset | _(unset)_ |
 | `GEMINI_MODEL` | Gemini model used when `GEMINI_API_KEY` is set | `gemini-2.5-flash` |

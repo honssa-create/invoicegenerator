@@ -1,6 +1,6 @@
 # PaddleOCR sidecar (inbound waybills)
 
-CPU PaddleOCR HTTP service used by InvoiceFlow `POST /api/inbound/scan`.
+CPU PaddleOCR HTTP service used by InvoiceFlow inbound waybill scan and rental utility meter dial OCR.
 
 ## Endpoints
 

@@ -68,7 +68,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `RESEND_API_KEY` | Enables sending real reminder emails via Resend; without it reminders are logged to activity feeds only | _(unset)_ |
 | `REMINDER_FROM_EMAIL` | From address for reminder emails | `InvoiceFlow <onboarding@resend.dev>` |
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
-| `CRON_SECRET` | Bearer token that lets an external scheduler run reminders for all users via `/api/cron/payment-reminders` | _(unset)_ |
+| `CRON_SECRET` | Bearer token for external schedulers: `/api/cron/payment-reminders`, `/api/cron/hub-sync`, and other `/api/cron/*` routes | _(unset)_ |
+| `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |
 | `RECEIPTS_DIR` | Local/volume receipt image folder (use `/data/receipts` on Railway with a volume) | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
 | `R2_ACCESS_KEY_ID` | R2 access key | _(unset)_ |
@@ -114,3 +115,15 @@ Set `JWT_SECRET` and `DATABASE_URL` in production.
 5. **Redeploy** after pushing to `main` (Settings → Deploy → Redeploy)
 
 This repo includes `railpack.json` and `railway.json` so Railpack detects **Node.js / Next.js** and runs `npm run build` + `npm start` automatically.
+
+## Order Hub auto-sync
+
+Incremental WooCommerce (and QuickBooks, if connected) import runs via `GET|POST /api/cron/hub-sync` with `Authorization: Bearer $CRON_SECRET`. The app pulls from the store using Railway’s **static outbound IPv4** addresses — allowlist **all** of them on the webstore host / CDN / WAF if API access is IP-restricted.
+
+**Railway**
+1. Set `CRON_SECRET` (and optional `HUB_OWNER_USER_ID`).
+2. Configure each store under **Settings → API Integrations**, or set `WOOCOMMERCE_{NESTIEE|HONOUR|CUPMOKA}_{URL,KEY,SECRET}`.
+
+**GitHub Actions** (workflow [`.github/workflows/hub-sync-cron.yml`](.github/workflows/hub-sync-cron.yml) — every 15 minutes + manual dispatch)
+1. Repo → Settings → Secrets and variables → Actions: add `APP_URL` (e.g. `https://your-app.up.railway.app`, no trailing slash required) and `CRON_SECRET` (same value as Railway).
+2. Actions → **Hub sync cron** → Run workflow once; confirm Order Hub “Last import” updates.

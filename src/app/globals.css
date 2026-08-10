@@ -97,9 +97,6 @@
   .no-print {
     display: none !important;
   }
-  .print-only {
-    display: block !important;
-  }
 
   /* Scoped expense print styles only */
   .expense-print-root {

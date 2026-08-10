@@ -1,11 +1,3 @@
-export interface User {
-  id: number;
-  email: string;
-  name: string;
-  company_name: string | null;
-  created_at: string;
-}
-
 export interface Customer {
   id: number;
   user_id: number;
@@ -137,12 +129,4 @@ export interface ReceiptScanResult {
   receipt_path: string | null;
   raw_text: string;
   source: 'ai' | 'ocr';
-}
-
-export interface DashboardStats {
-  totalInvoices: number;
-  totalRevenue: number;
-  pendingAmount: number;
-  overdueCount: number;
-  recentInvoices: InvoiceWithDetails[];
 }

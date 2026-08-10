@@ -43,15 +43,3 @@ export function buildExpenseExportQuery(filters: ExpenseExportFilters): string {
   const qs = params.toString();
   return qs ? `?${qs}` : '';
 }
-
-export function expenseExportFilenameSuffix(filters: ExpenseExportFilters): string {
-  const parts: string[] = [];
-  if (filters.paidFrom || filters.paidTo) {
-    parts.push(`paid-${filters.paidFrom || 'start'}-to-${filters.paidTo || 'end'}`);
-  }
-  if (filters.createdFrom || filters.createdTo) {
-    parts.push(`created-${filters.createdFrom || 'start'}-to-${filters.createdTo || 'end'}`);
-  }
-  if (filters.fundingSource) parts.push(filters.fundingSource);
-  return parts.length ? `-${parts.join('_')}` : '';
-}

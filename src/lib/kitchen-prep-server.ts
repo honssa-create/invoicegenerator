@@ -551,15 +551,6 @@ export async function ensurePrepFromWeddingOrder(
   return updated;
 }
 
-/** @deprecated Prefer ensurePrepFromWeddingOrder — kept for API compatibility. */
-export async function importFromOrder(
-  userId: number,
-  orderId: number,
-  orderOwnerId: number = userId
-): Promise<PrepOrder | null> {
-  return await ensurePrepFromWeddingOrder(orderOwnerId, orderId);
-}
-
 export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
   processed: number;
   created: number;

@@ -608,15 +608,6 @@ export async function scoreAndSuggest(
   return 'Unmatched';
 }
 
-/** @deprecated Use scoreAndSuggest — kept for callers that still import the old name. */
-export async function attemptAutoMatch(
-  userId: number,
-  recordId: number,
-  input: ReconciliationInput
-): Promise<ReconciliationStatus> {
-  return scoreAndSuggest(userId, recordId, input);
-}
-
 async function resolveMatchFromInvoice(
   userId: number,
   invoiceId: number,

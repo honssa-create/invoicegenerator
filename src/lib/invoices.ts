@@ -3,8 +3,6 @@ import { allocateGlobalRecordNumber } from './record-numbering';
 import type { InvoiceFile, InvoiceItem, InvoiceWithDetails } from './types';
 import { calculateInvoiceTotals } from './utils';
 
-export { calculateInvoiceTotals, formatCurrency, formatDate, STATUS_COLORS } from './utils';
-
 /** Reserve the next office-wide 8-digit invoice number. */
 export async function generateInvoiceNumber(_userId?: number): Promise<string> {
   return allocateGlobalRecordNumber('invoice');

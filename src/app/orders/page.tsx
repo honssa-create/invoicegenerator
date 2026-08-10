@@ -199,7 +199,7 @@ export default function OrdersPage() {
           </div>
           <button
             type="button"
-            onClick={create}
+            onClick={() => { void create(); }}
             disabled={creating}
             className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
           >

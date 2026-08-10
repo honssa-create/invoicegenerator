@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/kitchen', label: NAV.kitchen, icon: '🍲', section: 'kitchen' },
   { href: '/kitchen-prep', label: NAV.kitchenPrep, icon: '🥣', section: 'kitchen_prep' },
   { href: '/rentals', label: NAV.rentals, icon: '🏠', section: 'rentals' },
+  { href: '/rentals/meters', label: NAV.meterReadings, icon: '🔌', section: 'rentals' },
   { href: '/rentals/templates', label: NAV.templates, icon: '📋', section: 'rentals' },
   { href: '/expenses', label: NAV.expenses, icon: '🧾', section: 'expenses' },
   { href: '/accounting', label: NAV.accounting, icon: '📒', section: 'accounting' },

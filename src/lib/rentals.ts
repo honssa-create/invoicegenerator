@@ -759,6 +759,61 @@ export function waterMeterDataFromInputs(prev: string, curr: string, rate: strin
   };
 }
 
+/** Fixed physical meters logged in 水電錶紀錄. */
+export const UTILITY_METER_KEYS = [
+  'stock_room_1_2_elec',
+  'elec_213a_main',
+  'water_213a',
+  'water_213b',
+  'elec_213b',
+] as const;
+
+export type UtilityMeterKey = (typeof UTILITY_METER_KEYS)[number];
+
+export interface UtilityMeterDefinition {
+  key: UtilityMeterKey;
+  label: string;
+  kind: 'electricity' | 'water';
+}
+
+export const UTILITY_METER_DEFINITIONS: UtilityMeterDefinition[] = [
+  { key: 'stock_room_1_2_elec', label: 'Stock Room 1 & 2 電錶 - 2樓走廊', kind: 'electricity' },
+  { key: 'elec_213a_main', label: '213A 大電錶 - 2樓走廊', kind: 'electricity' },
+  { key: 'water_213a', label: '213A 水錶 - 213男廁內', kind: 'water' },
+  { key: 'water_213b', label: '213B 水錶 - 天台', kind: 'water' },
+  { key: 'elec_213b', label: '213B 電錶 - 213室門口位置', kind: 'electricity' },
+];
+
+export function isUtilityMeterKey(value: string): value is UtilityMeterKey {
+  return (UTILITY_METER_KEYS as readonly string[]).includes(value);
+}
+
+export interface UtilityMeterRoundItem {
+  id: number;
+  meter_key: UtilityMeterKey;
+  reading_value: number | null;
+  photo_path: string | null;
+  ocr_text: string | null;
+  synced_record_id: number | null;
+}
+
+export interface UtilityMeterRound {
+  id: number;
+  user_id: number;
+  reading_date: string;
+  period: string;
+  notes: string;
+  items: UtilityMeterRoundItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export function periodFromReadingDate(dateStr: string): string {
+  const raw = (dateStr || '').trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 7);
+  return currentBillingPeriod();
+}
+
 export function companyBillsUtilities(mode: UtilityBillingMode): boolean {
   return mode === 'company_sub_meter' || mode === 'company_shared_meter';
 }

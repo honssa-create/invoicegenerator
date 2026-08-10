@@ -108,16 +108,19 @@ function hydrateTenant(row: TenantRow, unitCount = 0): RentalTenant {
 }
 
 function hydrateCharge(row: ChargeRow): RentalChargeItem {
-  const amountDue = row.amount_due || 0;
-  const amountAllocated = row.amount_allocated || 0;
+  const amountDue = Number(row.amount_due) || 0;
+  const amountAllocated = Number(row.amount_allocated) || 0;
   const status = row.status && ['empty', 'unpaid', 'partially_paid', 'paid'].includes(row.status)
     ? row.status
     : deriveChargeItemStatus(amountDue, amountAllocated);
   return {
-    id: row.id, user_id: row.user_id, tenantId: row.tenant_id ?? null, unitId: row.unit_id,
+    id: Number(row.id), user_id: Number(row.user_id),
+    tenantId: row.tenant_id != null ? Number(row.tenant_id) : null,
+    unitId: Number(row.unit_id),
     billingPeriod: row.billing_period, chargeType: row.charge_type,
     amountDue, amountAllocated, status,
-    legacyRecordId: row.legacy_record_id, created_at: row.created_at, updated_at: row.updated_at,
+    legacyRecordId: row.legacy_record_id != null ? Number(row.legacy_record_id) : null,
+    created_at: row.created_at, updated_at: row.updated_at,
   };
 }
 
@@ -457,17 +460,18 @@ function buildNoticeColumns(
 ): RentPaymentNoticeMatrix['columns'] {
   const cols: RentPaymentNoticeMatrix['columns'] = [];
   for (const unit of units) {
+    const unitId = Number(unit.id);
     const chargeTypes = CHARGE_ORDER.filter((t) =>
       utilityChargeTypesForMode(resolveUtilityBillingMode(unit.utilityBillingMode, tenantMode)).includes(t),
     );
     for (const chargeType of chargeTypes) {
       const hasActivity = charges.some(
-        (c) => c.unitId === unit.id && c.chargeType === chargeType &&
-          (c.amountDue > 0 || c.amountAllocated > 0),
+        (c) => Number(c.unitId) === unitId && c.chargeType === chargeType &&
+          (Number(c.amountDue) > 0 || Number(c.amountAllocated) > 0),
       );
       if (!hasActivity) continue;
       cols.push({
-        unitId: unit.id,
+        unitId,
         unitName: unit.unitName,
         chargeType,
         label: columnLabel(unit.unitName, chargeType),
@@ -827,11 +831,18 @@ export async function buildFormalDebitNote(
   const dueDateDisplay = formatDisplayDate(dueDate);
   const dueDateChinese = formatDueDateChinese(dueDateDisplay, targetPeriod.split('-')[0]);
 
-  const addressRows = await db.prepare(
-    `SELECT id, address FROM rental_units WHERE user_id = ? AND id IN (${unitIds.map(() => '?').join(',')})`
-  ).all(userId, ...unitIds) as { id: number; address: string | null }[];
-  const addressMap = Object.fromEntries(addressRows.map((r) => [r.id, r.address]));
-  const premises = matrix.units
+  let premisesUnits = matrix.units;
+  let addressMap: Record<number, string | null> = {};
+  if (unitIds.length) {
+    const addressRows = await db.prepare(
+      `SELECT id, address FROM rental_units WHERE user_id = ? AND id IN (${unitIds.map(() => '?').join(',')})`
+    ).all(userId, ...unitIds) as { id: number; address: string | null }[];
+    addressMap = Object.fromEntries(addressRows.map((r) => [Number(r.id), r.address]));
+  } else {
+    // Charge-activity filter may leave matrix.units empty — never emit SQL `IN ()`.
+    premisesUnits = await getTenantUnits(Number(tenantId), userId);
+  }
+  const premises = premisesUnits
     .map((u) => addressMap[u.id]?.trim() || u.unitName)
     .join(' · ');
 

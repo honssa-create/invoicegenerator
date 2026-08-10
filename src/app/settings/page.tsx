@@ -179,8 +179,8 @@ export default function SettingsPage() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
             {isAdmin
               ? bi(
-                  'Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, Yedpay).',
-                  '管理支出下拉選項及外部 API 整合（WooCommerce、QuickBooks、Yedpay）。',
+                  'Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, Yedpay, SF Express).',
+                  '管理支出下拉選項及外部 API 整合（WooCommerce、QuickBooks、Yedpay、順豐）。',
                 )
               : bi('Manage expense dropdown options.', '管理支出下拉選項。')}
           </p>

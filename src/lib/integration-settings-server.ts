@@ -1,9 +1,11 @@
 import db from './db';
 import {
   EMPTY_INTEGRATION_SETTINGS,
+  SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
   type IntegrationSettings,
   type IntegrationSettingsMasked,
   type QuickBooksSettings,
+  type SfExpressSettings,
   type WooPlatformKey,
   type WooStoreSettings,
   type YedpaySettings,
@@ -28,6 +30,13 @@ function parseSettings(json: string | null | undefined): IntegrationSettings {
       },
       quickbooks: { ...EMPTY_INTEGRATION_SETTINGS.quickbooks, ...parsed.quickbooks },
       yedpay: { ...EMPTY_INTEGRATION_SETTINGS.yedpay, ...parsed.yedpay },
+      sf_express: {
+        ...EMPTY_INTEGRATION_SETTINGS.sf_express,
+        ...parsed.sf_express,
+        print_template_code:
+          parsed.sf_express?.print_template_code?.trim() ||
+          EMPTY_INTEGRATION_SETTINGS.sf_express.print_template_code,
+      },
     };
   } catch {
     return structuredClone(EMPTY_INTEGRATION_SETTINGS);
@@ -57,6 +66,24 @@ function envWoo(platform: WooPlatformKey): WooStoreSettings {
   };
 }
 
+function envSfExpress(): SfExpressSettings {
+  const env = process.env.SF_ENVIRONMENT?.trim().toLowerCase();
+  return {
+    partner_id: process.env.SF_PARTNER_ID?.trim() || '',
+    checkword: process.env.SF_CHECKWORD?.trim() || '',
+    monthly_card: process.env.SF_MONTHLY_CARD?.trim() || '',
+    environment: env === 'production' ? 'production' : 'sandbox',
+    express_type_id: process.env.SF_EXPRESS_TYPE_ID?.trim() || '1',
+    pay_method: process.env.SF_PAY_METHOD?.trim() || '1',
+    print_template_code:
+      process.env.SF_PRINT_TEMPLATE_CODE?.trim() || SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+    sender_company: process.env.SF_SENDER_COMPANY?.trim() || '',
+    sender_contact: process.env.SF_SENDER_CONTACT?.trim() || '',
+    sender_tel: process.env.SF_SENDER_TEL?.trim() || '',
+    sender_address: process.env.SF_SENDER_ADDRESS?.trim() || '',
+  };
+}
+
 function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSettings {
   const pick = (dbVal: string, envVal: string) => dbVal.trim() || envVal.trim();
   const pickWoo = (db: WooStoreSettings, platform: WooPlatformKey): WooStoreSettings => {
@@ -70,6 +97,8 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
     };
   };
 
+  const envSf = envSfExpress();
+  const sf = settings.sf_express;
   return {
     woocommerce: {
       nestiee: pickWoo(settings.woocommerce.nestiee, 'nestiee'),
@@ -87,6 +116,20 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
     yedpay: {
       access_token: pick(settings.yedpay.access_token, process.env.YEDPAY_ACCESS_TOKEN || ''),
       user_id: pick(settings.yedpay.user_id, process.env.YEDPAY_USER_ID || ''),
+    },
+    sf_express: {
+      partner_id: pick(sf.partner_id, envSf.partner_id),
+      checkword: pick(sf.checkword, envSf.checkword),
+      monthly_card: pick(sf.monthly_card, envSf.monthly_card),
+      environment: sf.environment || envSf.environment,
+      express_type_id: pick(sf.express_type_id, envSf.express_type_id) || '1',
+      pay_method: pick(sf.pay_method, envSf.pay_method) || '1',
+      print_template_code:
+        pick(sf.print_template_code, envSf.print_template_code) || SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+      sender_company: pick(sf.sender_company, envSf.sender_company),
+      sender_contact: pick(sf.sender_contact, envSf.sender_contact),
+      sender_tel: pick(sf.sender_tel, envSf.sender_tel),
+      sender_address: pick(sf.sender_address, envSf.sender_address),
     },
   };
 }
@@ -115,6 +158,7 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
 
   const qbSecret = maskSecret(s.quickbooks.client_secret);
   const yedToken = maskSecret(s.yedpay.access_token);
+  const sfCheck = maskSecret(s.sf_express.checkword);
 
   return {
     woocommerce: {
@@ -135,6 +179,21 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
       access_token_set: yedToken.set,
       access_token_hint: yedToken.hint,
     },
+    sf_express: {
+      partner_id: s.sf_express.partner_id,
+      partner_id_set: Boolean(s.sf_express.partner_id.trim()),
+      checkword_set: sfCheck.set,
+      checkword_hint: sfCheck.hint,
+      monthly_card: s.sf_express.monthly_card,
+      environment: s.sf_express.environment,
+      express_type_id: s.sf_express.express_type_id,
+      pay_method: s.sf_express.pay_method,
+      print_template_code: s.sf_express.print_template_code || SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+      sender_company: s.sf_express.sender_company,
+      sender_contact: s.sf_express.sender_contact,
+      sender_tel: s.sf_express.sender_tel,
+      sender_address: s.sf_express.sender_address,
+    },
   };
 }
 
@@ -142,6 +201,7 @@ export type IntegrationSettingsUpdate = {
   woocommerce?: Partial<Record<WooPlatformKey, Partial<WooStoreSettings>>>;
   quickbooks?: Partial<QuickBooksSettings>;
   yedpay?: Partial<YedpaySettings>;
+  sf_express?: Partial<SfExpressSettings>;
 };
 
 function keepOrReplace(current: string, incoming: string | undefined | null, clearIfEmpty = false): string {
@@ -159,6 +219,7 @@ export async function saveIntegrationSettings(userId: number, update: Integratio
     woocommerce: { ...current.woocommerce },
     quickbooks: { ...current.quickbooks },
     yedpay: { ...current.yedpay },
+    sf_express: { ...current.sf_express },
   };
 
   if (update.woocommerce) {
@@ -197,6 +258,30 @@ export async function saveIntegrationSettings(userId: number, update: Integratio
     };
   }
 
+  if (update.sf_express) {
+    const patch = update.sf_express;
+    const env =
+      patch.environment === 'production' || patch.environment === 'sandbox'
+        ? patch.environment
+        : current.sf_express.environment || 'sandbox';
+    next.sf_express = {
+      partner_id: keepOrReplace(current.sf_express.partner_id, patch.partner_id, true),
+      checkword: keepOrReplace(current.sf_express.checkword, patch.checkword),
+      monthly_card: keepOrReplace(current.sf_express.monthly_card, patch.monthly_card, true),
+      environment: env,
+      express_type_id:
+        keepOrReplace(current.sf_express.express_type_id, patch.express_type_id, true) || '1',
+      pay_method: keepOrReplace(current.sf_express.pay_method, patch.pay_method, true) || '1',
+      print_template_code:
+        keepOrReplace(current.sf_express.print_template_code, patch.print_template_code, true) ||
+        SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+      sender_company: keepOrReplace(current.sf_express.sender_company, patch.sender_company, true),
+      sender_contact: keepOrReplace(current.sf_express.sender_contact, patch.sender_contact, true),
+      sender_tel: keepOrReplace(current.sf_express.sender_tel, patch.sender_tel, true),
+      sender_address: keepOrReplace(current.sf_express.sender_address, patch.sender_address, true),
+    };
+  }
+
   await db.prepare(
     `INSERT INTO integration_settings (user_id, settings_json, updated_at)
      VALUES (?, ?, datetime('now'))
@@ -212,4 +297,20 @@ export async function getQuickBooksCredentials(userId: number): Promise<QuickBoo
 
 export async function getYedpayCredentials(userId: number): Promise<YedpaySettings> {
   return (await getIntegrationSettings(userId)).yedpay;
+}
+
+export async function getSfExpressCredentials(userId: number): Promise<SfExpressSettings> {
+  return (await getIntegrationSettings(userId)).sf_express;
+}
+
+export function sfExpressConfigured(s: SfExpressSettings): boolean {
+  return Boolean(
+    s.partner_id.trim() &&
+      s.checkword.trim() &&
+      s.monthly_card.trim() &&
+      s.sender_company.trim() &&
+      s.sender_contact.trim() &&
+      s.sender_tel.trim() &&
+      s.sender_address.trim()
+  );
 }

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
 import { compressImage } from '@/lib/imageCompression';
 import { compressPdfToImages } from '@/lib/pdfCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
@@ -87,6 +88,7 @@ export default function OrderDetailPage() {
   const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
   const [confirmPasteText, setConfirmPasteText] = useState('');
   const [confirmPasteError, setConfirmPasteError] = useState('');
+  const [sfModalOpen, setSfModalOpen] = useState(false);
   /** Big Day value last persisted with derived dates (or loaded from server). */
   const bigDayPersistedRef = useRef('');
   /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
@@ -765,6 +767,13 @@ export default function OrderDetailPage() {
           <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🚚 {bi('Generate Delivery Note', '產生出貨單')}
           </Link>
+          <button
+            type="button"
+            onClick={() => setSfModalOpen(true)}
+            className="btn bg-orange-600 text-white hover:bg-orange-700 w-full sm:w-auto"
+          >
+            {bi('Create SF Express', '建立順豐運單')}
+          </button>
           {isBadgeOrderType(orderType) && (
             <Link
               href={`/orders/${order.id}/production-note`}
@@ -1766,6 +1775,37 @@ export default function OrderDetailPage() {
             </div>
           </div>
         </div>
+      )}
+      {sfModalOpen && (
+        <SfExpressShipmentModal
+          orderId={order.id}
+          onClose={() => setSfModalOpen(false)}
+          onSuccess={(updated, meta) => {
+            setOrder(updated);
+            setSfModalOpen(false);
+            if (meta.pdfUrl) {
+              window.open(meta.pdfUrl, '_blank', 'noopener,noreferrer');
+            }
+            if (meta.printError) {
+              setQuoteToast({
+                kind: 'error',
+                text: bi(
+                  `Waybill ${meta.waybill} saved, but label print failed: ${meta.printError}`,
+                  `運單 ${meta.waybill} 已儲存，但面單列印失敗：${meta.printError}`
+                ),
+              });
+            } else {
+              setQuoteToast({
+                kind: 'success',
+                text: bi(
+                  `SF Express waybill ${meta.waybill} created.`,
+                  `已建立順豐運單 ${meta.waybill}。`
+                ),
+              });
+            }
+            setTimeout(() => setQuoteToast(null), 6000);
+          }}
+        />
       )}
     </AppLayout>
   );

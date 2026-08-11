@@ -411,7 +411,7 @@ export default function IntegrationsSettingsPanel({
             )}
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500">Express Type ID</label>
+            <label className="text-xs font-medium text-gray-500">Express Type ID (1 顺丰特快 / 2 顺丰标快 / 6 顺丰即日)</label>
             <input
               type="text"
               value={sf.express_type_id}

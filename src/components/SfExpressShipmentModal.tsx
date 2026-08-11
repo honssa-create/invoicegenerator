@@ -262,11 +262,18 @@ export default function SfExpressShipmentModal({ orderId, onClose, onSuccess }: 
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500">Express Type ID</label>
-                <input
+                <select
                   className={`${inputCls} mt-1`}
                   value={form.expressTypeId}
                   onChange={(e) => setField('expressTypeId', e.target.value)}
-                />
+                >
+                  <option value="1">1 — 顺丰特快</option>
+                  <option value="2">2 — 顺丰标快</option>
+                  <option value="6">6 — 顺丰即日</option>
+                  {!['1', '2', '6', ''].includes(form.expressTypeId) && (
+                    <option value={form.expressTypeId}>{form.expressTypeId} — custom</option>
+                  )}
+                </select>
               </div>
               <div className="md:col-span-2">
                 <label className="text-xs font-medium text-gray-500">Remark</label>

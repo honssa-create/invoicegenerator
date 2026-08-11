@@ -54,4 +54,6 @@ Restart `npm run dev`. Leave `GEMINI_API_KEY` unset to force the Paddle path whi
    PADDLE_OCR_URL=http://<paddle-service-name>.railway.internal:8000
    ```
    Optional: set the same `PADDLE_OCR_SECRET` on both services.
-5. Clear any dashboard start command that says `npm start` on the Paddle service (this folder’s `railway.json` starts `uvicorn`).
+5. Clear any dashboard start command that says `npm start` on the Paddle service. Prefer start command:
+   `sh -c 'uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}'`
+   (Railway runs commands without a shell unless wrapped in `sh -c`, so bare `${PORT:-8000}` is passed literally and fails.)

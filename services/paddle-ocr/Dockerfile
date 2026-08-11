@@ -16,5 +16,5 @@ COPY app.py .
 ENV PORT=8000
 EXPOSE 8000
 
-# Warm models on first import via startup event; allow long OCR requests.
-CMD uvicorn app:app --host 0.0.0.0 --port ${PORT}
+# Shell form so ${PORT} expands when Railway injects PORT.
+CMD sh -c "uvicorn app:app --host 0.0.0.0 --port $${PORT:-8000}"

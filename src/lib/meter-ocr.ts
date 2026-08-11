@@ -7,13 +7,13 @@ import type { OcrBox } from '@/lib/paddle-ocr';
 
 export type MeterKind = 'electricity' | 'water';
 
-/** Labels / specs that often OCR near the dial but are not the reading. */
+/** Labels / specs that often OCR near the dial but are not the reading.
+ *  Do not list bare single digits here — a real dial's last digit is often "1". */
 const NOISE_NUMBERS = new Set([
   '0.1',
   '0.01',
   '0.001',
   '0.0001',
-  '1',
   '10',
   '100',
   '1000',
@@ -30,6 +30,10 @@ const NOISE_NUMBERS = new Set([
   '62053',
   '2003',
 ]);
+
+function isTrailingDigitFrag(text: string): boolean {
+  return /^\d$/.test(text) || /^\.\d$/.test(text);
+}
 
 function midY(b: OcrBox): number {
   return (b.y0 + b.y1) / 2;
@@ -159,15 +163,32 @@ export function boxMatchesMeterUnit(box: OcrBox, kind: MeterKind): boolean {
 function assembleCluster(cluster: DigitFrag[]): string {
   const ordered = [...cluster].sort((a, b) => a.box.x0 - b.box.x0);
   const parts: string[] = [];
+  let lastX0 = -Infinity;
   let lastX1 = -Infinity;
   for (const f of ordered) {
-    if (f.box.x0 < lastX1 - 4 && parts.length) {
+    const overlaps = parts.length > 0 && f.box.x0 < lastX1 - 4;
+    if (overlaps) {
       const prev = parts[parts.length - 1]!;
+      const prevW = Math.max(1, lastX1 - lastX0);
+      // Tenths / last roller often sits inside the right edge of the main run box.
+      // Append instead of dropping the short fragment when it is further right.
+      if (
+        isTrailingDigitFrag(f.text) &&
+        prev.replace(/\D/g, '').length >= 3 &&
+        f.box.x0 >= lastX0 + prevW * 0.55
+      ) {
+        parts.push(f.text);
+        lastX0 = f.box.x0;
+        lastX1 = Math.max(lastX1, f.box.x1);
+        continue;
+      }
+      // Duplicate / re-OCR of the same window: keep the longer token
       if (f.text.length > prev.length) parts[parts.length - 1] = f.text;
       lastX1 = Math.max(lastX1, f.box.x1);
       continue;
     }
     parts.push(f.text);
+    lastX0 = f.box.x0;
     lastX1 = f.box.x1;
   }
   let raw = parts.join('');
@@ -232,8 +253,11 @@ function clusterByYAndHeight(frags: DigitFrag[]): DigitFrag[][] {
     for (const cluster of clusters) {
       const refY = cluster.reduce((s, c) => s + midY(c.box), 0) / cluster.length;
       const refH = clusterMedianHeight(cluster);
-      const hOk = Math.abs(boxH(f.box) - refH) <= Math.max(refH, boxH(f.box)) * 0.55;
-      if (Math.abs(midY(f.box) - refY) <= yTol && hOk) {
+      const yOk = Math.abs(midY(f.box) - refY) <= yTol;
+      // Red tenths / last roller is often slightly shorter — allow trailing singles looser height match
+      const hRatio = Math.max(refH, boxH(f.box)) * (isTrailingDigitFrag(f.text) ? 0.75 : 0.55);
+      const hOk = Math.abs(boxH(f.box) - refH) <= hRatio;
+      if (yOk && hOk) {
         cluster.push(f);
         placed = true;
         break;
@@ -315,9 +339,23 @@ function pickByUnitAnchor(
     const leftOf = sameRow.filter((f) => f.box.x1 <= unit.x0 + 8 || midX(f.box) < unit.x0);
     let band = leftOf.length ? leftOf : sameRow;
 
-    // Drop tiny fragments vs dial-sized peers in the band
+    // Drop tiny place-value labels, but keep short trailing dial digits (red 0.1 window)
     const bandMedH = median(band.map((f) => boxH(f.box))) || uh;
-    band = band.filter((f) => boxH(f.box) >= bandMedH * 0.45);
+    const kept = band.filter((f) => boxH(f.box) >= bandMedH * 0.45);
+    const rightEdge = kept.length
+      ? Math.max(...kept.map((f) => f.box.x1))
+      : Math.max(...band.map((f) => f.box.x1));
+    for (const f of band) {
+      if (kept.includes(f)) continue;
+      if (
+        isTrailingDigitFrag(f.text) &&
+        f.box.x0 >= rightEdge - boxH(f.box) * 2 &&
+        boxH(f.box) >= bandMedH * 0.28
+      ) {
+        kept.push(f);
+      }
+    }
+    band = kept;
 
     if (!band.length) continue;
 

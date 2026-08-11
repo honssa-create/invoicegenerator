@@ -155,4 +155,54 @@ describe('parseMeterReadingFromBoxes', () => {
     expect(r.raw).toBe('038429');
     expect(r.reading).toBe(38429);
   });
+
+  it('keeps overlapping tenths digit instead of dropping it (05731.8)', () => {
+    // Main run box extends into the red 0.1 window; old logic kept longer "05731" only
+    const boxes: OcrBox[] = [
+      box('05731', 50, 100, 100, 28), // x0=50 x1=150
+      box('.8', 138, 102, 22, 26), // overlaps right edge
+      box('0.1', 140, 138, 20, 12),
+      box('kWh', 175, 105, 30, 16),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toMatch(/05731\.?8/);
+    expect(r.reading).toBe(5731.8);
+  });
+
+  it('keeps overlapping last roller digit (038429)', () => {
+    const boxes: OcrBox[] = [
+      box('03842', 40, 100, 110, 30), // x0=40 x1=150
+      box('9', 140, 101, 18, 30), // overlaps right edge
+      box('kWh', 175, 105, 28, 16),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toBe('038429');
+    expect(r.reading).toBe(38429);
+  });
+
+  it('keeps last digit when it is 1', () => {
+    const boxes: OcrBox[] = [
+      box('0', 40, 100, 18, 30),
+      box('3', 62, 101, 18, 30),
+      box('8', 84, 100, 18, 30),
+      box('4', 106, 102, 18, 30),
+      box('2', 128, 100, 18, 30),
+      box('1', 150, 101, 18, 30),
+      box('kWh', 180, 104, 28, 16),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toBe('038421');
+    expect(r.reading).toBe(38421);
+  });
+
+  it('keeps shorter red tenths digit beside kWh', () => {
+    const boxes: OcrBox[] = [
+      box('05731', 50, 100, 90, 30),
+      box('8', 145, 108, 18, 18), // shorter / slightly lower red window
+      box('kWh', 175, 105, 30, 16),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toMatch(/05731\.?8|057318/);
+    expect(r.reading).toBeGreaterThanOrEqual(5731);
+  });
 });

@@ -820,7 +820,8 @@ export function waterMeterDataFromInputs(prev: string, curr: string, rate: strin
 }
 
 export const UTILITY_METER_DEFINITIONS = [
-  { key: 'stock_room_1_2_elec', label: 'Stock Room 1 & 2 電錶 - 2樓走廊', kind: 'electricity' },
+  { key: 'stock_room_1_elec', label: 'Stock Room 1 電錶 - 2樓走廊', kind: 'electricity' },
+  { key: 'stock_room_2_elec', label: 'Stock Room 2 電錶 - 2樓走廊', kind: 'electricity' },
   { key: 'elec_213a_main', label: '213A 大電錶 - 2樓走廊', kind: 'electricity' },
   { key: 'water_213a', label: '213A 水錶 - 213男廁內', kind: 'water' },
   { key: 'water_213b', label: '213B 水錶 - 天台', kind: 'water' },

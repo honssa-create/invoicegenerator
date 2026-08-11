@@ -61,7 +61,38 @@ function hydrateItem(row: ItemRow): UtilityMeterRoundItem | null {
   };
 }
 
+/** Old combined Stock Room 1&2 slot → Stock Room 1 only (Room 2 is entered separately). */
+async function migrateLegacyStockRoomMeterKey(roundId: number): Promise<void> {
+  const legacy = (await db
+    .prepare(
+      `SELECT id FROM utility_meter_round_items
+       WHERE round_id = ? AND meter_key = 'stock_room_1_2_elec'`
+    )
+    .get(roundId)) as { id: number } | undefined;
+  if (!legacy) return;
+
+  const hasSr1 = (await db
+    .prepare(
+      `SELECT id FROM utility_meter_round_items
+       WHERE round_id = ? AND meter_key = 'stock_room_1_elec'`
+    )
+    .get(roundId)) as { id: number } | undefined;
+
+  if (hasSr1) {
+    await db
+      .prepare('DELETE FROM utility_meter_round_items WHERE id = ?')
+      .run(legacy.id);
+  } else {
+    await db
+      .prepare(
+        `UPDATE utility_meter_round_items SET meter_key = 'stock_room_1_elec' WHERE id = ?`
+      )
+      .run(legacy.id);
+  }
+}
+
 async function loadItems(roundId: number): Promise<UtilityMeterRoundItem[]> {
+  await migrateLegacyStockRoomMeterKey(roundId);
   const rows = (await db
     .prepare(
       'SELECT * FROM utility_meter_round_items WHERE round_id = ? ORDER BY id ASC'
@@ -260,15 +291,25 @@ async function syncItemToBilling(
       }
       return synced;
     }
-    case 'stock_room_1_2_elec': {
-      const a = await mergeElectricity(
+    case 'stock_room_1_elec': {
+      const synced = await mergeElectricity(
         userId,
         'Stock Room 1',
         period,
         { currReading: readingValue },
         prevFromRound,
       );
-      const b = await mergeElectricity(
+      if (usage != null) {
+        const sr1 = await findUnitByName(userId, 'Stock Room 1');
+        await mergeElectricity(userId, '213A', period, {
+          meterStockRoom1: usage,
+          otherUnitUsages: sr1 ? { [String(sr1.id)]: usage } : undefined,
+        });
+      }
+      return synced;
+    }
+    case 'stock_room_2_elec': {
+      const synced = await mergeElectricity(
         userId,
         'Stock Room 2',
         period,
@@ -276,18 +317,13 @@ async function syncItemToBilling(
         prevFromRound,
       );
       if (usage != null) {
-        const sr1 = await findUnitByName(userId, 'Stock Room 1');
         const sr2 = await findUnitByName(userId, 'Stock Room 2');
-        const otherUnitUsages: Record<string, number | null> = {};
-        if (sr1) otherUnitUsages[String(sr1.id)] = usage;
-        if (sr2) otherUnitUsages[String(sr2.id)] = usage;
         await mergeElectricity(userId, '213A', period, {
-          meterStockRoom1: usage,
           meterStockRoom2: usage,
-          otherUnitUsages: Object.keys(otherUnitUsages).length ? otherUnitUsages : undefined,
+          otherUnitUsages: sr2 ? { [String(sr2.id)]: usage } : undefined,
         });
       }
-      return a ?? b;
+      return synced;
     }
     default:
       return null;

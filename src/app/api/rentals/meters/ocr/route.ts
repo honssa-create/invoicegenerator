@@ -28,9 +28,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Image too large (max 10 MB)' }, { status: 400 });
   }
 
+  const kindRaw = String(formData.get('kind') || '').trim().toLowerCase();
+  const kind =
+    kindRaw === 'water' || kindRaw === 'electricity'
+      ? (kindRaw as 'water' | 'electricity')
+      : undefined;
+
   const buffer = Buffer.from(await file.arrayBuffer());
   try {
-    const result = await ocrUtilityMeterPhoto(buffer, file.type, file.name || 'meter.jpg');
+    const result = await ocrUtilityMeterPhoto(buffer, file.type, file.name || 'meter.jpg', kind);
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to OCR meter photo';

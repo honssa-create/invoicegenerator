@@ -1,7 +1,7 @@
 import db from './db';
 import { saveReceipt, ocrImageText } from './receipt';
 import { paddleOcrBoxes } from './paddle-ocr';
-import { parseMeterReadingFromBoxes, parseMeterReadingFromText } from './meter-ocr';
+import { parseMeterReadingFromBoxes, parseMeterReadingFromText, type MeterKind } from './meter-ocr';
 import {
   ensureDefaultRentalUnits,
   ensureRentRecord,
@@ -539,13 +539,14 @@ export async function ocrUtilityMeterPhoto(
   buffer: Buffer,
   mimeType: string,
   originalName = 'meter.jpg',
+  kind?: MeterKind | null,
 ): Promise<{ reading: number | null; ocr_text: string; photo_path: string; source?: string }> {
   const photo_path = await saveReceipt(buffer, mimeType, originalName);
 
   // 1) PaddleOCR sidecar — digit clustering for roller/LCD dials
   const boxes = await paddleOcrBoxes(buffer, mimeType);
   if (boxes?.length) {
-    const paddle = parseMeterReadingFromBoxes(boxes);
+    const paddle = parseMeterReadingFromBoxes(boxes, kind);
     if (paddle.reading != null) {
       return {
         reading: paddle.reading,

@@ -1,9 +1,11 @@
 /**
  * Utility meter dial reading extraction from OCR text / Paddle boxes.
- * Handles mechanical rollers, LCD digits, and slightly staggered digit windows.
+ * Prefers digits beside unit labels (kWh / m³); falls back to tall dial bands.
  */
 
 import type { OcrBox } from '@/lib/paddle-ocr';
+
+export type MeterKind = 'electricity' | 'water';
 
 /** Labels / specs that often OCR near the dial but are not the reading. */
 const NOISE_NUMBERS = new Set([
@@ -33,8 +35,18 @@ function midY(b: OcrBox): number {
   return (b.y0 + b.y1) / 2;
 }
 
+function midX(b: OcrBox): number {
+  return (b.x0 + b.x1) / 2;
+}
+
 function boxH(b: OcrBox): number {
   return Math.max(1, b.y1 - b.y0);
+}
+
+function median(nums: number[]): number {
+  if (!nums.length) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
 }
 
 function digitRunsInText(text: string): string[] {
@@ -117,11 +129,231 @@ function digitFragments(boxes: OcrBox[]): DigitFrag[] {
   return out;
 }
 
+function normalizeUnitText(text: string): string {
+  return text
+    .replace(/\s+/g, '')
+    .replace(/[·•･]/g, '')
+    .replace(/³/g, '3')
+    .replace(/\^3/g, '3')
+    .toLowerCase();
+}
+
+/** Detect kWh / m³ (and OCR variants) on a box. */
+export function boxMatchesMeterUnit(box: OcrBox, kind: MeterKind): boolean {
+  const n = normalizeUnitText(box.text);
+  if (kind === 'electricity') {
+    // kWh, kwh, kw·h, kW.h, sometimes "kwh" glued to other chars
+    if (/(?:^|[^a-z])kwh(?:[^a-z]|$)/.test(n) || n === 'kwh' || /kwh/.test(n)) {
+      // Avoid matching bare "kw" without h; require wh
+      return /k.?w.?h/.test(n) || n.includes('kwh');
+    }
+    return false;
+  }
+  // water: m3, m³, 立方米
+  if (n.includes('立方米')) return true;
+  if (/^m3$/.test(n) || /(?:^|[^a-z0-9])m3(?:[^a-z0-9]|$)/.test(n)) return true;
+  if (/^m$/.test(n)) return false; // too weak alone
+  return /m3/.test(n) && !/[a-z]{2,}m3/.test(n);
+}
+
+function assembleCluster(cluster: DigitFrag[]): string {
+  const ordered = [...cluster].sort((a, b) => a.box.x0 - b.box.x0);
+  const parts: string[] = [];
+  let lastX1 = -Infinity;
+  for (const f of ordered) {
+    if (f.box.x0 < lastX1 - 4 && parts.length) {
+      const prev = parts[parts.length - 1]!;
+      if (f.text.length > prev.length) parts[parts.length - 1] = f.text;
+      lastX1 = Math.max(lastX1, f.box.x1);
+      continue;
+    }
+    parts.push(f.text);
+    lastX1 = f.box.x1;
+  }
+  let raw = parts.join('');
+  raw = raw.replace(/\.(?=.*\.)/g, '');
+  if (raw.startsWith('.')) raw = `0${raw}`;
+  if (raw.endsWith('.') && !/\.\d/.test(raw.slice(0, -1))) raw = raw.slice(0, -1);
+  return raw;
+}
+
+function clusterMedianHeight(cluster: DigitFrag[]): number {
+  return median(cluster.map((f) => boxH(f.box)));
+}
+
+function singleDigitCount(cluster: DigitFrag[]): number {
+  return cluster.filter((f) => /^\d$/.test(f.text) || /^\.\d$/.test(f.text)).length;
+}
+
+function geometryBoost(cluster: DigitFrag[], maxH: number, centerY: number): number {
+  const h = clusterMedianHeight(cluster);
+  let boost = 0;
+  if (maxH > 0) boost += (h / maxH) * 40;
+  const cy = median(cluster.map((f) => midY(f.box)));
+  const ySpan = Math.max(1, maxH * 8);
+  boost += Math.max(0, 12 - (Math.abs(cy - centerY) / ySpan) * 12);
+  const singles = singleDigitCount(cluster);
+  if (singles >= 4) boost += 25;
+  else if (singles >= 3) boost += 10;
+  // Prefer similar-height fragments (roller / LCD row)
+  const heights = cluster.map((f) => boxH(f.box));
+  const mh = median(heights);
+  if (mh > 0) {
+    const similar = heights.filter((x) => Math.abs(x - mh) <= mh * 0.45).length;
+    if (similar >= cluster.length * 0.7) boost += 10;
+  }
+  return boost;
+}
+
+function scoreCluster(
+  cluster: DigitFrag[],
+  maxH: number,
+  centerY: number,
+  unitAnchored: boolean,
+): { raw: string; score: number } {
+  const raw = assembleCluster(cluster);
+  const base = scoreCandidate(raw);
+  if (base < 0) return { raw, score: -1 };
+  let score = base + geometryBoost(cluster, maxH, centerY);
+  if (unitAnchored) score += 50;
+  return { raw, score };
+}
+
+function clusterByYAndHeight(frags: DigitFrag[]): DigitFrag[][] {
+  if (!frags.length) return [];
+  const heights = frags.map((f) => boxH(f.box));
+  const medH = median(heights) || 20;
+  const yTol = Math.max(12, medH * 0.85);
+
+  const sorted = [...frags].sort((a, b) => midY(a.box) - midY(b.box) || a.box.x0 - b.box.x0);
+  const clusters: DigitFrag[][] = [];
+  for (const f of sorted) {
+    let placed = false;
+    for (const cluster of clusters) {
+      const refY = cluster.reduce((s, c) => s + midY(c.box), 0) / cluster.length;
+      const refH = clusterMedianHeight(cluster);
+      const hOk = Math.abs(boxH(f.box) - refH) <= Math.max(refH, boxH(f.box)) * 0.55;
+      if (Math.abs(midY(f.box) - refY) <= yTol && hOk) {
+        cluster.push(f);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) clusters.push([f]);
+  }
+  return clusters;
+}
+
+function pickFromClusters(
+  clusters: DigitFrag[][],
+  frags: DigitFrag[],
+  opts: { unitAnchored: boolean; allowSmallSingles: boolean },
+): { raw: string | null; score: number } {
+  const maxH = Math.max(...frags.map((f) => boxH(f.box)), 1);
+  const centerY = median(frags.map((f) => midY(f.box)));
+
+  let bestRaw: string | null = null;
+  let bestScore = -1;
+  let bestClusterH = 0;
+
+  for (const cluster of clusters) {
+    const { raw, score } = scoreCluster(cluster, maxH, centerY, opts.unitAnchored);
+    const h = clusterMedianHeight(cluster);
+    if (score > bestScore || (score === bestScore && h > bestClusterH)) {
+      bestScore = score;
+      bestRaw = raw;
+      bestClusterH = h;
+    }
+  }
+
+  // Single multi-digit boxes — only if height-competitive with best dial cluster
+  for (const f of frags) {
+    if (f.text.replace(/\D/g, '').length < 4) continue;
+    const h = boxH(f.box);
+    if (!opts.allowSmallSingles && bestClusterH > 0 && h < bestClusterH * 0.7) continue;
+    const s = scoreCandidate(f.text);
+    if (s < 0) continue;
+    let score = s + (h / maxH) * 40;
+    if (opts.unitAnchored) score += 50;
+    if (score > bestScore) {
+      bestScore = score;
+      bestRaw = f.text;
+      bestClusterH = h;
+    }
+  }
+
+  return { raw: bestRaw, score: bestScore };
+}
+
+/**
+ * Prefer digit band beside kWh / m³ at similar midY and height.
+ */
+function pickByUnitAnchor(
+  boxes: OcrBox[],
+  frags: DigitFrag[],
+  kind: MeterKind,
+): { raw: string | null; score: number } | null {
+  const units = boxes.filter((b) => boxMatchesMeterUnit(b, kind));
+  if (!units.length) return null;
+
+  const maxH = Math.max(...frags.map((f) => boxH(f.box)), 1);
+  const centerY = median(frags.map((f) => midY(f.box)));
+
+  let bestRaw: string | null = null;
+  let bestScore = -1;
+  let bestBandH = 0;
+
+  for (const unit of units) {
+    const uy = midY(unit);
+    const uh = boxH(unit);
+    const yTol = Math.max(14, Math.max(uh, maxH * 0.35) * 1.2);
+
+    // Prefer digits left of unit; fall back to any same-row digits
+    const sameRow = frags.filter((f) => Math.abs(midY(f.box) - uy) <= yTol);
+    if (!sameRow.length) continue;
+
+    const leftOf = sameRow.filter((f) => f.box.x1 <= unit.x0 + 8 || midX(f.box) < unit.x0);
+    let band = leftOf.length ? leftOf : sameRow;
+
+    // Drop tiny fragments vs dial-sized peers in the band
+    const bandMedH = median(band.map((f) => boxH(f.box))) || uh;
+    band = band.filter((f) => boxH(f.box) >= bandMedH * 0.45);
+
+    if (!band.length) continue;
+
+    const { raw, score } = scoreCluster(band, maxH, centerY, true);
+    if (score < 0) continue;
+    const h = clusterMedianHeight(band);
+    // Prefer taller dial bands when multiple unit hits (e.g. tiny "imp/kWh")
+    if (score > bestScore || (score === bestScore && h > bestBandH)) {
+      bestScore = score;
+      bestRaw = raw;
+      bestBandH = h;
+    }
+  }
+
+  if (!bestRaw || bestScore < 0) return null;
+  return { raw: bestRaw, score: bestScore };
+}
+
+function finish(raw: string | null): { reading: number | null; raw: string | null } {
+  if (!raw) return { reading: null, raw: null };
+  const n = Number(raw);
+  return {
+    reading: Number.isFinite(n) ? n : null,
+    raw,
+  };
+}
+
 /**
  * Cluster digit fragments into horizontal bands (tolerate staggered Y),
  * concatenate left→right, pick the best meter-like reading.
+ * When `kind` is set, prefer digits beside kWh (electricity) or m³ (water).
  */
-export function parseMeterReadingFromBoxes(boxes: OcrBox[]): {
+export function parseMeterReadingFromBoxes(
+  boxes: OcrBox[],
+  kind?: MeterKind | null,
+): {
   reading: number | null;
   raw: string | null;
 } {
@@ -134,73 +366,24 @@ export function parseMeterReadingFromBoxes(boxes: OcrBox[]): {
     return { reading, raw: reading != null ? String(reading) : null };
   }
 
-  const heights = frags.map((f) => boxH(f.box)).sort((a, b) => a - b);
-  const medH = heights[Math.floor(heights.length / 2)] || 20;
-  const yTol = Math.max(12, medH * 0.85);
-
-  const sorted = [...frags].sort((a, b) => midY(a.box) - midY(b.box) || a.box.x0 - b.box.x0);
-  const clusters: DigitFrag[][] = [];
-  for (const f of sorted) {
-    let placed = false;
-    for (const cluster of clusters) {
-      const refY = cluster.reduce((s, c) => s + midY(c.box), 0) / cluster.length;
-      if (Math.abs(midY(f.box) - refY) <= yTol) {
-        cluster.push(f);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) clusters.push([f]);
-  }
-
-  let bestRaw: string | null = null;
-  let bestScore = -1;
-  for (const cluster of clusters) {
-    const ordered = [...cluster].sort((a, b) => a.box.x0 - b.box.x0);
-    // Deduplicate overlapping OCR of same digit window
-    const parts: string[] = [];
-    let lastX1 = -Infinity;
-    for (const f of ordered) {
-      if (f.box.x0 < lastX1 - 4 && parts.length) {
-        // Heavy overlap: keep longer / prefer existing
-        const prev = parts[parts.length - 1];
-        if (f.text.length > prev.length) parts[parts.length - 1] = f.text;
-        lastX1 = Math.max(lastX1, f.box.x1);
-        continue;
-      }
-      parts.push(f.text);
-      lastX1 = f.box.x1;
-    }
-    let raw = parts.join('');
-    // Normalize accidental double / dangling dots ("05731" + ".8" → "05731.8")
-    raw = raw.replace(/\.(?=.*\.)/g, '');
-    if (raw.startsWith('.')) raw = `0${raw}`;
-    if (raw.endsWith('.') && !/\.\d/.test(raw.slice(0, -1))) raw = raw.slice(0, -1);
-    const s = scoreCandidate(raw);
-    if (s > bestScore) {
-      bestScore = s;
-      bestRaw = raw;
+  if (kind === 'electricity' || kind === 'water') {
+    const anchored = pickByUnitAnchor(boxes, frags, kind);
+    if (anchored?.raw && anchored.score >= 0) {
+      return finish(anchored.raw);
     }
   }
 
-  // Also consider any single multi-digit box that already looks complete
-  for (const f of frags) {
-    const s = scoreCandidate(f.text);
-    if (s > bestScore) {
-      bestScore = s;
-      bestRaw = f.text;
-    }
-  }
+  const clusters = clusterByYAndHeight(frags);
+  const picked = pickFromClusters(clusters, frags, {
+    unitAnchored: false,
+    allowSmallSingles: false,
+  });
 
-  if (!bestRaw || bestScore < 0) {
+  if (!picked.raw || picked.score < 0) {
     const flat = boxes.map((b) => b.text).join('\n');
     const reading = parseMeterReadingFromText(flat);
     return { reading, raw: reading != null ? String(reading) : null };
   }
 
-  const n = Number(bestRaw);
-  return {
-    reading: Number.isFinite(n) ? n : null,
-    raw: bestRaw,
-  };
+  return finish(picked.raw);
 }

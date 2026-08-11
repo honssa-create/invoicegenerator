@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseMeterReadingFromBoxes, parseMeterReadingFromText } from '@/lib/meter-ocr';
+import {
+  boxMatchesMeterUnit,
+  parseMeterReadingFromBoxes,
+  parseMeterReadingFromText,
+} from '@/lib/meter-ocr';
 import type { OcrBox } from '@/lib/paddle-ocr';
 
 function box(text: string, x0: number, y0: number, w = 20, h = 28): OcrBox {
@@ -14,6 +18,22 @@ describe('parseMeterReadingFromText', () => {
 
   it('keeps decimal readings', () => {
     expect(parseMeterReadingFromText('05731.8 kWh 800imp')).toBe(5731.8);
+  });
+});
+
+describe('boxMatchesMeterUnit', () => {
+  it('matches kWh variants for electricity', () => {
+    expect(boxMatchesMeterUnit(box('kWh', 0, 0), 'electricity')).toBe(true);
+    expect(boxMatchesMeterUnit(box('kW·h', 0, 0), 'electricity')).toBe(true);
+    expect(boxMatchesMeterUnit(box('KWH', 0, 0), 'electricity')).toBe(true);
+    expect(boxMatchesMeterUnit(box('m3', 0, 0), 'electricity')).toBe(false);
+  });
+
+  it('matches m3 variants for water', () => {
+    expect(boxMatchesMeterUnit(box('m3', 0, 0), 'water')).toBe(true);
+    expect(boxMatchesMeterUnit(box('m³', 0, 0), 'water')).toBe(true);
+    expect(boxMatchesMeterUnit(box('立方米', 0, 0), 'water')).toBe(true);
+    expect(boxMatchesMeterUnit(box('kWh', 0, 0), 'water')).toBe(false);
   });
 });
 
@@ -32,7 +52,7 @@ describe('parseMeterReadingFromBoxes', () => {
       box('kWh', 180, 105, 30, 16),
       box('220', 20, 200, 24, 14),
     ];
-    const r = parseMeterReadingFromBoxes(boxes);
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
     expect(r.raw).toBe('038429');
     expect(r.reading).toBe(38429);
   });
@@ -46,7 +66,7 @@ describe('parseMeterReadingFromBoxes', () => {
       box('800', 20, 180, 24, 14),
       box('kWh', 180, 105, 30, 16),
     ];
-    const r = parseMeterReadingFromBoxes(boxes);
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
     expect(r.raw).toMatch(/05731\.?8/);
     expect(r.reading).toBe(5731.8);
   });
@@ -58,7 +78,7 @@ describe('parseMeterReadingFromBoxes', () => {
       box('kWh', 170, 85, 30, 16),
       box('220', 40, 160, 24, 12),
     ];
-    const r = parseMeterReadingFromBoxes(boxes);
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
     expect(r.raw).toBe('0031622');
     expect(r.reading).toBe(31622);
   });
@@ -71,8 +91,68 @@ describe('parseMeterReadingFromBoxes', () => {
       box('0.01', 150, 160, 22, 12),
       box('1.5', 20, 200, 20, 12),
     ];
-    const r = parseMeterReadingFromBoxes(boxes);
+    const r = parseMeterReadingFromBoxes(boxes, 'water');
     expect(r.raw).toBe('00007');
     expect(r.reading).toBe(7);
+  });
+
+  it('picks dial beside kWh over a longer distractor serial', () => {
+    const boxes: OcrBox[] = [
+      box('12345678', 10, 20, 80, 12), // small serial, longer string
+      box('0', 40, 100, 18, 32),
+      box('3', 62, 101, 18, 32),
+      box('8', 84, 100, 18, 32),
+      box('4', 106, 102, 18, 32),
+      box('2', 128, 100, 18, 32),
+      box('9', 150, 101, 18, 32),
+      box('kWh', 180, 104, 28, 16),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toBe('038429');
+    expect(r.reading).toBe(38429);
+  });
+
+  it('picks water dial beside m3 over distractors', () => {
+    const boxes: OcrBox[] = [
+      box('998877', 10, 10, 60, 12),
+      box('00007', 60, 90, 100, 28),
+      box('m³', 170, 95, 24, 14),
+      box('0.1', 120, 140, 18, 12),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'water');
+    expect(r.raw).toBe('00007');
+    expect(r.reading).toBe(7);
+  });
+
+  it('falls back to tall dial when unit label is missing', () => {
+    const boxes: OcrBox[] = [
+      box('999999', 10, 10, 70, 12),
+      box('0', 40, 100, 18, 32),
+      box('3', 62, 101, 18, 32),
+      box('8', 84, 100, 18, 32),
+      box('4', 106, 102, 18, 32),
+      box('2', 128, 100, 18, 32),
+      box('9', 150, 101, 18, 32),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toBe('038429');
+    expect(r.reading).toBe(38429);
+  });
+
+  it('does not lock onto wrong-kind unit; uses height fallback', () => {
+    // Only m3 present while scanning as electricity — ignore water unit, use tall dial
+    const boxes: OcrBox[] = [
+      box('11111111', 10, 10, 80, 12),
+      box('0', 40, 100, 18, 32),
+      box('3', 62, 101, 18, 32),
+      box('8', 84, 100, 18, 32),
+      box('4', 106, 102, 18, 32),
+      box('2', 128, 100, 18, 32),
+      box('9', 150, 101, 18, 32),
+      box('m3', 180, 104, 24, 14),
+    ];
+    const r = parseMeterReadingFromBoxes(boxes, 'electricity');
+    expect(r.raw).toBe('038429');
+    expect(r.reading).toBe(38429);
   });
 });

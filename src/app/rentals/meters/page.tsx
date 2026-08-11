@@ -132,8 +132,10 @@ export default function UtilityMeterReadingsPage() {
     try {
       const compressed = await compressImage(file, { maxDim: 1600, quality: 0.65, targetBytes: 300 * 1024 });
       const previewUrl = URL.createObjectURL(compressed.file);
+      const kind = UTILITY_METER_DEFINITIONS.find((d) => d.key === key)?.kind || 'electricity';
       const fd = new FormData();
       fd.append('photo', compressed.file);
+      fd.append('kind', kind);
       const res = await fetch('/api/rentals/meters/ocr', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) {

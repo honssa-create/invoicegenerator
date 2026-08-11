@@ -47,10 +47,11 @@ Restart `npm run dev`. Leave `GEMINI_API_KEY` unset to force the Paddle path whi
 ## Railway (second service)
 
 1. In the same Railway project: **+ New** → GitHub repo (same repo).
-2. Service **Settings → Root Directory:** `services/paddle-ocr` (uses this Dockerfile).
+2. Service **Settings → Root Directory:** `services/paddle-ocr` (uses this folder’s `Dockerfile` + `railway.json`; builder is **DOCKERFILE**, not Railpack/`npm`).
 3. Allocate **≥2GB RAM**. Private networking is enough (no public domain required).
 4. On the **Next.js** service set:
    ```bash
    PADDLE_OCR_URL=http://<paddle-service-name>.railway.internal:8000
    ```
    Optional: set the same `PADDLE_OCR_SECRET` on both services.
+5. Clear any dashboard start command that says `npm start` on the Paddle service (this folder’s `railway.json` starts `uvicorn`).

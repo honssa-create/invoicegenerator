@@ -94,15 +94,18 @@ export async function POST(request: Request) {
     orderType,
   });
 
-  if (type === 'due_soon') {
-    await db.prepare(
-      "UPDATE invoices SET last_due_soon_reminder_at = datetime('now') WHERE id = ? AND user_id = ?",
-    ).run(invoiceId, ownerId);
-  } else {
-    await db.prepare("UPDATE invoices SET last_reminder_at = datetime('now') WHERE id = ? AND user_id = ?").run(
-      invoiceId,
-      ownerId,
-    );
+  // Only mark as reminded when the email actually sent — failures stay on the list.
+  if (result.sent) {
+    if (type === 'due_soon') {
+      await db.prepare(
+        "UPDATE invoices SET last_due_soon_reminder_at = datetime('now') WHERE id = ? AND user_id = ?",
+      ).run(invoiceId, ownerId);
+    } else {
+      await db.prepare("UPDATE invoices SET last_reminder_at = datetime('now') WHERE id = ? AND user_id = ?").run(
+        invoiceId,
+        ownerId,
+      );
+    }
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -131,6 +134,13 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: result.error || 'Failed to send email', sent: false, provider: result.provider },
       { status: 502 },
+    );
+  }
+
+  if (!result.sent) {
+    return NextResponse.json(
+      { error: result.error || 'Email was not sent', sent: false, provider: result.provider },
+      { status: 422 },
     );
   }
 

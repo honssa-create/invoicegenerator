@@ -22,7 +22,11 @@ async function runReminders(userId: number | null) {
       result = { sent: r.sent, provider: r.provider };
     }
 
-    await markReminded.run(inv.id);
+    // Mark handled only on successful send, or when there is no recipient (nothing to retry).
+    // Send failures / Resend skips stay on the list for another attempt.
+    if (result.sent || !inv.to) {
+      await markReminded.run(inv.id);
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     let msg: string;
@@ -33,7 +37,7 @@ async function runReminders(userId: number | null) {
     } else if (result.provider === 'skipped') {
       msg = `[System] Automated overdue payment reminder to ${inv.to} skipped on ${today} (Resend not configured for this order type)`;
     } else {
-      msg = `[System] Automated overdue payment reminder email prepared for ${inv.to} on ${today}`;
+      msg = `[System] Automated overdue payment reminder to ${inv.to} failed on ${today}`;
     }
     await logActivity('invoice', inv.id, inv.user_id, 'activity', 'System', msg);
     if (inv.order_id) {

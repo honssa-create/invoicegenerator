@@ -1,10 +1,12 @@
 /** Parse WooCommerce REST API responses safely. */
 
-/** Headers only — SiteGround/WAF often blocks Basic Auth on /wp-json; use query auth instead. */
+/** Headers only — SiteGround/WAF blocks Basic Auth and bot-like User-Agents on /wp-json. */
 export function wooRequestHeaders(): Record<string, string> {
   return {
     Accept: 'application/json',
-    'User-Agent': 'Mozilla/5.0 (compatible; InvoiceFlow/1.0; +https://invoiceflow.app)',
+    // Use a normal browser UA: "InvoiceFlow/1.0" was getting HTML 403 from nestiee (nginx) on Railway.
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
 }
 

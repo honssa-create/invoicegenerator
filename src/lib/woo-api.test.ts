@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWooApiJson, wooApiErrorMessage } from './woo-api';
+import { appendWooQueryAuth, parseWooApiJson, wooApiErrorMessage } from './woo-api';
 
 describe('parseWooApiJson', () => {
   it('parses valid JSON', () => {
@@ -16,5 +16,15 @@ describe('parseWooApiJson', () => {
 describe('wooApiErrorMessage', () => {
   it('extracts Woo JSON error messages', () => {
     expect(wooApiErrorMessage(401, '{"message":"Invalid signature."}', 'nestiee')).toMatch(/Invalid signature/);
+  });
+});
+
+describe('appendWooQueryAuth', () => {
+  it('sets consumer_key and consumer_secret on the query', () => {
+    const params = new URLSearchParams({ per_page: '1' });
+    appendWooQueryAuth(params, 'ck_test', 'cs_test');
+    expect(params.get('consumer_key')).toBe('ck_test');
+    expect(params.get('consumer_secret')).toBe('cs_test');
+    expect(params.get('per_page')).toBe('1');
   });
 });

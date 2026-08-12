@@ -1,7 +1,7 @@
 import type { HubPlatform } from './hub';
 import { getIntegrationSettings } from './integration-settings-server';
 import { normalizeWooStoreUrl } from './woo-url';
-import { parseWooApiJson, wooApiErrorMessage, wooRequestHeaders } from './woo-api';
+import { appendWooQueryAuth, parseWooApiJson, wooApiErrorMessage, wooRequestHeaders } from './woo-api';
 import type { HubImportDateRange } from './hub-import';
 import { orderCreatedInRange } from './hub-import';
 import { formatWooAddress } from './orders';
@@ -79,9 +79,11 @@ async function wooApiGet(
   storeUrl: string,
   query: URLSearchParams
 ): Promise<{ ok: boolean; status: number; body: string }> {
+  // Query-string auth: SiteGround WAF returns HTML 403 for Basic Auth on /wp-json.
+  appendWooQueryAuth(query, store.consumerKey, store.consumerSecret);
   const url = `${storeUrl}/wp-json/wc/v3/orders?${query.toString()}`;
   const res = await fetch(url, {
-    headers: wooRequestHeaders(store.consumerKey, store.consumerSecret),
+    headers: wooRequestHeaders(),
     cache: 'no-store',
     redirect: 'follow',
   });

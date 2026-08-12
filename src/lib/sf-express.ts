@@ -11,12 +11,21 @@ export function sfExpressApiUrl(environment: 'sandbox' | 'production'): string {
   return environment === 'production' ? SF_PROD_URL : SF_SANDBOX_URL;
 }
 
-/** Base64(MD5(msgData + timestamp + checkword)) per 丰桥 Open Platform. */
+/**
+ * SF 丰桥 msgDigest:
+ * Base64(MD5(URLEncoder.encode(msgData + timestamp + checkword, "UTF-8")))
+ * Hex escapes must be uppercase (Java URLEncoder style).
+ */
+export function sfUrlEncode(value: string): string {
+  return encodeURIComponent(value)
+    .replace(/%[0-9a-f]{2}/gi, (m) => m.toUpperCase())
+    .replace(/%20/g, '+');
+}
+
+/** Base64(MD5(URL-encoded msgData + timestamp + checkword)) per 丰桥 Open Platform. */
 export function sfMsgDigest(msgData: string, timestamp: string, checkword: string): string {
-  return crypto
-    .createHash('md5')
-    .update(msgData + timestamp + checkword, 'utf8')
-    .digest('base64');
+  const toVerify = sfUrlEncode(msgData + timestamp + checkword);
+  return crypto.createHash('md5').update(toVerify, 'utf8').digest('base64');
 }
 
 export interface SfContactInfo {

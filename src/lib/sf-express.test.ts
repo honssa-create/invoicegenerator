@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
@@ -63,14 +62,12 @@ function sampleOrder(overrides: Partial<Order> = {}): Order {
 }
 
 describe('sfMsgDigest', () => {
-  it('matches Base64(MD5(msgData + timestamp + checkword))', () => {
-    const msgData = '{"orderId":"1"}';
-    const timestamp = '1710000000000';
-    const checkword = 'secret';
-    const expected = createHash('md5')
-      .update(msgData + timestamp + checkword, 'utf8')
-      .digest('base64');
-    expect(sfMsgDigest(msgData, timestamp, checkword)).toBe(expected);
+  it('matches SF documented vector (URL-encode then MD5 then Base64)', () => {
+    // From 丰桥 docs / community examples
+    const msgData = '{"language":"zh-CN","orderId":"QIAO-20200618-004"}';
+    const timestamp = '12312334453453';
+    const checkword = 'fjcg5PGKaNpPSHFAZ4QsCOkV71R3zVci';
+    expect(sfMsgDigest(msgData, timestamp, checkword)).toBe('IIKJtuLVzoFTu4kHI8M8vA==');
   });
 });
 

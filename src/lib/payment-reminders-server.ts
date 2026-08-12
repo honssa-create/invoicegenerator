@@ -1,5 +1,5 @@
 import db from '@/lib/db';
-import { getInvoiceWithDetails } from '@/lib/invoices';
+import { getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
 import {
   DUE_SOON_DAYS,
   defaultReminderBody,
@@ -26,6 +26,7 @@ type ReminderRow = {
   customer_name: string | null;
   customer_email: string | null;
   order_email: string | null;
+  invoice_email: string | null;
   order_fields_json: string | null;
 };
 
@@ -40,6 +41,14 @@ function orderTypeFromFieldsJson(json: string | null | undefined): string | null
   }
 }
 
+function preferEmail(...candidates: Array<string | null | undefined>): string | null {
+  for (const raw of candidates) {
+    const v = (raw || '').trim();
+    if (v) return v;
+  }
+  return null;
+}
+
 function userFilter(userId: number | null, params: (number | string)[]): string {
   if (userId === null) return '';
   params.push(userId);
@@ -49,7 +58,7 @@ function userFilter(userId: number | null, params: (number | string)[]): string 
 async function toCandidate(row: ReminderRow, type: ReminderType, daysOffset: number): Promise<ReminderCandidate> {
   const details = await getInvoiceWithDetails(row.id, row.user_id);
   const total = details?.total ?? 0;
-  const to = row.order_email || row.customer_email || null;
+  const to = preferEmail(row.invoice_email, row.order_email, row.customer_email);
   const { order_fields_json, ...rest } = row;
   return {
     ...rest,
@@ -82,11 +91,14 @@ export async function listReminderCandidates(
   const wantDueSoon = types.includes('due_soon');
   const candidates: ReminderCandidate[] = [];
 
+  await markSentInvoicesOverdue(userId);
+
   if (wantOverdue) {
     const params: (number | string)[] = [overdueDays];
     const query = `
       SELECT i.id, i.user_id, i.invoice_number, i.status, i.order_id, i.issue_date, i.due_date,
              i.created_at, i.last_reminder_at, i.last_due_soon_reminder_at,
+             i.email AS invoice_email,
              c.name AS customer_name, c.email AS customer_email,
              o.customer_email AS order_email,
              o.fields_json AS order_fields_json,
@@ -111,6 +123,7 @@ export async function listReminderCandidates(
     const query = `
       SELECT i.id, i.user_id, i.invoice_number, i.status, i.order_id, i.issue_date, i.due_date,
              i.created_at, i.last_reminder_at, i.last_due_soon_reminder_at,
+             i.email AS invoice_email,
              c.name AS customer_name, c.email AS customer_email,
              o.customer_email AS order_email,
              o.fields_json AS order_fields_json,

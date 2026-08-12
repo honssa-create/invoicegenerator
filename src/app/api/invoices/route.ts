@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { generateInvoiceNumber, getInvoiceWithDetails } from '@/lib/invoices';
+import { generateInvoiceNumber, getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -13,6 +13,7 @@ export async function GET(request: Request) {
   }
 
   const ownerId = await getDataOwnerId(session.userId);
+  await markSentInvoicesOverdue(ownerId);
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
 

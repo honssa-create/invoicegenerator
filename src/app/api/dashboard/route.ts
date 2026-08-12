@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getInvoiceWithDetails } from '@/lib/invoices';
+import { getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -9,8 +10,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = await getDataOwnerId(session.userId);
+  await markSentInvoicesOverdue(ownerId);
+
   const totalInvoices = (
-    await db.prepare('SELECT COUNT(*) as count FROM invoices WHERE user_id = ?').get(session.userId) as {
+    await db.prepare('SELECT COUNT(*) as count FROM invoices WHERE user_id = ?').get(ownerId) as {
       count: number;
     }
   ).count;
@@ -23,18 +27,18 @@ export async function GET(request: Request) {
          JOIN invoice_items ii ON ii.invoice_id = i.id
          WHERE i.user_id = ? AND i.status = 'paid'`
       )
-      .get(session.userId) as { subtotal: number }
+      .get(ownerId) as { subtotal: number }
   ).subtotal;
 
   const pendingInvoices = await db
     .prepare(
       `SELECT i.id FROM invoices i WHERE i.user_id = ? AND i.status IN ('sent', 'overdue')`
     )
-    .all(session.userId) as { id: number }[];
+    .all(ownerId) as { id: number }[];
 
   let pendingAmount = 0;
   for (const inv of pendingInvoices) {
-    const details = await getInvoiceWithDetails(inv.id, session.userId);
+    const details = await getInvoiceWithDetails(inv.id, ownerId);
     if (details) pendingAmount += details.total;
   }
 
@@ -43,21 +47,21 @@ export async function GET(request: Request) {
       .prepare(
         `SELECT COUNT(*) as count FROM invoices WHERE user_id = ? AND status = 'overdue'`
       )
-      .get(session.userId) as { count: number }
+      .get(ownerId) as { count: number }
   ).count;
 
   const recentIds = await db
     .prepare(
       `SELECT id FROM invoices WHERE user_id = ? ORDER BY created_at DESC LIMIT 5`
     )
-    .all(session.userId) as { id: number }[];
+    .all(ownerId) as { id: number }[];
 
   const recentInvoices = (await Promise.all(
-    recentIds.map((r) => getInvoiceWithDetails(r.id, session.userId))
+    recentIds.map((r) => getInvoiceWithDetails(r.id, ownerId))
   )).filter(Boolean);
 
   const customerCount = (
-    await db.prepare('SELECT COUNT(*) as count FROM customers WHERE user_id = ?').get(session.userId) as {
+    await db.prepare('SELECT COUNT(*) as count FROM customers WHERE user_id = ?').get(ownerId) as {
       count: number;
     }
   ).count;
@@ -70,7 +74,7 @@ export async function GET(request: Request) {
          COALESCE(SUM(amount_rmb), 0) as rmb
        FROM expenses WHERE user_id = ?`
     )
-    .get(session.userId) as { count: number; hkd: number; rmb: number };
+    .get(ownerId) as { count: number; hkd: number; rmb: number };
 
   return NextResponse.json({
     totalInvoices,

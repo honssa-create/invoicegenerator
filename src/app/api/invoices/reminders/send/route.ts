@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const to = (body.to || '').trim() || order?.customer_email || inv.email || inv.customer_email || '';
+  const to = (body.to || '').trim() || inv.email || order?.customer_email || inv.customer_email || '';
   if (!to) {
     return NextResponse.json({ error: 'No recipient email — add an address before sending' }, { status: 400 });
   }

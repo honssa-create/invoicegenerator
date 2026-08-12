@@ -13,6 +13,30 @@ export async function nextInvoiceNumberAfter(_userId?: number, _current?: string
   return allocateGlobalRecordNumber('invoice');
 }
 
+/**
+ * Flip `sent` invoices past their due date to `overdue`.
+ * When `userId` is null, updates every user (cron / global refresh).
+ */
+export async function markSentInvoicesOverdue(userId: number | null = null): Promise<number> {
+  const params: (number | string)[] = [];
+  let userClause = '';
+  if (userId !== null) {
+    userClause = ' AND user_id = ?';
+    params.push(userId);
+  }
+  const result = await db
+    .prepare(
+      `UPDATE invoices
+       SET status = 'overdue', updated_at = datetime('now')
+       WHERE status = 'sent'
+         AND due_date IS NOT NULL AND trim(due_date) != ''
+         AND due_date::date < CURRENT_DATE
+         ${userClause}`,
+    )
+    .run(...params);
+  return result.changes;
+}
+
 export async function getInvoiceWithDetails(invoiceId: number | string, userId: number): Promise<InvoiceWithDetails | null> {
   const invoice = await db
     .prepare(

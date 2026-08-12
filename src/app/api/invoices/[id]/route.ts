@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { getInvoiceWithDetails } from '@/lib/invoices';
+import { getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashInvoice } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
@@ -61,6 +61,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   }
 
   const ownerId = await getDataOwnerId(session.userId);
+  await markSentInvoicesOverdue(ownerId);
   const invoice = await getInvoiceWithDetails(Number(params.id), ownerId);
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });

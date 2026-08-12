@@ -284,7 +284,7 @@ export async function cloudPrintWaybills(
     credentials.print_template_code.trim() || SF_EXPRESS_DEFAULT_PRINT_TEMPLATE;
   const payload = {
     templateCode,
-    version: '1.0',
+    version: '2.0',
     fileType: 'pdf',
     documents: [{ masterWaybillNo: waybillNo }],
   };

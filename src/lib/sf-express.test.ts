@@ -13,6 +13,7 @@ import {
   extractCloudPrintPdfUrl,
   extractWaybillNo,
   sfMsgDigest,
+  toTraditionalSfMessage,
 } from './sf-express';
 import type { Order } from './orders';
 
@@ -63,11 +64,18 @@ function sampleOrder(overrides: Partial<Order> = {}): Order {
 
 describe('sfMsgDigest', () => {
   it('matches SF documented vector (URL-encode then MD5 then Base64)', () => {
-    // From 丰桥 docs / community examples
+    // From 豐橋 docs / community examples
     const msgData = '{"language":"zh-CN","orderId":"QIAO-20200618-004"}';
     const timestamp = '12312334453453';
     const checkword = 'fjcg5PGKaNpPSHFAZ4QsCOkV71R3zVci';
     expect(sfMsgDigest(msgData, timestamp, checkword)).toBe('IIKJtuLVzoFTu4kHI8M8vA==');
+  });
+});
+
+describe('toTraditionalSfMessage', () => {
+  it('converts common simplified SF errors to traditional', () => {
+    expect(toTraditionalSfMessage('数字签名无效')).toBe('數字簽名無效');
+    expect(toTraditionalSfMessage('顾客编码不存在或错误')).toBe('顧客編碼不存在或錯誤');
   });
 });
 

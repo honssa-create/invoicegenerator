@@ -12,7 +12,7 @@ export function sfExpressApiUrl(environment: 'sandbox' | 'production'): string {
 }
 
 /**
- * SF 丰桥 msgDigest:
+ * SF 豐橋 msgDigest:
  * Base64(MD5(URLEncoder.encode(msgData + timestamp + checkword, "UTF-8")))
  * Hex escapes must be uppercase (Java URLEncoder style).
  */
@@ -22,10 +22,48 @@ export function sfUrlEncode(value: string): string {
     .replace(/%20/g, '+');
 }
 
-/** Base64(MD5(URL-encoded msgData + timestamp + checkword)) per 丰桥 Open Platform. */
+/** Base64(MD5(URL-encoded msgData + timestamp + checkword)) per 豐橋 Open Platform. */
 export function sfMsgDigest(msgData: string, timestamp: string, checkword: string): string {
   const toVerify = sfUrlEncode(msgData + timestamp + checkword);
   return crypto.createHash('md5').update(toVerify, 'utf8').digest('base64');
+}
+
+/** Map common SF simplified-Chinese API errors to Traditional Chinese for HK UI. */
+export function toTraditionalSfMessage(message: string): string {
+  const map: Record<string, string> = {
+    数字签名无效: '數字簽名無效',
+    系统异常: '系統異常',
+    参数错误: '參數錯誤',
+    必填参数为空: '必填參數為空',
+    顾客编码不存在或错误: '顧客編碼不存在或錯誤',
+    校验码错误: '校驗碼錯誤',
+    重复下单: '重複下單',
+    月结卡号不合法或不存在: '月結卡號不合法或不存在',
+    寄件地址错误: '寄件地址錯誤',
+    到件地址错误: '到件地址錯誤',
+  };
+  const trimmed = message.trim();
+  if (map[trimmed]) return map[trimmed];
+  let out = trimmed;
+  for (const [simp, trad] of Object.entries(map)) {
+    if (out.includes(simp)) out = out.split(simp).join(trad);
+  }
+  return out
+    .replace(/顺丰/g, '順豐')
+    .replace(/运单/g, '運單')
+    .replace(/面单/g, '面單')
+    .replace(/校验/g, '校驗')
+    .replace(/顾客/g, '顧客')
+    .replace(/编码/g, '編碼')
+    .replace(/错误/g, '錯誤')
+    .replace(/参数/g, '參數')
+    .replace(/无效/g, '無效')
+    .replace(/签名/g, '簽名')
+    .replace(/系统/g, '系統')
+    .replace(/异常/g, '異常')
+    .replace(/重复/g, '重複')
+    .replace(/月结/g, '月結')
+    .replace(/卡号/g, '卡號');
 }
 
 export interface SfContactInfo {
@@ -137,13 +175,13 @@ function sfErrorMessage(apiBody: Record<string, unknown>, fallback: string): str
     data.message,
   ];
   for (const c of candidates) {
-    if (typeof c === 'string' && c.trim()) return c.trim();
+    if (typeof c === 'string' && c.trim()) return toTraditionalSfMessage(c.trim());
   }
   const code = apiBody.apiResultCode;
   if (typeof code === 'string' && code && code !== 'A1000') {
-    return `${fallback} (${code})`;
+    return toTraditionalSfMessage(`${fallback} (${code})`);
   }
-  return fallback;
+  return toTraditionalSfMessage(fallback);
 }
 
 export async function sfCallService(

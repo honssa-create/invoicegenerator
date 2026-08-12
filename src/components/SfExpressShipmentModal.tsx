@@ -267,9 +267,9 @@ export default function SfExpressShipmentModal({ orderId, onClose, onSuccess }: 
                   value={form.expressTypeId}
                   onChange={(e) => setField('expressTypeId', e.target.value)}
                 >
-                  <option value="1">1 — 顺丰特快</option>
-                  <option value="2">2 — 顺丰标快</option>
-                  <option value="6">6 — 顺丰即日</option>
+                  <option value="1">1 — 順豐特快</option>
+                  <option value="2">2 — 順豐標快</option>
+                  <option value="6">6 — 順豐即日</option>
                   {!['1', '2', '6', ''].includes(form.expressTypeId) && (
                     <option value={form.expressTypeId}>{form.expressTypeId} — custom</option>
                   )}

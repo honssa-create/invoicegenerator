@@ -360,14 +360,14 @@ export default function IntegrationsSettingsPanel({
           <p className="text-sm text-gray-500 mt-1">
             From{' '}
             <a href="https://qiao.sf-express.com" target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
-              丰桥 / SF Open Platform
+              豐橋 / SF Open Platform
             </a>{' '}
             — partner ID, checkword, monthly card, and sender printed on HK local labels.
           </p>
         </div>
         <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-medium text-gray-500">Partner ID 顾客编码</label>
+            <label className="text-xs font-medium text-gray-500">Partner ID 顧客編碼</label>
             <input
               type="text"
               value={sf.partner_id}
@@ -376,7 +376,7 @@ export default function IntegrationsSettingsPanel({
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500">Checkword 校验码</label>
+            <label className="text-xs font-medium text-gray-500">Checkword 校驗碼</label>
             <input
               type="password"
               value={sf.checkword}
@@ -386,7 +386,7 @@ export default function IntegrationsSettingsPanel({
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500">Monthly Card 月结卡号</label>
+            <label className="text-xs font-medium text-gray-500">Monthly Card 月結卡號</label>
             <input
               type="text"
               value={sf.monthly_card}
@@ -411,7 +411,7 @@ export default function IntegrationsSettingsPanel({
             )}
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500">Express Type ID (1 顺丰特快 / 2 顺丰标快 / 6 顺丰即日)</label>
+            <label className="text-xs font-medium text-gray-500">Express Type ID (1 順豐特快 / 2 順豐標快 / 6 順豐即日)</label>
             <input
               type="text"
               value={sf.express_type_id}

@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getDataOwnerId } from '@/lib/org-server';
 import { ingestWooOrders } from '@/lib/hub-sync';
+import { setSyncState } from '@/lib/hub-server';
 import { getWooStoreSetupIssue } from '@/lib/woocommerce';
 import type { WooOrder } from '@/lib/woocommerce';
 import { parseHubImportDateRange } from '@/lib/hub-import';
@@ -59,5 +60,18 @@ export async function POST(
     return NextResponse.json({ error: result.errors[0], result, date_range: parsedRange.range }, { status: 400 });
   }
 
-  return NextResponse.json({ result, date_range: parsedRange.range, source: 'browser' });
+  // A successful browser import is the first-sync/backfill path. Advancing the
+  // cursor prevents the next cron run from fetching the store's entire history.
+  // Do not advance it after a partial import with row errors.
+  const syncStateUpdated = result.errors.length === 0;
+  if (syncStateUpdated) {
+    await setSyncState(ownerId, 'woocommerce', platform, new Date().toISOString());
+  }
+
+  return NextResponse.json({
+    result,
+    date_range: parsedRange.range,
+    source: 'browser',
+    sync_state_updated: syncStateUpdated,
+  });
 }

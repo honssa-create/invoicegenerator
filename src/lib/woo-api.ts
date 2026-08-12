@@ -1,15 +1,17 @@
 /** Parse WooCommerce REST API responses safely. */
 
-export function wooBasicAuthHeader(key: string, secret: string): string {
-  return `Basic ${Buffer.from(`${key}:${secret}`).toString('base64')}`;
-}
-
-export function wooRequestHeaders(key: string, secret: string): Record<string, string> {
+/** Headers only — SiteGround/WAF often blocks Basic Auth on /wp-json; use query auth instead. */
+export function wooRequestHeaders(): Record<string, string> {
   return {
-    Authorization: wooBasicAuthHeader(key, secret),
     Accept: 'application/json',
     'User-Agent': 'Mozilla/5.0 (compatible; InvoiceFlow/1.0; +https://invoiceflow.app)',
   };
+}
+
+/** WooCommerce REST supports key/secret as query params (same as the browser Hub import path). */
+export function appendWooQueryAuth(params: URLSearchParams, key: string, secret: string): void {
+  params.set('consumer_key', key);
+  params.set('consumer_secret', secret);
 }
 
 export function parseWooApiJson<T>(body: string, context: string): T {

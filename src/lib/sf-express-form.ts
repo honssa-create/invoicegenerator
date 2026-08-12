@@ -63,7 +63,7 @@ export function buildSfExpressFormDefaults(
     recipientName: order.name?.trim() || '',
     recipientPhone: order.phone?.trim() || '',
     recipientAddress: order.shipping_address?.trim() || '',
-    country: 'HK',
+    country: '852',
     cargoName: cargo,
     parcelQty: parcelQtyFromOrder(order),
     weightKg: '1',

@@ -12,6 +12,7 @@ import {
   createSfOrder,
   extractCloudPrintPdfUrl,
   extractWaybillNo,
+  normalizeSfCountryCode,
   sfMsgDigest,
   toTraditionalSfMessage,
 } from './sf-express';
@@ -79,6 +80,15 @@ describe('toTraditionalSfMessage', () => {
   });
 });
 
+describe('normalizeSfCountryCode', () => {
+  it('maps HK aliases to 852', () => {
+    expect(normalizeSfCountryCode('HK')).toBe('852');
+    expect(normalizeSfCountryCode('hkg')).toBe('852');
+    expect(normalizeSfCountryCode('')).toBe('852');
+    expect(normalizeSfCountryCode('852')).toBe('852');
+  });
+});
+
 describe('buildSfExpressFormDefaults', () => {
   it('prefills from order fields', () => {
     const form = buildSfExpressFormDefaults(sampleOrder(), {
@@ -89,7 +99,7 @@ describe('buildSfExpressFormDefaults', () => {
     expect(form.recipientName).toBe('Alice Chan');
     expect(form.recipientPhone).toBe('91234567');
     expect(form.recipientAddress).toBe('Kwun Tong, Kowloon');
-    expect(form.country).toBe('HK');
+    expect(form.country).toBe('852');
     expect(form.cargoName).toBe('Custom badges');
     expect(form.parcelQty).toBe('3');
     expect(form.weightKg).toBe('1');
@@ -182,14 +192,14 @@ describe('createSfOrder / cloudPrintWaybills', () => {
             company: 'Honour',
             contact: 'Ops',
             tel: '21234567',
-            country: 'HK',
+            country: '852',
             address: 'HK',
           },
           {
             contactType: 2,
             contact: 'Alice',
             mobile: '91234567',
-            country: 'HK',
+            country: '852',
             address: 'KT',
           },
         ],

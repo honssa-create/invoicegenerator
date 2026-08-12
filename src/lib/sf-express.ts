@@ -297,6 +297,14 @@ export async function cloudPrintWaybills(
   return { pdfUrl, raw };
 }
 
+export function normalizeSfCountryCode(country: string): string {
+  const raw = country.trim().toUpperCase();
+  if (!raw || raw === 'HK' || raw === 'HKG') return '852';
+  if (raw === 'MO' || raw === 'MAC') return '853';
+  if (raw === 'CN' || raw === 'CHN') return '86';
+  return raw;
+}
+
 export function buildSfCreateOrderPayload(args: {
   credentials: SfExpressSettings;
   form: {
@@ -315,6 +323,7 @@ export function buildSfCreateOrderPayload(args: {
 }): SfCreateOrderInput {
   const { credentials, form } = args;
   const phone = form.recipientPhone.trim();
+  const country = normalizeSfCountryCode(form.country);
   return {
     orderId: form.orderId.trim(),
     language: 'zh-HK',
@@ -338,7 +347,7 @@ export function buildSfCreateOrderPayload(args: {
         contact: credentials.sender_contact.trim(),
         tel: credentials.sender_tel.trim(),
         mobile: credentials.sender_tel.trim(),
-        country: 'HK',
+        country: '852',
         address: credentials.sender_address.trim(),
       },
       {
@@ -346,7 +355,7 @@ export function buildSfCreateOrderPayload(args: {
         contact: form.recipientName.trim(),
         tel: phone,
         mobile: phone,
-        country: (form.country.trim() || 'HK').toUpperCase(),
+        country,
         address: form.recipientAddress.trim(),
       },
     ],

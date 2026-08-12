@@ -212,11 +212,12 @@ export default function SfExpressShipmentModal({ orderId, onClose, onSuccess }: 
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500">Country</label>
+                <label className="text-xs font-medium text-gray-500">Country / Region Code (e.g. 852)</label>
                 <input
                   className={`${inputCls} mt-1`}
                   value={form.country}
                   onChange={(e) => setField('country', e.target.value)}
+                  placeholder="852"
                 />
               </div>
               <div>

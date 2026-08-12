@@ -18,6 +18,8 @@ export interface ReminderCandidate {
   customer_name: string | null;
   customer_email: string | null;
   order_email: string | null;
+  /** Linked order's fields.order_type when present. */
+  order_type: string | null;
   total: number;
   type: ReminderType;
   /** Days past due (overdue) or days until due (due soon). */

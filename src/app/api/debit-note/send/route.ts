@@ -74,7 +74,10 @@ export async function POST(request: Request) {
       ${doc.footerRemark ? `<p><em>${doc.footerRemark}</em></p>` : ''}
       <p>Thank you.</p>`;
 
-    const email = await sendEmail(doc.tenant.email.trim(), subject, html);
+    const email = await sendEmail(doc.tenant.email.trim(), subject, html, {
+      userId: ownerId,
+      brand: 'honour',
+    });
 
     return NextResponse.json({ sent: email.sent, provider: email.provider, noteNo: doc.noteNo, email });
   } catch (e) {

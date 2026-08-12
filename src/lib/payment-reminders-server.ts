@@ -26,7 +26,19 @@ type ReminderRow = {
   customer_name: string | null;
   customer_email: string | null;
   order_email: string | null;
+  order_fields_json: string | null;
 };
+
+function orderTypeFromFieldsJson(json: string | null | undefined): string | null {
+  if (!json?.trim()) return null;
+  try {
+    const fields = JSON.parse(json) as Record<string, unknown>;
+    const t = fields.order_type;
+    return typeof t === 'string' && t.trim() ? t.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 function userFilter(userId: number | null, params: (number | string)[]): string {
   if (userId === null) return '';
@@ -38,8 +50,10 @@ async function toCandidate(row: ReminderRow, type: ReminderType, daysOffset: num
   const details = await getInvoiceWithDetails(row.id, row.user_id);
   const total = details?.total ?? 0;
   const to = row.order_email || row.customer_email || null;
+  const { order_fields_json, ...rest } = row;
   return {
-    ...row,
+    ...rest,
+    order_type: orderTypeFromFieldsJson(order_fields_json),
     total,
     type,
     daysOffset,
@@ -75,6 +89,7 @@ export async function listReminderCandidates(
              i.created_at, i.last_reminder_at, i.last_due_soon_reminder_at,
              c.name AS customer_name, c.email AS customer_email,
              o.customer_email AS order_email,
+             o.fields_json AS order_fields_json,
              CAST(julianday('now') - julianday(i.due_date) AS INTEGER) AS days_past_due
       FROM invoices i
       LEFT JOIN customers c ON c.id = i.customer_id
@@ -98,6 +113,7 @@ export async function listReminderCandidates(
              i.created_at, i.last_reminder_at, i.last_due_soon_reminder_at,
              c.name AS customer_name, c.email AS customer_email,
              o.customer_email AS order_email,
+             o.fields_json AS order_fields_json,
              CAST(julianday(i.due_date) - julianday('now') AS INTEGER) AS days_until_due
       FROM invoices i
       LEFT JOIN customers c ON c.id = i.customer_id

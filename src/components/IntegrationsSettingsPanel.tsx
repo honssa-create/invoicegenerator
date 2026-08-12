@@ -2,11 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import {
+  RESEND_BRAND_LABELS,
+  RESEND_UI_BRAND_KEYS,
   SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
   WOO_PLATFORM_LABELS,
   type IntegrationSettingsMasked,
+  type ResendBrandKey,
   type WooPlatformKey,
 } from '@/lib/integration-settings';
+import { ORDER_TYPES } from '@/lib/orders';
 
 const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
@@ -41,9 +45,15 @@ const EMPTY_MASKED: IntegrationSettingsMasked = {
     sender_tel: '',
     sender_address: '',
   },
+  resend: {
+    honour: { from_email: '', api_key_set: false, api_key_hint: '', order_types: [] },
+    nestiee: { from_email: '', api_key_set: false, api_key_hint: '', order_types: [] },
+    cupmoka: { from_email: '', api_key_set: false, api_key_hint: '', order_types: [] },
+  },
 };
 
 type WooForm = Record<WooPlatformKey, { url: string; key: string; secret: string }>;
+type ResendForm = Record<ResendBrandKey, { api_key: string; from_email: string; order_types: string[] }>;
 
 export default function IntegrationsSettingsPanel({
   onToast,
@@ -78,6 +88,11 @@ export default function IntegrationsSettingsPanel({
     sender_tel: '',
     sender_address: '',
   });
+  const [resend, setResend] = useState<ResendForm>({
+    honour: { api_key: '', from_email: '', order_types: [] },
+    nestiee: { api_key: '', from_email: '', order_types: [] },
+    cupmoka: { api_key: '', from_email: '', order_types: [] },
+  });
 
   const applyMasked = (s: IntegrationSettingsMasked) => {
     setMasked(s);
@@ -106,6 +121,11 @@ export default function IntegrationsSettingsPanel({
       sender_tel: s.sf_express.sender_tel,
       sender_address: s.sf_express.sender_address,
     });
+    setResend({
+      honour: { api_key: '', from_email: s.resend.honour.from_email, order_types: [...s.resend.honour.order_types] },
+      nestiee: { api_key: '', from_email: s.resend.nestiee.from_email, order_types: [...s.resend.nestiee.order_types] },
+      cupmoka: { api_key: '', from_email: s.resend.cupmoka.from_email, order_types: [...s.resend.cupmoka.order_types] },
+    });
   };
 
   const load = async () => {
@@ -128,6 +148,25 @@ export default function IntegrationsSettingsPanel({
   useEffect(() => {
     load();
   }, []);
+
+  const toggleResendOrderType = (brand: ResendBrandKey, orderType: string, checked: boolean) => {
+    setResend((prev) => {
+      const next: ResendForm = {
+        honour: { ...prev.honour, order_types: [...prev.honour.order_types] },
+        nestiee: { ...prev.nestiee, order_types: [...prev.nestiee.order_types] },
+        cupmoka: { ...prev.cupmoka, order_types: [...prev.cupmoka.order_types] },
+      };
+      if (checked) {
+        for (const b of Object.keys(next) as ResendBrandKey[]) {
+          next[b].order_types = next[b].order_types.filter((t) => t !== orderType);
+        }
+        next[brand].order_types = [...next[brand].order_types, orderType];
+      } else {
+        next[brand].order_types = next[brand].order_types.filter((t) => t !== orderType);
+      }
+      return next;
+    });
+  };
 
   const save = async () => {
     setSaving(true);
@@ -161,6 +200,23 @@ export default function IntegrationsSettingsPanel({
           sender_address: sf.sender_address,
           ...(sf.checkword ? { checkword: sf.checkword } : {}),
         },
+        resend: {
+          honour: {
+            from_email: resend.honour.from_email,
+            order_types: resend.honour.order_types,
+            ...(resend.honour.api_key ? { api_key: resend.honour.api_key } : {}),
+          },
+          nestiee: {
+            from_email: resend.nestiee.from_email,
+            order_types: resend.nestiee.order_types,
+            ...(resend.nestiee.api_key ? { api_key: resend.nestiee.api_key } : {}),
+          },
+          cupmoka: {
+            from_email: resend.cupmoka.from_email,
+            order_types: resend.cupmoka.order_types,
+            ...(resend.cupmoka.api_key ? { api_key: resend.cupmoka.api_key } : {}),
+          },
+        },
       };
 
       const res = await fetch('/api/settings/integrations', {
@@ -177,6 +233,11 @@ export default function IntegrationsSettingsPanel({
       setQb((prev) => ({ ...prev, client_secret: '' }));
       setYedpay((prev) => ({ ...prev, access_token: '' }));
       setSf((prev) => ({ ...prev, checkword: '' }));
+      setResend((prev) => ({
+        honour: { ...prev.honour, api_key: '' },
+        nestiee: { ...prev.nestiee, api_key: '' },
+        cupmoka: { ...prev.cupmoka, api_key: '' },
+      }));
       onToast('Integration settings saved', 'success');
     } catch {
       onToast('Failed to save integration settings', 'error');
@@ -476,6 +537,75 @@ export default function IntegrationsSettingsPanel({
               className={`${inputCls} mt-1`}
             />
           </div>
+        </div>
+      </section>
+
+      {/* Resend */}
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
+          <h2 className="text-lg font-semibold text-gray-900">Resend (email)</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            One Resend account per brand. Assign which order types send from each account. Order types with no
+            account or API key will not send email.
+          </p>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {RESEND_UI_BRAND_KEYS.map((brand) => (
+            <div key={brand} className="px-5 py-4">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">{RESEND_BRAND_LABELS[brand]}</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-500">API Key</label>
+                  <input
+                    type="password"
+                    value={resend[brand].api_key}
+                    onChange={(e) =>
+                      setResend({ ...resend, [brand]: { ...resend[brand], api_key: e.target.value } })
+                    }
+                    placeholder={
+                      masked.resend[brand].api_key_set ? masked.resend[brand].api_key_hint : 're_…'
+                    }
+                    className={`${inputCls} mt-1`}
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500">From email</label>
+                  <input
+                    type="text"
+                    value={resend[brand].from_email}
+                    onChange={(e) =>
+                      setResend({ ...resend, [brand]: { ...resend[brand], from_email: e.target.value } })
+                    }
+                    placeholder={`${RESEND_BRAND_LABELS[brand]} <billing@example.com>`}
+                    className={`${inputCls} mt-1`}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-xs font-medium text-gray-500">Order types using this account</label>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+                    {ORDER_TYPES.map((ot) => {
+                      const checked = resend[brand].order_types.includes(ot);
+                      return (
+                        <label key={ot} className="inline-flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => toggleResendOrderType(brand, ot, e.target.checked)}
+                            className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                          />
+                          {ot}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
+          Until an order type is assigned here and has an API key, related reminder emails are skipped.
         </div>
       </section>
     </div>

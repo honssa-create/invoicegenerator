@@ -892,7 +892,8 @@ export async function sendRentInvoice(
     email = await sendEmail(
       unit.tenantEmail,
       `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, invoiceNote, paymentInstructionsText)
+      invoiceHtml(unit, fresh, invoiceNote, paymentInstructionsText),
+      { userId, brand: 'honour' },
     );
   }
   await logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);
@@ -1111,7 +1112,8 @@ export async function markRentPaid(
     email = await sendEmail(
       unit.tenantEmail,
       `租金收據 ${unit.unitName} ${record.billingPeriod}`,
-      receiptHtml(unit, fresh, input.note, paymentAmount)
+      receiptHtml(unit, fresh, input.note, paymentAmount),
+      { userId, brand: 'honour' },
     );
   }
   const action = fullyPaid ? 'Payment Marked Paid' : 'Partial Payment Recorded';

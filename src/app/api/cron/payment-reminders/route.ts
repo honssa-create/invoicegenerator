@@ -10,19 +10,31 @@ import { listReminderCandidates } from '@/lib/payment-reminders-server';
 async function runReminders(userId: number | null) {
   const { overdueDays, candidates } = await listReminderCandidates(userId, ['overdue']);
   const results: { invoice: string; email: string | null; sent: boolean; provider: string }[] = [];
-  const today = new Date().toISOString().slice(0, 10);
   const markReminded = db.prepare("UPDATE invoices SET last_reminder_at = datetime('now') WHERE id = ?");
 
   for (const inv of candidates) {
     let result = { sent: false, provider: 'log' as string };
     if (inv.to) {
-      const r = await sendEmail(inv.to, inv.subject, plainTextToHtml(inv.body));
+      const r = await sendEmail(inv.to, inv.subject, plainTextToHtml(inv.body), {
+        userId: inv.user_id,
+        orderType: inv.order_type,
+      });
       result = { sent: r.sent, provider: r.provider };
     }
 
     await markReminded.run(inv.id);
 
-    const msg = `[System] Automated overdue payment reminder email ${inv.to ? `sent to ${inv.to}` : '(no client email on file)'} on ${today}`;
+    const today = new Date().toISOString().slice(0, 10);
+    let msg: string;
+    if (!inv.to) {
+      msg = `[System] Automated overdue payment reminder email (no client email on file) on ${today}`;
+    } else if (result.sent) {
+      msg = `[System] Automated overdue payment reminder email sent to ${inv.to} on ${today}`;
+    } else if (result.provider === 'skipped') {
+      msg = `[System] Automated overdue payment reminder to ${inv.to} skipped on ${today} (Resend not configured for this order type)`;
+    } else {
+      msg = `[System] Automated overdue payment reminder email prepared for ${inv.to} on ${today}`;
+    }
     await logActivity('invoice', inv.id, inv.user_id, 'activity', 'System', msg);
     if (inv.order_id) {
       await logActivity('order', inv.order_id, inv.user_id, 'activity', 'System', msg);

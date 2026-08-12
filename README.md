@@ -67,8 +67,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `PADDLE_OCR_SECRET` | Optional shared secret; sent as `X-Paddle-OCR-Secret` (set the same value on the sidecar) | _(unset)_ |
 | `GEMINI_API_KEY` | Enables Google Gemini vision for Scan-to-Table / inbound fallback / payments (and PDF parsing); falls back to on-device OCR when unset | _(unset)_ |
 | `GEMINI_MODEL` | Gemini model used when `GEMINI_API_KEY` is set | `gemini-2.5-flash` |
-| `RESEND_API_KEY` | Enables sending real reminder emails via Resend; without it reminders are logged to activity feeds only | _(unset)_ |
-| `REMINDER_FROM_EMAIL` | From address for reminder emails | `InvoiceFlow <onboarding@resend.dev>` |
+| `RESEND_API_KEY` | Legacy fallback: fills Honour Resend API key when Settings / `RESEND_API_KEY_HONOUR` unset | _(unset)_ |
+| `REMINDER_FROM_EMAIL` | Legacy fallback: fills Honour from address when Settings / `RESEND_FROM_EMAIL_HONOUR` unset | `InvoiceFlow <onboarding@resend.dev>` |
+| `RESEND_API_KEY_HONOUR` / `RESEND_FROM_EMAIL_HONOUR` | Optional env overlay for Honour Resend (prefer Settings → Integrations → Resend) | _(unset)_ |
+| `RESEND_API_KEY_NESTIEE` / `RESEND_FROM_EMAIL_NESTIEE` | Optional env overlay for Nestiee Resend | _(unset)_ |
+| `RESEND_API_KEY_CUPMOKA` / `RESEND_FROM_EMAIL_CUPMOKA` | Optional env overlay for Cupmoka Resend | _(unset)_ |
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
 | `CRON_SECRET` | Bearer token for external schedulers: `/api/cron/payment-reminders`, `/api/cron/hub-sync`, and other `/api/cron/*` routes | _(unset)_ |
 | `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |

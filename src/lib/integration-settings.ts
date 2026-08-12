@@ -1,6 +1,53 @@
 /** Client-safe integration settings types. */
 
+import { ORDER_TYPES } from './orders';
+
 export type WooPlatformKey = 'nestiee' | 'honour' | 'cupmoka';
+
+export type ResendBrandKey = 'honour' | 'nestiee' | 'cupmoka';
+
+export const RESEND_BRAND_KEYS: ResendBrandKey[] = ['honour', 'nestiee', 'cupmoka'];
+
+/** Brands shown in Settings → Integrations. */
+export const RESEND_UI_BRAND_KEYS: ResendBrandKey[] = ['honour', 'nestiee', 'cupmoka'];
+
+export const RESEND_BRAND_LABELS: Record<ResendBrandKey, string> = {
+  honour: 'Honour',
+  nestiee: 'Nestiee',
+  cupmoka: 'Cupmoka',
+};
+
+export interface ResendBrandSettings {
+  api_key: string;
+  from_email: string;
+  order_types: string[];
+}
+
+export interface ResendBrandSettingsMasked {
+  from_email: string;
+  api_key_set: boolean;
+  api_key_hint: string;
+  order_types: string[];
+}
+
+export const DEFAULT_RESEND_ORDER_TYPES: Record<ResendBrandKey, string[]> = {
+  honour: ['honour訂製', 'honour en訂製'],
+  nestiee: ['Nestiee 燕窩訂單', '燕窩回禮燉製'],
+  cupmoka: ['Cupmoka'],
+};
+
+export function normalizeResendOrderTypes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const allowed = new Set<string>(ORDER_TYPES);
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const t = item.trim();
+    if (!t || !allowed.has(t) || out.includes(t)) continue;
+    out.push(t);
+  }
+  return out;
+}
 
 export interface WooStoreSettings {
   url: string;
@@ -80,6 +127,7 @@ export interface IntegrationSettings {
   quickbooks: QuickBooksSettings;
   yedpay: YedpaySettings;
   sf_express: SfExpressSettings;
+  resend: Record<ResendBrandKey, ResendBrandSettings>;
 }
 
 export interface IntegrationSettingsMasked {
@@ -87,6 +135,7 @@ export interface IntegrationSettingsMasked {
   quickbooks: QuickBooksSettingsMasked;
   yedpay: YedpaySettingsMasked;
   sf_express: SfExpressSettingsMasked;
+  resend: Record<ResendBrandKey, ResendBrandSettingsMasked>;
 }
 
 export const WOO_PLATFORM_LABELS: Record<WooPlatformKey, string> = {
@@ -123,5 +172,22 @@ export const EMPTY_INTEGRATION_SETTINGS: IntegrationSettings = {
     sender_contact: '',
     sender_tel: '',
     sender_address: '',
+  },
+  resend: {
+    honour: {
+      api_key: '',
+      from_email: '',
+      order_types: [...DEFAULT_RESEND_ORDER_TYPES.honour],
+    },
+    nestiee: {
+      api_key: '',
+      from_email: '',
+      order_types: [...DEFAULT_RESEND_ORDER_TYPES.nestiee],
+    },
+    cupmoka: {
+      api_key: '',
+      from_email: '',
+      order_types: [...DEFAULT_RESEND_ORDER_TYPES.cupmoka],
+    },
   },
 };

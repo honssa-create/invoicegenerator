@@ -198,6 +198,9 @@ export default function InvoiceDetailPage() {
       setMsg('Saved');
       load();
       setTimeout(() => setMsg(''), 2000);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setMsg((data as { error?: string }).error || 'Save failed');
     }
   };
 

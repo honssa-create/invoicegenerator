@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getDataOwnerId } from '@/lib/org-server';
 import { trashCustomer } from '@/lib/trash';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -9,9 +10,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = await getDataOwnerId(session.userId);
   const customer = await db
     .prepare('SELECT * FROM customers WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
 
   if (!customer) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -26,9 +28,10 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = await getDataOwnerId(session.userId);
   const existing = await db
     .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
 
   if (!existing) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -53,7 +56,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       state?.trim() || null,
       zip?.trim() || null,
       params.id,
-      session.userId
+      ownerId
     );
 
     const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(params.id);
@@ -69,10 +72,11 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = await getDataOwnerId(session.userId);
   const invoiceCount = (
     await db
       .prepare('SELECT COUNT(*) as count FROM invoices WHERE customer_id = ? AND user_id = ?')
-      .get(params.id, session.userId) as { count: number }
+      .get(params.id, ownerId) as { count: number }
   ).count;
 
   if (invoiceCount > 0) {
@@ -82,7 +86,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     );
   }
 
-  if (!await trashCustomer(session.userId, Number(params.id))) {
+  if (!await trashCustomer(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
   }
 

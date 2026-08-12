@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -8,9 +9,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = await getDataOwnerId(session.userId);
   const customers = await db
     .prepare('SELECT * FROM customers WHERE user_id = ? ORDER BY name')
-    .all(session.userId);
+    .all(ownerId);
 
   return NextResponse.json({ customers });
 }
@@ -28,13 +30,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
     }
 
+    const ownerId = await getDataOwnerId(session.userId);
     const result = await db
       .prepare(
         `INSERT INTO customers (user_id, name, email, phone, address, city, state, zip)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
-        session.userId,
+        ownerId,
         name.trim(),
         email?.trim() || null,
         phone?.trim() || null,

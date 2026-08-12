@@ -72,13 +72,13 @@ export async function POST(request: Request) {
     type === 'due_soon'
       ? (async () => {
           const row = await db
-            .prepare(`SELECT CAST(julianday(?) - julianday('now') AS INTEGER) AS d`)
+            .prepare(`SELECT (?::date - CURRENT_DATE) AS d`)
             .get(inv.due_date) as { d: number };
           return Math.max(0, Number(row?.d) || DUE_SOON_DAYS);
         })()
       : (async () => {
           const row = await db
-            .prepare(`SELECT CAST(julianday('now') - julianday(?) AS INTEGER) AS d`)
+            .prepare(`SELECT (CURRENT_DATE - ?::date) AS d`)
             .get(inv.due_date) as { d: number };
           return Math.max(0, Number(row?.d) || 0);
         })()

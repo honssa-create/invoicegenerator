@@ -90,14 +90,14 @@ export async function listReminderCandidates(
              c.name AS customer_name, c.email AS customer_email,
              o.customer_email AS order_email,
              o.fields_json AS order_fields_json,
-             CAST(julianday('now') - julianday(i.due_date) AS INTEGER) AS days_past_due
+             (CURRENT_DATE - i.due_date::date) AS days_past_due
       FROM invoices i
       LEFT JOIN customers c ON c.id = i.customer_id
       LEFT JOIN orders o ON o.id = i.order_id
       WHERE i.status != 'paid'
         AND i.due_date IS NOT NULL AND trim(i.due_date) != ''
-        AND date(i.due_date) < date('now')
-        AND (i.last_reminder_at IS NULL OR julianday('now') - julianday(i.last_reminder_at) >= ?)
+        AND i.due_date::date < CURRENT_DATE
+        AND (i.last_reminder_at IS NULL OR (CURRENT_DATE - i.last_reminder_at::date) >= ?)
         ${userFilter(userId, params)}
       ORDER BY i.due_date ASC`;
     const rows = await db.prepare(query).all(...params) as Array<ReminderRow & { days_past_due: number }>;
@@ -114,14 +114,14 @@ export async function listReminderCandidates(
              c.name AS customer_name, c.email AS customer_email,
              o.customer_email AS order_email,
              o.fields_json AS order_fields_json,
-             CAST(julianday(i.due_date) - julianday('now') AS INTEGER) AS days_until_due
+             (i.due_date::date - CURRENT_DATE) AS days_until_due
       FROM invoices i
       LEFT JOIN customers c ON c.id = i.customer_id
       LEFT JOIN orders o ON o.id = i.order_id
       WHERE i.status != 'paid'
         AND i.due_date IS NOT NULL AND trim(i.due_date) != ''
-        AND date(i.due_date) >= date('now')
-        AND julianday(i.due_date) - julianday('now') <= ?
+        AND i.due_date::date >= CURRENT_DATE
+        AND (i.due_date::date - CURRENT_DATE) <= ?
         AND i.last_due_soon_reminder_at IS NULL
         ${userFilter(userId, params)}
       ORDER BY i.due_date ASC`;

@@ -7,6 +7,9 @@ import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
 import OrderPropertyBar, { type AccountUser } from '@/components/OrderPropertyBar';
+import SupplierSelect from '@/components/SupplierSelect';
+import { DEFAULT_OPTIONS } from '@/lib/expenses';
+import { mergeSupplierLists } from '@/lib/expense-suppliers';
 import { compressImage } from '@/lib/imageCompression';
 import { compressPdfToImages } from '@/lib/pdfCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
@@ -94,6 +97,7 @@ export default function OrderDetailPage() {
   const [sfModalOpen, setSfModalOpen] = useState(false);
   const [accountUsers, setAccountUsers] = useState<AccountUser[]>([]);
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
+  const [supplierOptions, setSupplierOptions] = useState<string[]>([...DEFAULT_OPTIONS.supplier]);
   /** Big Day value last persisted with derived dates (or loaded from server). */
   const bigDayPersistedRef = useRef('');
   /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
@@ -129,6 +133,13 @@ export default function OrderDetailPage() {
     fetch('/api/orders/tag-options')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setTagSuggestions(Array.isArray(d?.tags) ? d.tags : []))
+      .catch(() => {});
+    fetch('/api/expense-options')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const list = d?.options?.supplier;
+        if (Array.isArray(list)) setSupplierOptions(list.map(String));
+      })
       .catch(() => {});
   }, []);
 
@@ -1125,7 +1136,32 @@ export default function OrderDetailPage() {
                 <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
                   <h3 className="text-sm font-semibold text-gray-700">Supplier 供應商</h3>
                   <div className="max-w-md">
-                    {labeled('供應商', fInput('supplier', 'text', 'e.g. 亞加力-和夫'))}
+                    {labeled(
+                      '供應商',
+                      <SupplierSelect
+                        value={fVal('supplier')}
+                        options={mergeSupplierLists(supplierOptions, [fVal('supplier')])}
+                        onChange={(v) => {
+                          setFieldLocal('supplier', v);
+                          patch({ fields: { supplier: v } });
+                        }}
+                        onAdd={async (v) => {
+                          const res = await fetch('/api/expense-options', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: 'supplier', value: v }),
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            if (Array.isArray(data.options)) setSupplierOptions(data.options.map(String));
+                            else setSupplierOptions((prev) => mergeSupplierLists(prev, [v]));
+                          } else {
+                            setSupplierOptions((prev) => mergeSupplierLists(prev, [v]));
+                          }
+                        }}
+                        placeholder={bi('Select supplier…', '選擇供應商…')}
+                      />
+                    )}
                   </div>
                   <div className="grid md:grid-cols-3 gap-5">
                     {labeled('單價 ($)', fInput('supplier_price', 'text', 'e.g. rmb 4.2'))}

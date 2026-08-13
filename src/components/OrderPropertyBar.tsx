@@ -9,11 +9,13 @@ export type AccountUser = { id: number; name: string; email: string };
 type Props = {
   orderType: string;
   status: string;
+  dueDate: string;
   assigneeIds: number[];
   tags: string[];
   users: AccountUser[];
   tagSuggestions: string[];
   onStatusChange: (status: string) => void;
+  onDueDateChange: (dueDate: string) => void;
   onAssigneesChange: (ids: number[]) => void;
   onTagsChange: (tags: string[]) => void;
 };
@@ -46,6 +48,15 @@ function IconTag({ className = '' }: { className?: string }) {
   );
 }
 
+function IconCalendar({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+      <rect x="3.5" y="5" width="17" height="15" rx="2" />
+      <path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PropertyLabel({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div className="flex items-center gap-2 min-w-[7.5rem] shrink-0 text-gray-400">
@@ -65,11 +76,13 @@ function initials(name: string): string {
 export default function OrderPropertyBar({
   orderType,
   status,
+  dueDate,
   assigneeIds,
   tags,
   users,
   tagSuggestions,
   onStatusChange,
+  onDueDateChange,
   onAssigneesChange,
   onTagsChange,
 }: Props) {
@@ -190,77 +203,89 @@ export default function OrderPropertyBar({
             )}
           </div>
         </div>
-      </div>
 
-      <div className="flex items-start gap-3 min-w-0" ref={tagsRef}>
-        <PropertyLabel icon={<IconTag className="text-gray-400 mt-1" />} label={bi('Tags', '標籤')} />
-        <div className="relative min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {tags.map((tag) => (
+        <div className="flex items-center gap-3 min-w-0">
+          <PropertyLabel icon={<IconCalendar className="text-gray-400" />} label={bi('Due date', '到期日')} />
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => onDueDateChange(e.target.value)}
+            className={`text-sm rounded-md px-2 py-1 outline-none border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${
+              dueDate ? 'text-gray-900' : 'text-gray-400'
+            }`}
+          />
+        </div>
+
+        <div className="flex items-start gap-3 min-w-0" ref={tagsRef}>
+          <PropertyLabel icon={<IconTag className="text-gray-400 mt-1" />} label={bi('Tags', '標籤')} />
+          <div className="relative min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {tags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => removeTag(tag)}
+                  title={bi('Remove tag', '移除標籤')}
+                  className="inline-flex items-center gap-1 rounded-md bg-[#C23A8A] text-white text-xs font-medium px-2 py-1 hover:bg-[#A02D6C]"
+                >
+                  {tag}
+                  <span className="opacity-80">×</span>
+                </button>
+              ))}
               <button
-                key={tag}
                 type="button"
-                onClick={() => removeTag(tag)}
-                title={bi('Remove tag', '移除標籤')}
-                className="inline-flex items-center gap-1 rounded-md bg-[#C23A8A] text-white text-xs font-medium px-2 py-1 hover:bg-[#A02D6C]"
+                onClick={() => setTagsOpen((o) => !o)}
+                className="text-sm text-gray-400 hover:text-gray-600 px-1"
               >
-                {tag}
-                <span className="opacity-80">×</span>
+                {tags.length ? '+' : bi('Empty', '空白')}
               </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setTagsOpen((o) => !o)}
-              className="text-sm text-gray-400 hover:text-gray-600 px-1"
-            >
-              {tags.length ? '+' : bi('Empty', '空白')}
-            </button>
-          </div>
-          {tagsOpen && (
-            <div className="absolute z-30 mt-1 left-0 w-72 bg-white border border-gray-200 rounded-lg shadow-lg">
-              <div className="p-2 border-b border-gray-100">
-                <input
-                  autoFocus
-                  value={tagQuery}
-                  onChange={(e) => setTagQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (q && !exactTag) addTag(q);
-                      else if (filteredTags[0]) addTag(filteredTags[0]);
-                      else if (q) addTag(q);
-                    }
-                  }}
-                  placeholder={bi('Search or add tag…', '搜尋或新增標籤…')}
-                  className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-              <div className="max-h-48 overflow-y-auto py-1">
-                {filteredTags.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => addTag(t)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                  >
-                    {t}
-                  </button>
-                ))}
-                {q && !exactTag && (
-                  <button
-                    type="button"
-                    onClick={() => addTag(q)}
-                    className="w-full text-left px-3 py-2 text-sm text-brand-700 hover:bg-brand-50 font-medium"
-                  >
-                    {bi('Add', '新增')} “{q}”
-                  </button>
-                )}
-                {!q && filteredTags.length === 0 && (
-                  <p className="px-3 py-2 text-sm text-gray-400">{bi('Type to add a tag', '輸入以新增標籤')}</p>
-                )}
-              </div>
             </div>
-          )}
+            {tagsOpen && (
+              <div className="absolute z-30 mt-1 left-0 w-72 bg-white border border-gray-200 rounded-lg shadow-lg">
+                <div className="p-2 border-b border-gray-100">
+                  <input
+                    autoFocus
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (q && !exactTag) addTag(q);
+                        else if (filteredTags[0]) addTag(filteredTags[0]);
+                        else if (q) addTag(q);
+                      }
+                    }}
+                    placeholder={bi('Search or add tag…', '搜尋或新增標籤…')}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div className="max-h-48 overflow-y-auto py-1">
+                  {filteredTags.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => addTag(t)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                  {q && !exactTag && (
+                    <button
+                      type="button"
+                      onClick={() => addTag(q)}
+                      className="w-full text-left px-3 py-2 text-sm text-brand-700 hover:bg-brand-50 font-medium"
+                    >
+                      {bi('Add', '新增')} “{q}”
+                    </button>
+                  )}
+                  {!q && filteredTags.length === 0 && (
+                    <p className="px-3 py-2 text-sm text-gray-400">{bi('Type to add a tag', '輸入以新增標籤')}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

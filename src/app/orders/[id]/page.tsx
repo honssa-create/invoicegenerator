@@ -47,6 +47,7 @@ import {
   weddingGiftRoundTagKey,
   parseAssigneeIds,
   parseOrderTags,
+  parseOrderDueDateField,
   serializeAssigneeIds,
   serializeOrderTags,
   orderTitle,
@@ -834,6 +835,7 @@ export default function OrderDetailPage() {
             <OrderPropertyBar
               orderType={orderType}
               status={order.status}
+              dueDate={parseOrderDueDateField(order.fields)}
               assigneeIds={parseAssigneeIds(order.fields)}
               tags={parseOrderTags(order.fields)}
               users={accountUsers}
@@ -841,6 +843,10 @@ export default function OrderDetailPage() {
               onStatusChange={(next) => {
                 setCoreLocal('status', next);
                 patch({ core: { status: next } });
+              }}
+              onDueDateChange={(next) => {
+                setFieldLocal('due_date', next);
+                patch({ fields: { due_date: next } });
               }}
               onAssigneesChange={(ids) => {
                 const serialized = serializeAssigneeIds(ids);

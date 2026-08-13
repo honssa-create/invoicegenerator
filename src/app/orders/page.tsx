@@ -6,6 +6,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import OrdersBoard from '@/components/OrdersBoard';
+import OrdersCalendar from '@/components/OrdersCalendar';
 import { ORDER_TYPES, STATUS_COLORS, getOrderType, statusesForOrderType, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
@@ -25,7 +26,7 @@ export default function OrdersPage() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'reference', dir: 'desc' });
-  const [view, setView] = useState<'line' | 'board'>('line');
+  const [view, setView] = useState<'line' | 'board' | 'calendar'>('line');
   const [boardError, setBoardError] = useState('');
 
   const load = () => {
@@ -197,6 +198,15 @@ export default function OrdersPage() {
             >
               {bi('Board', '看板')}
             </button>
+            <button
+              type="button"
+              onClick={() => setView('calendar')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                view === 'calendar' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {bi('Calendar', '日曆')}
+            </button>
           </div>
           <button
             type="button"
@@ -254,6 +264,22 @@ export default function OrdersPage() {
             onCreateInStatus={(status) => { void create(status); }}
             creatingStatus={creatingStatus}
           />
+        )
+      ) : view === 'calendar' ? (
+        loading ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-500">
+            {bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}
+          </div>
+        ) : displayed.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-500">
+            {bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}
+          </div>
+        ) : (
+          <OrdersCalendar orders={displayed} />
         )
       ) : (
         <div className="bg-white rounded-xl border border-gray-200">

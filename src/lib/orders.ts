@@ -71,6 +71,52 @@ export function statusesForOrderType(orderType: string): readonly string[] {
   return usesEcomOrderStatuses(orderType) ? ECOM_ORDER_STATUSES : ORDER_STATUSES;
 }
 
+/**
+ * Calendar date for an order: `fields.due_date` from the property bar.
+ * Returns YYYY-MM-DD when parseable.
+ */
+export function orderDueDate(o: {
+  delivery_date?: string | null;
+  fields?: Record<string, unknown>;
+}): string | null {
+  const raw = typeof o.fields?.due_date === 'string' ? o.fields.due_date : '';
+  return normalizeOrderDueDate(raw);
+}
+
+/** Read due date field (YYYY-MM-DD or empty). */
+export function parseOrderDueDateField(fields: Record<string, unknown>): string {
+  return normalizeOrderDueDate(
+    typeof fields.due_date === 'string' ? fields.due_date : ''
+  ) || '';
+}
+
+/** Normalize common date strings to YYYY-MM-DD. */
+export function normalizeOrderDueDate(raw: string | null | undefined): string | null {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (dmy) {
+    let y = Number(dmy[3]);
+    if (y < 100) y += 2000;
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${String(y).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) {
+    const d = new Date(t);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return null;
+}
+
 function parseJsonArrayField(fields: Record<string, unknown>, key: string): unknown[] {
   const raw = fields[key];
   if (raw == null || raw === false || raw === '') return [];

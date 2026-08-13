@@ -6,12 +6,12 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
+import OrderPropertyBar, { type AccountUser } from '@/components/OrderPropertyBar';
 import { compressImage } from '@/lib/imageCompression';
 import { compressPdfToImages } from '@/lib/pdfCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
 import {
   ORDER_FIELDS,
-  ORDER_STATUSES,
   ORDER_TYPES,
   ORDER_PAYMENT_METHODS,
   ORDER_PAYMENT_METHOD_OTHER,
@@ -42,7 +42,10 @@ import {
   nestieeGiftQtyManualKey,
   weddingGiftFoilStickerKey,
   weddingGiftRoundTagKey,
-  STATUS_COLORS,
+  parseAssigneeIds,
+  parseOrderTags,
+  serializeAssigneeIds,
+  serializeOrderTags,
   orderTitle,
   isBadgeOrderType,
   isWeddingGiftOrderType,
@@ -89,6 +92,8 @@ export default function OrderDetailPage() {
   const [confirmPasteText, setConfirmPasteText] = useState('');
   const [confirmPasteError, setConfirmPasteError] = useState('');
   const [sfModalOpen, setSfModalOpen] = useState(false);
+  const [accountUsers, setAccountUsers] = useState<AccountUser[]>([]);
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   /** Big Day value last persisted with derived dates (or loaded from server). */
   const bigDayPersistedRef = useRef('');
   /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
@@ -116,6 +121,14 @@ export default function OrderDetailPage() {
     fetch('/api/quotations')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setQuotations((d?.quotations || []).map((q: QuotationOption) => ({ id: q.id, quote_number: q.quote_number, status: q.status }))))
+      .catch(() => {});
+    fetch('/api/account/users')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setAccountUsers(Array.isArray(d?.users) ? d.users : []))
+      .catch(() => {});
+    fetch('/api/orders/tag-options')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setTagSuggestions(Array.isArray(d?.tags) ? d.tags : []))
       .catch(() => {});
   }, []);
 
@@ -397,18 +410,6 @@ export default function OrderDetailPage() {
     } catch {
       setPaymentScanMsg((m) => ({ ...m, [slot]: MSG.scanFailed }));
     }
-  };
-
-  const paymentBadge = () => {
-    const inv = order?.linked_invoice;
-    const fieldStatus = String(order?.fields.payment_status_label || '');
-    if (inv?.status === 'paid') return { text: '✓ Paid · 100% Payment (全數付清)', cls: 'bg-green-100 text-green-700' };
-    if (fieldStatus.includes('部分付款') || fieldStatus.toLowerCase().includes('part')) {
-      return { text: '部分付款 Partly Paid', cls: 'bg-amber-100 text-amber-700' };
-    }
-    if (!inv) return { text: 'No invoice linked', cls: 'bg-gray-100 text-gray-600' };
-    if (inv.status === 'overdue') return { text: '⚠ Overdue / 逾期未付', cls: 'bg-red-100 text-red-700' };
-    return { text: '未付款 / 待核對 Unpaid', cls: 'bg-red-100 text-red-700' };
   };
 
   if (loading) {
@@ -808,29 +809,6 @@ export default function OrderDetailPage() {
         <div className="w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2">
           {/* Header */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center gap-3 flex-wrap mb-3">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Task</span>
-              <select
-                value={order.status}
-                onChange={(e) => { setCoreLocal('status', e.target.value); patch({ core: { status: e.target.value } }); }}
-                className={`text-xs font-medium rounded-full px-3 py-1 border-0 cursor-pointer ${STATUS_COLORS[order.status] || 'bg-gray-100 text-gray-700'}`}
-              >
-                {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <span className="inline-flex items-center gap-1 text-xs font-medium bg-red-50 text-red-600 rounded-full px-3 py-1">
-                🚚 交貨
-                <input value={order.delivery_date} onChange={(e) => setCoreLocal('delivery_date', e.target.value)} onBlur={(e) => patch({ core: { delivery_date: e.target.value } })} placeholder="22/1" className="w-16 bg-transparent outline-none text-red-600 placeholder-red-300" />
-              </span>
-              {(() => { const b = paymentBadge(); return (
-                order.linked_invoice ? (
-                  <Link href={`/invoices/${order.linked_invoice.id}`} className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-3 py-1 ${b.cls}`}>
-                    💳 {b.text}
-                  </Link>
-                ) : (
-                  <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-3 py-1 ${b.cls}`}>💳 {b.text}</span>
-                )
-              ); })()}
-            </div>
             <div className="flex items-start justify-between gap-4">
               <h1 className="text-xl sm:text-2xl font-bold text-gray-900 min-w-0">{orderTitle(order)}</h1>
               <div className="text-right shrink-0">
@@ -842,12 +820,38 @@ export default function OrderDetailPage() {
                 </p>
               </div>
             </div>
+            <OrderPropertyBar
+              orderType={orderType}
+              status={order.status}
+              assigneeIds={parseAssigneeIds(order.fields)}
+              tags={parseOrderTags(order.fields)}
+              users={accountUsers}
+              tagSuggestions={tagSuggestions}
+              onStatusChange={(next) => {
+                setCoreLocal('status', next);
+                patch({ core: { status: next } });
+              }}
+              onAssigneesChange={(ids) => {
+                const serialized = serializeAssigneeIds(ids);
+                setFieldLocal('assignee_ids', serialized);
+                patch({ fields: { assignee_ids: serialized } });
+              }}
+              onTagsChange={(nextTags) => {
+                const serialized = serializeOrderTags(nextTags);
+                setFieldLocal('tags', serialized);
+                patch({ fields: { tags: serialized } });
+                setTagSuggestions((prev) => {
+                  const merged = new Set([...prev, ...nextTags]);
+                  return Array.from(merged).sort((a, b) => a.localeCompare(b, 'zh'));
+                });
+              }}
+            />
             <input
               value={order.description}
               onChange={(e) => setCoreLocal('description', e.target.value)}
               onBlur={(e) => patch({ core: { description: e.target.value } })}
               placeholder="Description 描述 (e.g. 4款亞加力)"
-              className="mt-2 w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 rounded px-2 py-1 text-sm outline-none"
+              className="mt-3 w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 rounded px-2 py-1 text-sm outline-none"
             />
             <div className="mt-4">
               <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>

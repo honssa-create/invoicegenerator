@@ -18,6 +18,7 @@ import { bi } from '@/lib/ui-labels';
 
 type Props = {
   orders: Order[];
+  statuses?: readonly string[];
   onStatusChange: (orderId: number, nextStatus: string) => Promise<boolean>;
   onCreateInStatus: (status: string) => void;
   creatingStatus?: string | null;
@@ -217,6 +218,7 @@ function ColumnMenu({
 
 export default function OrdersBoard({
   orders,
+  statuses = ORDER_STATUSES,
   onStatusChange,
   onCreateInStatus,
   creatingStatus = null,
@@ -227,18 +229,19 @@ export default function OrdersBoard({
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [menuStatus, setMenuStatus] = useState<string | null>(null);
 
+  const fallbackStatus = statuses[0] || 'OPEN';
+
   const byStatus = useMemo(() => {
     const map = new Map<string, Order[]>();
-    for (const s of ORDER_STATUSES) map.set(s, []);
+    for (const s of statuses) map.set(s, []);
+    const known = new Set(statuses);
     for (const o of orders) {
-      const key = ORDER_STATUSES.includes(o.status as (typeof ORDER_STATUSES)[number])
-        ? o.status
-        : 'OPEN';
-      const list = map.get(key) || map.get('OPEN')!;
+      const key = known.has(o.status) ? o.status : fallbackStatus;
+      const list = map.get(key) || map.get(fallbackStatus)!;
       list.push(o);
     }
     return map;
-  }, [orders]);
+  }, [orders, statuses, fallbackStatus]);
 
   const toggleCollapse = (status: string) => {
     setCollapsed((prev) => {
@@ -269,7 +272,7 @@ export default function OrdersBoard({
   return (
     <div className="overflow-x-auto pb-2 -mx-1 px-1">
       <div className="flex gap-3 min-w-min items-start">
-        {ORDER_STATUSES.map((status) => {
+        {statuses.map((status) => {
           const columnOrders = byStatus.get(status) || [];
           const isOver = dropStatus === status && draggingId != null;
           const isCollapsed = collapsed.has(status);

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import OrdersBoard from '@/components/OrdersBoard';
-import { ORDER_STATUSES, ORDER_TYPES, STATUS_COLORS, getOrderType, type Order } from '@/lib/orders';
+import { ORDER_TYPES, STATUS_COLORS, getOrderType, statusesForOrderType, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
@@ -41,6 +41,12 @@ export default function OrdersPage() {
     const fromData = orders.map(getOrderType).filter(Boolean);
     return Array.from(new Set([...ORDER_TYPES, ...fromData]));
   }, [orders]);
+
+  const statusOptions = useMemo(() => statusesForOrderType(orderType), [orderType]);
+
+  useEffect(() => {
+    if (status && !statusOptions.includes(status)) setStatus('');
+  }, [status, statusOptions]);
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -230,7 +236,7 @@ export default function OrdersPage() {
           <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
           <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
             <option value="">{BTN.all}</option>
-            {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
       </FilterBar>
@@ -243,6 +249,7 @@ export default function OrdersPage() {
         ) : (
           <OrdersBoard
             orders={displayed}
+            statuses={statusOptions}
             onStatusChange={changeBoardStatus}
             onCreateInStatus={(status) => { void create(status); }}
             creatingStatus={creatingStatus}

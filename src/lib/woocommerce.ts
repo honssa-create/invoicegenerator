@@ -178,10 +178,36 @@ export function mapWooStatus(status: string): string {
   }
 }
 
-/** Woo draft orders are incomplete checkouts and must not enter the Order Hub. */
+/** Nestiee / ecommerce Woo statuses → InvoiceFlow ecommerce status set. */
+export function mapNestieeWooStatus(status: string): string {
+  const normalized = String(status || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'checkout-draft':
+    case 'draft':
+    case 'wc-draft':
+      return 'checkout-draft';
+    case 'pending':
+    case 'failed':
+    case 'cancelled':
+    case 'refunded':
+      return 'pending payment';
+    case 'processing':
+    case 'on-hold':
+      return 'processing';
+    case 'shipped':
+    case 'wc-shipped':
+      return 'shipped';
+    case 'completed':
+      return 'completed';
+    default:
+      return 'processing';
+  }
+}
+
+/** Manufacturing Woo drafts (honour/cupmoka) must not enter the Order Hub. Nestiee imports drafts. */
 export function isWooDraftOrder(status: string | null | undefined): boolean {
   const normalized = String(status || '').trim().toLowerCase();
-  return normalized === 'draft' || normalized === 'wc-draft';
+  return normalized === 'draft' || normalized === 'wc-draft' || normalized === 'checkout-draft';
 }
 
 export function wooCustomerName(order: WooOrder): string {

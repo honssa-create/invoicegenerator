@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWooDraftOrder, mapWooStatus } from './woocommerce';
+import { isWooDraftOrder, mapNestieeWooStatus, mapWooStatus } from './woocommerce';
 import { extractOrderNoFromRemarks } from './reconciliation-server';
 
 describe('mapWooStatus', () => {
@@ -24,10 +24,41 @@ describe('mapWooStatus', () => {
   });
 });
 
+describe('mapNestieeWooStatus', () => {
+  it('maps draft statuses to checkout-draft', () => {
+    expect(mapNestieeWooStatus('checkout-draft')).toBe('checkout-draft');
+    expect(mapNestieeWooStatus('draft')).toBe('checkout-draft');
+    expect(mapNestieeWooStatus('wc-draft')).toBe('checkout-draft');
+  });
+
+  it('maps pending and attention statuses to pending payment', () => {
+    expect(mapNestieeWooStatus('pending')).toBe('pending payment');
+    expect(mapNestieeWooStatus('failed')).toBe('pending payment');
+    expect(mapNestieeWooStatus('cancelled')).toBe('pending payment');
+    expect(mapNestieeWooStatus('refunded')).toBe('pending payment');
+  });
+
+  it('maps processing and on-hold to processing', () => {
+    expect(mapNestieeWooStatus('processing')).toBe('processing');
+    expect(mapNestieeWooStatus('on-hold')).toBe('processing');
+  });
+
+  it('maps shipped and completed', () => {
+    expect(mapNestieeWooStatus('shipped')).toBe('shipped');
+    expect(mapNestieeWooStatus('wc-shipped')).toBe('shipped');
+    expect(mapNestieeWooStatus('completed')).toBe('completed');
+  });
+
+  it('maps unknown Woo statuses to processing', () => {
+    expect(mapNestieeWooStatus('custom-status')).toBe('processing');
+  });
+});
+
 describe('isWooDraftOrder', () => {
   it('identifies Woo draft statuses', () => {
     expect(isWooDraftOrder('draft')).toBe(true);
     expect(isWooDraftOrder(' WC-DRAFT ')).toBe(true);
+    expect(isWooDraftOrder('checkout-draft')).toBe(true);
   });
 
   it('keeps non-draft Woo orders importable', () => {

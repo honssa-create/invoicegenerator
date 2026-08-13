@@ -51,6 +51,70 @@ export const ORDER_STATUSES = [
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+/** Ecommerce statuses for Nestiee + 燕窩回禮燉製. */
+export const ECOM_ORDER_STATUSES = [
+  'checkout-draft',
+  'pending payment',
+  'processing',
+  'shipped',
+  'completed',
+] as const;
+
+export type EcomOrderStatus = (typeof ECOM_ORDER_STATUSES)[number];
+
+export function usesEcomOrderStatuses(orderType: string): boolean {
+  return isNestieeOrderType(orderType) || isWeddingGiftOrderType(orderType);
+}
+
+/** Status options for the given order type (manufacturing vs ecommerce). */
+export function statusesForOrderType(orderType: string): readonly string[] {
+  return usesEcomOrderStatuses(orderType) ? ECOM_ORDER_STATUSES : ORDER_STATUSES;
+}
+
+function parseJsonArrayField(fields: Record<string, unknown>, key: string): unknown[] {
+  const raw = fields[key];
+  if (raw == null || raw === false || raw === '') return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/** User ids assigned to an order (`fields.assignee_ids`). */
+export function parseAssigneeIds(fields: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  for (const v of parseJsonArrayField(fields, 'assignee_ids')) {
+    const n = typeof v === 'number' ? v : Number(v);
+    if (Number.isFinite(n) && n > 0) out.push(Math.trunc(n));
+  }
+  return Array.from(new Set(out));
+}
+
+export function serializeAssigneeIds(ids: number[]): string {
+  return JSON.stringify(Array.from(new Set(ids.filter((n) => Number.isFinite(n) && n > 0))));
+}
+
+/** Free-form tags on an order (`fields.tags`). */
+export function parseOrderTags(fields: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const v of parseJsonArrayField(fields, 'tags')) {
+    const s = String(v ?? '').trim();
+    if (s) out.push(s);
+  }
+  return Array.from(new Set(out));
+}
+
+export function serializeOrderTags(tags: string[]): string {
+  const cleaned = tags.map((t) => String(t ?? '').trim()).filter(Boolean);
+  return JSON.stringify(Array.from(new Set(cleaned)));
+}
+
 export const STATUS_DOT_COLORS: Record<string, string> = {
   'OPEN': '#9CA3AF',
   '快遞到件': '#5BA4CF',
@@ -67,6 +131,11 @@ export const STATUS_DOT_COLORS: Record<string, string> = {
   '客退貨/客原版': '#8B7D72',
   '已處理': '#5C5C5C',
   'FAIL': '#E91E8C',
+  'checkout-draft': '#9CA3AF',
+  'pending payment': '#3B82F6',
+  'processing': '#D97706',
+  'shipped': '#6366F1',
+  'completed': '#16A34A',
 };
 
 export const STATUS_COLORS: Record<string, string> = {
@@ -85,6 +154,11 @@ export const STATUS_COLORS: Record<string, string> = {
   '客退貨/客原版': 'bg-[#F0EDEB] text-[#6B6058]',
   '已處理': 'bg-[#EBEBEB] text-[#3F3F3F]',
   'FAIL': 'bg-[#FCE4F2] text-[#C01070]',
+  'checkout-draft': 'bg-[#F3F4F6] text-[#6B7280]',
+  'pending payment': 'bg-[#DBEAFE] text-[#1D4ED8]',
+  'processing': 'bg-[#FEF3C7] text-[#B45309]',
+  'shipped': 'bg-[#E0E7FF] text-[#4338CA]',
+  'completed': 'bg-[#DCFCE7] text-[#15803D]',
 };
 
 export const STATUS_COLUMN_BG: Record<string, string> = {
@@ -103,6 +177,11 @@ export const STATUS_COLUMN_BG: Record<string, string> = {
   '客退貨/客原版': 'bg-[#E6E0DB]',
   '已處理': 'bg-[#DDDDDD]',
   'FAIL': 'bg-[#F9D0E8]',
+  'checkout-draft': 'bg-[#E8EAED]',
+  'pending payment': 'bg-[#DBEAFE]',
+  'processing': 'bg-[#FDE68A]',
+  'shipped': 'bg-[#C7D2FE]',
+  'completed': 'bg-[#BBF7D0]',
 };
 
 export const STATUS_COLUMN_ACCENT: Record<string, string> = {
@@ -121,6 +200,11 @@ export const STATUS_COLUMN_ACCENT: Record<string, string> = {
   '客退貨/客原版': 'border-t-[#8B7D72]',
   '已處理': 'border-t-[#5C5C5C]',
   'FAIL': 'border-t-[#E91E8C]',
+  'checkout-draft': 'border-t-[#9CA3AF]',
+  'pending payment': 'border-t-[#3B82F6]',
+  'processing': 'border-t-[#D97706]',
+  'shipped': 'border-t-[#6366F1]',
+  'completed': 'border-t-[#16A34A]',
 };
 
 // The full custom-field list shown in the order detail "Fields" panel, in order.

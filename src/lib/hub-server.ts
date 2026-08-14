@@ -36,6 +36,7 @@ export interface HubOrderUpsertInput {
   customer_email?: string | null;
   phone?: string | null;
   shipping_address?: string | null;
+  billing_address?: string | null;
   description?: string | null;
   notes?: string | null;
   external_po_number?: string | null;
@@ -158,10 +159,6 @@ export async function upsertHubOrder(
       fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
     }
 
-    const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
-    if (billing) fields.billing_address = billing;
-    if (!shippingAddress && billing) shippingAddress = billing;
-
     const verified = fields.payment_verified === true || fields.payment_verified === 'true';
     const existingPay =
       parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
@@ -208,10 +205,6 @@ export async function upsertHubOrder(
       fields.requested_delivery = estimate;
     }
 
-    const billing = formatWooAddress(payload.billing as WooAddressLike | undefined);
-    if (billing) fields.billing_address = billing;
-    if (!shippingAddress && billing) shippingAddress = billing;
-
     const verified = fields.payment_verified === true || fields.payment_verified === 'true';
     const existingPay =
       parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
@@ -236,6 +229,15 @@ export async function upsertHubOrder(
       }
     }
   }
+
+  // Capture Woo billing address for all store platforms (honour / nestiee / cupmoka).
+  const billingFromInput = input.billing_address?.trim() || '';
+  const billingFromPayload = input.raw_payload
+    ? formatWooAddress(input.raw_payload.billing as WooAddressLike | undefined)
+    : '';
+  const billingAddress = billingFromInput || billingFromPayload;
+  if (billingAddress) fields.billing_address = billingAddress;
+  if (!shippingAddress && billingAddress) shippingAddress = billingAddress;
 
   const notesToWrite =
     importedNotes && !(existing?.notes || '').trim() ? importedNotes : null;

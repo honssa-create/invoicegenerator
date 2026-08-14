@@ -969,13 +969,25 @@ export default function OrderDetailPage() {
                   </select>
                 )}
               </div>
-              <div className="md:col-span-2">
+              <div>
                 {labeled(
                   '送貨地址 Shipping Address',
                   <textarea
                     value={order.shipping_address}
                     onChange={(e) => setCoreLocal('shipping_address', e.target.value)}
                     onBlur={(e) => patch({ core: { shipping_address: e.target.value } })}
+                    rows={3}
+                    className={softInput}
+                  />
+                )}
+              </div>
+              <div>
+                {labeled(
+                  '帳單地址 Billing Address',
+                  <textarea
+                    value={String(order.fields.billing_address ?? '')}
+                    onChange={(e) => setFieldLocal('billing_address', e.target.value)}
+                    onBlur={(e) => patch({ fields: { billing_address: e.target.value } })}
                     rows={3}
                     className={softInput}
                   />

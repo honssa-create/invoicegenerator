@@ -425,6 +425,8 @@ export default function InvoiceDetailPage() {
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="space-y-3">
               <div>
                 <label className={labelCls}>Email</label>
                 <input
@@ -447,23 +449,6 @@ export default function InvoiceDetailPage() {
                 </label>
               </div>
             </div>
-            <div className="space-y-3">
-              <div>
-                <label className={labelCls}>Status</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as InvoiceStatus)}
-                  disabled={readOnly}
-                  className={inputCls}
-                >
-                  {INVOICE_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
             <div className="text-right lg:pl-4">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AMOUNT</p>
               <p className="text-3xl font-bold text-gray-900 tabular-nums mt-1">
@@ -476,8 +461,8 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
 
-          <div className="p-5 border-b border-gray-100 grid lg:grid-cols-[1.1fr_1fr] gap-6">
-            <div className="space-y-4">
+          <div className="p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-6">
+            <div className="space-y-4 w-full lg:w-1/4 lg:min-w-[11rem] lg:max-w-xs shrink-0">
               <div>
                 <label className={labelCls}>Billing address</label>
                 <textarea
@@ -499,7 +484,7 @@ export default function InvoiceDetailPage() {
                 />
               </div>
             </div>
-            <div className="grid sm:grid-cols-2 gap-3 content-start">
+            <div className="grid sm:grid-cols-2 gap-3 content-start w-full lg:w-1/2 shrink-0">
               <div>
                 <label className={labelCls}>{bi('Issue date', '開立日期')}</label>
                 <input
@@ -900,6 +885,21 @@ export default function InvoiceDetailPage() {
                 ))}
               </select>
             )}
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <label className={labelCls}>Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as InvoiceStatus)}
+                disabled={readOnly}
+                className={inputCls}
+              >
+                {INVOICE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <ActivityFeed entityType="invoice" entityId={invoice.id} className="max-h-[700px]" />
         </div>

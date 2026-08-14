@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
 import { NAV_ITEMS } from './nav-items';
+import { ORDER_NAV_TYPE_FILTERS } from '@/lib/orders';
 import { APP, BTN } from '@/lib/ui-labels';
 
 interface SidebarProps {
@@ -15,6 +17,7 @@ interface SidebarProps {
 export default function Sidebar({ variant = 'desktop', open = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout, canAccess } = useAuth();
+  const [ordersMenuOpen, setOrdersMenuOpen] = useState(false);
 
   const isMobile = variant === 'mobile';
 
@@ -22,11 +25,15 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
     ? `fixed inset-y-0 left-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-gray-200 bg-white shadow-xl transition-transform duration-200 ease-out lg:hidden ${
         open ? 'translate-x-0' : '-translate-x-full pointer-events-none'
       }`
-    : 'hidden lg:flex w-64 min-h-screen flex-col border-r border-gray-200 bg-white';
+    : 'hidden lg:flex relative z-40 w-64 min-h-screen flex-col border-r border-gray-200 bg-white';
 
-  const handleNav = () => onNavigate?.();
+  const handleNav = () => {
+    setOrdersMenuOpen(false);
+    onNavigate?.();
+  };
 
   const visibleItems = NAV_ITEMS.filter((item) => canAccess(item.section));
+  const ordersActive = pathname === '/orders' || pathname.startsWith('/orders/');
 
   return (
     <aside className={asideClass} aria-hidden={isMobile ? !open : undefined}>
@@ -40,9 +47,85 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
         </Link>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto p-3 sm:p-4">
+      <nav className="flex-1 space-y-1 overflow-y-auto overflow-x-visible p-3 sm:p-4">
         {visibleItems.map((item) => {
-          const active = pathname.startsWith(item.href);
+          const active =
+            item.href === '/orders'
+              ? ordersActive
+              : pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+          if (item.href === '/orders') {
+            return (
+              <div
+                key={item.href}
+                className="relative group"
+                onMouseEnter={() => {
+                  if (!isMobile) setOrdersMenuOpen(true);
+                }}
+                onMouseLeave={() => {
+                  if (!isMobile) setOrdersMenuOpen(false);
+                }}
+              >
+                <div
+                  className={`flex min-h-[44px] items-center rounded-lg transition-colors ${
+                    active
+                      ? 'bg-brand-50 text-brand-700'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <Link
+                    href="/orders"
+                    onClick={handleNav}
+                    className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-sm font-medium"
+                  >
+                    <span className="text-lg">{item.icon}</span>
+                    {item.label}
+                  </Link>
+                  {isMobile ? (
+                    <button
+                      type="button"
+                      aria-label="Order type filters"
+                      aria-expanded={ordersMenuOpen}
+                      onClick={() => setOrdersMenuOpen((v) => !v)}
+                      className="shrink-0 px-3 py-2 text-xs text-gray-500 hover:text-gray-800"
+                    >
+                      {ordersMenuOpen ? '▲' : '▼'}
+                    </button>
+                  ) : (
+                    <span className="shrink-0 px-3 py-2 text-xs text-gray-400" aria-hidden>
+                      ▾
+                    </span>
+                  )}
+                </div>
+
+                {/*
+                  Submenu expands under Orders (not a right flyout) so it is not clipped by
+                  nav overflow or covered by the main content pane.
+                */}
+                <div
+                  className={`ml-3 mt-0.5 space-y-0.5 border-l border-gray-200 pl-2 ${
+                    isMobile
+                      ? ordersMenuOpen
+                        ? 'block'
+                        : 'hidden'
+                      : 'hidden group-hover:block'
+                  }`}
+                >
+                  {ORDER_NAV_TYPE_FILTERS.map((f) => (
+                    <Link
+                      key={f.param}
+                      href={`/orders?type=${f.param}`}
+                      onClick={handleNav}
+                      className="block rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-brand-50 hover:text-brand-700"
+                    >
+                      {f.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+
           return (
             <Link
               key={item.href}

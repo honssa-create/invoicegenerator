@@ -1,12 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
-import { ORDER_TYPES, STATUS_COLORS, getOrderType, statusesForOrderType, type Order } from '@/lib/orders';
+import {
+  ORDER_NAV_TYPE_FILTERS,
+  ORDER_TYPES,
+  STATUS_COLORS,
+  getOrderType,
+  orderMatchesTypeFilter,
+  statusKeyForTypeFilter,
+  statusesForOrderType,
+  type Order,
+} from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const OrdersBoard = dynamic(() => import('@/components/OrdersBoard'), { ssr: false });
@@ -15,7 +24,22 @@ const OrdersCalendar = dynamic(() => import('@/components/OrdersCalendar'), { ss
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
 
 export default function OrdersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+        </div>
+      }
+    >
+      <OrdersPageContent />
+    </Suspense>
+  );
+}
+
+function OrdersPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -40,12 +64,30 @@ export default function OrdersPage() {
   };
   useEffect(() => { load(); }, []);
 
+  // Sidebar type shortcuts: /orders?type=honour|wedding|nestiee (or exact type)
+  useEffect(() => {
+    const raw = searchParams.get('type')?.trim() || '';
+    setOrderType(raw);
+  }, [searchParams]);
+
+  const setOrderTypeAndUrl = (value: string) => {
+    setOrderType(value);
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set('type', value);
+    else params.delete('type');
+    const qs = params.toString();
+    router.replace(qs ? `/orders?${qs}` : '/orders', { scroll: false });
+  };
+
   const typeOptions = useMemo(() => {
     const fromData = orders.map(getOrderType).filter(Boolean);
     return Array.from(new Set([...ORDER_TYPES, ...fromData]));
   }, [orders]);
 
-  const statusOptions = useMemo(() => statusesForOrderType(orderType), [orderType]);
+  const statusOptions = useMemo(
+    () => statusesForOrderType(statusKeyForTypeFilter(orderType)),
+    [orderType],
+  );
 
   useEffect(() => {
     if (status && !statusOptions.includes(status)) setStatus('');
@@ -57,7 +99,7 @@ export default function OrdersPage() {
       const created = o.created_at?.slice(0, 10) || '';
       if (dateStart && created && created < dateStart) return false;
       if (dateEnd && created && created > dateEnd) return false;
-      if (orderType && getOrderType(o) !== orderType) return false;
+      if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
       if (status && o.status !== status) return false;
       if (q) {
         const hay = [o.reference_number, o.po_number, o.name, o.description, getOrderType(o)]
@@ -118,6 +160,7 @@ export default function OrdersPage() {
     setOrderType('');
     setStatus('');
     setSearch('');
+    router.replace('/orders', { scroll: false });
   };
 
   const create = async (status?: string) => {
@@ -239,8 +282,11 @@ export default function OrdersPage() {
       >
         <div className="flex flex-col">
           <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Order Type', '訂單類型')}</label>
-          <select value={orderType} onChange={(e) => setOrderType(e.target.value)} className={selectCls}>
+          <select value={orderType} onChange={(e) => setOrderTypeAndUrl(e.target.value)} className={selectCls}>
             <option value="">{BTN.all}</option>
+            {ORDER_NAV_TYPE_FILTERS.map((f) => (
+              <option key={f.param} value={f.param}>{f.label}</option>
+            ))}
             {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>

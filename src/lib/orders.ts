@@ -430,6 +430,36 @@ export const ORDER_TYPES = [
 ] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
+/** Sidebar / URL shortcuts that group related order types. */
+export const ORDER_NAV_TYPE_FILTERS = [
+  { param: 'honour', label: 'honour訂單' },
+  { param: 'wedding', label: '燕窩回禮' },
+  { param: 'nestiee', label: '燕窩訂單' },
+] as const;
+
+export type OrderNavTypeParam = (typeof ORDER_NAV_TYPE_FILTERS)[number]['param'];
+
+export function isOrderNavTypeParam(value: string): value is OrderNavTypeParam {
+  return (ORDER_NAV_TYPE_FILTERS as readonly { param: string }[]).some((f) => f.param === value);
+}
+
+/** Whether an order's type matches a nav/filter value (exact type or nav group param). */
+export function orderMatchesTypeFilter(orderType: string, filter: string): boolean {
+  if (!filter) return true;
+  if (filter === 'honour') return isBadgeOrderType(orderType);
+  if (filter === 'wedding') return isWeddingGiftOrderType(orderType);
+  if (filter === 'nestiee') return isNestieeOrderType(orderType);
+  return orderType === filter;
+}
+
+/** Resolve status-list key for a filter (nav group → representative type). */
+export function statusKeyForTypeFilter(filter: string): string {
+  if (filter === 'honour') return 'honour訂製';
+  if (filter === 'wedding') return WEDDING_GIFT_ORDER_TYPE;
+  if (filter === 'nestiee') return NESTIEE_ORDER_TYPE;
+  return filter;
+}
+
 export function getOrderType(o: Pick<Order, 'fields'>): string {
   const t = o.fields?.order_type;
   return typeof t === 'string' ? t : '';

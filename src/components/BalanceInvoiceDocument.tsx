@@ -245,7 +245,7 @@ export default function BalanceInvoiceDocument({
       </header>
 
       <div className="mb-7">
-        <h1 className="quo-title">INVOICE</h1>
+        <h1 className="quo-title">BALANCE INVOICE</h1>
         <hr className="quo-rule mt-2.5" />
       </div>
 

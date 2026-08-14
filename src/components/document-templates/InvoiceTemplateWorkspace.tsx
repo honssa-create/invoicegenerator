@@ -116,7 +116,6 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
   const [paymentTerms, setPaymentTerms] = useState('<terms>');
   const [style, setStyle] = useState<QuotationStyleTemplate>({ ...DEFAULT_QUOTATION_STYLE });
   const [saveMessage, setSaveMessage] = useState('');
-  const [showSum, setShowSum] = useState(true);
   const [showChop, setShowChop] = useState(true);
 
   useEffect(() => {
@@ -211,7 +210,7 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
       <FormalQuotationDocument
         model={standardModel}
         style={style}
-        showSum={showSum}
+        showSum
         showSignature
         showChop={showChop}
         documentTitle="INVOICE"
@@ -261,15 +260,6 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
         </div>
         {layoutId === 'standard' ? (
           <div className="flex flex-wrap gap-4 pt-1 text-sm text-gray-700">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showSum}
-                onChange={(e) => setShowSum(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              {bi('Show totals', '顯示合計')}
-            </label>
             <label className="inline-flex items-center gap-2">
               <input
                 type="checkbox"

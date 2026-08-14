@@ -28,24 +28,15 @@ interface Business {
 /** Matches public/invoice-template-sign.html (chop) vs invoice-template.html (no chop). */
 type PdfChopMode = 'chop' | 'no-chop';
 
-/** Standard totals block on / off (deposit/balance layouts always show totals). */
-type PdfTotalsMode = 'totals' | 'no-totals';
-
 /** Standard / deposit / balance HTML layout variants. */
 type PdfLayoutMode = 'standard' | 'deposit' | 'balance';
 
 const PDF_CHOP_STORAGE_KEY = 'invoice-pdf-chop';
-const PDF_TOTALS_STORAGE_KEY = 'invoice-pdf-totals';
 const PDF_LAYOUT_STORAGE_KEY = 'invoice-pdf-layout';
 
 const PDF_CHOP_OPTIONS: { id: PdfChopMode; label: string }[] = [
   { id: 'chop', label: bi('Chop', '公司章') },
   { id: 'no-chop', label: bi('No chop', '無公司章') },
-];
-
-const PDF_TOTALS_OPTIONS: { id: PdfTotalsMode; label: string }[] = [
-  { id: 'totals', label: bi('Totals', '合計') },
-  { id: 'no-totals', label: bi('No totals', '無合計') },
 ];
 
 const PDF_LAYOUT_OPTIONS: { id: PdfLayoutMode; label: string }[] = [
@@ -63,17 +54,6 @@ function loadPdfChop(): PdfChopMode {
     /* ignore */
   }
   return 'chop';
-}
-
-function loadPdfTotals(): PdfTotalsMode {
-  if (typeof window === 'undefined') return 'totals';
-  try {
-    const raw = localStorage.getItem(PDF_TOTALS_STORAGE_KEY);
-    if (raw === 'totals' || raw === 'no-totals') return raw;
-  } catch {
-    /* ignore */
-  }
-  return 'totals';
 }
 
 function loadPdfLayout(): PdfLayoutMode {
@@ -97,7 +77,6 @@ export default function InvoicePrintPage() {
   > | null>(null);
   const [style, setStyle] = useState<QuotationStyleTemplate>(DEFAULT_QUOTATION_STYLE);
   const [chopMode, setChopMode] = useState<PdfChopMode>('chop');
-  const [totalsMode, setTotalsMode] = useState<PdfTotalsMode>('totals');
   const [layoutMode, setLayoutMode] = useState<PdfLayoutMode>('standard');
 
   useEffect(() => {
@@ -116,7 +95,6 @@ export default function InvoicePrintPage() {
   useEffect(() => {
     setStyle(loadQuotationStyleFromStorage('label') || DEFAULT_QUOTATION_STYLE);
     setChopMode(loadPdfChop());
-    setTotalsMode(loadPdfTotals());
     setLayoutMode(loadPdfLayout());
   }, []);
 
@@ -124,15 +102,6 @@ export default function InvoicePrintPage() {
     setChopMode(mode);
     try {
       localStorage.setItem(PDF_CHOP_STORAGE_KEY, mode);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const setTotalsPersist = (mode: PdfTotalsMode) => {
-    setTotalsMode(mode);
-    try {
-      localStorage.setItem(PDF_TOTALS_STORAGE_KEY, mode);
     } catch {
       /* ignore */
     }
@@ -181,7 +150,6 @@ export default function InvoicePrintPage() {
 
   const isSplitDue = layoutMode === 'deposit' || layoutMode === 'balance';
   const showChop = chopMode === 'chop';
-  const showSum = totalsMode === 'totals';
   const ready = invoice && standardModel && depositModel && balanceModel;
 
   if (!ready) {
@@ -224,54 +192,29 @@ export default function InvoicePrintPage() {
             })}
           </div>
           {!isSplitDue ? (
-            <>
-              <div
-                className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
-                role="group"
-                aria-label={bi('PDF totals', 'PDF 合計')}
-              >
-                {PDF_TOTALS_OPTIONS.map((opt) => {
-                  const active = totalsMode === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setTotalsPersist(opt.id)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        active
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <div
-                className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
-                role="group"
-                aria-label={bi('PDF chop', 'PDF 公司章')}
-              >
-                {PDF_CHOP_OPTIONS.map((opt) => {
-                  const active = chopMode === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setChopPersist(opt.id)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        active
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
+            <div
+              className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
+              role="group"
+              aria-label={bi('PDF chop', 'PDF 公司章')}
+            >
+              {PDF_CHOP_OPTIONS.map((opt) => {
+                const active = chopMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setChopPersist(opt.id)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      active
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           ) : null}
           <button
             onClick={() => window.print()}
@@ -292,7 +235,7 @@ export default function InvoicePrintPage() {
             model={standardModel}
             style={style}
             printMode
-            showSum={showSum}
+            showSum
             showSignature
             showChop={showChop}
             documentTitle="INVOICE"

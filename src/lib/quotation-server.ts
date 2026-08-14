@@ -37,6 +37,16 @@ export async function getQuotationWithDetails(
     .prepare('SELECT id, path, original_name FROM quotation_files WHERE quotation_id = ? ORDER BY id')
     .all(id)) as QuotationFile[];
 
+  const linkedOrder = (await db
+    .prepare(
+      `SELECT id, reference_number, po_number FROM orders
+       WHERE quotation_id = ? AND user_id = ?
+       ORDER BY id ASC LIMIT 1`
+    )
+    .get(id, userId)) as
+    | { id: number; reference_number: string | null; po_number: string | null }
+    | undefined;
+
   const { subtotal, discountAmount, taxAmount, total } = calculateQuotationTotals(items, {
     taxRate: quotation.tax_rate as number,
     discountType: quotation.discount_type as string,
@@ -57,5 +67,12 @@ export async function getQuotationWithDetails(
     discount_amount: discountAmount,
     tax_amount: taxAmount,
     total,
+    linked_order: linkedOrder
+      ? {
+          id: linkedOrder.id,
+          reference_number: linkedOrder.reference_number,
+          po_number: linkedOrder.po_number,
+        }
+      : null,
   };
 }

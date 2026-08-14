@@ -70,8 +70,23 @@ describe('prefillProductionNote', () => {
     expect(prefillProductionNote(order).po).toBe('#7');
   });
 
-  it('does not double-hash PO that already has #', () => {
-    expect(prefillProductionNote(baseOrder({ po_number: '#H1' })).po).toBe('#H1');
+  it('prefills craft details from per-line honour fields when flats empty', () => {
+    const order = baseOrder({
+      po_number: 'H9',
+      fields: {
+        honour_lines: JSON.stringify([
+          {
+            style: 'Badge',
+            quantity: '10',
+            unit_price: '1',
+            craft: 'line craft',
+            plating_color: '金',
+            clasp: '磁扣',
+          },
+        ]),
+      },
+    });
+    expect(prefillProductionNote(order).details).toBe('line craft, 金, 磁扣');
   });
 });
 

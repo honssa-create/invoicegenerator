@@ -33,12 +33,18 @@ import {
   computeWeddingGiftTotal,
   derivePaymentStatusLabel,
   emptyHonourLine,
+  emptyHonourSupplier,
+  ensureHonourSupplierCount,
   honourLinesDerivedFields,
+  honourProductLineCount,
+  honourSuppliersDerivedFields,
+  isHonourShippingLine,
   normalizeWeddingGiftBottleCapacity,
   computeWeddingGiftMaterials,
   computeWeddingGiftPacking,
   normalizeOrderPaymentMethod,
   parseHonourLines,
+  parseHonourSuppliers,
   getNestieeLines,
   NESTIEE_GIFT_BOX_TYPES,
   nestieeGiftQtyManualKey,
@@ -53,6 +59,7 @@ import {
   isBadgeOrderType,
   isWeddingGiftOrderType,
   type HonourLineItem,
+  type HonourSupplierItem,
   type Order,
 } from '@/lib/orders';
 import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
@@ -468,6 +475,12 @@ export default function OrderDetailPage() {
   const orderType = fVal('order_type');
   const honourLines = isBadgeOrderType(orderType) ? parseHonourLines(order.fields) : [];
   const honourTotals = computeHonourLineTotals(honourLines);
+  const honourSuppliers = isBadgeOrderType(orderType)
+    ? parseHonourSuppliers(order.fields, {
+        minCount: honourProductLineCount(honourLines),
+        cartonCountCore: order.carton_count,
+      })
+    : [];
   const honourDue =
     isBadgeOrderType(orderType) && honourTotals.totalAmount > 0 ? honourTotals.totalAmount : null;
   const weddingGiftTotal = isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(order.fields) : 0;
@@ -581,11 +594,20 @@ export default function OrderDetailPage() {
   const setHonourLinesLocal = (lines: HonourLineItem[]) => {
     const derived = honourLinesDerivedFields(lines);
     const { totalAmount } = computeHonourLineTotals(lines);
+    // Grow supplier cards when product count increases (never auto-shrink).
+    const productCount = honourProductLineCount(lines);
+    const currentSuppliers = parseHonourSuppliers(order.fields, {
+      minCount: 1,
+      cartonCountCore: order.carton_count,
+    });
+    const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
+    const supplierDerived =
+      padded.length !== currentSuppliers.length ? honourSuppliersDerivedFields(padded) : {};
     setOrder((prev) =>
       prev
         ? {
             ...prev,
-            fields: { ...prev.fields, ...derived },
+            fields: { ...prev.fields, ...derived, ...supplierDerived },
             total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
           }
         : prev
@@ -595,18 +617,58 @@ export default function OrderDetailPage() {
   const commitHonourLines = (lines: HonourLineItem[]) => {
     const derived = honourLinesDerivedFields(lines);
     const { totalAmount } = computeHonourLineTotals(lines);
+    const productCount = honourProductLineCount(lines);
+    const currentSuppliers = parseHonourSuppliers(order.fields, {
+      minCount: 1,
+      cartonCountCore: order.carton_count,
+    });
+    const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
+    const supplierDerived =
+      padded.length !== currentSuppliers.length ? honourSuppliersDerivedFields(padded) : {};
     setOrder((prev) =>
       prev
         ? {
             ...prev,
-            fields: { ...prev.fields, ...derived },
+            fields: { ...prev.fields, ...derived, ...supplierDerived },
             total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
           }
         : prev
     );
     patch({
-      fields: derived,
+      fields: { ...derived, ...supplierDerived },
       ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
+    });
+  };
+
+  const setHonourSuppliersLocal = (suppliers: HonourSupplierItem[]) => {
+    const derived = honourSuppliersDerivedFields(suppliers);
+    const firstCarton = suppliers[0]?.carton_count ?? '';
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            fields: { ...prev.fields, ...derived },
+            carton_count: firstCarton,
+          }
+        : prev
+    );
+  };
+
+  const commitHonourSuppliers = (suppliers: HonourSupplierItem[]) => {
+    const derived = honourSuppliersDerivedFields(suppliers);
+    const firstCarton = suppliers[0]?.carton_count ?? '';
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            fields: { ...prev.fields, ...derived },
+            carton_count: firstCarton,
+          }
+        : prev
+    );
+    patch({
+      fields: derived,
+      core: { carton_count: firstCarton },
     });
   };
 
@@ -1027,7 +1089,7 @@ export default function OrderDetailPage() {
 
             {isBadgeOrderType(orderType) && (
               <div className="space-y-8">
-                {/* Line items */}
+                {/* Line items — per-product craft & packaging */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-semibold text-gray-700">Items 款式明細</h3>
@@ -1036,77 +1098,203 @@ export default function OrderDetailPage() {
                       onClick={() => commitHonourLines([...honourLines, emptyHonourLine()])}
                       className="text-sm font-medium text-brand-600 hover:text-brand-700"
                     >
-                      + Add row
+                      + Add product
                     </button>
                   </div>
-                  <div className="space-y-3">
-                    {honourLines.map((line, index) => (
-                      <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px_auto] gap-3 items-end">
-                        {labeled(
-                          index === 0 ? 'Style 款式' : '\u00a0',
-                          <input
-                            value={line.style}
-                            onChange={(e) => {
-                              const next = honourLines.map((l, i) => (i === index ? { ...l, style: e.target.value } : l));
-                              setHonourLinesLocal(next);
-                            }}
-                            onBlur={(e) => {
-                              const next = honourLines.map((l, i) => (i === index ? { ...l, style: e.target.value } : l));
-                              commitHonourLines(next);
-                            }}
-                            placeholder="e.g. 亞加力雙面"
-                            className={softInput}
-                          />
-                        )}
-                        {labeled(
-                          index === 0 ? 'Quantity 數量' : '\u00a0',
-                          <input
-                            type="number"
-                            min={0}
-                            value={line.quantity}
-                            onChange={(e) => {
-                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: nonNeg(e.target.value) } : l));
-                              setHonourLinesLocal(next);
-                            }}
-                            onBlur={(e) => {
-                              const v = nonNeg(e.target.value);
-                              const next = honourLines.map((l, i) => (i === index ? { ...l, quantity: v } : l));
-                              commitHonourLines(next);
-                            }}
-                            placeholder="0"
-                            className={softInput}
-                          />
-                        )}
-                        {labeled(
-                          index === 0 ? 'Amount per 單價' : '\u00a0',
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                            <input
-                              type="number"
-                              value={line.unit_price}
-                              onChange={(e) => {
-                                const next = honourLines.map((l, i) => (i === index ? { ...l, unit_price: e.target.value } : l));
-                                setHonourLinesLocal(next);
-                              }}
-                              onBlur={(e) => {
-                                const next = honourLines.map((l, i) => (i === index ? { ...l, unit_price: e.target.value } : l));
-                                commitHonourLines(next);
-                              }}
-                              placeholder="0.00"
-                              className={`${softInput} pl-7`}
-                            />
+                  <div className="space-y-6">
+                    {honourLines.map((line, index) => {
+                      const shipping = isHonourShippingLine(line);
+                      const productIndex =
+                        honourLines.slice(0, index + 1).filter((l) => !isHonourShippingLine(l)).length;
+                      const updateLine = (patchLine: Partial<HonourLineItem>, commit: boolean) => {
+                        const next = honourLines.map((l, i) => (i === index ? { ...l, ...patchLine } : l));
+                        if (commit) commitHonourLines(next);
+                        else setHonourLinesLocal(next);
+                      };
+                      if (shipping) {
+                        return (
+                          <div
+                            key={`ship-${index}`}
+                            className="rounded-xl border border-dashed border-gray-200 bg-gray-50/60 p-4"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-semibold text-gray-600">Shipping 運費</h4>
+                              <button
+                                type="button"
+                                disabled={honourLines.length <= 1}
+                                onClick={() => commitHonourLines(honourLines.filter((_, i) => i !== index))}
+                                className="text-sm text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-md">
+                              {labeled(
+                                'Amount 金額',
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                                  <input
+                                    type="number"
+                                    value={line.unit_price}
+                                    onChange={(e) => updateLine({ unit_price: e.target.value }, false)}
+                                    onBlur={(e) => updateLine({ unit_price: e.target.value, quantity: '1' }, true)}
+                                    placeholder="0.00"
+                                    className={`${softInput} pl-7`}
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        )}
-                        <button
-                          type="button"
-                          disabled={honourLines.length <= 1}
-                          onClick={() => commitHonourLines(honourLines.filter((_, i) => i !== index))}
-                          className="mb-0.5 text-sm text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed px-2 py-2"
+                        );
+                      }
+                      return (
+                        <div
+                          key={`product-${index}`}
+                          className="rounded-xl border border-gray-200 bg-white p-4 space-y-5 shadow-sm"
                         >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-semibold text-gray-800">
+                              Product {productIndex} 產品 {productIndex}
+                            </h4>
+                            <button
+                              type="button"
+                              disabled={honourProductLineCount(honourLines) <= 1}
+                              onClick={() => commitHonourLines(honourLines.filter((_, i) => i !== index))}
+                              className="text-sm text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px] gap-3">
+                            {labeled(
+                              'Style 款式',
+                              <input
+                                value={line.style}
+                                onChange={(e) => updateLine({ style: e.target.value }, false)}
+                                onBlur={(e) => updateLine({ style: e.target.value }, true)}
+                                placeholder="e.g. 亞加力雙面"
+                                className={softInput}
+                              />
+                            )}
+                            {labeled(
+                              'Quantity 數量',
+                              <input
+                                type="number"
+                                min={0}
+                                value={line.quantity}
+                                onChange={(e) => updateLine({ quantity: nonNeg(e.target.value) }, false)}
+                                onBlur={(e) => updateLine({ quantity: nonNeg(e.target.value) }, true)}
+                                placeholder="0"
+                                className={softInput}
+                              />
+                            )}
+                            {labeled(
+                              'Amount per 單價',
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                                <input
+                                  type="number"
+                                  value={line.unit_price}
+                                  onChange={(e) => updateLine({ unit_price: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ unit_price: e.target.value }, true)}
+                                  placeholder="0.00"
+                                  className={`${softInput} pl-7`}
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="border-t border-dashed border-gray-100 pt-4 space-y-4">
+                            <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Craft 工藝
+                            </h5>
+                            <div className="grid md:grid-cols-2 gap-4">
+                              {labeled(
+                                '紙卡尺寸',
+                                <input
+                                  value={line.card_size}
+                                  onChange={(e) => updateLine({ card_size: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ card_size: e.target.value }, true)}
+                                  className={softInput}
+                                />
+                              )}
+                              {labeled(
+                                '加工工藝',
+                                <input
+                                  value={line.craft}
+                                  onChange={(e) => updateLine({ craft: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ craft: e.target.value }, true)}
+                                  placeholder="e.g. 亞加力-單面"
+                                  className={softInput}
+                                />
+                              )}
+                              {labeled(
+                                '電鍍色',
+                                <input
+                                  value={line.plating_color}
+                                  onChange={(e) => updateLine({ plating_color: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ plating_color: e.target.value }, true)}
+                                  className={softInput}
+                                />
+                              )}
+                              {labeled(
+                                '背扣',
+                                <input
+                                  value={line.clasp}
+                                  onChange={(e) => updateLine({ clasp: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ clasp: e.target.value }, true)}
+                                  placeholder="e.g. 四節圓圈"
+                                  className={softInput}
+                                />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="border-t border-dashed border-gray-100 pt-4 space-y-4">
+                            <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Packaging 包裝
+                            </h5>
+                            <div className="grid md:grid-cols-2 gap-4">
+                              {labeled(
+                                '內部包裝處理',
+                                <input
+                                  value={line.internal_pack}
+                                  onChange={(e) => updateLine({ internal_pack: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ internal_pack: e.target.value }, true)}
+                                  placeholder="e.g. 不需要"
+                                  className={softInput}
+                                />
+                              )}
+                              {labeled(
+                                '交貨包裝',
+                                <input
+                                  value={line.pack_required}
+                                  onChange={(e) => updateLine({ pack_required: e.target.value }, false)}
+                                  onBlur={(e) => updateLine({ pack_required: e.target.value }, true)}
+                                  placeholder="e.g. OPP 獨立包裝"
+                                  className={softInput}
+                                />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="border-t border-dashed border-gray-100 pt-4">
+                            {labeled(
+                              '其他選項 Other options',
+                              <textarea
+                                value={line.other_options}
+                                onChange={(e) => updateLine({ other_options: e.target.value }, false)}
+                                onBlur={(e) => updateLine({ other_options: e.target.value }, true)}
+                                rows={4}
+                                placeholder="Unmatched Woo / CPO options for this product…"
+                                className={softInput}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="grid md:grid-cols-2 gap-5 mt-4 max-w-lg">
                     {readOnly('total quantity 總數量', honourTotals.totalQuantity)}
@@ -1126,80 +1314,135 @@ export default function OrderDetailPage() {
                   </div>
                 </div>
 
-                {/* Craft & packaging */}
+                {/* Supplier cards */}
                 <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
-                  <h3 className="text-sm font-semibold text-gray-700">Craft & Packaging 工藝與包裝</h3>
-                  <div className="grid md:grid-cols-3 gap-5">
-                    {labeled('加工工藝', fInput('craft', 'text', 'e.g. 亞加力-單面'))}
-                    {labeled('電鍍色', fInput('plating_color', 'text'))}
-                    {labeled('背扣', fInput('clasp', 'text', 'e.g. 四節圓圈'))}
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-gray-700">Supplier 供應商</h3>
+                    <button
+                      type="button"
+                      onClick={() => commitHonourSuppliers([...honourSuppliers, emptyHonourSupplier()])}
+                      className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                    >
+                      + Add more
+                    </button>
                   </div>
-                  <div className="grid md:grid-cols-3 gap-5">
-                    {labeled('內部包裝處理', fInput('internal_pack', 'text', 'e.g. 不需要'))}
-                    {labeled('交貨包裝', fInput('pack_required', 'text', 'e.g. OPP 獨立包裝'))}
-                  </div>
-                  {labeled(
-                    '其他加工',
-                    <textarea
-                      value={fVal('other_craft')}
-                      onChange={(e) => setFieldLocal('other_craft', e.target.value)}
-                      onBlur={(e) => patch({ fields: { other_craft: e.target.value } })}
-                      rows={6}
-                      placeholder="Woo / CPO option dump for further processing…"
-                      className={softInput}
-                    />
-                  )}
-                </div>
-
-                {/* Supplier */}
-                <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
-                  <h3 className="text-sm font-semibold text-gray-700">Supplier 供應商</h3>
-                  <div className="max-w-md">
-                    {labeled(
-                      '供應商',
-                      <SupplierSelect
-                        value={fVal('supplier')}
-                        options={mergeSupplierLists(supplierOptions, [fVal('supplier')])}
-                        onChange={(v) => {
-                          setFieldLocal('supplier', v);
-                          patch({ fields: { supplier: v } });
-                        }}
-                        onAdd={async (v) => {
-                          const res = await fetch('/api/expense-options', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'supplier', value: v }),
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            if (Array.isArray(data.options)) setSupplierOptions(data.options.map(String));
-                            else setSupplierOptions((prev) => mergeSupplierLists(prev, [v]));
-                          } else {
-                            setSupplierOptions((prev) => mergeSupplierLists(prev, [v]));
-                          }
-                        }}
-                        placeholder={bi('Select supplier…', '選擇供應商…')}
-                      />
-                    )}
-                  </div>
-                  <div className="grid md:grid-cols-3 gap-5">
-                    {labeled('單價 ($)', fInput('supplier_price', 'text', 'e.g. rmb 4.2'))}
-                    {labeled('模費/印刷費 ($)', fInput('mould_print_fee', 'text'))}
-                    {labeled('生產數量', fInput('supplier_qty', 'text'))}
-                  </div>
-                  <div className="grid md:grid-cols-3 gap-5">
-                    {labeled('出貨包裝', fInput('supplier_pack', 'text', 'e.g. OPP獨立包裝'))}
-                    {labeled('寄出日期', fInput('supplier_ship_date', 'text', 'e.g. 15/1/26'))}
-                    {labeled(
-                      '箱數',
-                      <input
-                        value={order.carton_count}
-                        onChange={(e) => setCoreLocal('carton_count', e.target.value)}
-                        onBlur={(e) => patch({ core: { carton_count: e.target.value } })}
-                        placeholder="e.g. 5"
-                        className={softInput}
-                      />
-                    )}
+                  <div className="space-y-5">
+                    {honourSuppliers.map((sup, sIndex) => {
+                      const updateSup = (patchSup: Partial<HonourSupplierItem>, commit: boolean) => {
+                        const next = honourSuppliers.map((s, i) => (i === sIndex ? { ...s, ...patchSup } : s));
+                        if (commit) commitHonourSuppliers(next);
+                        else setHonourSuppliersLocal(next);
+                      };
+                      return (
+                        <div
+                          key={`supplier-${sIndex}`}
+                          className="rounded-xl border border-gray-200 bg-white p-4 space-y-4 shadow-sm"
+                        >
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-semibold text-gray-800">
+                              Supplier-{sIndex + 1} 供應商-{sIndex + 1}
+                            </h4>
+                            <button
+                              type="button"
+                              disabled={honourSuppliers.length <= 1}
+                              onClick={() =>
+                                commitHonourSuppliers(honourSuppliers.filter((_, i) => i !== sIndex))
+                              }
+                              className="text-sm text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div className="max-w-md">
+                            {labeled(
+                              '供應商',
+                              <SupplierSelect
+                                value={sup.supplier}
+                                options={mergeSupplierLists(supplierOptions, [sup.supplier])}
+                                onChange={(v) => updateSup({ supplier: v }, true)}
+                                onAdd={async (v) => {
+                                  const res = await fetch('/api/expense-options', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ type: 'supplier', value: v }),
+                                  });
+                                  if (res.ok) {
+                                    const data = await res.json();
+                                    if (Array.isArray(data.options)) setSupplierOptions(data.options.map(String));
+                                    else setSupplierOptions((prev) => mergeSupplierLists(prev, [v]));
+                                  } else {
+                                    setSupplierOptions((prev) => mergeSupplierLists(prev, [v]));
+                                  }
+                                }}
+                                placeholder={bi('Select supplier…', '選擇供應商…')}
+                              />
+                            )}
+                          </div>
+                          <div className="grid md:grid-cols-3 gap-4">
+                            {labeled(
+                              '單價 ($)',
+                              <input
+                                value={sup.supplier_price}
+                                onChange={(e) => updateSup({ supplier_price: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ supplier_price: e.target.value }, true)}
+                                placeholder="e.g. rmb 4.2"
+                                className={softInput}
+                              />
+                            )}
+                            {labeled(
+                              '模費/印刷費 ($)',
+                              <input
+                                value={sup.mould_print_fee}
+                                onChange={(e) => updateSup({ mould_print_fee: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ mould_print_fee: e.target.value }, true)}
+                                className={softInput}
+                              />
+                            )}
+                            {labeled(
+                              '生產數量',
+                              <input
+                                value={sup.supplier_qty}
+                                onChange={(e) => updateSup({ supplier_qty: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ supplier_qty: e.target.value }, true)}
+                                className={softInput}
+                              />
+                            )}
+                          </div>
+                          <div className="grid md:grid-cols-3 gap-4">
+                            {labeled(
+                              '出貨包裝',
+                              <input
+                                value={sup.supplier_pack}
+                                onChange={(e) => updateSup({ supplier_pack: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ supplier_pack: e.target.value }, true)}
+                                placeholder="e.g. OPP獨立包裝"
+                                className={softInput}
+                              />
+                            )}
+                            {labeled(
+                              '寄出日期',
+                              <input
+                                value={sup.supplier_ship_date}
+                                onChange={(e) => updateSup({ supplier_ship_date: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ supplier_ship_date: e.target.value }, true)}
+                                placeholder="e.g. 15/1/26"
+                                className={softInput}
+                              />
+                            )}
+                            {labeled(
+                              '箱數',
+                              <input
+                                value={sup.carton_count}
+                                onChange={(e) => updateSup({ carton_count: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ carton_count: e.target.value }, true)}
+                                placeholder="e.g. 5"
+                                className={softInput}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 

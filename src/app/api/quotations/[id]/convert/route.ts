@@ -39,6 +39,22 @@ export async function POST(request: Request, { params }: { params: { id: string 
   }
 
   if (target === 'order') {
+    const existingOrder = (await db
+      .prepare(
+        `SELECT id, reference_number FROM orders WHERE quotation_id = ? AND user_id = ? ORDER BY id ASC LIMIT 1`
+      )
+      .get(params.id, ownerId)) as { id: number; reference_number: string | null } | undefined;
+    if (existingOrder) {
+      return NextResponse.json(
+        {
+          error: 'Quotation is already linked to an order',
+          id: existingOrder.id,
+          reference_number: existingOrder.reference_number,
+        },
+        { status: 409 }
+      );
+    }
+
     const itemsSummary = q.items.map((i) => `• ${i.product_service || ''} × ${i.quantity} @ $${i.unit_price}`).join('\n');
     const first = q.items[0];
     const firstName = (first?.product_service || '').trim();

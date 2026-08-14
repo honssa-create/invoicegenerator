@@ -13,11 +13,13 @@ import {
   normalizeOrderShippingMethod,
   appendNestieeShippingLine,
   applyNestieeGiftBoxAutoQtys,
-  parseHonourLinesFromWoo,
-  appendHonourShippingLine,
+  buildHonourLinesFromWoo,
+  mergeHonourLinesPreservingLocal,
+  parseHonourLines,
   honourLinesDerivedFields,
-  applyHonourOptionsToFields,
-  collectHonourCpoOptionsFromLines,
+  honourProductLineCount,
+  parseHonourSuppliers,
+  honourSuppliersDerivedFields,
   parseHonourCpoNotesFromLines,
   parseHonourPaymentFromWoo,
   parseHonourEstimateDelivery,
@@ -185,11 +187,17 @@ export async function upsertHubOrder(
     const payload = input.raw_payload;
     const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
     const shippingTotal = parseWooShippingTotal(payload);
-    const honourLines = appendHonourShippingLine(parseHonourLinesFromWoo(rawLines), shippingTotal);
+    const incoming = buildHonourLinesFromWoo(rawLines, shippingTotal);
+    const existingLines = parseHonourLines(fields as Record<string, string | boolean>);
+    const honourLines = mergeHonourLinesPreservingLocal(incoming, existingLines);
     Object.assign(fields, honourLinesDerivedFields(honourLines));
 
-    const { options, sizeMeta } = collectHonourCpoOptionsFromLines(rawLines);
-    applyHonourOptionsToFields(fields, options, sizeMeta);
+    // Pad supplier cards to product count (grow-only); seed from legacy flats if needed.
+    const suppliers = parseHonourSuppliers(fields as Record<string, string | boolean>, {
+      minCount: honourProductLineCount(honourLines),
+    });
+    Object.assign(fields, honourSuppliersDerivedFields(suppliers));
+
     const cpoNotes = parseHonourCpoNotesFromLines(rawLines);
     if (cpoNotes && !importedNotes.includes(cpoNotes)) {
       importedNotes = [importedNotes, cpoNotes].filter(Boolean).join('\n');

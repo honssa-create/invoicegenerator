@@ -224,6 +224,10 @@ export default function QuotationDetailPage() {
   };
 
   const convert = async (target: 'invoice' | 'order') => {
+    if (target === 'order' && quote?.linked_order) {
+      alert(bi('This quotation is already linked to an order.', '此報價單已關聯訂單。'));
+      return;
+    }
     await save();
     const res = await fetch(`/api/quotations/${id}/convert`, {
       method: 'POST',
@@ -232,6 +236,11 @@ export default function QuotationDetailPage() {
     });
     const data = await res.json();
     if (!res.ok) {
+      if (res.status === 409 && data.id) {
+        alert(bi('Already linked to an order.', '已關聯訂單。'));
+        router.push(`/orders/${data.id}`);
+        return;
+      }
       alert(data.error || MSG.conversionFailed);
       return;
     }
@@ -331,6 +340,17 @@ export default function QuotationDetailPage() {
             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[status]}`}>
               {QUOTATION_STATUS_FORM_LABEL[status as keyof typeof QUOTATION_STATUS_FORM_LABEL] || status}
             </span>
+            {quote.linked_order && (
+              <Link
+                href={`/orders/${quote.linked_order.id}`}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-medium hover:bg-teal-100"
+              >
+                🔗{' '}
+                {quote.linked_order.reference_number ||
+                  quote.linked_order.po_number ||
+                  `#${quote.linked_order.id}`}
+              </Link>
+            )}
           </div>
         </div>
         <div className="page-actions">
@@ -358,8 +378,19 @@ export default function QuotationDetailPage() {
               >
                 {copying ? bi('Copying…', '複製中…') : `📋 ${bi('Copy to New Invoice', '複製為新發票')}`}
               </button>
-              <button onClick={() => convert('order')} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">
-                → {bi('Convert to Order', '轉換為訂單')}
+              <button
+                onClick={() => convert('order')}
+                disabled={Boolean(quote.linked_order)}
+                title={
+                  quote.linked_order
+                    ? bi('Already linked to an order', '已關聯訂單')
+                    : undefined
+                }
+                className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {quote.linked_order
+                  ? bi('Linked to Order', '已轉換為訂單')
+                  : `→ ${bi('Convert to Order', '轉換為訂單')}`}
               </button>
               <button
                 onClick={save}

@@ -1,5 +1,6 @@
 import {
   BIRD_NEST_FLAVORS,
+  firstHonourProductLine,
   getNestieeLines,
   isBadgeOrderType,
   isBirdNestOrderType,
@@ -136,10 +137,10 @@ export function buildQuotationNotesFromOrder(
   if (order.po_number?.trim()) parts.push(`PO#: ${order.po_number}`);
   if (order.description?.trim()) parts.push(`Description: ${order.description.trim()}`);
 
-  const pack = fieldStr(order.fields, 'pack_required');
+  const pack = fieldStr(order.fields, 'pack_required') || firstHonourProductLine(parseHonourLines(order.fields))?.pack_required || '';
   if (pack) parts.push(`Packaging: ${pack}`);
 
-  const craft = fieldStr(order.fields, 'craft');
+  const craft = fieldStr(order.fields, 'craft') || firstHonourProductLine(parseHonourLines(order.fields))?.craft || '';
   if (craft) parts.push(`Craft: ${craft}`);
 
   return parts.length ? parts.join('\n') : null;

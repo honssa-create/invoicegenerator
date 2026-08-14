@@ -291,21 +291,128 @@ export const ORDER_FIELDS: OrderFieldDef[] = [
   { key: 'extra_actions', label: '額外動作', type: 'textarea' },
 ];
 
+/** Synthetic Honour line style for Woo shipping fees. */
+export const HONOUR_SHIPPING_LINE_STYLE = 'Shipping';
+
 /** Honour / honour-en line items stored as JSON in fields.honour_lines. */
 export interface HonourLineItem {
   style: string;
   quantity: string;
   unit_price: string;
+  /** Per-line craft */
+  card_size: string;
+  craft: string;
+  plating_color: string;
+  clasp: string;
+  /** Per-line packaging */
+  internal_pack: string;
+  pack_required: string;
+  /** Unmatched CPO options for this line */
+  other_options: string;
 }
 
 export function emptyHonourLine(): HonourLineItem {
-  return { style: '', quantity: '', unit_price: '' };
+  return {
+    style: '',
+    quantity: '',
+    unit_price: '',
+    card_size: '',
+    craft: '',
+    plating_color: '',
+    clasp: '',
+    internal_pack: '',
+    pack_required: '',
+    other_options: '',
+  };
+}
+
+/** Supplier cards stored as JSON in fields.honour_suppliers. */
+export interface HonourSupplierItem {
+  supplier: string;
+  supplier_price: string;
+  mould_print_fee: string;
+  supplier_qty: string;
+  supplier_pack: string;
+  supplier_ship_date: string;
+  carton_count: string;
+}
+
+export function emptyHonourSupplier(): HonourSupplierItem {
+  return {
+    supplier: '',
+    supplier_price: '',
+    mould_print_fee: '',
+    supplier_qty: '',
+    supplier_pack: '',
+    supplier_ship_date: '',
+    carton_count: '',
+  };
 }
 
 function fieldAsString(fields: Record<string, string | boolean>, key: string): string {
   const v = fields[key];
   if (typeof v === 'boolean') return v ? 'yes' : '';
   return String(v ?? '').trim();
+}
+
+export function isHonourShippingLine(line: Pick<HonourLineItem, 'style'>): boolean {
+  return line.style.trim().toLowerCase() === HONOUR_SHIPPING_LINE_STYLE.toLowerCase();
+}
+
+/** Product lines only (excludes synthetic Shipping row). */
+export function honourProductLines(lines: HonourLineItem[]): HonourLineItem[] {
+  return lines.filter((l) => !isHonourShippingLine(l));
+}
+
+export function honourProductLineCount(lines: HonourLineItem[]): number {
+  return honourProductLines(lines).length;
+}
+
+function normalizeHonourLineRow(row: Record<string, unknown>): HonourLineItem {
+  return {
+    style: String(row.style ?? ''),
+    quantity: String(row.quantity ?? ''),
+    unit_price: String(row.unit_price ?? ''),
+    card_size: String(row.card_size ?? ''),
+    craft: String(row.craft ?? ''),
+    plating_color: String(row.plating_color ?? ''),
+    clasp: String(row.clasp ?? ''),
+    internal_pack: String(row.internal_pack ?? ''),
+    pack_required: String(row.pack_required ?? ''),
+    other_options: String(row.other_options ?? ''),
+  };
+}
+
+function seedLegacyCraftOntoFirstProduct(lines: HonourLineItem[], fields: Record<string, string | boolean>): HonourLineItem[] {
+  const alreadyStructured = honourProductLines(lines).some(
+    (l) =>
+      l.card_size ||
+      l.craft ||
+      l.plating_color ||
+      l.clasp ||
+      l.internal_pack ||
+      l.pack_required ||
+      l.other_options
+  );
+  if (alreadyStructured) return lines;
+
+  const legacy = {
+    card_size: fieldAsString(fields, 'card_size'),
+    craft: fieldAsString(fields, 'craft'),
+    plating_color: fieldAsString(fields, 'plating_color'),
+    clasp: fieldAsString(fields, 'clasp'),
+    internal_pack: fieldAsString(fields, 'internal_pack'),
+    pack_required: fieldAsString(fields, 'pack_required'),
+    other_options: fieldAsString(fields, 'other_craft'),
+  };
+  if (!Object.values(legacy).some(Boolean)) return lines;
+
+  let seeded = false;
+  return lines.map((line) => {
+    if (seeded || isHonourShippingLine(line)) return line;
+    seeded = true;
+    return { ...line, ...legacy };
+  });
 }
 
 /** Parse honour_lines JSON; seed one row from legacy badge_style / badge_quantity when empty. */
@@ -315,14 +422,11 @@ export function parseHonourLines(fields: Record<string, string | boolean>): Hono
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((row) => {
+        const lines = parsed.map((row) => {
           const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
-          return {
-            style: String(r.style ?? ''),
-            quantity: String(r.quantity ?? ''),
-            unit_price: String(r.unit_price ?? ''),
-          };
+          return normalizeHonourLineRow(r);
         });
+        return seedLegacyCraftOntoFirstProduct(lines, fields);
       }
     } catch {
       /* fall through to legacy seed */
@@ -331,7 +435,7 @@ export function parseHonourLines(fields: Record<string, string | boolean>): Hono
   const style = fieldAsString(fields, 'badge_style');
   const quantity = fieldAsString(fields, 'badge_quantity');
   if (style || quantity) {
-    return [{ style, quantity, unit_price: '' }];
+    return seedLegacyCraftOntoFirstProduct([{ ...emptyHonourLine(), style, quantity }], fields);
   }
   return [emptyHonourLine()];
 }
@@ -342,6 +446,13 @@ export function serializeHonourLines(lines: HonourLineItem[]): string {
       style: String(l.style ?? ''),
       quantity: String(l.quantity ?? ''),
       unit_price: String(l.unit_price ?? ''),
+      card_size: String(l.card_size ?? ''),
+      craft: String(l.craft ?? ''),
+      plating_color: String(l.plating_color ?? ''),
+      clasp: String(l.clasp ?? ''),
+      internal_pack: String(l.internal_pack ?? ''),
+      pack_required: String(l.pack_required ?? ''),
+      other_options: String(l.other_options ?? ''),
     }))
   );
 }
@@ -366,15 +477,139 @@ export function computeHonourLineTotals(lines: HonourLineItem[]): {
   };
 }
 
+/** First non-Shipping product line (for legacy flat-field mirrors). */
+export function firstHonourProductLine(lines: HonourLineItem[]): HonourLineItem | undefined {
+  return honourProductLines(lines)[0];
+}
+
 /** Derived fields kept in sync for delivery-note / legacy readers. */
 export function honourLinesDerivedFields(lines: HonourLineItem[]): Record<string, string> {
   const { totalQuantity } = computeHonourLineTotals(lines);
-  const first = lines[0];
+  const first = firstHonourProductLine(lines) || lines[0];
   return {
     honour_lines: serializeHonourLines(lines),
     badge_style: first?.style ?? '',
     badge_quantity: first?.quantity ?? (totalQuantity ? String(totalQuantity) : ''),
     qty_ordered: totalQuantity ? String(totalQuantity) : '',
+    // Mirror first product line craft/packaging for production-note / quotation notes.
+    card_size: first?.card_size ?? '',
+    craft: first?.craft ?? '',
+    plating_color: first?.plating_color ?? '',
+    clasp: first?.clasp ?? '',
+    internal_pack: first?.internal_pack ?? '',
+    pack_required: first?.pack_required ?? '',
+    other_craft: first?.other_options ?? '',
+  };
+}
+
+function normalizeHonourSupplierRow(row: Record<string, unknown>): HonourSupplierItem {
+  return {
+    supplier: String(row.supplier ?? ''),
+    supplier_price: String(row.supplier_price ?? ''),
+    mould_print_fee: String(row.mould_print_fee ?? ''),
+    supplier_qty: String(row.supplier_qty ?? ''),
+    supplier_pack: String(row.supplier_pack ?? ''),
+    supplier_ship_date: String(row.supplier_ship_date ?? ''),
+    carton_count: String(row.carton_count ?? ''),
+  };
+}
+
+function seedLegacySupplier(fields: Record<string, string | boolean>, cartonCountCore?: string): HonourSupplierItem {
+  return {
+    supplier: fieldAsString(fields, 'supplier'),
+    supplier_price: fieldAsString(fields, 'supplier_price'),
+    mould_print_fee: fieldAsString(fields, 'mould_print_fee'),
+    supplier_qty: fieldAsString(fields, 'supplier_qty'),
+    supplier_pack: fieldAsString(fields, 'supplier_pack'),
+    supplier_ship_date: fieldAsString(fields, 'supplier_ship_date'),
+    carton_count: fieldAsString(fields, 'carton_count') || String(cartonCountCore ?? '').trim(),
+  };
+}
+
+/**
+ * Parse honour_suppliers JSON. Seeds Supplier-1 from legacy flat fields when empty.
+ * Pads to at least `minCount` (default: product line count) without shrinking.
+ */
+export function parseHonourSuppliers(
+  fields: Record<string, string | boolean>,
+  opts?: { minCount?: number; cartonCountCore?: string }
+): HonourSupplierItem[] {
+  const minCount = Math.max(1, opts?.minCount ?? 1);
+  let suppliers: HonourSupplierItem[] = [];
+  const raw = fields.honour_suppliers;
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        suppliers = parsed.map((row) => {
+          const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+          return normalizeHonourSupplierRow(r);
+        });
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!suppliers.length) {
+    const legacy = seedLegacySupplier(fields, opts?.cartonCountCore);
+    const hasAny = Object.values(legacy).some(Boolean);
+    suppliers = [hasAny ? legacy : emptyHonourSupplier()];
+  } else {
+    // Fill empty first card from legacy flats (one-time migration aid).
+    const legacy = seedLegacySupplier(fields, opts?.cartonCountCore);
+    if (Object.values(legacy).some(Boolean)) {
+      const first = suppliers[0];
+      suppliers[0] = {
+        supplier: first.supplier || legacy.supplier,
+        supplier_price: first.supplier_price || legacy.supplier_price,
+        mould_print_fee: first.mould_print_fee || legacy.mould_print_fee,
+        supplier_qty: first.supplier_qty || legacy.supplier_qty,
+        supplier_pack: first.supplier_pack || legacy.supplier_pack,
+        supplier_ship_date: first.supplier_ship_date || legacy.supplier_ship_date,
+        carton_count: first.carton_count || legacy.carton_count,
+      };
+    }
+  }
+  return ensureHonourSupplierCount(suppliers, minCount);
+}
+
+/** Grow-only pad to minCount; never shrink. */
+export function ensureHonourSupplierCount(
+  suppliers: HonourSupplierItem[],
+  minCount: number
+): HonourSupplierItem[] {
+  const target = Math.max(1, minCount);
+  if (suppliers.length >= target) return suppliers;
+  const next = [...suppliers];
+  while (next.length < target) next.push(emptyHonourSupplier());
+  return next;
+}
+
+export function serializeHonourSuppliers(suppliers: HonourSupplierItem[]): string {
+  return JSON.stringify(
+    suppliers.map((s) => ({
+      supplier: String(s.supplier ?? ''),
+      supplier_price: String(s.supplier_price ?? ''),
+      mould_print_fee: String(s.mould_print_fee ?? ''),
+      supplier_qty: String(s.supplier_qty ?? ''),
+      supplier_pack: String(s.supplier_pack ?? ''),
+      supplier_ship_date: String(s.supplier_ship_date ?? ''),
+      carton_count: String(s.carton_count ?? ''),
+    }))
+  );
+}
+
+/** Mirror first supplier into legacy flat keys; persist honour_suppliers JSON. */
+export function honourSuppliersDerivedFields(suppliers: HonourSupplierItem[]): Record<string, string> {
+  const first = suppliers[0] || emptyHonourSupplier();
+  return {
+    honour_suppliers: serializeHonourSuppliers(suppliers),
+    supplier: first.supplier,
+    supplier_price: first.supplier_price,
+    mould_print_fee: first.mould_print_fee,
+    supplier_qty: first.supplier_qty,
+    supplier_pack: first.supplier_pack,
+    supplier_ship_date: first.supplier_ship_date,
   };
 }
 
@@ -954,8 +1189,7 @@ export function appendNestieeShippingLine(
   ];
 }
 
-/** Synthetic Honour line style for Woo shipping fees. */
-export const HONOUR_SHIPPING_LINE_STYLE = 'Shipping';
+/** Synthetic Honour line style for Woo shipping fees — see export near HonourLineItem. */
 
 export interface HonourCpoOption {
   label: string;
@@ -1053,8 +1287,67 @@ function honourCardSizeFromMeta(meta: WooMetaDatum[] | null | undefined): string
 }
 
 /**
- * Map CPO options onto Honour Order Detail craft fields.
+ * Map CPO options onto a single Honour product line (craft / packaging / other_options).
  * Only fills empty fields so local edits survive re-import.
+ * Known craft: size, 做法, 金屬電鍍色, 背面配件.
+ * Known packaging: 內部包裝處理, 交貨包裝 (and aliases).
+ * Everything else visible goes into other_options (not duplicated into known fields' dump).
+ */
+export function applyHonourOptionsToLine(
+  line: HonourLineItem,
+  options: HonourCpoOption[],
+  metaForSize?: WooMetaDatum[] | null
+): HonourLineItem {
+  const next = { ...line };
+  const setIfEmpty = (key: keyof HonourLineItem, value: string) => {
+    if (!value.trim()) return;
+    if (String(next[key] ?? '').trim()) return;
+    (next as Record<string, string>)[key] = value.trim();
+  };
+
+  const cardSize = honourCardSizeFromMeta(metaForSize || null);
+  if (cardSize) setIfEmpty('card_size', cardSize);
+
+  const otherLines: string[] = [];
+  for (const opt of options) {
+    const label = opt.label;
+    const value = opt.value;
+    if (/備註|notes?/i.test(label)) continue;
+
+    if (label === '金屬電鍍色') {
+      setIfEmpty('plating_color', value);
+      continue;
+    }
+    if (label === '背面配件') {
+      setIfEmpty('clasp', value);
+      continue;
+    }
+    if (label === '做法') {
+      setIfEmpty('craft', value);
+      continue;
+    }
+    if (label === '內部包裝處理' || /內部包裝/.test(label)) {
+      setIfEmpty('internal_pack', value);
+      continue;
+    }
+    if (
+      label === '交貨包裝' ||
+      label === '客戶要求交貨包裝' ||
+      /交貨包裝|客戶.*包裝/.test(label)
+    ) {
+      setIfEmpty('pack_required', value);
+      continue;
+    }
+
+    otherLines.push(`${label}: ${value}`);
+  }
+  if (otherLines.length) setIfEmpty('other_options', otherLines.join('\n'));
+  return next;
+}
+
+/**
+ * Legacy flat-field mapper (order-level). Prefers applying into first empty craft keys.
+ * Kept for tests / older call sites; Hub ingest uses per-line mapping instead.
  */
 export function applyHonourOptionsToFields(
   fields: Record<string, unknown>,
@@ -1072,15 +1365,12 @@ export function applyHonourOptionsToFields(
   const cardSize = honourCardSizeFromMeta(metaForSize || null);
   if (cardSize) setIfEmpty('card_size', cardSize);
 
-  const dumpLines: string[] = [];
+  const otherLines: string[] = [];
   for (const opt of options) {
     const label = opt.label;
     const value = opt.value;
-    // Notes go to order notes, not the craft dump.
     if (/備註|notes?/i.test(label)) continue;
-    dumpLines.push(`${label}: ${value}`);
 
-    // Exact Honour craft labels only — other colours/options stay in the dump.
     if (label === '金屬電鍍色') {
       setIfEmpty('plating_color', value);
       continue;
@@ -1093,9 +1383,44 @@ export function applyHonourOptionsToFields(
       setIfEmpty('craft', value);
       continue;
     }
+    if (label === '內部包裝處理' || /內部包裝/.test(label)) {
+      setIfEmpty('internal_pack', value);
+      continue;
+    }
+    if (
+      label === '交貨包裝' ||
+      label === '客戶要求交貨包裝' ||
+      /交貨包裝|客戶.*包裝/.test(label)
+    ) {
+      setIfEmpty('pack_required', value);
+      continue;
+    }
+    otherLines.push(`${label}: ${value}`);
   }
-  if (dumpLines.length) setIfEmpty('other_craft', dumpLines.join('\n'));
+  if (otherLines.length) setIfEmpty('other_craft', otherLines.join('\n'));
   return written;
+}
+
+/** Preserve non-empty per-line craft/packaging when Hub re-syncs style/qty/price. */
+export function mergeHonourLinesPreservingLocal(
+  incoming: HonourLineItem[],
+  existing: HonourLineItem[]
+): HonourLineItem[] {
+  return incoming.map((line, index) => {
+    if (isHonourShippingLine(line)) return line;
+    const prev = existing[index];
+    if (!prev || isHonourShippingLine(prev)) return line;
+    return {
+      ...line,
+      card_size: prev.card_size || line.card_size,
+      craft: prev.craft || line.craft,
+      plating_color: prev.plating_color || line.plating_color,
+      clasp: prev.clasp || line.clasp,
+      internal_pack: prev.internal_pack || line.internal_pack,
+      pack_required: prev.pack_required || line.pack_required,
+      other_options: prev.other_options || line.other_options,
+    };
+  });
 }
 
 /** Normalize Woo line_items into Honour style/qty/price rows (Uni CPO qty preferred). */
@@ -1112,9 +1437,37 @@ export function parseHonourLinesFromWoo(lineItems: WooLineItemLike[] | null | un
     const linePrice = nestieeNum(li.price);
     const unitPrice = parsedQuantity > 0 ? linePrice / parsedQuantity : linePrice;
     const unit_price = String(Math.round(unitPrice * 10_000) / 10_000);
-    out.push({ style, quantity, unit_price });
+    out.push({ ...emptyHonourLine(), style, quantity, unit_price });
   }
   return out;
+}
+
+/**
+ * Build Honour lines from Woo with per-line CPO craft/packaging/options applied.
+ */
+export function buildHonourLinesFromWoo(
+  lineItems: WooLineItemLike[] | null | undefined,
+  shippingTotal = 0
+): HonourLineItem[] {
+  if (!Array.isArray(lineItems) || !lineItems.length) {
+    return appendHonourShippingLine([], shippingTotal);
+  }
+  const out: HonourLineItem[] = [];
+  for (const li of lineItems) {
+    const style = String(li?.name ?? '').trim();
+    if (!style) continue;
+    const cpoQty = honourCpoQuantityFromMeta(li.meta_data);
+    const wooQty = nestieeNum(li.quantity);
+    const quantity = cpoQty || (wooQty > 0 ? String(wooQty) : '');
+    const parsedQuantity = nestieeNum(quantity);
+    const linePrice = nestieeNum(li.price);
+    const unitPrice = parsedQuantity > 0 ? linePrice / parsedQuantity : linePrice;
+    const unit_price = String(Math.round(unitPrice * 10_000) / 10_000);
+    const base: HonourLineItem = { ...emptyHonourLine(), style, quantity, unit_price };
+    const meta = li.meta_data || [];
+    out.push(applyHonourOptionsToLine(base, extractHonourCpoOptions(meta), meta));
+  }
+  return appendHonourShippingLine(out, shippingTotal);
 }
 
 /**
@@ -1124,14 +1477,13 @@ export function appendHonourShippingLine(
   lines: HonourLineItem[],
   shippingTotal: number
 ): HonourLineItem[] {
-  const withoutShipping = lines.filter(
-    (line) => line.style.trim().toLowerCase() !== HONOUR_SHIPPING_LINE_STYLE.toLowerCase()
-  );
+  const withoutShipping = lines.filter((line) => !isHonourShippingLine(line));
   const amount = Math.round(Math.max(0, shippingTotal) * 100) / 100;
   if (amount <= 0) return withoutShipping;
   return [
     ...withoutShipping,
     {
+      ...emptyHonourLine(),
       style: HONOUR_SHIPPING_LINE_STYLE,
       quantity: '1',
       unit_price: String(amount),

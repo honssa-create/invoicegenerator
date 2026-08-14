@@ -57,6 +57,8 @@ export interface QuotationWithDetails {
   discount_amount: number;
   tax_amount: number;
   total: number;
+  /** Order created from / linked to this quotation (via orders.quotation_id). */
+  linked_order: { id: number; reference_number: string | null; po_number: string | null } | null;
 }
 
 export const QUOTATION_STATUSES: QuotationStatus[] = ['draft', 'sent', 'approved', 'rejected'];

@@ -5,6 +5,7 @@
 
 import {
   computeHonourLineTotals,
+  firstHonourProductLine,
   parseHonourLines,
   type Order,
 } from './orders';
@@ -49,9 +50,9 @@ export function prefillProductionNote(order: Order): ProductionNoteFields {
       ? `#${order.id}`
       : '';
 
-  const craft = fieldStr(f, 'craft');
-  const clasp = fieldStr(f, 'clasp');
-  const plating = fieldStr(f, 'plating_color');
+  const craft = fieldStr(f, 'craft') || firstHonourProductLine(lines)?.craft || '';
+  const clasp = fieldStr(f, 'clasp') || firstHonourProductLine(lines)?.clasp || '';
+  const plating = fieldStr(f, 'plating_color') || firstHonourProductLine(lines)?.plating_color || '';
   const detailsParts = [craft, plating, clasp].filter(Boolean);
   const details = detailsParts.join(', ');
 

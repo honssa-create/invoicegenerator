@@ -15,6 +15,7 @@ import {
   buildDebitNoteFooterRemark,
   buildDebitNotePaymentInstructionsText,
   defaultPaymentTemplateForUnits,
+  currentBillingPeriod,
   formatDebitNoteUnitLabel,
   renderDebitNoteFooterRemark,
   resolveDebitNoteCompanyHeader,
@@ -1035,19 +1036,81 @@ export async function getUnitPaymentHistory(unitId: number, userId: number): Pro
   if (!tenantId) return [];
   const units = await getTenantUnits(tenantId, userId);
   const unitNameMap = Object.fromEntries(units.map((u) => [u.id, u.unitName]));
-  const payments = await Promise.all((await db.prepare(
-    'SELECT * FROM rental_payments WHERE tenant_id = ? AND user_id = ? ORDER BY payment_date DESC, id DESC'
-  ).all(tenantId, userId) as PaymentRow[]).map(hydratePayment));
 
-  const hydrated = await Promise.all(
-    payments.map(async (p) => await hydratePaymentWithAllocations(p, userId, unitNameMap)),
-  );
-  return hydrated
-    .filter((p) => p.allocations.some((a) => a.unitId === unitId) || p.amountUnallocated > 0)
-    .map((p) => ({
-      ...p,
-      allocations: p.allocations.filter((a) => a.unitId === unitId),
-    }));
+  const paymentRows = await db.prepare(
+    'SELECT * FROM rental_payments WHERE tenant_id = ? AND user_id = ? ORDER BY payment_date DESC, id DESC'
+  ).all(tenantId, userId) as PaymentRow[];
+  if (!paymentRows.length) return [];
+
+  const paymentIds = paymentRows.map((p) => p.id);
+  const placeholders = paymentIds.map(() => '?').join(',');
+
+  const [sumRows, allocRows] = await Promise.all([
+    db.prepare(
+      `SELECT payment_id, COALESCE(SUM(amount), 0) AS total
+       FROM rental_payment_allocations WHERE payment_id IN (${placeholders})
+       GROUP BY payment_id`
+    ).all(...paymentIds) as Promise<{ payment_id: number; total: number }[]>,
+    db.prepare(
+      `SELECT a.id, a.user_id, a.payment_id, a.charge_item_id, a.amount, a.created_at,
+              c.unit_id, c.billing_period, c.charge_type
+       FROM rental_payment_allocations a
+       JOIN rental_charge_items c ON c.id = a.charge_item_id
+       WHERE a.user_id = ? AND a.payment_id IN (${placeholders})`
+    ).all(userId, ...paymentIds) as Promise<Array<{
+      id: number;
+      user_id: number;
+      payment_id: number;
+      charge_item_id: number;
+      amount: number;
+      created_at: string;
+      unit_id: number;
+      billing_period: string;
+      charge_type: RentalChargeType;
+    }>>,
+  ]);
+
+  const allocatedByPayment = new Map(sumRows.map((r) => [r.payment_id, Number(r.total) || 0]));
+  const allocsByPayment = new Map<number, typeof allocRows>();
+  for (const row of allocRows) {
+    const list = allocsByPayment.get(row.payment_id) || [];
+    list.push(row);
+    allocsByPayment.set(row.payment_id, list);
+  }
+
+  const result: RentalPaymentWithAllocations[] = [];
+  for (const row of paymentRows) {
+    const allocated = allocatedByPayment.get(row.id) || 0;
+    const amountUnallocated = Math.max(0, (row.amount || 0) - allocated);
+    const allAllocs = allocsByPayment.get(row.id) || [];
+    const unitAllocs = allAllocs.filter((a) => a.unit_id === unitId);
+    if (!unitAllocs.length && amountUnallocated <= 0) continue;
+    result.push({
+      id: row.id,
+      user_id: row.user_id,
+      tenantId: row.tenant_id,
+      paymentDate: row.payment_date,
+      amount: row.amount || 0,
+      receiptImagePath: row.receipt_image_path,
+      method: row.method,
+      reference: row.reference,
+      notes: row.notes,
+      amountAllocated: allocated,
+      amountUnallocated,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      allocations: unitAllocs.map((a) => ({
+        id: a.id,
+        amount: a.amount,
+        chargeItemId: a.charge_item_id,
+        unitId: a.unit_id,
+        unitName: unitNameMap[a.unit_id] || `Unit ${a.unit_id}`,
+        billingPeriod: a.billing_period,
+        chargeType: a.charge_type,
+      })),
+    });
+  }
+  return result;
 }
 
 /** Outstanding charge items for a single unit (FIFO order). */
@@ -1097,18 +1160,34 @@ export async function getUnitLeasePaymentLedger(
   const end = (lease.actualEndDate || lease.leaseEndDate)?.slice(0, 7);
   if (!start || !end || start > end) return [];
 
+  // Advance payments may create charge rows beyond the configured lease end.
+  // Keep those paid future periods visible, but only for this lease's tenant.
+  const prepaidPeriodRow = lease.tenantId
+    ? await db.prepare(
+        `SELECT MAX(c.billing_period) AS billing_period
+         FROM rental_charge_items c
+         JOIN rental_payment_allocations a ON a.charge_item_id = c.id
+         JOIN rental_payments p ON p.id = a.payment_id
+         WHERE c.user_id = ? AND c.unit_id = ? AND p.tenant_id = ?
+           AND c.billing_period >= ?`
+      ).get(userId, unitId, lease.tenantId, start) as { billing_period: string | null } | undefined
+    : undefined;
+  const ledgerEnd = prepaidPeriodRow?.billing_period && prepaidPeriodRow.billing_period > end
+    ? prepaidPeriodRow.billing_period
+    : end;
+
   const records = await db.prepare(
     `SELECT id, billing_period, base_rent, water_fee, electricity_fee, actual_amount,
             amount_paid, paid_date, paid_at, invoice_ref, receipt_ref
      FROM rental_records
      WHERE user_id = ? AND unit_id = ? AND billing_period >= ? AND billing_period <= ?
      ORDER BY billing_period ASC`
-  ).all(userId, unitId, start, end) as LedgerRecordRow[];
+  ).all(userId, unitId, start, ledgerEnd) as LedgerRecordRow[];
 
   const chargeRows = await db.prepare(
     `SELECT * FROM rental_charge_items
      WHERE user_id = ? AND unit_id = ? AND billing_period >= ? AND billing_period <= ?`
-  ).all(userId, unitId, start, end) as ChargeRow[];
+  ).all(userId, unitId, start, ledgerEnd) as ChargeRow[];
 
   const chargeIds = chargeRows.map((c) => c.id);
   const allocByChargeId = new Map<number, PeriodChargeAllocationEntry[]>();
@@ -1145,7 +1224,7 @@ export async function getUnitLeasePaymentLedger(
 
   const months: string[] = [];
   let period = start;
-  while (period <= end) {
+  while (period <= ledgerEnd) {
     months.push(period);
     period = addBillingMonths(period, 1);
   }
@@ -1203,7 +1282,10 @@ export async function getUnitLeasePaymentLedger(
     };
   });
 
-  return rows.reverse();
+  const currentPeriod = currentBillingPeriod();
+  return rows
+    .filter((row) => row.billingPeriod <= currentPeriod || row.amountReceived > 0)
+    .reverse();
 }
 
 export async function getRentalPaymentDetail(paymentId: number | string, userId: number) {

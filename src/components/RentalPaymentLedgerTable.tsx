@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import PeriodPaymentDetailModal from '@/components/PeriodPaymentDetailModal';
 import {
@@ -20,6 +20,15 @@ interface Props {
 
 export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
   const [detailRow, setDetailRow] = useState<UnitLeasePaymentLedgerRow | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 5;
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows]);
 
   return (
     <>
@@ -38,7 +47,7 @@ export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {rows.map((r) => (
+            {visibleRows.map((r) => (
               <tr
                 key={r.billingPeriod}
                 className="hover:bg-brand-50/40 cursor-pointer"
@@ -90,6 +99,36 @@ export default function RentalPaymentLedgerTable({ rows, leaseLabel }: Props) {
           </tbody>
         </table>
       </div>
+
+      {rows.length > pageSize && (
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-xs text-gray-500">
+          <span>
+            {bi(
+              `Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, rows.length)} of ${rows.length} months`,
+              `顯示第 ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, rows.length)} 個，共 ${rows.length} 個月`,
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setPage(currentPage - 1)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {bi('Previous', '上一頁')}
+            </button>
+            <span>{currentPage} / {pageCount}</span>
+            <button
+              type="button"
+              disabled={currentPage === pageCount}
+              onClick={() => setPage(currentPage + 1)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {bi('Next', '下一頁')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {detailRow && (
         <PeriodPaymentDetailModal row={detailRow} onClose={() => setDetailRow(null)} />

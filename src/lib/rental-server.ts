@@ -230,7 +230,8 @@ export async function getSuggestedPrevWaterReading(
     `SELECT water_meter_json FROM rental_records
      WHERE user_id = ? AND unit_id = ? AND billing_period < ?
        AND water_meter_json IS NOT NULL AND water_meter_json != ''
-     ORDER BY billing_period DESC`
+     ORDER BY billing_period DESC
+     LIMIT 24`
   ).all(userId, unitId, beforePeriod) as { water_meter_json: string }[];
   for (const row of rows) {
     const m = parseWaterMeterJson(row.water_meter_json);
@@ -293,7 +294,8 @@ export async function getSuggestedPrevElectricityReading(
     `SELECT electricity_meter_json FROM rental_records
      WHERE user_id = ? AND unit_id = ? AND billing_period < ?
        AND electricity_meter_json IS NOT NULL AND electricity_meter_json != ''
-     ORDER BY billing_period DESC`
+     ORDER BY billing_period DESC
+     LIMIT 24`
   ).all(userId, unitId, beforePeriod) as { electricity_meter_json: string }[];
   for (const row of rows) {
     const m = parseElectricityMeterJson(row.electricity_meter_json);
@@ -747,13 +749,15 @@ export async function getRentalUnitDetail(
   if (!unit) return null;
 
   const requestedLeaseId = options?.leaseId ? Number(options.leaseId) : null;
-  const requestedLease = requestedLeaseId ? await getLeaseById(requestedLeaseId, userId) : null;
+  const [requestedLease, activeLease] = await Promise.all([
+    requestedLeaseId ? getLeaseById(requestedLeaseId, userId) : Promise.resolve(null),
+    getCurrentLeaseForUnit(unit.id, userId),
+  ]);
   const isHistoricalView = Boolean(
     requestedLease && requestedLease.unitId === unit.id && !requestedLease.isCurrent,
   );
   if (requestedLeaseId && !isHistoricalView) return null;
 
-  const activeLease = await getCurrentLeaseForUnit(unit.id, userId);
   const displayLease = isHistoricalView ? requestedLease! : activeLease;
   const readOnlyLease = isHistoricalView || (
     displayLease != null && (
@@ -763,56 +767,86 @@ export async function getRentalUnitDetail(
   );
 
   if (!isHistoricalView) {
-    await ensureRentRecord(unit, period);
+    // Read path: create/update monthly row without charge-ledger sync.
+    await ensureRentRecord(unit, period, { syncCharges: false, lease: activeLease });
     await applyOverdueStatuses(userId, period);
   }
-  const suggestedPrevElectricityReading = await getSuggestedPrevElectricityReading(userId, Number(unitId), period);
-  const suggestedPrevWaterReading = await getSuggestedPrevWaterReading(userId, Number(unitId), period);
-  const currentRecord = await getRentRecord(
-    (await db.prepare('SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?')
-      .get(userId, unit.id, period) as { id: number })?.id,
-    userId
-  );
+
+  const recordIdRow = await db.prepare(
+    'SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?'
+  ).get(userId, unit.id, period) as { id: number } | undefined;
+  const currentRecord = recordIdRow?.id
+    ? await getRentRecord(recordIdRow.id, userId)
+    : null;
+
+  // Sync charges only when missing (steady-state detail opens skip the heavy write path).
   let chargeItems: RentalChargeItem[] = [];
   if (currentRecord) {
-    await syncChargeItemsFromRecord(currentRecord);
     chargeItems = await getChargeItemsForRecord(currentRecord.id, userId);
+    if (!isHistoricalView && chargeItems.length === 0) {
+      await syncChargeItemsFromRecord(currentRecord);
+      chargeItems = await getChargeItemsForRecord(currentRecord.id, userId);
+    }
   }
-  const history = (await db.prepare(
-    'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC'
-  ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
-  const activities = await getRentalActivities(unit.id, userId);
-  const latestReceipt = currentRecord
-    ? (await db.prepare('SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1')
-        .get(currentRecord.id) as ReceiptRow | undefined)
-    : undefined;
-  const currentLease = activeLease;
-  let paymentHistory = await getUnitPaymentHistory(unit.id, userId);
+
+  const [
+    suggestedPrevElectricityReading,
+    suggestedPrevWaterReading,
+    activities,
+    latestReceiptRow,
+    paymentHistoryRaw,
+    allUnitRows,
+    paymentLedger,
+    outstandingCharges,
+    leaseHistory,
+    leaseDocuments,
+  ] = await Promise.all([
+    getSuggestedPrevElectricityReading(userId, Number(unitId), period),
+    getSuggestedPrevWaterReading(userId, Number(unitId), period),
+    getRentalActivities(unit.id, userId),
+    currentRecord
+      ? db.prepare(
+          'SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1'
+        ).get(currentRecord.id) as Promise<ReceiptRow | undefined>
+      : Promise.resolve(undefined),
+    getUnitPaymentHistory(unit.id, userId),
+    db.prepare(
+      'SELECT id, unit_name FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE'
+    ).all(userId) as Promise<{ id: number; unit_name: string }[]>,
+    getUnitLeasePaymentLedger(unit.id, userId, displayLease),
+    isHistoricalView ? Promise.resolve([] as RentalChargeItem[]) : getUnitOutstandingCharges(unit.id, userId),
+    getLeaseHistory(unit.id, userId),
+    displayLease ? getLeaseDocuments(displayLease.id, userId) : Promise.resolve([]),
+  ]);
+
+  let paymentHistory = paymentHistoryRaw;
   if (isHistoricalView && displayLease?.tenantId) {
     paymentHistory = paymentHistory.filter((p) => p.tenantId === displayLease.tenantId);
   }
-  const allUnitRows = await db.prepare(
-    'SELECT id, unit_name FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE'
-  ).all(userId) as { id: number; unit_name: string }[];
+
   const portfolioUnits = allUnitRows.map((r) => ({ id: r.id, unitName: r.unit_name }));
   const byId = new Map(portfolioUnits.map((u) => [u.id, u]));
   const sharedMeterDeductionUnits = unit.sharedMeterDeductionUnitIds
     .map((uid) => byId.get(uid) || { id: uid, unitName: `#${uid}` });
 
   return {
-    unit, currentRecord, history, activities,
+    unit,
+    currentRecord,
+    // Detail UI uses paymentLedger, not history — keep empty to avoid shipping meter JSON blobs.
+    history: [] as RentRecord[],
+    activities,
     chargeItems,
     paymentHistory,
-    paymentLedger: await getUnitLeasePaymentLedger(unit.id, userId, displayLease),
-    outstandingCharges: isHistoricalView ? [] : await getUnitOutstandingCharges(unit.id, userId),
-    latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
-    currentLease,
+    paymentLedger,
+    outstandingCharges,
+    latestReceipt: latestReceiptRow ? hydrateReceipt(latestReceiptRow) : null,
+    currentLease: activeLease,
     viewingLease: isHistoricalView ? displayLease : null,
     displayLease,
     readOnlyLease,
     isHistoricalView,
-    leaseHistory: await getLeaseHistory(unit.id, userId),
-    leaseDocuments: displayLease ? await getLeaseDocuments(displayLease.id, userId) : [],
+    leaseHistory,
+    leaseDocuments,
     suggestedPrevElectricityReading,
     suggestedPrevWaterReading,
     portfolioUnits,

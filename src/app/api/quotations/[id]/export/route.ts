@@ -32,7 +32,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     ['Shipping Address', q.shipping_address || ''],
     ['Currency', q.currency || 'HKD'],
     [],
-    ['Service Date', 'Product/Service', 'Description', 'Qty', 'Rate', 'Amount', 'Class'],
+    ['Service Date', 'Product/Service', 'Description', 'Qty', 'Rate', 'Amount'],
     ...q.items.map((i) => [
       i.service_date || '',
       i.product_service || '',
@@ -40,7 +40,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
       i.quantity,
       i.unit_price,
       i.amount,
-      i.class_name || '',
     ]),
     [],
     ['', '', '', '', 'Subtotal', q.subtotal],
@@ -51,7 +50,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   ];
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+  ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Quotation');
   const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });

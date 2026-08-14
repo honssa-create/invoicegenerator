@@ -27,7 +27,6 @@ interface LineItem {
   description: string;
   quantity: number;
   unit_price: number;
-  class_name: string;
 }
 
 const emptyLine = (): LineItem => ({
@@ -36,7 +35,6 @@ const emptyLine = (): LineItem => ({
   description: '',
   quantity: 1,
   unit_price: 0,
-  class_name: '',
 });
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -123,7 +121,6 @@ export default function QuotationDetailPage() {
                 description: i.description || '',
                 quantity: i.quantity,
                 unit_price: i.unit_price,
-                class_name: i.class_name || '',
               }))
             : [emptyLine()]
         );
@@ -396,6 +393,8 @@ export default function QuotationDetailPage() {
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="space-y-3">
               <div>
                 <label className={labelCls}>Email</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={readOnly} className={inputCls} placeholder="customer@email.com" />
@@ -411,18 +410,6 @@ export default function QuotationDetailPage() {
                 </label>
               </div>
             </div>
-            <div className="space-y-3">
-              <div>
-                <label className={labelCls}>Status</label>
-                <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={readOnly} className={inputCls}>
-                  {QUOTATION_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {QUOTATION_STATUS_FORM_LABEL[s]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
             <div className="text-right lg:pl-4">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AMOUNT</p>
               <p className="text-3xl font-bold text-gray-900 tabular-nums mt-1">
@@ -432,8 +419,8 @@ export default function QuotationDetailPage() {
           </div>
 
           {/* Addresses + date/shipping meta */}
-          <div className="p-5 border-b border-gray-100 grid lg:grid-cols-[1.1fr_1fr] gap-6">
-            <div className="space-y-4">
+          <div className="p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-6">
+            <div className="space-y-4 w-full lg:w-1/4 lg:min-w-[11rem] lg:max-w-xs shrink-0">
               <div>
                 <label className={labelCls}>Billing address</label>
                 <textarea
@@ -455,7 +442,7 @@ export default function QuotationDetailPage() {
                 />
               </div>
             </div>
-            <div className="grid sm:grid-cols-2 gap-3 content-start">
+            <div className="grid sm:grid-cols-2 gap-3 content-start w-full lg:w-1/2 shrink-0">
               <div>
                 <label className={labelCls}>Estimate date</label>
                 <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} disabled={readOnly} className={inputCls} />
@@ -504,9 +491,8 @@ export default function QuotationDetailPage() {
                   <th className="text-left py-2 pr-2 font-medium">Description</th>
                   <th className="text-right py-2 pr-2 font-medium w-20">Qty</th>
                   <th className="text-right py-2 pr-2 font-medium w-24">Rate</th>
-                  <th className="text-right py-2 pr-2 font-medium w-28">Amount ({currencyLabel})</th>
-                  <th className="text-left py-2 pr-2 font-medium w-24">Class</th>
-                  <th className="w-8" />
+                  <th className="text-right py-2 pr-6 font-medium w-32">Amount ({currencyLabel})</th>
+                  <th className="w-10 pr-2" />
                 </tr>
               </thead>
               <tbody>
@@ -558,16 +544,8 @@ export default function QuotationDetailPage() {
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm text-right"
                       />
                     </td>
-                    <td className="py-2 pr-2 text-right tabular-nums pt-3">{formatCurrency(item.quantity * item.unit_price)}</td>
+                    <td className="py-2 pr-6 text-right tabular-nums pt-3">{formatCurrency(item.quantity * item.unit_price)}</td>
                     <td className="py-2 pr-2">
-                      <input
-                        value={item.class_name}
-                        onChange={(e) => updateItem(i, 'class_name', e.target.value)}
-                        disabled={readOnly}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
-                      />
-                    </td>
-                    <td className="py-2">
                       {!readOnly && (
                         <button type="button" onClick={() => removeItem(i)} className="text-gray-400 hover:text-red-600 text-sm px-1" title="Remove line">
                           🗑
@@ -773,7 +751,17 @@ export default function QuotationDetailPage() {
           </div>
         </div>
 
-        <div>
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <label className={labelCls}>Status</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={readOnly} className={inputCls}>
+              {QUOTATION_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {QUOTATION_STATUS_FORM_LABEL[s]}
+                </option>
+              ))}
+            </select>
+          </div>
           <ActivityFeed entityType="quotation" entityId={quote.id} className="max-h-[700px]" />
         </div>
       </div>

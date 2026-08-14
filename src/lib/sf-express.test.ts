@@ -209,7 +209,8 @@ describe('createSfOrder / cloudPrintWaybills', () => {
 
     expect(result.waybillNo).toBe('SF999');
     expect(fetchImpl).toHaveBeenCalledOnce();
-    const body = String((fetchImpl.mock.calls[0][1] as RequestInit).body);
+    const [, createInit] = fetchImpl.mock.calls[0] as unknown as [RequestInfo, RequestInit];
+    const body = String(createInit.body);
     expect(body).toContain('EXP_RECE_CREATE_ORDER');
   });
 
@@ -233,7 +234,8 @@ describe('createSfOrder / cloudPrintWaybills', () => {
       fetchImpl as unknown as typeof fetch
     );
     expect(result.pdfUrl).toBe('https://cdn.example/label.pdf');
-    const body = String((fetchImpl.mock.calls[0][1] as RequestInit).body);
+    const [, printInit] = fetchImpl.mock.calls[0] as unknown as [RequestInfo, RequestInit];
+    const body = String(printInit.body);
     expect(decodeURIComponent(body)).toContain(SF_EXPRESS_DEFAULT_PRINT_TEMPLATE);
   });
 });

@@ -27,7 +27,6 @@ interface LineItem {
   description: string;
   quantity: number;
   unit_price: number;
-  class_name: string;
 }
 
 const emptyLine = (): LineItem => ({
@@ -36,7 +35,6 @@ const emptyLine = (): LineItem => ({
   description: '',
   quantity: 1,
   unit_price: 0,
-  class_name: '',
 });
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -130,7 +128,6 @@ export default function InvoiceDetailPage() {
                 description: i.description || '',
                 quantity: i.quantity,
                 unit_price: i.unit_price,
-                class_name: i.class_name || '',
               }))
             : [emptyLine()],
         );
@@ -565,9 +562,8 @@ export default function InvoiceDetailPage() {
                   <th className="text-left py-2 pr-2 font-medium">Description</th>
                   <th className="text-right py-2 pr-2 font-medium w-20">Qty</th>
                   <th className="text-right py-2 pr-2 font-medium w-24">Rate</th>
-                  <th className="text-right py-2 pr-2 font-medium w-28">Amount ({currencyLabel})</th>
-                  <th className="text-left py-2 pr-2 font-medium w-24">Class</th>
-                  <th className="w-8" />
+                  <th className="text-right py-2 pr-6 font-medium w-32">Amount ({currencyLabel})</th>
+                  <th className="w-10 pr-2" />
                 </tr>
               </thead>
               <tbody>
@@ -619,18 +615,10 @@ export default function InvoiceDetailPage() {
                         className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm text-right"
                       />
                     </td>
-                    <td className="py-2 pr-2 text-right tabular-nums pt-3">
+                    <td className="py-2 pr-6 text-right tabular-nums pt-3">
                       {formatCurrency(item.quantity * item.unit_price)}
                     </td>
                     <td className="py-2 pr-2">
-                      <input
-                        value={item.class_name}
-                        onChange={(e) => updateItem(i, 'class_name', e.target.value)}
-                        disabled={readOnly}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
-                      />
-                    </td>
-                    <td className="py-2">
                       {!readOnly && (
                         <button
                           type="button"

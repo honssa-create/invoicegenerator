@@ -561,6 +561,45 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('reconciliation_approval_workflow_v1') ON CONFLICT DO NOTHING`
     );
   }
+
+  // Manual payment entry: source=manual + receipt_path.
+  const migReconManual = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_manual_entry_v1'`
+  );
+  if (!migReconManual.rows.length) {
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS receipt_path TEXT`);
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_source_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_source_check
+        CHECK (source IN ('yedpay', 'bank_upload', 'manual'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_manual_entry_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS created_by TEXT`);
+
+  // Extra manual payment methods: 現金 / 支票 / 銀行轉帳.
+  const migReconMethods = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_payment_methods_v2'`
+  );
+  if (!migReconMethods.rows.length) {
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_payment_method_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_payment_method_check
+        CHECK (payment_method IN ('Yedpay', 'FPS', 'Payme', '現金', '支票', '銀行轉帳'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_payment_methods_v2') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

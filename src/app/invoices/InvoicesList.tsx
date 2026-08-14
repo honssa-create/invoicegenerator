@@ -14,6 +14,52 @@ import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type SortKey = 'number' | 'customer' | 'date' | 'due' | 'amount' | 'status';
 const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
+const PAGE_SIZE = 50;
+
+function PaginationBar({
+  page,
+  totalPages,
+  pageStart,
+  pageEnd,
+  total,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  pageStart: number;
+  pageEnd: number;
+  total: number;
+  onPage: (p: number) => void;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 text-sm">
+      <div className="text-gray-600">
+        {total === 0 ? 'No records' : `Showing ${pageStart + 1}–${pageEnd} of ${total}`}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPage(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          ← Prev
+        </button>
+        <span className="text-xs text-gray-500">
+          Page {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPage(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function InvoicesList() {
   const searchParams = useSearchParams();
@@ -28,6 +74,7 @@ export default function InvoicesList() {
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
+  const [page, setPage] = useState(1);
 
   const loadInvoices = () => {
     setLoading(true);
@@ -82,6 +129,19 @@ export default function InvoicesList() {
     });
     return list;
   }, [invoices, dateStart, dateEnd, client, status, search, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
+  const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
+  const pageEnd = Math.min(page * PAGE_SIZE, displayed.length);
+  const pageRows = displayed.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setPage(1);
+  }, [dateStart, dateEnd, client, status, search, sort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const toggleSort = (key: SortKey) =>
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
@@ -176,6 +236,15 @@ export default function InvoicesList() {
             {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">{bi('Create an invoice', '建立發票')}</Link>}
           </div>
         ) : (
+          <>
+          <PaginationBar
+            page={page}
+            totalPages={totalPages}
+            pageStart={pageStart}
+            pageEnd={pageEnd}
+            total={displayed.length}
+            onPage={setPage}
+          />
           <div className="table-scroll">
           <table className="w-full min-w-[720px]">
             <thead>
@@ -190,7 +259,7 @@ export default function InvoicesList() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {displayed.map((inv) => (
+              {pageRows.map((inv) => (
                 <tr key={inv.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{inv.invoice_number}</Link>
@@ -212,6 +281,19 @@ export default function InvoicesList() {
             </tbody>
           </table>
           </div>
+          {displayed.length > PAGE_SIZE && (
+            <div className="border-t border-gray-100">
+              <PaginationBar
+                page={page}
+                totalPages={totalPages}
+                pageStart={pageStart}
+                pageEnd={pageEnd}
+                total={displayed.length}
+                onPage={setPage}
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
     </AppLayout>

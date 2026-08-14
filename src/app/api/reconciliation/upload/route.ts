@@ -159,7 +159,7 @@ export async function POST(request: Request) {
   }
 
   const ownerId = await getDataOwnerId(session.userId);
-  const result = await importBankStatementRows(ownerId, paymentMethod, parsed);
+  const result = await importBankStatementRows(ownerId, paymentMethod, parsed, session.name);
 
   return NextResponse.json({ ...result, errors });
 }

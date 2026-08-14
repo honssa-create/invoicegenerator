@@ -1,6 +1,6 @@
 /** Client-safe reconciliation types and constants. */
 
-export const PAYMENT_METHODS = ['Yedpay', 'FPS', 'Payme'] as const;
+export const PAYMENT_METHODS = ['Yedpay', 'FPS', 'Payme', '現金', '支票', '銀行轉帳'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const RECONCILIATION_STATUSES = ['Unmatched', 'Pending Approval', 'Matched', 'Discrepancy'] as const;
@@ -34,7 +34,8 @@ export interface ReconciliationRecord {
   transaction_fee: number;
   net_amount: number;
   remarks: string | null;
-  source: 'yedpay' | 'bank_upload';
+  receipt_path: string | null;
+  source: 'yedpay' | 'bank_upload' | 'manual';
   external_id: string | null;
   matched_at: string | null;
   confidence: ReconConfidence | null;
@@ -43,6 +44,7 @@ export interface ReconciliationRecord {
   candidates: ReconCandidateSummary[];
   approved_by: string | null;
   approved_at: string | null;
+  created_by: string | null;
   created_at: string;
   /** Hydrated for UI when suggested_order_id is set */
   suggested_order_no?: string | null;
@@ -62,12 +64,18 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   Yedpay: 'Yedpay',
   FPS: 'FPS 轉數快',
   Payme: 'PayMe',
+  現金: '現金',
+  支票: '支票',
+  銀行轉帳: '銀行轉帳',
 };
 
 export const METHOD_HINTS: Record<PaymentMethod, string[]> = {
   Yedpay: ['yedpay', 'yed pay'],
   FPS: ['fps', '轉數快', '轉数快', 'faster payment'],
   Payme: ['payme', 'pay me'],
+  現金: ['現金', 'cash'],
+  支票: ['支票', 'cheque', 'check'],
+  銀行轉帳: ['銀行轉帳', '银行转帐', 'bank transfer', 'wire transfer', 'tt'],
 };
 
 export function amountsClose(a: number, b: number, tolerance = AMOUNT_TOLERANCE): boolean {

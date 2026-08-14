@@ -75,3 +75,11 @@ export function otherIncomeReceiptUrl(recordId: number, storedPath: string | nul
   if (!storedPath) return null;
   return `/api/other-income/${recordId}/receipt`;
 }
+
+export function reconciliationReceiptUrl(
+  recordId: number,
+  storedPath: string | null | undefined
+): string | null {
+  if (!storedPath) return null;
+  return `/api/reconciliation/${recordId}/receipt`;
+}

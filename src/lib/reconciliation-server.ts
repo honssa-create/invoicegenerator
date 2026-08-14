@@ -27,8 +27,10 @@ export interface ReconciliationInput {
   transaction_fee?: number;
   order_no?: string | null;
   remarks?: string | null;
-  source: 'yedpay' | 'bank_upload';
+  receipt_path?: string | null;
+  source: 'yedpay' | 'bank_upload' | 'manual';
   external_id?: string | null;
+  created_by?: string | null;
 }
 
 export interface MatchCandidate {
@@ -125,7 +127,8 @@ function rowToRecord(row: Record<string, unknown>): ReconciliationRecord {
     transaction_fee: row.transaction_fee as number,
     net_amount: row.net_amount as number,
     remarks: (row.remarks as string) || null,
-    source: row.source as 'yedpay' | 'bank_upload',
+    receipt_path: (row.receipt_path as string) || null,
+    source: row.source as 'yedpay' | 'bank_upload' | 'manual',
     external_id: (row.external_id as string) || null,
     matched_at: (row.matched_at as string) || null,
     confidence: (row.confidence as ReconConfidence) || null,
@@ -134,6 +137,7 @@ function rowToRecord(row: Record<string, unknown>): ReconciliationRecord {
     candidates: parseCandidatesJson(row.candidate_order_ids_json),
     approved_by: (row.approved_by as string) || null,
     approved_at: (row.approved_at as string) || null,
+    created_by: (row.created_by as string) || null,
     created_at: row.created_at as string,
     suggested_order_no: (row.suggested_order_no as string) || null,
     suggested_customer_name: (row.suggested_customer_name as string) || null,
@@ -522,8 +526,8 @@ export async function insertReconciliationRecord(userId: number, input: Reconcil
     .prepare(
       `INSERT INTO reconciliation_records
        (user_id, order_no, deposit_time, gross_amount, payment_method, status, transaction_fee, net_amount,
-        remarks, source, external_id)
-       VALUES (?, ?, ?, ?, ?, 'Unmatched', ?, ?, ?, ?, ?)`
+        remarks, receipt_path, source, external_id, created_by)
+       VALUES (?, ?, ?, ?, ?, 'Unmatched', ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       userId,
@@ -534,11 +538,88 @@ export async function insertReconciliationRecord(userId: number, input: Reconcil
       round2(fee),
       net,
       input.remarks?.trim() || null,
+      input.receipt_path?.trim() || null,
       input.source,
-      input.external_id || null
+      input.external_id || null,
+      input.created_by?.trim() || null
     );
 
   return Number(result.lastInsertRowid);
+}
+
+export interface ManualPaymentInput {
+  amount: number;
+  invoice_no?: string | null;
+  order_no?: string | null;
+  remarks?: string | null;
+  receipt_path?: string | null;
+  payment_method?: PaymentMethod;
+  deposit_time?: string | null;
+  created_by?: string | null;
+}
+
+/** Operator-entered deposit (not from Yedpay / bank CSV). Scores suggestions like imports. */
+export async function createManualPayment(
+  userId: number,
+  input: ManualPaymentInput
+): Promise<ReconciliationRecord> {
+  const amount = round2(Number(input.amount));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Enter a valid amount (銀碼)');
+  }
+
+  const invoiceNo = input.invoice_no?.trim() || '';
+  const orderNo = input.order_no?.trim() || '';
+  const depositTime = toIsoDateTime(input.deposit_time?.trim() || nowIso());
+  const paymentMethod: PaymentMethod = input.payment_method || 'FPS';
+
+  const reconInput: ReconciliationInput = {
+    deposit_time: depositTime,
+    gross_amount: amount,
+    payment_method: paymentMethod,
+    transaction_fee: 0,
+    order_no: orderNo || invoiceNo || null,
+    remarks: input.remarks?.trim() || null,
+    receipt_path: input.receipt_path?.trim() || null,
+    source: 'manual',
+    external_id: `manual:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+    created_by: input.created_by?.trim() || null,
+  };
+
+  const id = await insertReconciliationRecord(userId, reconInput);
+
+  // Prefer explicit invoice no., then order no., then auto-score from remarks / amount.
+  const preferKeys = [invoiceNo, orderNo].filter(Boolean);
+  let suggested = false;
+  for (const key of preferKeys) {
+    const match = await findOrderByOrderNo(userId, key);
+    if (!match) continue;
+    if (match.expected_amount === null || amountsClose(amount, match.expected_amount)) {
+      await suggestMatch(userId, id, {
+        status: 'Pending Approval',
+        confidence: 'high',
+        match,
+        orderNoHint: orderNo || match.order_no || key,
+      });
+    } else {
+      await suggestMatch(userId, id, {
+        status: 'Discrepancy',
+        confidence: null,
+        match,
+        orderNoHint: orderNo || match.order_no || key,
+      });
+    }
+    suggested = true;
+    break;
+  }
+
+  if (!suggested) {
+    await scoreAndSuggest(userId, id, reconInput);
+  }
+
+  const record = await getReconciliationRecord(userId, id);
+  if (!record) throw new Error('Failed to create payment');
+  return record;
 }
 
 async function recordExistsByExternalId(userId: number, externalId: string): Promise<boolean> {
@@ -848,7 +929,10 @@ function yedpayTxnToInput(txn: YedpayTransaction): ReconciliationInput {
   };
 }
 
-export async function syncYedpayForUser(userId: number): Promise<{
+export async function syncYedpayForUser(
+  userId: number,
+  createdBy?: string | null
+): Promise<{
   fetched: number;
   imported: number;
   suggested: number;
@@ -883,7 +967,10 @@ export async function syncYedpayForUser(userId: number): Promise<{
         continue;
       }
 
-      const input = yedpayTxnToInput(txn);
+      const input: ReconciliationInput = {
+        ...yedpayTxnToInput(txn),
+        created_by: createdBy?.trim() || null,
+      };
       const id = await insertReconciliationRecord(userId, input);
       imported += 1;
       const status = await scoreAndSuggest(userId, id, input);
@@ -896,7 +983,8 @@ export async function syncYedpayForUser(userId: number): Promise<{
 export async function importBankStatementRows(
   userId: number,
   paymentMethod: PaymentMethod,
-  rows: ReconciliationInput[]
+  rows: ReconciliationInput[],
+  createdBy?: string | null
 ): Promise<{ imported: number; suggested: number; skipped: number }> {
   let imported = 0;
   let suggested = 0;
@@ -913,6 +1001,7 @@ export async function importBankStatementRows(
         payment_method: paymentMethod,
         transaction_fee: 0,
         source: 'bank_upload',
+        created_by: createdBy?.trim() || row.created_by || null,
       };
       const id = await insertReconciliationRecord(userId, input);
       imported += 1;

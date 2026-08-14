@@ -22,6 +22,7 @@ const OrdersBoard = dynamic(() => import('@/components/OrdersBoard'), { ssr: fal
 const OrdersCalendar = dynamic(() => import('@/components/OrdersCalendar'), { ssr: false });
 
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
+const PAGE_SIZE = 50;
 
 export default function OrdersPage() {
   return (
@@ -54,6 +55,7 @@ function OrdersPageContent() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'reference', dir: 'desc' });
   const [view, setView] = useState<'line' | 'board' | 'calendar'>('line');
   const [boardError, setBoardError] = useState('');
+  const [page, setPage] = useState(1);
 
   const load = () => {
     setLoading(true);
@@ -136,6 +138,19 @@ function OrdersPageContent() {
     });
     return list;
   }, [orders, dateStart, dateEnd, orderType, status, search, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
+  const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
+  const pageEnd = Math.min(page * PAGE_SIZE, displayed.length);
+  const pageRows = displayed.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setPage(1);
+  }, [dateStart, dateEnd, orderType, status, search, sort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const toggleSort = (key: SortKey) =>
     setSort((prev) =>
@@ -338,6 +353,33 @@ function OrdersPageContent() {
           ) : displayed.length === 0 ? (
             <div className="p-12 text-center text-gray-500">{bi('No orders match your filters.', '沒有符合篩選條件的訂單。')}</div>
           ) : (
+            <>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 text-sm">
+              <div className="text-gray-600">
+                Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+                >
+                  ← Prev
+                </button>
+                <span className="text-xs text-gray-500">
+                  Page {page} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
             <div className="table-scroll">
             <table className="w-full min-w-[840px]">
               <thead>
@@ -351,7 +393,7 @@ function OrdersPageContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {displayed.map((o) => (
+                {pageRows.map((o) => (
                   <tr key={o.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
@@ -375,6 +417,35 @@ function OrdersPageContent() {
               </tbody>
             </table>
             </div>
+            {displayed.length > PAGE_SIZE && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 text-sm">
+                <div className="text-gray-600">
+                  Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+                  >
+                    ← Prev
+                  </button>
+                  <span className="text-xs text-gray-500">
+                    Page {page} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       )}

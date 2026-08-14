@@ -621,12 +621,13 @@ CREATE TABLE IF NOT EXISTS reconciliation_records (
   invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
   deposit_time TEXT NOT NULL,
   gross_amount DOUBLE PRECISION NOT NULL,
-  payment_method TEXT NOT NULL CHECK (payment_method IN ('Yedpay', 'FPS', 'Payme')),
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('Yedpay', 'FPS', 'Payme', '現金', '支票', '銀行轉帳')),
   status TEXT NOT NULL DEFAULT 'Unmatched' CHECK (status IN ('Unmatched', 'Pending Approval', 'Matched', 'Discrepancy')),
   transaction_fee DOUBLE PRECISION NOT NULL DEFAULT 0,
   net_amount DOUBLE PRECISION NOT NULL,
   remarks TEXT,
-  source TEXT NOT NULL CHECK (source IN ('yedpay', 'bank_upload')),
+  receipt_path TEXT,
+  source TEXT NOT NULL CHECK (source IN ('yedpay', 'bank_upload', 'manual')),
   external_id TEXT,
   matched_at TEXT,
   confidence TEXT CHECK (confidence IS NULL OR confidence IN ('high', 'medium')),
@@ -635,6 +636,7 @@ CREATE TABLE IF NOT EXISTS reconciliation_records (
   candidate_order_ids_json TEXT,
   approved_by TEXT,
   approved_at TEXT,
+  created_by TEXT,
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
@@ -645,6 +647,8 @@ ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_invoice_id
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS candidate_order_ids_json TEXT;
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_by TEXT;
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_at TEXT;
+ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS receipt_path TEXT;
+ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS created_by TEXT;
 
 CREATE TABLE IF NOT EXISTS integration_tokens (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

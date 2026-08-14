@@ -13,7 +13,7 @@ export async function POST(request: Request) {
 
   try {
     const ownerId = await getDataOwnerId(session.userId);
-    const result = await syncYedpayForUser(ownerId);
+    const result = await syncYedpayForUser(ownerId, session.name);
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Yedpay sync failed';

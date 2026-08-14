@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
-import OrdersBoard from '@/components/OrdersBoard';
-import OrdersCalendar from '@/components/OrdersCalendar';
 import { ORDER_TYPES, STATUS_COLORS, getOrderType, statusesForOrderType, type Order } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+
+const OrdersBoard = dynamic(() => import('@/components/OrdersBoard'), { ssr: false });
+const OrdersCalendar = dynamic(() => import('@/components/OrdersCalendar'), { ssr: false });
 
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
+import { getInvoiceWithDetails, listInvoices, markSentInvoicesOverdue } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
@@ -30,17 +30,8 @@ export async function GET(request: Request) {
       .get(ownerId) as { subtotal: number }
   ).subtotal;
 
-  const pendingInvoices = await db
-    .prepare(
-      `SELECT i.id FROM invoices i WHERE i.user_id = ? AND i.status IN ('sent', 'overdue')`
-    )
-    .all(ownerId) as { id: number }[];
-
-  let pendingAmount = 0;
-  for (const inv of pendingInvoices) {
-    const details = await getInvoiceWithDetails(inv.id, ownerId);
-    if (details) pendingAmount += details.total;
-  }
+  const pendingInvoices = await listInvoices(ownerId, { status: ['sent', 'overdue'] });
+  const pendingAmount = pendingInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
   const overdueCount = (
     await db

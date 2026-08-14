@@ -11,7 +11,6 @@ import SupplierSelect from '@/components/SupplierSelect';
 import { DEFAULT_OPTIONS } from '@/lib/expenses';
 import { mergeSupplierLists } from '@/lib/expense-suppliers';
 import { compressImage } from '@/lib/imageCompression';
-import { compressPdfToImages } from '@/lib/pdfCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
 import {
   ORDER_FIELDS,
@@ -237,6 +236,7 @@ export default function OrderDetailPage() {
       try {
         if (f.type === 'application/pdf') {
           setUploadMsg(`Compressing PDF “${f.name}” pages…`);
+          const { compressPdfToImages } = await import('@/lib/pdfCompression');
           const pages = await compressPdfToImages(f);
           prepared.push(...pages);
         } else if (f.type.startsWith('image/')) {
@@ -344,6 +344,7 @@ export default function OrderDetailPage() {
     let file = rawFile;
     try {
       if (rawFile.type === 'application/pdf') {
+        const { compressPdfToImages } = await import('@/lib/pdfCompression');
         const pages = await compressPdfToImages(rawFile, { quality: 0.65, maxWidthOrHeight: 1600 });
         if (pages[0]) file = pages[0];
       } else {

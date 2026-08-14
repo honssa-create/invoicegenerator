@@ -110,31 +110,12 @@ export async function getOrder(id: number | string, userId: number): Promise<Ord
   return row ? await hydrate(row, true) : null;
 }
 
+/** List orders without order_files / activities / linked docs (detail uses getOrder). */
 export async function listOrders(userId: number): Promise<Order[]> {
   const rows = await db
     .prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY updated_at DESC, id DESC')
     .all(userId) as OrderRow[];
-  const orders = await Promise.all(rows.map(async (r) => await hydrate(r, false)));
-  if (!orders.length) return orders;
-
-  const ids = orders.map((o) => o.id);
-  const placeholders = ids.map(() => '?').join(', ');
-  const fileRows = (await db
-    .prepare(
-      `SELECT id, order_id, path, original_name FROM order_files WHERE order_id IN (${placeholders}) ORDER BY id`
-    )
-    .all(...ids)) as Array<{ id: number; order_id: number; path: string; original_name: string | null }>;
-
-  const byOrder = new Map<number, Order['files']>();
-  for (const f of fileRows) {
-    const list = byOrder.get(f.order_id) || [];
-    list.push({ id: f.id, path: f.path, original_name: f.original_name });
-    byOrder.set(f.order_id, list);
-  }
-  for (const order of orders) {
-    order.files = byOrder.get(order.id) || [];
-  }
-  return orders;
+  return Promise.all(rows.map((r) => hydrate(r, false)));
 }
 
 export async function logActivity(

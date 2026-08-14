@@ -341,7 +341,7 @@ export default function ExpensesPage() {
     setShowForm(true);
   };
 
-  const openEdit = (e: Expense) => {
+  const fillEditForm = (e: Expense) => {
     setForm({
       category: e.category || '',
       merchant: e.merchant || '',
@@ -364,6 +364,19 @@ export default function ExpensesPage() {
     setSupplierInputOcrHint(false);
     setError('');
     setShowForm(true);
+  };
+
+  /** List payload only has the primary receipt — fetch full expense before edit/detail. */
+  const fetchFullExpense = async (id: number): Promise<Expense | null> => {
+    const res = await fetch(`/api/expenses/${id}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.expense as Expense) || null;
+  };
+
+  const openEdit = async (e: Expense) => {
+    const full = (await fetchFullExpense(e.id)) || e;
+    fillEditForm(full);
   };
 
   const handleFiles = async (fileList: FileList | File[]) => {
@@ -583,7 +596,11 @@ export default function ExpensesPage() {
         : new Set([...Array.from(selected), ...pagedRows.map((e) => e.id)])
     );
 
-  const openDetail = (e: Expense) => setDetail(e);
+  const openDetail = async (e: Expense) => {
+    setDetail(e);
+    const full = await fetchFullExpense(e.id);
+    if (full) setDetail(full);
+  };
 
   const openLightbox = (expense: Expense, index: number) => {
     const receipts = expense.receipts || [];
@@ -952,7 +969,7 @@ export default function ExpensesPage() {
                   </td>
                   <td className={`px-4 py-3 sticky right-0 z-10 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm space-x-3 whitespace-nowrap ${stickyCell}`} onClick={(ev) => ev.stopPropagation()}>
                     <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">{BTN.view}</button>
-                    <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.edit}</button>
+                    <button onClick={() => void openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.edit}</button>
                     <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button>
                   </td>
                 </tr>
@@ -1247,7 +1264,7 @@ export default function ExpensesPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setDetail(null); openEdit(detail); }}
+                    onClick={() => { setDetail(null); void openEdit(detail); }}
                     className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
                   >
                     {BTN.edit}

@@ -82,3 +82,81 @@ export async function getInvoiceWithDetails(invoiceId: number | string, userId: 
     total,
   };
 }
+
+/**
+ * Lean list for invoice tables: one invoice query + one items query, no files.
+ * Totals match getInvoiceWithDetails (tax / discount / shipping).
+ */
+export async function listInvoices(
+  userId: number,
+  opts: { status?: string | string[] } = {},
+): Promise<InvoiceWithDetails[]> {
+  const params: (string | number)[] = [userId];
+  let statusClause = '';
+  if (opts.status !== undefined) {
+    const statuses = Array.isArray(opts.status) ? opts.status : [opts.status];
+    if (statuses.length === 1) {
+      statusClause = ' AND i.status = ?';
+      params.push(statuses[0]);
+    } else if (statuses.length > 1) {
+      statusClause = ` AND i.status IN (${statuses.map(() => '?').join(',')})`;
+      params.push(...statuses);
+    }
+  }
+
+  const rows = (await db
+    .prepare(
+      `SELECT i.*, c.name as customer_name, c.email as customer_email,
+              c.address as customer_address, c.city as customer_city,
+              c.state as customer_state, c.zip as customer_zip
+       FROM invoices i
+       JOIN customers c ON c.id = i.customer_id
+       WHERE i.user_id = ?${statusClause}
+       ORDER BY i.created_at DESC`,
+    )
+    .all(...params)) as Array<Record<string, unknown>>;
+
+  if (!rows.length) return [];
+
+  const ids = rows.map((r) => Number(r.id));
+  const placeholders = ids.map(() => '?').join(',');
+  const itemRows = (await db
+    .prepare(
+      `SELECT invoice_id, quantity, unit_price FROM invoice_items WHERE invoice_id IN (${placeholders}) ORDER BY id`,
+    )
+    .all(...ids)) as Array<{ invoice_id: number; quantity: number; unit_price: number }>;
+
+  const itemsByInvoice = new Map<number, { quantity: number; unit_price: number }[]>();
+  for (const item of itemRows) {
+    const list = itemsByInvoice.get(item.invoice_id) || [];
+    list.push({ quantity: Number(item.quantity) || 0, unit_price: Number(item.unit_price) || 0 });
+    itemsByInvoice.set(item.invoice_id, list);
+  }
+
+  return rows.map((invoice) => {
+    const id = Number(invoice.id);
+    const items = itemsByInvoice.get(id) || [];
+    const { subtotal, discountAmount, taxAmount, total } = calculateInvoiceTotals(items, {
+      taxRate: invoice.tax_rate as number,
+      discountType: invoice.discount_type as string,
+      discountValue: invoice.discount_value as number,
+      shippingAmount: invoice.shipping_amount as number,
+    });
+
+    return {
+      ...(invoice as unknown as InvoiceWithDetails),
+      discount_type: (invoice.discount_type as InvoiceWithDetails['discount_type']) || 'percent',
+      discount_value: Number(invoice.discount_value) || 0,
+      shipping_amount: Number(invoice.shipping_amount) || 0,
+      currency: (invoice.currency as string) || 'HKD',
+      send_later: Boolean(Number(invoice.send_later) || 0),
+      term: (invoice.term as string) || 'NET30',
+      items: [],
+      files: [],
+      subtotal,
+      discount_amount: discountAmount,
+      tax_amount: taxAmount,
+      total,
+    };
+  });
+}

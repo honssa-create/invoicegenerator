@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { generateInvoiceNumber, getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
+import { generateInvoiceNumber, getInvoiceWithDetails, listInvoices, markSentInvoicesOverdue } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -15,21 +15,9 @@ export async function GET(request: Request) {
   const ownerId = await getDataOwnerId(session.userId);
   await markSentInvoicesOverdue(ownerId);
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get('status');
+  const status = searchParams.get('status') || undefined;
 
-  let query = 'SELECT id FROM invoices WHERE user_id = ?';
-  const queryParams: (string | number)[] = [ownerId];
-
-  if (status) {
-    query += ' AND status = ?';
-    queryParams.push(status);
-  }
-
-  query += ' ORDER BY created_at DESC';
-
-  const rows = await db.prepare(query).all(...queryParams) as { id: number }[];
-  const invoices = (await Promise.all(rows.map((r) => getInvoiceWithDetails(r.id, ownerId)))).filter(Boolean);
-
+  const invoices = await listInvoices(ownerId, status ? { status } : {});
   return NextResponse.json({ invoices });
 }
 

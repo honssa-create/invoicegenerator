@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { useAuth } from './AuthProvider';
 import Sidebar from './Sidebar';
 import { APP } from '@/lib/ui-labels';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { loading } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -22,14 +20,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [menuOpen]);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-brand-600" />
-      </div>
-    );
-  }
-
+  // Middleware already gates routes; render shell + children immediately so
+  // page data fetches run in parallel with /api/auth/me (not behind it).
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />

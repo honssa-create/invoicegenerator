@@ -372,3 +372,40 @@ export async function attachReceipts(expenses: Expense[]): Promise<Expense[]> {
   }
   return expenses;
 }
+
+/** List view: only the first receipt per expense (table thumbnails). */
+export async function attachPrimaryReceipts(expenses: Expense[]): Promise<Expense[]> {
+  if (!expenses.length) return expenses;
+  const ids = expenses.map((e) => e.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await db
+    .prepare(
+      `SELECT DISTINCT ON (expense_id) id, expense_id, path, source_url
+       FROM expense_receipts
+       WHERE expense_id IN (${placeholders})
+       ORDER BY expense_id, id`,
+    )
+    .all(...ids) as { id: number; expense_id: number; path: string; source_url: string | null }[];
+  const map = new Map<number, { id: number; path: string; source_url: string | null }>();
+  for (const r of rows) {
+    map.set(r.expense_id, { id: r.id, path: r.path, source_url: r.source_url });
+  }
+  for (const e of expenses) {
+    const primary = map.get(e.id);
+    if (primary) {
+      e.receipts = [primary];
+    } else if (e.receipt_path?.trim()) {
+      const legacyPath = e.receipt_path.trim();
+      e.receipts = [
+        {
+          id: 0,
+          path: legacyPath,
+          source_url: /^https?:\/\//i.test(legacyPath) ? legacyPath : null,
+        },
+      ];
+    } else {
+      e.receipts = [];
+    }
+  }
+  return expenses;
+}

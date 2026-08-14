@@ -49,27 +49,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  // Fetch session once on mount — not on every route change.
   useEffect(() => {
+    let cancelled = false;
     fetch('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (cancelled) return;
         if (data?.user) {
           setUser(data.user);
-          if (!PUBLIC_PATHS.includes(pathname)) {
-            const section = sectionForPagePath(pathname);
-            if (
-              section &&
-              !canAccessSection(data.user.role, data.user.permissions, section)
-            ) {
-              router.push('/dashboard');
-            }
-          }
-        } else if (!PUBLIC_PATHS.includes(pathname)) {
-          router.push('/login');
+        } else {
+          setUser(null);
         }
       })
-      .finally(() => setLoading(false));
-  }, [pathname, router]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Permission / login redirects from already-loaded user (no network).
+  useEffect(() => {
+    if (loading) return;
+    if (PUBLIC_PATHS.includes(pathname)) return;
+
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    const section = sectionForPagePath(pathname);
+    if (section && !canAccessSection(user.role, user.permissions, section)) {
+      router.push('/dashboard');
+    }
+  }, [loading, user, pathname, router]);
 
   const canAccess = (section: PermissionSection) => {
     if (!user) return false;

@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import {
   assignExpenseNumbersAtomic,
+  attachPrimaryReceipts,
   attachReceipts,
   normalizeNumber,
   receiptPathsFromBody,
@@ -33,12 +34,14 @@ export async function GET(request: Request) {
     params.push(session.userId);
   }
 
+  let idsFilter = false;
   if (idsParam) {
     const ids = idsParam
       .split(',')
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0);
     if (ids.length) {
+      idsFilter = true;
       query += ` AND id IN (${ids.map(() => '?').join(',')})`;
       params.push(...ids);
     }
@@ -56,7 +59,12 @@ export async function GET(request: Request) {
   query += ' ORDER BY COALESCE(paid_date, created_at) DESC, id DESC';
 
   const expenses = await db.prepare(query).all(...params) as Expense[];
-  await attachReceipts(expenses);
+  // Print view needs every receipt; list only needs the primary thumbnail.
+  if (idsFilter) {
+    await attachReceipts(expenses);
+  } else {
+    await attachPrimaryReceipts(expenses);
+  }
   return NextResponse.json({ expenses });
 }
 

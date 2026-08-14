@@ -14,6 +14,7 @@ import {
   type PaymentMethod,
   type ReconciliationRecord,
 } from '@/lib/reconciliation';
+import { BTN } from '@/lib/ui-labels';
 
 interface MatchCandidate {
   order_id: number;
@@ -234,6 +235,17 @@ export default function ReconciliationPage() {
     setSort((prev) =>
       prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' }
     );
+  };
+
+  const exportExcel = () => {
+    const params = new URLSearchParams();
+    if (zoneFilter) params.set('zone', zoneFilter);
+    if (methodFilter) params.set('method', methodFilter);
+    if (dateStart) params.set('dateStart', dateStart);
+    if (dateEnd) params.set('dateEnd', dateEnd);
+    if (search.trim()) params.set('q', search.trim());
+    const qs = params.toString();
+    window.location.href = `/api/reconciliation/export${qs ? `?${qs}` : ''}`;
   };
   const syncYedpay = async () => {
     setSyncing(true);
@@ -610,6 +622,12 @@ export default function ReconciliationPage() {
           </p>
         </div>
         <div className="page-actions flex flex-col sm:flex-row gap-2">
+          <button
+            onClick={exportExcel}
+            className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 whitespace-nowrap"
+          >
+            ⬇ {BTN.exportExcel}
+          </button>
           <button
             onClick={openManualForm}
             className="btn bg-brand-600 text-white hover:bg-brand-700 whitespace-nowrap"

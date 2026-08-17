@@ -33,6 +33,7 @@ import {
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
+  isVirtualRentRecord,
   formatDueDayLabel,
   formatDisplayDate,
   formatMoney,
@@ -386,6 +387,22 @@ function RentalDetailInner() {
       });
   }, [id, period, viewLeaseId]);
 
+  /** Persist virtual period card (id=0) before record-id write actions. */
+  const ensurePeriodRecord = useCallback(async (): Promise<number | null> => {
+    const existing = data?.currentRecord?.id;
+    if (existing && existing > 0) return existing;
+    const res = await fetch(
+      `/api/rentals/units/${id}/ensure-period?period=${encodeURIComponent(period)}`,
+      { method: 'POST' },
+    );
+    if (!res.ok) return null;
+    const body = await res.json();
+    const record = body.record as RentRecord | undefined;
+    if (!record?.id) return null;
+    setData((prev) => (prev ? { ...prev, currentRecord: record } : prev));
+    return record.id;
+  }, [data?.currentRecord?.id, id, period]);
+
   useEffect(() => { load(); }, [load]);
 
   // Reactive base-rent period: recalc whenever 每月交租日 or billing month changes
@@ -492,8 +509,11 @@ function RentalDetailInner() {
   }, [captureUtilitySnapshot, electricityFormula, waterMeterFormula]);
 
   const saveUtilities = useCallback(async (opts?: { reload?: boolean; snapshot?: UtilitySnapshot; skipUndo?: boolean }) => {
-    const recordId = data?.currentRecord?.id;
-    if (!recordId) return false;
+    let recordId = data?.currentRecord?.id;
+    if (!recordId || recordId <= 0) {
+      recordId = (await ensurePeriodRecord()) || 0;
+      if (!recordId) return false;
+    }
     if (!opts?.skipUndo && !skipUndoCaptureRef.current && lastCommittedUtilityRef.current) {
       undoUtilitySnapshotRef.current = lastCommittedUtilityRef.current;
       setUtilityCanUndo(true);
@@ -516,7 +536,7 @@ function RentalDetailInner() {
     if (opts?.reload) load();
     else window.setTimeout(() => setUtilitySaveState('idle'), 2000);
     return true;
-  }, [data?.currentRecord?.id, buildUtilityPayload, captureUtilitySnapshot, load]);
+  }, [data?.currentRecord?.id, buildUtilityPayload, captureUtilitySnapshot, load, ensurePeriodRecord]);
 
   const undoUtilitySave = useCallback(async () => {
     const snap = undoUtilitySnapshotRef.current;
@@ -581,7 +601,13 @@ function RentalDetailInner() {
   const sendInvoice = async () => {
     if (!data?.currentRecord) return;
     setBusy(true);
-    const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/invoice`, {
+    const recordId = await ensurePeriodRecord();
+    if (!recordId) {
+      setBusy(false);
+      setToast('Failed to prepare billing period');
+      return;
+    }
+    const res = await fetch(`/api/rentals/records/${recordId}/invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -608,9 +634,11 @@ function RentalDetailInner() {
     setReceiptFile(f);
 
     if (!data?.currentRecord) { setOcrLoading(false); return; }
+    const recordId = await ensurePeriodRecord();
+    if (!recordId) { setOcrLoading(false); return; }
     const fd = new FormData();
     fd.append('receipt', f);
-    const res = await fetch(`/api/rentals/records/${data.currentRecord.id}/receipt-scan`, { method: 'POST', body: fd });
+    const res = await fetch(`/api/rentals/records/${recordId}/receipt-scan`, { method: 'POST', body: fd });
     const d = await res.json();
     setOcrLoading(false);
     if (res.ok) {
@@ -890,8 +918,11 @@ function RentalDetailInner() {
   const { unit, currentRecord, activities, currentLease, leaseHistory, leaseDocuments, paymentLedger, viewingLease, readOnlyLease, isHistoricalView } = data;
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
-  const recStatus = rec ? displayRentalStatus(rec) : 'pending';
+  const recStatus = rec
+    ? displayRentalStatus(rec, { dueDateDay: unit.dueDateDay, period: rec.billingPeriod || period })
+    : 'pending';
   const balance = rec ? outstandingBalance(rec) : 0;
+  const hasPersistedRecord = Boolean(rec && !isVirtualRentRecord(rec));
   const readOnly = Boolean(readOnlyLease);
   const fieldCls = readOnly
     ? 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-100 text-gray-600 cursor-not-allowed'
@@ -1378,13 +1409,13 @@ function RentalDetailInner() {
                     </button>
                   </>
                 )}
-                {rec?.receiptRef && (
+                {rec?.receiptRef && hasPersistedRecord && (
                   <Link href={`/rentals/records/${rec.id}/receipt`}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
                     🧾 {bi('View Receipt', '查看收據')}
                   </Link>
                 )}
-                {rec?.invoiceRef && (
+                {rec?.invoiceRef && hasPersistedRecord && (
                   <Link href={`/rentals/records/${rec.id}/invoice`}
                     className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
                     🖨 {bi('View Invoice', '查看發票')}
@@ -1598,7 +1629,9 @@ function RentalDetailInner() {
             />
             <div className="flex justify-between gap-3 flex-wrap">
               <div className="flex gap-2 flex-wrap">
-                <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">{bi('Preview Print View', '預覽列印')}</Link>
+                {hasPersistedRecord && (
+                  <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">{bi('Preview Print View', '預覽列印')}</Link>
+                )}
                 {unit.tenantId && (
                   <Link
                     href={`/billing/debit-note?tenantId=${unit.tenantId}&unitId=${unit.id}&targetPeriod=${period}&mode=single&paymentTemplate=${invoicePaymentTemplate}${invoicePaymentRemark ? `&paymentRemark=${encodeURIComponent(invoicePaymentRemark)}` : ''}`}

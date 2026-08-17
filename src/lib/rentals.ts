@@ -493,10 +493,80 @@ export function outstandingBalance(record: Pick<RentRecord, 'actualAmount' | 'am
   return Math.max(0, (record.actualAmount || 0) - (record.amountPaid || 0));
 }
 
-export function displayRentalStatus(record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'>): RentalDisplayStatus {
+/** Options to derive overdue on read without a prior DB status UPDATE. */
+export interface DisplayRentalStatusOpts {
+  dueDateDay?: number;
+  period?: string;
+  today?: string;
+}
+
+export function displayRentalStatus(
+  record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'> & { billingPeriod?: string },
+  opts?: DisplayRentalStatusOpts,
+): RentalDisplayStatus {
   if (record.status === 'paid' || outstandingBalance(record) <= 0) return 'paid';
   if ((record.amountPaid || 0) > 0) return 'partial';
-  return record.status;
+  const period = opts?.period || record.billingPeriod;
+  const dueDay = opts?.dueDateDay;
+  if (period && dueDay != null && Number.isFinite(dueDay)) {
+    const today = opts?.today || new Date().toISOString().slice(0, 10);
+    if (today > dueDateForPeriod(period, dueDay)) return 'overdue';
+  }
+  return record.status === 'overdue' ? 'overdue' : 'pending';
+}
+
+/** True when the period card is not yet persisted (`rental_records` row missing). */
+export function isVirtualRentRecord(record: Pick<RentRecord, 'id'> | null | undefined): boolean {
+  return !record || !record.id;
+}
+
+/**
+ * In-memory pending card for a unit × period with no DB row yet.
+ * Materialized by cron or the first write (ensureRentRecord).
+ */
+export function buildVirtualRentRecord(
+  unit: Pick<RentalUnit, 'id' | 'user_id' | 'currentYearRent' | 'dueDateDay'>,
+  period: string,
+  lease?: Pick<RentalLease, 'baseRent' | 'dueDateDay' | 'leaseStartDate' | 'leaseEndDate'> | null,
+): RentRecord {
+  const dueDay = lease?.dueDateDay || unit.dueDateDay || 1;
+  const defaults = defaultRentPeriod(period, dueDay);
+  let base = unit.currentYearRent || 0;
+  if (lease && billingPeriodWithinLease(period, lease.leaseStartDate, lease.leaseEndDate)) {
+    base = lease.baseRent || base;
+  }
+  const now = new Date().toISOString();
+  return {
+    id: 0,
+    user_id: unit.user_id,
+    unitId: unit.id,
+    billingPeriod: period,
+    baseRent: base,
+    baseRentPeriodFrom: defaults.from,
+    baseRentPeriodTo: defaults.to,
+    waterFee: 0,
+    electricityFee: 0,
+    waterPeriodFrom: null,
+    waterPeriodTo: null,
+    electricityPeriodFrom: null,
+    electricityPeriodTo: null,
+    actualAmount: base,
+    amountPaid: 0,
+    status: 'pending',
+    paidDate: null,
+    invoiceRef: null,
+    receiptRef: null,
+    receiptImagePath: null,
+    invoiceSentAt: null,
+    receiptSentAt: null,
+    paidAt: null,
+    customInvoiceNote: null,
+    customReceiptNote: null,
+    electricityMeter: null,
+    waterMeter: null,
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 /** Normalize optional date field from API (ISO) → DD/MM/YYYY for form state */

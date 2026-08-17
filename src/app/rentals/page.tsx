@@ -353,7 +353,10 @@ export default function RentalsPage() {
                 {activePanelUnits.map((u) => {
                   const remaining = daysRemaining(u.leaseEndDate);
                   const rec = u.currentRecord;
-                  const recStatus = displayRentalStatus(rec);
+                  const recStatus = displayRentalStatus(rec, {
+                    dueDateDay: u.dueDateDay,
+                    period: rec.billingPeriod || period,
+                  });
                   const leaseStatus = u.leaseStatus || (u.currentLease
                     ? computeLeaseDisplayStatus(u.currentLease)
                     : 'vacant');

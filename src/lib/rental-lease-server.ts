@@ -78,6 +78,19 @@ export async function syncAllLeaseStatuses(userId: number) {
   await syncAndLoadCurrentLeases(userId);
 }
 
+/** Read current leases without persisting derived status (dashboard / detail GET). */
+export async function loadCurrentLeases(userId: number): Promise<Map<number, RentalLease>> {
+  const rows = await db.prepare(
+    'SELECT * FROM rental_leases WHERE user_id = ? AND is_current = 1'
+  ).all(userId) as LeaseRow[];
+  const map = new Map<number, RentalLease>();
+  for (const row of rows) {
+    const lease = hydrateLease(row);
+    map.set(lease.unitId, lease);
+  }
+  return map;
+}
+
 /** Sync current-lease statuses once and return them keyed by unit id. */
 export async function syncAndLoadCurrentLeases(userId: number): Promise<Map<number, RentalLease>> {
   const rows = await db.prepare(
@@ -90,6 +103,17 @@ export async function syncAndLoadCurrentLeases(userId: number): Promise<Map<numb
     map.set(lease.unitId, { ...lease, status });
   }
   return map;
+}
+
+/** Current lease for a unit without writing derived status. */
+export async function getCurrentLeaseForUnitReadOnly(
+  unitId: number | string,
+  userId: number,
+): Promise<RentalLease | null> {
+  const row = await db.prepare(
+    `SELECT * FROM rental_leases WHERE unit_id = ? AND user_id = ? AND is_current = 1 ORDER BY id DESC LIMIT 1`
+  ).get(unitId, userId) as LeaseRow | undefined;
+  return row ? hydrateLease(row) : null;
 }
 
 export async function getCurrentLeaseForUnit(unitId: number | string, userId: number): Promise<RentalLease | null> {

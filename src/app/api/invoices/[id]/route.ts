@@ -6,6 +6,7 @@ import { getInvoiceWithDetails } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashInvoice } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
+import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 
 async function linkedOrder(orderId: number | null | undefined, ownerId: number) {
   if (!orderId) return null;
@@ -89,9 +90,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const ownerId = await getDataOwnerId(session);
 
   const existing = await db
-    .prepare('SELECT id, invoice_number, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
+    .prepare('SELECT id, invoice_number, status, order_id, updated_at FROM invoices WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId) as
-      | { id: number; invoice_number: string; status: string; order_id: number | null }
+      | { id: number; invoice_number: string; status: string; order_id: number | null; updated_at: string }
       | undefined;
 
   if (!existing) {
@@ -100,6 +101,20 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
   try {
     const body = await request.json();
+    const expectedUpdatedAt = body.expected_updated_at as string | undefined;
+    if (expectedUpdatedAt != null && !timestampsMatch(existing.updated_at, expectedUpdatedAt)) {
+      const invoice = await getInvoiceWithDetails(Number(params.id), ownerId);
+      return NextResponse.json(
+        {
+          error: CONFLICT_MESSAGE,
+          conflict: true,
+          invoice,
+          linkedOrder: await linkedOrder(invoice?.order_id, ownerId),
+        },
+        { status: 409 },
+      );
+    }
+
     const {
       customer_id,
       issue_date,
@@ -165,10 +180,21 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       if (order_id !== undefined) pushField(fields, values, 'order_id', order_id || null, (v) => v as number | null);
 
       fields.push("updated_at = datetime('now')");
-      values.push(params.id, ownerId);
-
-      if (fields.length > 1) {
-        await db.prepare(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+      if (expectedUpdatedAt != null) {
+        values.push(params.id, ownerId, existing.updated_at);
+        if (fields.length > 1) {
+          const result = await db
+            .prepare(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ? AND user_id = ? AND updated_at = ?`)
+            .run(...values);
+          if (!result.changes) {
+            throw Object.assign(new Error(CONFLICT_MESSAGE), { conflict: true });
+          }
+        }
+      } else {
+        values.push(params.id, ownerId);
+        if (fields.length > 1) {
+          await db.prepare(`UPDATE invoices SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+        }
       }
 
       if (items && Array.isArray(items)) {
@@ -229,7 +255,19 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       invoice,
       linkedOrder: await linkedOrder(invoice?.order_id, ownerId),
     });
-  } catch {
+  } catch (err) {
+    if (err && typeof err === 'object' && 'conflict' in err) {
+      const invoice = await getInvoiceWithDetails(Number(params.id), ownerId);
+      return NextResponse.json(
+        {
+          error: CONFLICT_MESSAGE,
+          conflict: true,
+          invoice,
+          linkedOrder: await linkedOrder(invoice?.order_id, ownerId),
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
   }
 }

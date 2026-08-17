@@ -8,6 +8,7 @@ import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
 import { isWeddingGiftOrderType } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
+import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 
 const CORE_COLUMNS = [
   'po_number',
@@ -59,18 +60,34 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const ownerId = await getDataOwnerId(session);
 
   const existing = await db
-    .prepare('SELECT reference_number, status, fields_json FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, ownerId) as { reference_number: string; status: string; fields_json: string } | undefined;
+    .prepare('SELECT reference_number, status, fields_json, updated_at FROM orders WHERE id = ? AND user_id = ?')
+    .get(params.id, ownerId) as {
+    reference_number: string;
+    status: string;
+    fields_json: string;
+    updated_at: string;
+  } | undefined;
   if (!existing) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   try {
     const body = await request.json();
+    const expectedUpdatedAt = body.expected_updated_at as string | undefined;
+    if (expectedUpdatedAt != null && !timestampsMatch(existing.updated_at, expectedUpdatedAt)) {
+      return NextResponse.json(
+        {
+          error: CONFLICT_MESSAGE,
+          conflict: true,
+          order: await getOrder(params.id, ownerId),
+        },
+        { status: 409 },
+      );
+    }
+
     const core: Record<string, unknown> = body.core || {};
     const fields: Record<string, unknown> = body.fields || {};
     const linkedInvoiceId = body.linked_invoice_id;
     const linkedQuotationId = body.linked_quotation_id;
 
-    // Update whitelisted core columns.
     const setClauses: string[] = [];
     const values: unknown[] = [];
     for (const col of CORE_COLUMNS) {
@@ -82,7 +99,6 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     let mergedFields: Record<string, unknown> | null = null;
-    // Merge custom fields into fields_json.
     if (Object.keys(fields).length) {
       let current: Record<string, unknown> = {};
       try {
@@ -97,8 +113,27 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     if (setClauses.length) {
       setClauses.push("updated_at = datetime('now')");
-      values.push(params.id, ownerId);
-      await db.prepare(`UPDATE orders SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+      if (expectedUpdatedAt != null) {
+        values.push(params.id, ownerId, existing.updated_at);
+        const result = await db
+          .prepare(
+            `UPDATE orders SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ? AND updated_at = ?`,
+          )
+          .run(...values);
+        if (!result.changes) {
+          return NextResponse.json(
+            {
+              error: CONFLICT_MESSAGE,
+              conflict: true,
+              order: await getOrder(params.id, ownerId),
+            },
+            { status: 409 },
+          );
+        }
+      } else {
+        values.push(params.id, ownerId);
+        await db.prepare(`UPDATE orders SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+      }
     }
 
     if (linkedInvoiceId !== undefined) {
@@ -155,12 +190,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       }
     }
 
-    // Log a status change to the activity feed.
     if ('status' in core && core.status && core.status !== existing.status) {
       await logActivity(params.id, session.userId, 'activity', session.name, `changed status to ${core.status}`);
     }
 
-    // Sync kitchen prep when 回禮 fields change (or order becomes 回禮).
     const shouldSyncPrep = Object.keys(fields).some((k) => PREP_SYNC_FIELD_KEYS.has(k));
     if (shouldSyncPrep) {
       let orderType = '';

@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency, StatusBadge } from '@/components/ui';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { invoiceFileUrl } from '@/lib/image-url';
 import { isSectionReadOnly } from '@/lib/permissions';
 import { calculateInvoiceTotals } from '@/lib/utils';
@@ -91,7 +93,7 @@ export default function InvoiceDetailPage() {
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     fetch(`/api/invoices/${id}`)
       .then((r) => r.json())
       .then((d) => {
@@ -133,11 +135,13 @@ export default function InvoiceDetailPage() {
         );
         setFiles(inv.files || []);
       });
-  };
+  }, [id]);
 
   useEffect(() => {
     load();
-  }, [id]);
+  }, [load]);
+
+  useRefetchOnFocus(load, Boolean(id));
 
   useEffect(() => {
     fetch('/api/customers')
@@ -188,6 +192,7 @@ export default function InvoiceDetailPage() {
         discount_value: discountValue,
         shipping_amount: shippingAmount,
         items: items.filter((i) => i.description.trim() || i.product_service.trim()),
+        expected_updated_at: invoice?.updated_at || undefined,
       }),
     });
     setSaving(false);
@@ -197,16 +202,28 @@ export default function InvoiceDetailPage() {
       setTimeout(() => setMsg(''), 2000);
     } else {
       const data = await res.json().catch(() => ({}));
-      setMsg((data as { error?: string }).error || 'Save failed');
+      if (res.status === 409) {
+        setToast({ text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH), kind: 'error' });
+        if ((data as { invoice?: InvoiceWithDetails }).invoice) load();
+        else load();
+      } else {
+        setMsg((data as { error?: string }).error || 'Save failed');
+      }
     }
   };
 
   const linkOrder = async (orderId: string) => {
-    await fetch(`/api/invoices/${id}`, {
+    const res = await fetch(`/api/invoices/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: orderId ? Number(orderId) : null }),
+      body: JSON.stringify({
+        order_id: orderId ? Number(orderId) : null,
+        expected_updated_at: invoice?.updated_at || undefined,
+      }),
     });
+    if (res.status === 409) {
+      setToast({ text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH), kind: 'error' });
+    }
     load();
   };
 

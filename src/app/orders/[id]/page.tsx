@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState, type DragEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -8,6 +8,8 @@ import ActivityFeed from '@/components/ActivityFeed';
 import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
 import OrderPropertyBar, { type AccountUser } from '@/components/OrderPropertyBar';
 import SupplierSelect from '@/components/SupplierSelect';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { DEFAULT_OPTIONS } from '@/lib/expenses';
 import { mergeSupplierLists } from '@/lib/expense-suppliers';
 import { compressImage } from '@/lib/imageCompression';
@@ -109,20 +111,46 @@ export default function OrderDetailPage() {
   const bigDayPersistedRef = useRef('');
   /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
   const bigDaySavedOnChangeRef = useRef<string | null>(null);
+  const patchQueueRef = useRef(Promise.resolve());
+  const updatedAtRef = useRef('');
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
     fetch(`/api/orders/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
+        if (cancelled) return;
         const o = d?.order || null;
         setOrder(o);
         if (o) {
           bigDayPersistedRef.current = String(o.fields?.big_day || '');
           bigDaySavedOnChangeRef.current = null;
+          updatedAtRef.current = o.updated_at || '';
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  const refetchOrder = useCallback(() => {
+    fetch(`/api/orders/${id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const o = d?.order || null;
+        if (!o) return;
+        setOrder(o);
+        bigDayPersistedRef.current = String(o.fields?.big_day || '');
+        updatedAtRef.current = o.updated_at || '';
+      })
+      .catch(() => {});
+  }, [id]);
+
+  useRefetchOnFocus(refetchOrder, Boolean(id) && !loading);
 
   useEffect(() => {
     fetch('/api/invoices?fields=options')
@@ -150,7 +178,12 @@ export default function OrderDetailPage() {
       .catch(() => {});
   }, []);
 
-  const patch = async (payload: { core?: Record<string, unknown>; fields?: Record<string, unknown>; linked_invoice_id?: string | number | null; linked_quotation_id?: string | number | null }) => {
+  const patch = (payload: {
+    core?: Record<string, unknown>;
+    fields?: Record<string, unknown>;
+    linked_invoice_id?: string | number | null;
+    linked_quotation_id?: string | number | null;
+  }) => {
     // Keep UI in sync immediately so a later server response can't briefly wipe autofills.
     if (payload.fields && Object.keys(payload.fields).length) {
       setOrder((o) =>
@@ -165,18 +198,36 @@ export default function OrderDetailPage() {
           : o
       );
     }
-    const res = await fetch(`/api/orders/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.order) {
+    patchQueueRef.current = patchQueueRef.current.then(async () => {
+      const res = await fetch(`/api/orders/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          expected_updated_at: updatedAtRef.current || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.order) {
         setOrder(data.order);
         bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
+        updatedAtRef.current = data.order.updated_at || '';
+        return;
       }
-    }
+      if (res.status === 409) {
+        if (data.order) {
+          setOrder(data.order);
+          bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
+          updatedAtRef.current = data.order.updated_at || '';
+        } else {
+          refetchOrder();
+        }
+        setQuoteToast({
+          text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH),
+          kind: 'error',
+        });
+      }
+    }).catch(() => {});
   };
 
   const convertToQuotation = async () => {
@@ -205,7 +256,10 @@ export default function OrderDetailPage() {
       setQuoteToast({ text: `Created quotation ${data.quote_number}`, kind: 'success' });
       const orderRes = await fetch(`/api/orders/${id}`);
       const orderData = await orderRes.json();
-      if (orderData.order) setOrder(orderData.order);
+      if (orderData.order) {
+        setOrder(orderData.order);
+        updatedAtRef.current = orderData.order.updated_at || '';
+      }
       setTimeout(() => router.push(`/quotations/${data.id}`), 800);
     } catch {
       setQuoteToast({ text: 'Failed to convert order', kind: 'error' });

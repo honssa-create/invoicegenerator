@@ -306,15 +306,6 @@ function OrderHubContent() {
           >
             {importing === 'all' ? 'Importing all…' : 'Import All Connected'}
           </button>
-          <a
-            href="/api/integrations/quickbooks/connect"
-            className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 text-center"
-          >
-            Connect QuickBooks
-          </a>
-          <Link href="/settings" className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 text-center">
-            API Settings
-          </Link>
         </div>
       </div>
 

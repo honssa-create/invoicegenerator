@@ -6,7 +6,7 @@ import { getRentalActivities, logRentalActivity } from '@/lib/rental-server';
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const activities = await getRentalActivities(Number(params.id), await rentalOwnerId(session.userId));
+  const activities = await getRentalActivities(Number(params.id), await rentalOwnerId(session));
   return NextResponse.json({ activities });
 }
 
@@ -15,7 +15,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     const { action, note, rentRecordId } = await request.json();
     if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });

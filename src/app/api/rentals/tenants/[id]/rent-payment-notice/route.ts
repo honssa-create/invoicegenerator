@@ -10,7 +10,7 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const { searchParams } = new URL(request.url);
   const targetPeriod =
     searchParams.get('target_period') ||

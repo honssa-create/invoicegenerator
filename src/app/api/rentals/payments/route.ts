@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'tenantId and positive amount required' }, { status: 400 });
     }
 
-    const ownerId = await rentalOwnerId(session.userId);
+    const ownerId = await rentalOwnerId(session);
     let allocations = Array.isArray(body.allocations)
       ? (body.allocations as { chargeItemId: number; amount: number }[])
           .map((a) => ({

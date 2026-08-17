@@ -6,7 +6,7 @@ import { listRentalTenants } from '@/lib/rental-ledger-server';
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  return NextResponse.json({ tenants: await listRentalTenants(await rentalOwnerId(session.userId)) });
+  return NextResponse.json({ tenants: await listRentalTenants(await rentalOwnerId(session)) });
 }
 
 export async function POST(request: Request) {

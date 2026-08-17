@@ -9,7 +9,7 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const detail = await getTenantLedgerDetail(params.id, ownerId);
   if (!detail) return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
   return NextResponse.json(detail);
@@ -23,7 +23,7 @@ export async function PATCH(
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     const body = await request.json();
     const tenant = await updateRentalTenant(params.id, ownerId, body);

@@ -8,6 +8,10 @@ import { listReminderCandidates } from '@/lib/payment-reminders-server';
 
 /** Cron auto-sends overdue reminders only (due-soon is preview/send from UI). */
 async function runReminders(userId: number | null) {
+  // Keep overdue status current without doing it on every invoices/dashboard GET.
+  const { markSentInvoicesOverdue } = await import('@/lib/invoices');
+  await markSentInvoicesOverdue(userId);
+
   const { overdueDays, candidates } = await listReminderCandidates(userId, ['overdue']);
   const results: { invoice: string; email: string | null; sent: boolean; provider: string }[] = [];
   const markReminded = db.prepare("UPDATE invoices SET last_reminder_at = datetime('now') WHERE id = ?");

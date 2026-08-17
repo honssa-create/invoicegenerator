@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const orders = await listHubOrders(ownerId);
 
   const integrations: HubIntegrationStatus[] = await Promise.all(HUB_PLATFORMS.filter((p) => p !== 'manual').map(async (platform) => {

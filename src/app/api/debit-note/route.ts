@@ -18,7 +18,7 @@ function parseUnitIds(searchParams: URLSearchParams): number[] | undefined {
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const { searchParams } = new URL(request.url);
 
   const tenantId = searchParams.get('tenant_id') || searchParams.get('tenantId');

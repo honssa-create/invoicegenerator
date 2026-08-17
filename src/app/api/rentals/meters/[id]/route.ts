@@ -10,7 +10,7 @@ import {
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const round = await getUtilityMeterRound(params.id, await rentalOwnerId(session.userId));
+  const round = await getUtilityMeterRound(params.id, await rentalOwnerId(session));
   if (!round) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({ round });
 }
@@ -24,7 +24,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const body = await request.json();
     const round = await updateUtilityMeterRound(
       params.id,
-      await rentalOwnerId(session.userId),
+      await rentalOwnerId(session),
       body,
     );
     if (!round) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -40,7 +40,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ok = await deleteUtilityMeterRound(params.id, await rentalOwnerId(session.userId));
+  const ok = await deleteUtilityMeterRound(params.id, await rentalOwnerId(session));
   if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

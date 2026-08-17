@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   let body: { invoiceId?: number; to?: string; subject?: string; body?: string; type?: string };
   try {

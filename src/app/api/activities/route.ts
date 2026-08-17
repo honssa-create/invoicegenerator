@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const { searchParams } = new URL(request.url);
   const type = searchParams.get('type') as EntityType | null;
   const id = searchParams.get('id');
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const { type, id, body } = await request.json();

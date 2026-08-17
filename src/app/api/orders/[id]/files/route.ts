@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const order = await db
     .prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?')

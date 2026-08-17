@@ -16,7 +16,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const invoice = await db
     .prepare('SELECT id FROM invoices WHERE id = ? AND user_id = ?')

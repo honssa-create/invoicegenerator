@@ -17,7 +17,7 @@ function parseCompanyKey(raw: string | null): TemplateCompanyVariantId | null {
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const { searchParams } = new URL(request.url);
   const company = parseCompanyKey(searchParams.get('company'));
   if (company) {
@@ -32,7 +32,7 @@ export async function PUT(request: Request) {
   if (isSectionReadOnly(session.role, 'rentals')) {
     return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
   }
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   let body: { company?: string; style?: Partial<DebitNoteStyleTemplate> };
   try {
     body = await request.json();

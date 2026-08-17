@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hashPassword(password);
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const result = await db
       .prepare(
         'INSERT INTO users (email, password_hash, name, company_name, role, owner_user_id) VALUES (?, ?, ?, ?, ?, ?)'

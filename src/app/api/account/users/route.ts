@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const session = await requireApiSession(request);
   if (session instanceof NextResponse) return session;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const rows = (await db
     .prepare(
       `SELECT id, name, email FROM users

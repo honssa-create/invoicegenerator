@@ -160,7 +160,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Could not parse the file' }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const errors: string[] = [];
   const receiptWarnings: ReceiptFetchWarning[] = [];
   const seenInBatch = new Set<string>();

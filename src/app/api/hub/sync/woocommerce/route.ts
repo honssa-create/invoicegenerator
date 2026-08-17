@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'order_hub', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const stores = await getWooStoreConfigs(ownerId);
   if (!stores.length) {
     return NextResponse.json(

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { listOrders } from '@/lib/order-server';
+import { listOrdersSummary } from '@/lib/order-server';
 import { orderTitle } from '@/lib/orders';
 import { getDataOwnerId } from '@/lib/org-server';
 
@@ -10,8 +10,8 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
-  const orders = await listOrders(ownerId);
+  const ownerId = await getDataOwnerId(session);
+  const orders = await listOrdersSummary(ownerId);
   const entries = orders
     .filter((o) => PAYMENT_KEYS.some((k) => o.fields[k] !== undefined && String(o.fields[k]).trim() !== ''))
     .map((o) => ({

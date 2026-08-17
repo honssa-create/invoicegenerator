@@ -8,7 +8,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const row = await db
     .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')

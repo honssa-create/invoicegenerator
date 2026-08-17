@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const status = searchParams.get('status');
   const idsParam = searchParams.get('ids');
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   let query = 'SELECT * FROM expenses WHERE user_id = ?';
   const params: (string | number)[] = [ownerId];
 
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     const amount_hkd = await normalizeNumber(body.amount_hkd);
     const amount_rmb = await normalizeNumber(body.amount_rmb);
     const receiptPaths = await receiptPathsFromBody(body);
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const paidDate = body.paid_date?.trim() || '';
 
     if (amount_hkd === null && amount_rmb === null) {

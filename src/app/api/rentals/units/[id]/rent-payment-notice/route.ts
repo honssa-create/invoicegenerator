@@ -12,7 +12,7 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const unit = await getRentalUnit(params.id, ownerId);
   if (!unit) return NextResponse.json({ error: 'Unit not found' }, { status: 404 });
 

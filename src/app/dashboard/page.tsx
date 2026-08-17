@@ -33,9 +33,18 @@ export default function DashboardPage() {
   if (!data) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">{TITLE.dashboard}</h1>
+            <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Overview of your invoicing activity', '發票業務總覽')}</p>
+          </div>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6 animate-pulse">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-24 bg-gray-100 rounded-xl" />
+          ))}
+        </div>
+        <div className="h-64 bg-gray-100 rounded-xl animate-pulse" />
       </AppLayout>
     );
   }

@@ -7,7 +7,7 @@ import { currentBillingPeriod } from '@/lib/rentals';
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const { searchParams } = new URL(request.url);
   const period = searchParams.get('period') || currentBillingPeriod();
   const leaseId = searchParams.get('leaseId') || undefined;
@@ -21,7 +21,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     if (!await getRentalUnit(params.id, ownerId)) {
       return NextResponse.json({ error: 'Unit not found' }, { status: 404 });

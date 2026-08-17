@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   if (denied) return denied;
 
   try {
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const result = await syncYedpayForUser(ownerId, session.name);
     return NextResponse.json(result);
   } catch (err) {

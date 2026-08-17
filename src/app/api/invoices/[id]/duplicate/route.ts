@@ -14,7 +14,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const source = await getInvoiceWithDetails(params.id, ownerId);
   if (!source) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 

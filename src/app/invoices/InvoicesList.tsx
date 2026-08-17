@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
@@ -173,7 +172,7 @@ export default function InvoicesList() {
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
-    <AppLayout>
+    <>
       <div className="page-header">
         <div>
           <h1 className="page-title">{TITLE.invoices}</h1>
@@ -227,8 +226,10 @@ export default function InvoicesList() {
 
       <div className="bg-white rounded-xl border border-gray-200">
         {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
+          <div className="p-6 space-y-3 animate-pulse">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-10 bg-gray-100 rounded-lg" />
+            ))}
           </div>
         ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
@@ -296,6 +297,6 @@ export default function InvoicesList() {
           </>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 }

@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     if (!Number.isFinite(orderId)) {
       return NextResponse.json({ error: 'order_id is required' }, { status: 400 });
     }
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const order = await ensurePrepFromWeddingOrder(ownerId, orderId);
     if (!order) return NextResponse.json({ error: 'Order not found or not importable' }, { status: 404 });
     return NextResponse.json({ order }, { status: 201 });

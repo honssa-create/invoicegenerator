@@ -8,7 +8,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     const body = await request.json();
     const result = await markRentPaid(params.id, ownerId, {

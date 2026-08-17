@@ -9,7 +9,7 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const detail = await getRentalPaymentDetail(params.id, await rentalOwnerId(session.userId));
+  const detail = await getRentalPaymentDetail(params.id, await rentalOwnerId(session));
   if (!detail) return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
   return NextResponse.json(detail);
 }
@@ -22,7 +22,7 @@ export async function DELETE(
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ok = await deleteRentalPayment(params.id, await rentalOwnerId(session.userId));
+  const ok = await deleteRentalPayment(params.id, await rentalOwnerId(session));
   if (!ok) return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { generateQuoteNumber, getQuotationWithDetails } from '@/lib/quotation-server';
+import { generateQuoteNumber, getQuotationWithDetails, listQuotations, listQuotationOptions } from '@/lib/quotation-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -10,12 +10,12 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
-  const rows = await db
-    .prepare('SELECT id FROM quotations WHERE user_id = ? ORDER BY created_at DESC')
-    .all(ownerId) as { id: number }[];
-  const quotations = (await Promise.all(rows.map((r) => getQuotationWithDetails(r.id, ownerId)))).filter(Boolean);
-  return NextResponse.json({ quotations });
+  const ownerId = await getDataOwnerId(session);
+  const { searchParams } = new URL(request.url);
+  if (searchParams.get('fields') === 'options') {
+    return NextResponse.json({ quotations: await listQuotationOptions(ownerId) });
+  }
+  return NextResponse.json({ quotations: await listQuotations(ownerId) });
 }
 
 export async function POST(request: Request) {
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const body = await request.json();

@@ -6,7 +6,7 @@ import { restockRaw, getState } from '@/lib/kitchen-server';
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const body = await request.json();

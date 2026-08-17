@@ -12,7 +12,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   try {
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const result = await logPrepSheetPrint(ownerId, session.userId, session.name, {
       prepOrderId: order.id,
       prepOrderCode: order.order_code,

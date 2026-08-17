@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const records = await listReconciliationRecords(ownerId);
 
   const url = new URL(request.url);

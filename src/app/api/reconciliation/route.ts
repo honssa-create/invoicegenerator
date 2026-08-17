@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const url = new URL(request.url);
   const candidateSearch = url.searchParams.get('q') || undefined;
   const records = await listReconciliationRecords(ownerId);

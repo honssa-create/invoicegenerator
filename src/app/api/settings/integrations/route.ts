@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const session = await requireApiAdmin(request);
   if (session instanceof NextResponse) return session;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
 }
 
@@ -26,7 +26,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   try {
     await saveIntegrationSettings(ownerId, body);
   } catch (err) {

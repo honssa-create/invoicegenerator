@@ -14,7 +14,7 @@ export async function POST(
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
 
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const unitId = Number(params.id);
   const body = await request.json();
 

@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const rows = await db
     .prepare('SELECT id FROM invoices WHERE user_id = ? ORDER BY created_at DESC')
     .all(ownerId) as { id: number }[];

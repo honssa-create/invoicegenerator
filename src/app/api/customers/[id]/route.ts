@@ -10,7 +10,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const customer = await db
     .prepare('SELECT * FROM customers WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId);
@@ -28,7 +28,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const existing = await db
     .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
     .get(params.id, ownerId);
@@ -72,7 +72,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const invoiceCount = (
     await db
       .prepare('SELECT COUNT(*) as count FROM invoices WHERE customer_id = ? AND user_id = ?')

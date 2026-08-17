@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const deniedQuotations = denyReadOnlyWrite(session, 'quotations', request.method);
   if (deniedQuotations) return deniedQuotations;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const { quotationId, quoteNumber } = await convertOrderToQuotation(

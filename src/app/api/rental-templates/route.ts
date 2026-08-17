@@ -6,6 +6,6 @@ import { listRentalTemplates } from '@/lib/rental-template-server';
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   return NextResponse.json({ templates: await listRentalTemplates(ownerId) });
 }

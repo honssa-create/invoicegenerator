@@ -18,6 +18,8 @@ export interface SessionPayload {
   name: string;
   role: UserRole;
   permissions: PermissionSection[];
+  /** Org data-pool owner; equals userId for admins / solo users. Absent on legacy tokens. */
+  ownerUserId?: number;
 }
 
 export interface AuthUser {
@@ -39,12 +41,19 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
 export async function buildSessionPayload(userId: number): Promise<SessionPayload | null> {
   const row = await db
-    .prepare('SELECT id, email, name FROM users WHERE id = ?')
-    .get(userId) as { id: number; email: string; name: string } | undefined;
+    .prepare('SELECT id, email, name, owner_user_id FROM users WHERE id = ?')
+    .get(userId) as { id: number; email: string; name: string; owner_user_id: number | null } | undefined;
   if (!row) return null;
   const role = await getUserRole(userId);
   const permissions = await getPermissionsListForRole(role);
-  return { userId: row.id, email: row.email, name: row.name, role, permissions };
+  return {
+    userId: row.id,
+    email: row.email,
+    name: row.name,
+    role,
+    permissions,
+    ownerUserId: row.owner_user_id ?? row.id,
+  };
 }
 
 export async function createToken(payload: SessionPayload): Promise<string> {
@@ -60,12 +69,14 @@ export async function verifyToken(token: string): Promise<SessionPayload | null>
     const { payload } = await jwtVerify(token, JWT_SECRET);
     const role = (payload.role as UserRole) || 'operator';
     const permissions = (payload.permissions as PermissionSection[]) || [];
+    const userId = payload.userId as number;
     return {
-      userId: payload.userId as number,
+      userId,
       email: payload.email as string,
       name: payload.name as string,
       role,
       permissions,
+      ...(typeof payload.ownerUserId === 'number' ? { ownerUserId: payload.ownerUserId } : {}),
     };
   } catch {
     return null;
@@ -76,13 +87,12 @@ export async function createSessionForUserId(userId: number): Promise<{ token: s
   const session = await buildSessionPayload(userId);
   if (!session) return null;
   const row = await db
-    .prepare('SELECT id, email, name, company_name, role FROM users WHERE id = ?')
+    .prepare('SELECT id, email, name, company_name FROM users WHERE id = ?')
     .get(userId) as {
     id: number;
     email: string;
     name: string;
     company_name: string | null;
-    role: string;
   };
   const token = await createToken(session);
   return {
@@ -92,7 +102,7 @@ export async function createSessionForUserId(userId: number): Promise<{ token: s
       email: row.email,
       name: row.name,
       company_name: row.company_name,
-      role: await getUserRole(userId),
+      role: session.role,
       permissions: session.permissions,
     },
   };

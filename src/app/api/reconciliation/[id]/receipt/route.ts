@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Invalid record id' }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const row = (await db
     .prepare('SELECT receipt_path FROM reconciliation_records WHERE id = ? AND user_id = ?')
     .get(recordId, ownerId)) as { receipt_path: string | null } | undefined;

@@ -11,7 +11,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const quotation = await getQuotationWithDetails(params.id, ownerId);
   if (!quotation) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
@@ -38,7 +38,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const existing = await db
     .prepare('SELECT id, status FROM quotations WHERE id = ? AND user_id = ?')
@@ -143,7 +143,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   if (!await trashQuotation(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
   }

@@ -26,15 +26,19 @@ const PAGE_SIZE = 50;
 
 export default function OrdersPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
-        </div>
-      }
-    >
-      <OrdersPageContent />
-    </Suspense>
+    <AppLayout>
+      <Suspense
+        fallback={
+          <div className="space-y-4 animate-pulse">
+            <div className="h-8 w-48 bg-gray-200 rounded" />
+            <div className="h-10 bg-gray-100 rounded-lg" />
+            <div className="h-64 bg-gray-100 rounded-xl" />
+          </div>
+        }
+      >
+        <OrdersPageContent />
+      </Suspense>
+    </AppLayout>
   );
 }
 
@@ -232,7 +236,7 @@ function OrdersPageContent() {
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
-    <AppLayout>
+    <>
       <div className="page-header">
         <div>
           <h1 className="page-title">{TITLE.orders}</h1>
@@ -316,8 +320,10 @@ function OrdersPageContent() {
 
       {view === 'board' ? (
         loading ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3 animate-pulse">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-24 bg-gray-100 rounded-lg" />
+            ))}
           </div>
         ) : (
           <OrdersBoard
@@ -330,9 +336,7 @@ function OrdersPageContent() {
         )
       ) : view === 'calendar' ? (
         loading ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
-          </div>
+          <div className="bg-white rounded-xl border border-gray-200 h-96 animate-pulse" />
         ) : orders.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-500">
             {bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}
@@ -347,7 +351,11 @@ function OrdersPageContent() {
       ) : (
         <div className="bg-white rounded-xl border border-gray-200">
           {loading ? (
-            <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
+            <div className="p-6 space-y-3 animate-pulse">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-10 bg-gray-100 rounded-lg" />
+              ))}
+            </div>
           ) : orders.length === 0 ? (
             <div className="p-12 text-center text-gray-500">{bi('No orders yet. Create your first order.', '尚無訂單。建立第一張訂單。')}</div>
           ) : displayed.length === 0 ? (
@@ -449,6 +457,6 @@ function OrdersPageContent() {
           )}
         </div>
       )}
-    </AppLayout>
+    </>
   );
 }

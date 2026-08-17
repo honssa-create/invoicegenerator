@@ -8,7 +8,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     if (!await getRentRecord(params.id, ownerId)) {
       return NextResponse.json({ error: 'Record not found' }, { status: 404 });

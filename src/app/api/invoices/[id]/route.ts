@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
+import { getInvoiceWithDetails } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashInvoice } from '@/lib/trash';
 import { logActivity } from '@/lib/activity';
@@ -60,8 +60,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
-  await markSentInvoicesOverdue(ownerId);
+  const ownerId = await getDataOwnerId(session);
   const invoice = await getInvoiceWithDetails(Number(params.id), ownerId);
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
@@ -87,7 +86,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const existing = await db
     .prepare('SELECT id, invoice_number, status, order_id FROM invoices WHERE id = ? AND user_id = ?')
@@ -244,7 +243,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   if (!await trashInvoice(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   }

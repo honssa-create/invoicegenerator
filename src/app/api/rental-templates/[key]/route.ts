@@ -11,7 +11,7 @@ export async function PATCH(
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     const body = await request.json();
     const template = await updateRentalTemplate(ownerId, params.key, {

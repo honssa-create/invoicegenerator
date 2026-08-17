@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const record = await createManualPayment(ownerId, {
       amount,
       invoice_no: body.invoice_no,

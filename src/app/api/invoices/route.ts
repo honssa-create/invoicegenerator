@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { generateInvoiceNumber, getInvoiceWithDetails, listInvoices, markSentInvoicesOverdue } from '@/lib/invoices';
+import { generateInvoiceNumber, getInvoiceWithDetails, listInvoices, listInvoiceOptions } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -12,9 +12,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
-  await markSentInvoicesOverdue(ownerId);
+  const ownerId = await getDataOwnerId(session);
   const { searchParams } = new URL(request.url);
+  if (searchParams.get('fields') === 'options') {
+    return NextResponse.json({ invoices: await listInvoiceOptions(ownerId) });
+  }
   const status = searchParams.get('status') || undefined;
 
   const invoices = await listInvoices(ownerId, status ? { status } : {});
@@ -30,7 +32,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const body = await request.json();

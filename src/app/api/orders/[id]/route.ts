@@ -41,7 +41,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const order = await getOrder(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   return NextResponse.json({ order });
@@ -56,7 +56,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const existing = await db
     .prepare('SELECT reference_number, status, fields_json FROM orders WHERE id = ? AND user_id = ?')
@@ -198,7 +198,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   if (!await trashOrder(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }

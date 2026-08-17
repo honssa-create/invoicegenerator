@@ -40,7 +40,7 @@ export async function POST(
     return NextResponse.json({ error: parsedRange.error }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   if (platform === 'quickbooks') {
     if (!isQuickBooksConnected(ownerId)) {

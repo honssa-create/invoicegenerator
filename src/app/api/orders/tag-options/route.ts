@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const rows = (await db
     .prepare('SELECT fields_json FROM orders WHERE user_id = ?')
     .all(ownerId)) as Array<{ fields_json: string | null }>;

@@ -9,7 +9,7 @@ import {
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const rounds = await listUtilityMeterRounds(ownerId);
   return NextResponse.json({ rounds });
 }
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   if (denied) return denied;
   try {
     const body = await request.json();
-    const round = await createUtilityMeterRound(await rentalOwnerId(session.userId), body);
+    const round = await createUtilityMeterRound(await rentalOwnerId(session), body);
     return NextResponse.json({ round }, { status: 201 });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to create meter round';

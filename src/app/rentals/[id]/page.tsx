@@ -866,7 +866,25 @@ function RentalDetailInner() {
     load();
   };
 
-  if (loading) return <AppLayout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div></AppLayout>;
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="page-header">
+          <div>
+            <div className="h-8 w-56 bg-gray-200 rounded animate-pulse" />
+            <div className="h-4 w-72 bg-gray-100 rounded mt-2 animate-pulse" />
+          </div>
+        </div>
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="h-48 bg-gray-100 rounded-xl animate-pulse" />
+            <div className="h-64 bg-gray-100 rounded-xl animate-pulse" />
+          </div>
+          <div className="h-96 bg-gray-100 rounded-xl animate-pulse" />
+        </div>
+      </AppLayout>
+    );
+  }
   if (!data) return <AppLayout><div className="p-12 text-center text-gray-500">{bi('Unit not found.', '找不到單位。')} <button onClick={() => router.push('/rentals')} className="text-brand-600 underline">{BTN.back}</button></div></AppLayout>;
 
   const { unit, currentRecord, activities, currentLease, leaseHistory, leaseDocuments, paymentLedger, viewingLease, readOnlyLease, isHistoricalView } = data;

@@ -10,7 +10,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Only admin can toggle holiday mode' }, { status: 403 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   try {
     const body = await request.json();
     const holidayMode = Boolean(body.holiday_mode ?? body.holidayMode);

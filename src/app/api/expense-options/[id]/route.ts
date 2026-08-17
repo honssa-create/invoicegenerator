@@ -22,7 +22,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const body = await request.json();
     const value = typeof body.value === 'string' ? body.value : '';
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const result = await updateManagedOption(ownerId, id, value);
 
     if (!result.option) {
@@ -49,7 +49,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
 
   try {
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const result = await deleteManagedOption(ownerId, id);
 
     if (!result.ok) {

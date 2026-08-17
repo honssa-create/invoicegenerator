@@ -36,13 +36,19 @@ async function handle(request: Request) {
   const authHeader = request.headers.get('authorization') || '';
   const cronSecret = process.env.CRON_SECRET;
 
+  // Keep invoice overdue status current without write-on-read on list/dashboard GETs.
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+    const { markSentInvoicesOverdue } = await import('@/lib/invoices');
+    await markSentInvoicesOverdue(null);
+  }
+
   let ownerId: number;
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
     ownerId = await resolveHubOwnerUserId();
   } else {
     const session = await getSessionFromRequest(request);
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    ownerId = await getDataOwnerId(session.userId);
+    ownerId = await getDataOwnerId(session);
   }
 
   const result = await runHubSyncForOwner(ownerId);

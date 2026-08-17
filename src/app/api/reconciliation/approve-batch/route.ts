@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'reconciliation', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const result = await approveAllHighConfidence(ownerId, session.name);
   return NextResponse.json(result);
 }

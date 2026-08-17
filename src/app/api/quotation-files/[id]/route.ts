@@ -12,7 +12,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const row = await db
     .prepare(
@@ -41,7 +41,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   if (!await trashQuotationFile(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 });
   }

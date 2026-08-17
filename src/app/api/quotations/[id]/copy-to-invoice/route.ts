@@ -15,7 +15,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const quote = await getQuotationWithDetails(params.id, ownerId);
   if (!quote) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 

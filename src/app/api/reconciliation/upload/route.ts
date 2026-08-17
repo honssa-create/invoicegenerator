@@ -158,7 +158,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No valid rows found in bank statement', errors }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const result = await importBankStatementRows(ownerId, paymentMethod, parsed, session.name);
 
   return NextResponse.json({ ...result, errors });

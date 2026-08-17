@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'expenses');
   if (session instanceof NextResponse) return session;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   const options = Object.fromEntries(await Promise.all(
     OPTION_TYPES.map(async (type) => [type, await mergedOptions(ownerId, type)])
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Option value is required' }, { status: 400 });
     }
 
-    const ownerId = await getDataOwnerId(session.userId);
+    const ownerId = await getDataOwnerId(session);
     const result = await addManagedOption(ownerId, type as OptionType, trimmed);
 
     return NextResponse.json({

@@ -89,7 +89,7 @@ export async function getInvoiceWithDetails(invoiceId: number | string, userId: 
  */
 export async function listInvoices(
   userId: number,
-  opts: { status?: string | string[] } = {},
+  opts: { status?: string | string[]; limit?: number } = {},
 ): Promise<InvoiceWithDetails[]> {
   const params: (string | number)[] = [userId];
   let statusClause = '';
@@ -104,6 +104,8 @@ export async function listInvoices(
     }
   }
 
+  const limitClause = opts.limit && opts.limit > 0 ? ` LIMIT ${Math.floor(opts.limit)}` : '';
+
   const rows = (await db
     .prepare(
       `SELECT i.*, c.name as customer_name, c.email as customer_email,
@@ -112,7 +114,7 @@ export async function listInvoices(
        FROM invoices i
        JOIN customers c ON c.id = i.customer_id
        WHERE i.user_id = ?${statusClause}
-       ORDER BY i.created_at DESC`,
+       ORDER BY i.created_at DESC${limitClause}`,
     )
     .all(...params)) as Array<Record<string, unknown>>;
 
@@ -159,4 +161,23 @@ export async function listInvoices(
       total,
     };
   });
+}
+
+/** Sum invoice totals for statuses without hydrating full invoice objects. */
+export async function sumInvoiceTotals(
+  userId: number,
+  statuses: string[],
+): Promise<number> {
+  if (!statuses.length) return 0;
+  const invoices = await listInvoices(userId, { status: statuses });
+  return invoices.reduce((sum, inv) => sum + inv.total, 0);
+}
+
+/** Dropdown options for linking invoices to orders. */
+export async function listInvoiceOptions(
+  userId: number,
+): Promise<{ id: number; invoice_number: string; status: string }[]> {
+  return (await db
+    .prepare('SELECT id, invoice_number, status FROM invoices WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId)) as { id: number; invoice_number: string; status: string }[];
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { getOrder, listOrders, logActivity } from '@/lib/order-server';
+import { getOrder, listOrdersSummary, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
@@ -13,8 +13,8 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const ownerId = await getDataOwnerId(session.userId);
-  return NextResponse.json({ orders: await listOrders(ownerId) });
+  const ownerId = await getDataOwnerId(session);
+  return NextResponse.json({ orders: await listOrdersSummary(ownerId) });
 }
 
 export async function POST(request: Request) {
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'orders', request.method);
   if (denied) return denied;
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const body = await request.json();

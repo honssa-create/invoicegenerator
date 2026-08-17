@@ -306,7 +306,7 @@ export async function restoreFromTrash(
 }
 
 export async function trashExpense(session: SessionPayload, expenseId: number): Promise<boolean> {
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   let sql = 'SELECT * FROM expenses WHERE id = ? AND user_id = ?';
   const params: number[] = [expenseId, ownerId];
   if (session.role === 'operator') {

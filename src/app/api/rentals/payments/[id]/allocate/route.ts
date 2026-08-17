@@ -19,7 +19,7 @@ export async function POST(
     }
     const result = await allocatePayment(
       params.id,
-      await rentalOwnerId(session.userId),
+      await rentalOwnerId(session),
       allocations.map((a: { chargeItemId: number; amount: number }) => ({
         chargeItemId: Number(a.chargeItemId),
         amount: Number(a.amount),

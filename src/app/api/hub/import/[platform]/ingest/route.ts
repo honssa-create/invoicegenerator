@@ -46,7 +46,7 @@ export async function POST(
     return NextResponse.json({ error: 'orders array is required' }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const issue = await getWooStoreSetupIssue(ownerId, platform);
   if (issue === 'not_configured') {
     return NextResponse.json({ error: 'Store is not configured.' }, { status: 400 });

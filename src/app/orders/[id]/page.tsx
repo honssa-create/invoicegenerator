@@ -125,11 +125,11 @@ export default function OrderDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    fetch('/api/invoices')
+    fetch('/api/invoices?fields=options')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setInvoices((d?.invoices || []).map((i: InvoiceOption) => ({ id: i.id, invoice_number: i.invoice_number, status: i.status }))))
       .catch(() => {});
-    fetch('/api/quotations')
+    fetch('/api/quotations?fields=options')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setQuotations((d?.quotations || []).map((q: QuotationOption) => ({ id: q.id, quote_number: q.quote_number, status: q.status }))))
       .catch(() => {});
@@ -463,7 +463,16 @@ export default function OrderDetailPage() {
   if (loading) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>
+        <div className="page-header">
+          <div>
+            <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
+            <div className="h-4 w-64 bg-gray-100 rounded mt-2 animate-pulse" />
+          </div>
+        </div>
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 h-96 bg-gray-100 rounded-xl animate-pulse" />
+          <div className="h-96 bg-gray-100 rounded-xl animate-pulse" />
+        </div>
       </AppLayout>
     );
   }

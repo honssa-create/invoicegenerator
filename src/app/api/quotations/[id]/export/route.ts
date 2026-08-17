@@ -11,7 +11,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const q = await getQuotationWithDetails(params.id, ownerId);
   if (!q) {
     return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });

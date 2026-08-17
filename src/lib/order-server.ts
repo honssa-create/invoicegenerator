@@ -118,6 +118,37 @@ export async function listOrders(userId: number): Promise<Order[]> {
   return Promise.all(rows.map((r) => hydrate(r, false)));
 }
 
+/** Field keys needed by board/table/accounting/cashflow — not honour_lines / nestiee blobs. */
+const LIST_FIELD_KEYS = [
+  'order_type',
+  'payment_amount', 'payment1_amount', 'payment2_amount', 'payment3_amount',
+  'payment_date', 'payment_bank', 'payment_method_detail', 'payment_reference',
+  'payment_receipt_path', 'payment_verified',
+] as const;
+
+function pickListFields(fields: Record<string, string | boolean>): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const key of LIST_FIELD_KEYS) {
+    if (fields[key] !== undefined) out[key] = fields[key];
+  }
+  return out;
+}
+
+/**
+ * Lean list for table/board/accounting/cashflow: no files/activities and slim fields_json.
+ */
+export async function listOrdersSummary(userId: number): Promise<Order[]> {
+  const orders = await listOrders(userId);
+  return orders.map((o) => ({
+    ...o,
+    fields: pickListFields(o.fields || {}),
+    files: [],
+    activities: [],
+    linked_invoice: null,
+    linked_quotation: null,
+  }));
+}
+
 export async function logActivity(
   orderId: number | string,
   userId: number,

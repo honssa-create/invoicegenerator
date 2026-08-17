@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: 'invoice_id is required' }, { status: 400 });
   }
 
-  const ownerId = await getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const existing = await getReconciliationRecord(ownerId, recordId);
   if (!existing) return NextResponse.json({ error: 'Record not found' }, { status: 404 });
   if (existing.status === 'Matched') {

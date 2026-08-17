@@ -15,7 +15,7 @@ export async function POST(
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
 
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const leaseId = Number(params.id);
   const lease = await getLeaseById(leaseId, ownerId);
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
@@ -38,7 +38,7 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = await rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const lease = await getLeaseById(params.id, ownerId);
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 

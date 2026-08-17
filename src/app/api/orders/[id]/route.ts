@@ -15,7 +15,6 @@ const CORE_COLUMNS = [
   'name',
   'description',
   'status',
-  'delivery_date',
   'customer_email',
   'phone',
   'shipping_address',

@@ -10,6 +10,7 @@ import {
   STATUS_DOT_COLORS,
   computeOrderPaidTotal,
   getOrderType,
+  orderDueDate,
   type Order,
 } from '@/lib/orders';
 import { orderFileUrl } from '@/lib/image-url';
@@ -42,7 +43,7 @@ function formatCompactDate(value: string | null | undefined): string {
 }
 
 function formatMetaLine(o: Order): string {
-  const delivery = formatCompactDate(o.delivery_date);
+  const delivery = formatCompactDate(orderDueDate(o));
   if (delivery) return delivery;
   const created = (o.created_at || '').slice(0, 7);
   if (!created) return '';
@@ -109,7 +110,7 @@ function OrderCard({
   const orderType = getOrderType(order);
   const paid = computeOrderPaidTotal(order.fields || {});
   const meta = formatMetaLine(order);
-  const delivery = formatCompactDate(order.delivery_date);
+  const delivery = formatCompactDate(orderDueDate(order));
   const [didDrag, setDidDrag] = useState(false);
 
   return (

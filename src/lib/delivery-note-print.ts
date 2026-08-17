@@ -3,6 +3,7 @@ import {
   type DeliveryNotePreviewModel,
 } from '@/components/DeliveryNoteDocument';
 import type { Order } from '@/lib/orders';
+import { orderDueDate } from '@/lib/orders';
 import { formatQuotationDate } from '@/lib/quotation-style';
 
 function fieldStr(fields: Record<string, string | boolean>, key: string): string {
@@ -22,10 +23,11 @@ export function orderToDeliveryNotePreview(order: Order): DeliveryNotePreviewMod
     ? `Cartons / 箱數: ${order.carton_count.trim()}`
     : '';
   const tracking = fieldStr(order.fields, 'tracking_no');
+  const receiptDate = orderDueDate(order);
   const descParts = [
     cartonNote,
     tracking ? `Tracking: ${tracking}` : '',
-    order.delivery_date?.trim() ? `Delivery: ${order.delivery_date.trim()}` : '',
+    receiptDate ? `Delivery: ${receiptDate}` : '',
   ].filter(Boolean);
 
   const invoiceNo =
@@ -36,7 +38,7 @@ export function orderToDeliveryNotePreview(order: Order): DeliveryNotePreviewMod
   const orderNo = order.po_number?.trim() || order.name?.trim() || '—';
 
   const date =
-    formatQuotationDate(order.delivery_date) ||
+    formatQuotationDate(receiptDate) ||
     formatQuotationDate(new Date().toISOString().slice(0, 10)) ||
     '—';
 

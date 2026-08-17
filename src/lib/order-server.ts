@@ -1,5 +1,6 @@
 import db from './db';
 import type { Order } from './orders';
+import { orderDueDate } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
 
@@ -85,7 +86,8 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
     name: row.name || '',
     description: row.description || '',
     status: row.status || 'OPEN',
-    delivery_date: row.delivery_date || '',
+    // Derived from fields (due_date / client_delivery_date); legacy DB column is fallback only.
+    delivery_date: orderDueDate({ fields }) || row.delivery_date || '',
     customer_email: row.customer_email || '',
     phone: row.phone || '',
     shipping_address: row.shipping_address || '',
@@ -121,6 +123,8 @@ export async function listOrders(userId: number): Promise<Order[]> {
 /** Field keys needed by board/table/accounting/cashflow — not honour_lines / nestiee blobs. */
 const LIST_FIELD_KEYS = [
   'order_type',
+  'due_date',
+  'client_delivery_date',
   'payment_amount', 'payment1_amount', 'payment2_amount', 'payment3_amount',
   'payment_date', 'payment_bank', 'payment_method_detail', 'payment_reference',
   'payment_receipt_path', 'payment_verified',

@@ -10,7 +10,7 @@ import {
   quotationValidUntilFromIssueDate,
 } from './order-to-quotation';
 import type { Order } from './orders';
-import { resolveOrderAddressesForQuotation } from './orders';
+import { orderDueDate, resolveOrderAddressesForQuotation } from './orders';
 
 async function findOrCreateCustomerFromOrder(userId: number, order: Order): Promise<number> {
   const name = order.name?.trim() || 'Unknown Customer';
@@ -75,10 +75,7 @@ export async function convertOrderToQuotation(
     order.po_number?.trim() ||
     String(order.fields.original_order_id || '').trim() ||
     null;
-  const shippingDate =
-    parseOrderDate(order.delivery_date) ||
-    parseOrderDate(String(order.fields.客人送貨日期 || order.fields.delivery_date || '')) ||
-    null;
+  const shippingDate = parseOrderDate(orderDueDate(order) || '') || null;
   const trackingNo = String(order.fields.tracking_no || '').trim() || null;
 
   const { quotationId, quoteNumber } = await db.transaction(async () => {

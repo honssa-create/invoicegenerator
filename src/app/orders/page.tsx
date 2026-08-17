@@ -10,6 +10,7 @@ import {
   ORDER_TYPES,
   STATUS_COLORS,
   getOrderType,
+  orderDueDate,
   orderMatchesTypeFilter,
   statusKeyForTypeFilter,
   statusesForOrderType,
@@ -123,7 +124,7 @@ function OrdersPageContent() {
           base = (a.status || '').localeCompare(b.status || '', 'zh');
           break;
         case 'delivery':
-          base = (a.delivery_date || '').localeCompare(b.delivery_date || '');
+          base = (orderDueDate(a) || '').localeCompare(orderDueDate(b) || '');
           break;
         case 'order':
           base = (a.po_number || '').localeCompare(b.po_number || '', 'zh');
@@ -411,7 +412,7 @@ function OrdersPageContent() {
                     <td className="px-6 py-4">
                       <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>{o.status}</span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{o.delivery_date || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{orderDueDate(o) || '—'}</td>
                     <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
                   </tr>
                 ))}

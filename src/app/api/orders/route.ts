@@ -44,9 +44,9 @@ export async function POST(request: Request) {
       const result = await db
         .prepare(
           `INSERT INTO orders (
-             user_id, reference_number, po_number, name, description, status, delivery_date,
+             user_id, reference_number, po_number, name, description, status,
              customer_email, phone, shipping_address, notes, fields_json
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
@@ -55,7 +55,6 @@ export async function POST(request: Request) {
           body.name?.trim() || null,
           body.description?.trim() || null,
           status,
-          body.delivery_date?.trim() || null,
           body.customer_email?.trim() || null,
           body.phone?.trim() || null,
           body.shipping_address?.trim() || null,

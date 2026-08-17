@@ -61,14 +61,11 @@ export function statusesForOrderType(orderType: string): readonly string[] {
 }
 
 /**
- * Calendar date for an order: property-bar `due_date`, falling back to
+ * Calendar / list date for an order: property-bar `due_date`, falling back to
  * shipment `client_delivery_date` (客人收貨日期) — the two stay linked in the UI.
  * Returns YYYY-MM-DD when parseable.
  */
-export function orderDueDate(o: {
-  delivery_date?: string | null;
-  fields?: Record<string, unknown>;
-}): string | null {
+export function orderDueDate(o: { fields?: Record<string, unknown> }): string | null {
   const due = typeof o.fields?.due_date === 'string' ? o.fields.due_date : '';
   const ship =
     typeof o.fields?.client_delivery_date === 'string' ? o.fields.client_delivery_date : '';
@@ -1131,6 +1128,7 @@ export function resolveOrderAddressesForQuotation(order: {
 export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
   honour: 'honour訂製',
   nestiee: NESTIEE_ORDER_TYPE,
+  cupmoka: 'Cupmoka',
 };
 
 export const PAYMENT_STATUS_LABELS = ['Unpaid', '部分付款 Partly Paid', 'Full Paid'] as const;

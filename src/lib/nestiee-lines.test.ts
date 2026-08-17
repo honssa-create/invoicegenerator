@@ -13,6 +13,7 @@ import {
   isNestieeFastestShipOption,
   isNestieeScheduledShipOption,
   parseNestieeReceiptDateFromDeliveryOptions,
+  parseNestieeDeliveryDateMeta,
   resolveOrderAddressesForQuotation,
   stripHtml,
   NESTIEE_SHIPPING_LINE_NAME,
@@ -191,6 +192,68 @@ describe('parseNestieeReceiptDateFromDeliveryOptions', () => {
     expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-05-15T14:43:11')).toBe(
       '2026-05-24'
     );
+  });
+
+  it('reads order meta nestiee/delivery_date (outside EPO)', () => {
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: '_wc_other/nestiee/delivery_date', value: '2026-08-20' }],
+      })
+    ).toBe('2026-08-20');
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: 'nestiee/delivery_date', value: 'Sat, 22 Aug 2026' }],
+      })
+    ).toBe('2026-08-22');
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: '_wc_other/nestiee/delivery_date', value: '按最快寄出 (1-2個工作天)' }],
+      })
+    ).toBe('__ASAP__');
+
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions([], '2026-08-14T09:40:02', {
+        date_created: '2026-08-14T09:40:02',
+        meta_data: [{ key: '_wc_other/nestiee/delivery_date', value: '2026-09-21' }],
+      })
+    ).toBe('2026-09-21');
+
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions([], '2026-08-14T09:40:02', {
+        date_created: '2026-08-14T09:40:02',
+        meta_data: [
+          { key: '_wc_other/nestiee/delivery_date', value: '按最快寄出 (1-2個工作天)' },
+        ],
+      })
+    ).toBe('2026-08-16');
+  });
+
+  it('prefers nestiee/delivery_date meta over EPO options', () => {
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        price: 100,
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              {
+                name: '<b>📦送貨安排</b>',
+                value: '⚡按最快日子寄出 (1-2個工作天寄出)',
+                price: 0,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-08-14', {
+        date_created: '2026-08-14',
+        meta_data: [{ key: '_wc_other/nestiee/delivery_date', value: '2026-09-01' }],
+      })
+    ).toBe('2026-09-01');
   });
 
   it('returns empty when option missing or created date unparseable', () => {

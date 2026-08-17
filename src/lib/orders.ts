@@ -1013,34 +1013,70 @@ function nestieeOrderCreatedIso(orderCreatedAt: string | null | undefined): stri
   );
 }
 
+function isNestieeAsapDeliveryText(raw: string): boolean {
+  return /按最快(?:日子)?寄出/.test(stripHtml(raw));
+}
+
+/** Nestiee checkout field outside EPO: order meta `nestiee/delivery_date`. */
+export function parseNestieeDeliveryDateMeta(
+  payload: Record<string, unknown> | null | undefined
+): string {
+  if (!payload) return '';
+  const meta = Array.isArray(payload.meta_data) ? (payload.meta_data as WooMetaDatum[]) : [];
+  const keys = new Set(['_wc_other/nestiee/delivery_date', 'nestiee/delivery_date']);
+  for (const m of meta) {
+    const key = String(m?.key || '');
+    if (!keys.has(key)) continue;
+    const value = stripHtml(String(m?.value ?? '')).trim();
+    if (!value) continue;
+    if (isNestieeAsapDeliveryText(value)) return '__ASAP__';
+    const iso = normalizeOrderDueDate(value);
+    if (iso) return iso;
+  }
+  return '';
+}
+
 /**
- * Nestiee 送貨安排 → 客人收貨日期:
- * - 按最快寄出… → order created + 2 calendar days
- * - 預約指定日子 → companion 預約送達日期 / 請選擇送貨日 value (DD/MM/YYYY)
+ * Nestiee → 客人收貨日期 (priority):
+ * 1. Order meta nestiee/delivery_date (ISO / English date, or ASAP text → created+2)
+ * 2. EPO 預約指定日子 + companion 預約送達日期
+ * 3. EPO 按最快寄出… → created+2
  */
 export function parseNestieeReceiptDateFromDeliveryOptions(
   lines: NestieeLineItem[] | null | undefined,
-  orderCreatedAt: string | null | undefined
+  orderCreatedAt: string | null | undefined,
+  payload?: Record<string, unknown> | null
 ): string {
-  if (!Array.isArray(lines) || !lines.length) return '';
+  const created =
+    nestieeOrderCreatedIso(orderCreatedAt) ||
+    nestieeOrderCreatedIso(
+      typeof payload?.date_created === 'string' ? payload.date_created : ''
+    );
 
-  for (const line of lines) {
-    const opts = line.options || [];
-    if (!opts.some((opt) => isNestieeScheduledShipOption(opt))) continue;
-    for (const opt of opts) {
-      if (!isNestieeScheduledDeliveryDateOption(opt)) continue;
-      const iso = normalizeOrderDueDate(opt.value);
-      if (iso) return iso;
+  const fromMeta = parseNestieeDeliveryDateMeta(payload);
+  if (fromMeta === '__ASAP__') {
+    return created ? addCalendarDays(created, 2) : '';
+  }
+  if (fromMeta) return fromMeta;
+
+  if (Array.isArray(lines) && lines.length) {
+    for (const line of lines) {
+      const opts = line.options || [];
+      if (!opts.some((opt) => isNestieeScheduledShipOption(opt))) continue;
+      for (const opt of opts) {
+        if (!isNestieeScheduledDeliveryDateOption(opt)) continue;
+        const iso = normalizeOrderDueDate(opt.value);
+        if (iso) return iso;
+      }
     }
+
+    const hasFastest = lines.some((line) =>
+      (line.options || []).some((opt) => isNestieeFastestShipOption(opt))
+    );
+    if (hasFastest && created) return addCalendarDays(created, 2);
   }
 
-  const hasFastest = lines.some((line) =>
-    (line.options || []).some((opt) => isNestieeFastestShipOption(opt))
-  );
-  if (!hasFastest) return '';
-  const created = nestieeOrderCreatedIso(orderCreatedAt);
-  if (!created) return '';
-  return addCalendarDays(created, 2);
+  return '';
 }
 
 /** Read `fields.nestiee_lines` (JSON string or already-parsed array). */

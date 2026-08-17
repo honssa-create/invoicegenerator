@@ -163,13 +163,14 @@ export async function upsertHubOrder(
       fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
     }
 
-    // ASAP 送貨安排 → 客人收貨日期 = order created + 2 days (same linked keys as UI).
+    // Nestiee delivery_date meta / EPO 送貨安排 → linked receipt-date fields.
     const receiptDate =
       normalizeOrderDueDate(String(fields.due_date || '')) ||
       normalizeOrderDueDate(String(fields.client_delivery_date || '')) ||
       parseNestieeReceiptDateFromDeliveryOptions(
         nestieeLines,
-        typeof payload.date_created === 'string' ? payload.date_created : ''
+        typeof payload.date_created === 'string' ? payload.date_created : '',
+        payload
       );
     if (receiptDate) {
       fields.due_date = receiptDate;

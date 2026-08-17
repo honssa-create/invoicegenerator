@@ -87,7 +87,7 @@ async function main() {
         const created =
           (typeof payload?.date_created === 'string' && payload.date_created) ||
           String(row.created_at || '');
-        nextReceipt = parseNestieeReceiptDateFromDeliveryOptions(lines, created);
+        nextReceipt = parseNestieeReceiptDateFromDeliveryOptions(lines, created, payload);
       }
     }
 

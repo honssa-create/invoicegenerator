@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type DragEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -233,13 +233,34 @@ export default function OrderDetailPage() {
   const setFieldLocal = (key: string, value: unknown) =>
     setOrder((o) => (o ? { ...o, fields: { ...o.fields, [key]: value as string | boolean } } : o));
 
+  /** Keep status-bar due date and Shipment 客人送貨日期 in sync. */
+  const setLinkedDeliveryDatesLocal = (next: string) =>
+    setOrder((o) =>
+      o
+        ? {
+            ...o,
+            fields: {
+              ...o.fields,
+              due_date: next,
+              client_delivery_date: next,
+            },
+          }
+        : o
+    );
+  const commitLinkedDeliveryDates = (next: string) => {
+    setLinkedDeliveryDatesLocal(next);
+    patch({ fields: { due_date: next, client_delivery_date: next } });
+  };
+
   const [uploadMsg, setUploadMsg] = useState('');
-  const uploadFiles = async (files: FileList) => {
+  const uploadFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (!list.length) return;
     setUploadMsg('Optimising files…');
     // Compress images (≤1600px JPEG) and convert heavy PDFs (>2MB) into compressed
     // JPEG page images so we store a lightweight image array, never the raw monster PDF.
     const prepared: File[] = [];
-    for (const f of Array.from(files)) {
+    for (const f of list) {
       try {
         if (f.type === 'application/pdf') {
           setUploadMsg(`Compressing PDF “${f.name}” pages…`);
@@ -267,6 +288,13 @@ export default function OrderDetailPage() {
       setOrder((o) => (o ? { ...o, files: data.files } : o));
     }
     setUploadMsg('');
+  };
+
+  const onDesignProofsDrop = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    if (files?.length) void uploadFiles(files);
   };
 
   const deleteFile = async (fileId: number) => {
@@ -497,6 +525,23 @@ export default function OrderDetailPage() {
             : null;
   const paidTotal = computeOrderPaidTotal(order.fields);
   const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
+
+  const payment3FieldKeys = [
+    'payment3_amount',
+    'payment3_date',
+    'payment3_bank',
+    'payment3_reference',
+    'payment3_receipt_path',
+    'payment3_method_detail',
+    'payment3_method_note',
+  ] as const;
+  const hasPayment3Content =
+    Boolean(paymentPreview[3]) ||
+    payment3FieldKeys.some((k) => String(order.fields[k] ?? '').trim());
+  const showPayment3 =
+    hasPayment3Content ||
+    order.fields.payment3_enabled === true ||
+    String(order.fields.payment3_enabled ?? '').trim() === 'true';
 
   const applyAmountAndStatus = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount', value: string) => {
     const fields: Record<string, string> = { [key]: value };
@@ -908,8 +953,7 @@ export default function OrderDetailPage() {
                 patch({ core: { status: next } });
               }}
               onDueDateChange={(next) => {
-                setFieldLocal('due_date', next);
-                patch({ fields: { due_date: next } });
+                commitLinkedDeliveryDates(next);
               }}
               onAssigneesChange={(ids) => {
                 const serialized = serializeAssigneeIds(ids);
@@ -1009,7 +1053,16 @@ export default function OrderDetailPage() {
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 3</p>
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Shipment Detail 送貨詳情</h2>
             <div className="grid md:grid-cols-2 gap-5">
-              {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
+              {labeled(
+                '客人送貨日期',
+                <input
+                  type="date"
+                  value={parseOrderDueDateField(order.fields)}
+                  onChange={(e) => setLinkedDeliveryDatesLocal(e.target.value)}
+                  onBlur={(e) => commitLinkedDeliveryDates(e.target.value)}
+                  className={softInput}
+                />
+              )}
               {labeled('客人收件時間', fInput('receiving_time', 'text', 'e.g. 2-6pm'))}
               {labeled('聯絡方式', fInput('contact_method', 'text', 'Phone / WhatsApp / WeChat'))}
               {labeled('Tracking Number 運單號', fInput('tracking_no', 'text', 'e.g. SF5120793357800'))}
@@ -1877,42 +1930,69 @@ export default function OrderDetailPage() {
               </div>
             </div>
 
-            {/* Third payment */}
-            <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/30">
-              <h3 className="text-sm font-semibold text-gray-800 mb-4">第三次付款 Third Payment</h3>
-              <div className="grid md:grid-cols-[200px_1fr] gap-5">
-                <div>
-                  <div
-                    onClick={() => payment3InputRef.current?.click()}
-                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 3); }}
-                    onDragOver={(e) => e.preventDefault()}
-                    className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
-                  >
-                    <input ref={payment3InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 3); e.target.value = ''; }} />
-                    {paymentPreview[3] || order.fields.payment3_receipt_path ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''}
-                        alt="Third payment receipt"
-                        onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''); }}
-                        className="max-h-28 rounded-lg cursor-zoom-in"
-                      />
-                    ) : (
-                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
-                    )}
-                  </div>
-                  {paymentScanMsg[3] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[3]}</p>}
+            {/* Third payment — hidden until enabled or existing data */}
+            {showPayment3 ? (
+              <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/30">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <h3 className="text-sm font-semibold text-gray-800">第三次付款 Third Payment</h3>
+                  {!hasPayment3Content ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFieldLocal('payment3_enabled', '');
+                        patch({ fields: { payment3_enabled: '' } });
+                      }}
+                      className="text-sm text-gray-500 hover:text-red-600"
+                    >
+                      {bi('Remove', '移除')}
+                    </button>
+                  ) : null}
                 </div>
+                <div className="grid md:grid-cols-[200px_1fr] gap-5">
+                  <div>
+                    <div
+                      onClick={() => payment3InputRef.current?.click()}
+                      onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 3); }}
+                      onDragOver={(e) => e.preventDefault()}
+                      className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
+                    >
+                      <input ref={payment3InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 3); e.target.value = ''; }} />
+                      {paymentPreview[3] || order.fields.payment3_receipt_path ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''}
+                          alt="Third payment receipt"
+                          onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''); }}
+                          className="max-h-28 rounded-lg cursor-zoom-in"
+                        />
+                      ) : (
+                        <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                      )}
+                    </div>
+                    {paymentScanMsg[3] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[3]}</p>}
+                  </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
-                  {labeled('支付日期 Payment Date', fInput('payment3_date', 'date'))}
-                  {labeled('銀碼 Amount', paymentAmountInput('payment3_amount'))}
-                  {labeled('銀行 / 平台 Bank/Platform', fInput('payment3_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                  {paymentMethodFields(3)}
-                  <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment3_reference', 'text', 'Transaction / 流水號'))}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
+                    {labeled('支付日期 Payment Date', fInput('payment3_date', 'date'))}
+                    {labeled('銀碼 Amount', paymentAmountInput('payment3_amount'))}
+                    {labeled('銀行 / 平台 Bank/Platform', fInput('payment3_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
+                    {paymentMethodFields(3)}
+                    <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment3_reference', 'text', 'Transaction / 流水號'))}</div>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setFieldLocal('payment3_enabled', 'true');
+                  patch({ fields: { payment3_enabled: 'true' } });
+                }}
+                className="w-full rounded-xl border border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 transition-colors"
+              >
+                + {bi('Add third payment', '新增第三次付款')}
+              </button>
+            )}
           </section>
 
           {/* Visual assets / image grid */}
@@ -1926,10 +2006,29 @@ export default function OrderDetailPage() {
               <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
             </div>
             {order.files.length === 0 ? (
-              <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400 text-sm cursor-pointer hover:border-brand-400 hover:bg-brand-50/40">
-                Click to upload product design proofs (images or PDF — heavy PDFs are auto-compressed to page images)
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDrop={onDesignProofsDrop}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400 text-sm cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
+              >
+                Drop photos / PDF here, or click to upload
+                <span className="block text-[11px] mt-1 text-gray-400">
+                  Heavy PDFs are auto-compressed to page images
+                </span>
               </div>
             ) : (
+              <div className="space-y-3">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDrop={onDesignProofsDrop}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  className="border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 text-center text-xs text-gray-400 cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
+                >
+                  Drop more photos / PDF here, or click to upload
+                </div>
               <ul className="space-y-2">
                 {order.files.map((f) => {
                   const url = orderFileUrl(f);
@@ -2007,6 +2106,7 @@ export default function OrderDetailPage() {
                   );
                 })}
               </ul>
+              </div>
             )}
           </div>
         </div>

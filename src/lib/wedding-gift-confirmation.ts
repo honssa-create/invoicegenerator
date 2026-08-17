@@ -200,7 +200,10 @@ export function parseWeddingGiftConfirmation(text: string): WeddingGiftConfirmat
   if (unitPrice) fields.unit_bottle_price = unitPrice;
 
   const delivery = extractDelivery(raw);
-  if (delivery.date) fields.client_delivery_date = delivery.date;
+  if (delivery.date) {
+    fields.client_delivery_date = delivery.date;
+    fields.due_date = delivery.date;
+  }
   if (delivery.time) fields.receiving_time = delivery.time;
 
   const address = extractAddress(raw);

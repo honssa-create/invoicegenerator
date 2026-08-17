@@ -67,6 +67,7 @@ describe('parseWeddingGiftConfirmation', () => {
       qty_osmanthus: '0',
       unit_bottle_price: '42.75',
       client_delivery_date: '2026-07-30',
+      due_date: '2026-07-30',
       receiving_time: '12 - 5pm',
     });
     expect(result.core).toMatchObject({

@@ -72,22 +72,25 @@ export function statusesForOrderType(orderType: string): readonly string[] {
 }
 
 /**
- * Calendar date for an order: `fields.due_date` from the property bar.
+ * Calendar date for an order: property-bar `due_date`, falling back to
+ * shipment `client_delivery_date` (客人送貨日期) — the two stay linked in the UI.
  * Returns YYYY-MM-DD when parseable.
  */
 export function orderDueDate(o: {
   delivery_date?: string | null;
   fields?: Record<string, unknown>;
 }): string | null {
-  const raw = typeof o.fields?.due_date === 'string' ? o.fields.due_date : '';
-  return normalizeOrderDueDate(raw);
+  const due = typeof o.fields?.due_date === 'string' ? o.fields.due_date : '';
+  const ship =
+    typeof o.fields?.client_delivery_date === 'string' ? o.fields.client_delivery_date : '';
+  return normalizeOrderDueDate(due) || normalizeOrderDueDate(ship);
 }
 
-/** Read due date field (YYYY-MM-DD or empty). */
+/** Read linked due / 客人送貨日期 (YYYY-MM-DD or empty). */
 export function parseOrderDueDateField(fields: Record<string, unknown>): string {
-  return normalizeOrderDueDate(
-    typeof fields.due_date === 'string' ? fields.due_date : ''
-  ) || '';
+  const due = typeof fields.due_date === 'string' ? fields.due_date : '';
+  const ship = typeof fields.client_delivery_date === 'string' ? fields.client_delivery_date : '';
+  return normalizeOrderDueDate(due) || normalizeOrderDueDate(ship) || '';
 }
 
 /** Normalize common date strings to YYYY-MM-DD. */

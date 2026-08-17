@@ -205,7 +205,7 @@ export default function OrderPropertyBar({
         </div>
 
         <div className="flex items-center gap-3 min-w-0">
-          <PropertyLabel icon={<IconCalendar className="text-gray-400" />} label={bi('Due date', '到期日')} />
+          <PropertyLabel icon={<IconCalendar className="text-gray-400" />} label={bi('Receipt date', '收貨日')} />
           <input
             type="date"
             value={dueDate}

@@ -73,7 +73,7 @@ export function statusesForOrderType(orderType: string): readonly string[] {
 
 /**
  * Calendar date for an order: property-bar `due_date`, falling back to
- * shipment `client_delivery_date` (客人送貨日期) — the two stay linked in the UI.
+ * shipment `client_delivery_date` (客人收貨日期) — the two stay linked in the UI.
  * Returns YYYY-MM-DD when parseable.
  */
 export function orderDueDate(o: {
@@ -86,7 +86,7 @@ export function orderDueDate(o: {
   return normalizeOrderDueDate(due) || normalizeOrderDueDate(ship);
 }
 
-/** Read linked due / 客人送貨日期 (YYYY-MM-DD or empty). */
+/** Read linked due / 客人收貨日期 (YYYY-MM-DD or empty). */
 export function parseOrderDueDateField(fields: Record<string, unknown>): string {
   const due = typeof fields.due_date === 'string' ? fields.due_date : '';
   const ship = typeof fields.client_delivery_date === 'string' ? fields.client_delivery_date : '';

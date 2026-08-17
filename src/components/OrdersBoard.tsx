@@ -105,7 +105,7 @@ function OrderCard({
   onDragEnd: () => void;
 }) {
   const router = useRouter();
-  const thumb = order.files[0];
+  const thumb = order.files.find((f) => /\.(png|jpe?g|gif|webp)$/i.test(f.original_name || '')) || null;
   const orderType = getOrderType(order);
   const paid = computeOrderPaidTotal(order.fields || {});
   const meta = formatMetaLine(order);

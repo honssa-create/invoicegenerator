@@ -79,6 +79,10 @@ interface QuotationOption {
   status: string;
 }
 
+function isImageName(name: string | null | undefined): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(name || '');
+}
+
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -287,7 +291,7 @@ export default function OrderDetailPage() {
   const setFieldLocal = (key: string, value: unknown) =>
     setOrder((o) => (o ? { ...o, fields: { ...o.fields, [key]: value as string | boolean } } : o));
 
-  /** Keep status-bar due date and Shipment 客人送貨日期 in sync. */
+  /** Keep status-bar receipt date and Shipment 客人收貨日期 in sync. */
   const setLinkedDeliveryDatesLocal = (next: string) =>
     setOrder((o) =>
       o
@@ -333,7 +337,7 @@ export default function OrderDetailPage() {
     }
     if (!prepared.length) { setUploadMsg(''); return; }
 
-    setUploadMsg(`Uploading ${prepared.length} image(s)…`);
+    setUploadMsg(`Uploading ${prepared.length} file(s)…`);
     const fd = new FormData();
     prepared.forEach((f) => fd.append('file', f));
     const res = await fetch(`/api/orders/${id}/files`, { method: 'POST', body: fd });
@@ -1117,7 +1121,7 @@ export default function OrderDetailPage() {
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Shipment Detail 送貨詳情</h2>
             <div className="grid md:grid-cols-2 gap-5">
               {labeled(
-                '客人送貨日期',
+                '客人收貨日期',
                 <input
                   type="date"
                   value={parseOrderDueDateField(order.fields)}
@@ -2065,8 +2069,8 @@ export default function OrderDetailPage() {
                 <h2 className="font-semibold text-gray-900">Design Proofs 設計圖 / Image Preview</h2>
                 {uploadMsg && <p className="text-xs text-brand-700 mt-0.5">{uploadMsg}</p>}
               </div>
-              <button onClick={() => fileInputRef.current?.click()} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Upload images / PDF</button>
-              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
+              <button onClick={() => fileInputRef.current?.click()} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ {bi('Upload files', '上傳檔案')}</button>
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
             </div>
             {order.files.length === 0 ? (
               <div
@@ -2076,9 +2080,9 @@ export default function OrderDetailPage() {
                 onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400 text-sm cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
               >
-                Drop photos / PDF here, or click to upload
+                {bi('Drop any file here, or click to upload', '拖放任意檔案到此處，或點擊上傳')}
                 <span className="block text-[11px] mt-1 text-gray-400">
-                  Heavy PDFs are auto-compressed to page images
+                  {bi('Images are compressed; heavy PDFs become page images', '圖片會壓縮；大型 PDF 會轉成頁面圖片')}
                 </span>
               </div>
             ) : (
@@ -2090,25 +2094,32 @@ export default function OrderDetailPage() {
                   onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   className="border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 text-center text-xs text-gray-400 cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
                 >
-                  Drop more photos / PDF here, or click to upload
+                  {bi('Drop more files here, or click to upload', '拖放更多檔案到此處，或點擊上傳')}
                 </div>
               <ul className="space-y-2">
                 {order.files.map((f) => {
                   const url = orderFileUrl(f);
-                  const name = f.original_name || `Image #${f.id}`;
+                  const name = f.original_name || `File #${f.id}`;
                   const renaming = renamingFileId === f.id;
+                  const isImage = isImageName(f.original_name);
                   return (
                     <li
                       key={f.id}
                       className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={url}
-                        alt={name}
-                        onClick={() => setLightbox(url)}
-                        className="h-14 w-14 rounded-md object-cover border border-gray-200 shrink-0 bg-white cursor-zoom-in hover:ring-2 hover:ring-brand-400"
-                      />
+                      {isImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={url}
+                          alt={name}
+                          onClick={() => setLightbox(url)}
+                          className="h-14 w-14 rounded-md object-cover border border-gray-200 shrink-0 bg-white cursor-zoom-in hover:ring-2 hover:ring-brand-400"
+                        />
+                      ) : (
+                        <span className="h-14 w-14 rounded-md bg-white border border-gray-200 flex items-center justify-center text-gray-400 text-xs font-medium shrink-0">
+                          FILE
+                        </span>
+                      )}
                       {renaming ? (
                         <input
                           autoFocus
@@ -2130,7 +2141,7 @@ export default function OrderDetailPage() {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => setLightbox(url)}
+                          onClick={() => (isImage ? setLightbox(url) : void downloadFile(f))}
                           onDoubleClick={(e) => {
                             e.preventDefault();
                             startRenameFile(f);
@@ -2161,7 +2172,7 @@ export default function OrderDetailPage() {
                         type="button"
                         onClick={() => deleteFile(f.id)}
                         className="text-xs text-red-600 hover:text-red-700 font-medium shrink-0 px-2 py-1"
-                        aria-label="Delete image"
+                        aria-label="Delete file"
                       >
                         {BTN.delete}
                       </button>

@@ -212,8 +212,8 @@ export default function RentalsPage() {
       setToast(d.error || MSG.schedulerFailed);
       return;
     }
-    const skipMsg = d.skipped ? ` · ${d.skipped} skipped (after lease end / inactive)` : '';
-    setToast(`Dispatched ${d.processed} rental invoices${skipMsg}`);
+    const units = d.materialized?.units ?? 0;
+    setToast(`Materialized ${units} period row(s) for ${d.period} (email auto-send off)`);
     load();
   };
 

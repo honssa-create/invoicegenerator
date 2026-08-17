@@ -26,7 +26,6 @@ import {
   getPreviousLeasesForUser,
   buildRentalDashboardAlerts,
   loadCurrentLeases,
-  shouldAutoDispatchInvoice,
   updateCurrentLeaseFromUnit,
 } from './rental-lease-server';
 import {
@@ -1242,34 +1241,17 @@ export async function markRentPaid(
 // ---------------------------------------------------------------------------
 
 export async function runRentalInvoiceDispatch(userId: number | null, period = currentBillingPeriod()) {
+  // Materialize period rows + overdue only — do not auto-email invoices.
+  // Manual send remains via POST /api/rentals/records/[id]/invoice.
   const materialized = await materializeRentPeriod(userId, period);
-
-  const rows = await db.prepare(
-    `SELECT * FROM rental_units WHERE automation_enabled = 1 ${userId === null ? '' : 'AND user_id = ?'}`
-  ).all(...(userId === null ? [] : [userId])) as UnitRow[];
-  const results: { unit: string; skipped?: string; record?: RentRecord }[] = [];
-  const skipped: { unit: string; reason: string }[] = [];
-
-  for (const unitRow of rows) {
-    const unit = hydrateUnit(unitRow);
-    const check = await shouldAutoDispatchInvoice(unit.user_id, unit.id, period);
-    if (!check.allowed) {
-      skipped.push({ unit: unit.unitName, reason: check.reason || 'Not billable' });
-      continue;
-    }
-    const record = await ensureRentRecord(unit, period);
-    if (!record.invoiceSentAt) {
-      const sent = await sendRentInvoice(record.id, unit.user_id, {});
-      results.push({ unit: unit.unitName, record: sent.record });
-    }
-  }
   return {
     period,
     materialized,
-    processed: results.length,
-    skipped: skipped.length,
-    results,
-    skippedDetails: skipped,
+    processed: 0,
+    skipped: 0,
+    results: [] as { unit: string; record?: RentRecord }[],
+    skippedDetails: [] as { unit: string; reason: string }[],
+    emailDispatch: 'disabled' as const,
   };
 }
 

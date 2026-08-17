@@ -25,7 +25,7 @@ interface Business {
   email: string;
 }
 
-/** Matches public/invoice-template-sign.html (chop) vs invoice-template.html (no chop). */
+/** Matches public/invoice-template-sign.html (chop). React print also supports no-chop. */
 type PdfChopMode = 'chop' | 'no-chop';
 
 /** Standard / deposit / balance HTML layout variants. */

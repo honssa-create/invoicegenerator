@@ -20,7 +20,7 @@ export interface InvoicePrintBusiness {
   email: string;
 }
 
-/** Default payment block from public/invoice-template.html (Invoice No. substituted). */
+/** Default payment block for invoice print (Invoice No. substituted). */
 export function defaultInvoicePaymentRemarks(invoiceNo: string): string {
   return `We accept both cheque payment and bank transfer
 (Please remark the Invoice No: ${invoiceNo} on the cheque or in the bank transfer note.)

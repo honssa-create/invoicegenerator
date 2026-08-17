@@ -600,6 +600,19 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('reconciliation_payment_methods_v2') ON CONFLICT DO NOTHING`
     );
   }
+
+  // Drop unused legacy kitchen/order activity tables (replaced by gift-box movements + activity_logs).
+  const migDropLegacy = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'drop_legacy_kitchen_and_order_activities_v1'`
+  );
+  if (!migDropLegacy.rows.length) {
+    await client().query(`DROP TABLE IF EXISTS order_activities CASCADE`);
+    await client().query(`DROP TABLE IF EXISTS kitchen_daily_orders CASCADE`);
+    await client().query(`DROP TABLE IF EXISTS kitchen_batches CASCADE`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('drop_legacy_kitchen_and_order_activities_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

@@ -289,6 +289,9 @@ function OrderHubContent() {
     return map;
   }, [data?.integrations]);
 
+  const qbIntegration = integrationByPlatform.get('quickbooks');
+  const showQbConnect = Boolean(qbIntegration?.configured && !qbIntegration?.connected && !qbIntegration?.setup_error);
+
   return (
     <AppLayout>
       <div className="page-header">
@@ -299,6 +302,14 @@ function OrderHubContent() {
           </p>
         </div>
         <div className="page-actions flex flex-col sm:flex-row gap-2">
+          {showQbConnect && (
+            <a
+              href="/api/integrations/quickbooks/connect"
+              className="btn bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 text-center"
+            >
+              Connect QuickBooks
+            </a>
+          )}
           <button
             onClick={importAll}
             disabled={importing !== null}
@@ -383,21 +394,30 @@ function OrderHubContent() {
                   In hub: {data?.summary.byPlatform[platform] ?? 0}
                 </p>
               </div>
-              <button
-                onClick={() => importPlatform(platform)}
-                disabled={!canImport || importing !== null}
-                className="btn mt-auto bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-              >
-                {isImporting
-                  ? 'Importing…'
-                  : hasSetupError
-                    ? 'Fix in Settings'
-                    : canImport
-                      ? 'Import'
-                      : intg?.configured
-                        ? 'Connect first'
-                        : 'Configure in Settings'}
-              </button>
+              {platform === 'quickbooks' && intg?.configured && !intg.connected && !hasSetupError ? (
+                <a
+                  href="/api/integrations/quickbooks/connect"
+                  className="btn mt-auto bg-green-600 text-white hover:bg-green-700 text-sm text-center"
+                >
+                  Connect QuickBooks
+                </a>
+              ) : (
+                <button
+                  onClick={() => importPlatform(platform)}
+                  disabled={!canImport || importing !== null}
+                  className="btn mt-auto bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                >
+                  {isImporting
+                    ? 'Importing…'
+                    : hasSetupError
+                      ? 'Fix in Settings'
+                      : canImport
+                        ? 'Import'
+                        : intg?.configured
+                          ? 'Connect first'
+                          : 'Configure in Settings'}
+                </button>
+              )}
             </div>
           );
         })}

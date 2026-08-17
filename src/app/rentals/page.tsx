@@ -715,8 +715,11 @@ export default function RentalsPage() {
                   checked={!unitModal.vacant && unitModal.automationEnabled !== false}
                   onChange={(e) => setUnitModal({ ...unitModal, automationEnabled: e.target.checked })}
                 />
-                Monthly invoice automation
+                Auto-create monthly rent periods
               </label>
+              <p className="w-full text-xs text-gray-500 mt-1 ml-0 sm:ml-0">
+                When enabled, cron materializes billing periods for this unit. Invoice email is still sent manually.
+              </p>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setUnitModal(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">{BTN.cancel}</button>

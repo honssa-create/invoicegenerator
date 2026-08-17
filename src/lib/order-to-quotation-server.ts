@@ -114,11 +114,18 @@ export async function convertOrderToQuotation(
        ) VALUES (?, ?, ?, ?, ?, ?)`
     );
     for (const item of items) {
-      if (!item.description.trim()) continue;
+      const product = (item.product_service || item.description || '').trim();
+      if (!product && !item.description.trim()) continue;
       const qty = Number(item.quantity) || 0;
       const price = Number(item.unit_price) || 0;
-      const desc = item.description.trim();
-      await insertItem.run(quotationId, desc, desc, qty, price, qty * price);
+      await insertItem.run(
+        quotationId,
+        product || null,
+        (item.description || '').trim(),
+        qty,
+        price,
+        qty * price
+      );
     }
 
     const mergedFields = { ...order.fields, quotation_no: quoteNumber };

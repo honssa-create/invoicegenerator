@@ -5,7 +5,9 @@ import {
   parseNumericFromText,
   parseOrderDate,
   quotationValidUntilFromIssueDate,
+  summarizeHonourCraftDescription,
 } from './order-to-quotation';
+import { emptyHonourLine } from './orders';
 
 describe('parseNumericFromText', () => {
   it('extracts numbers from mixed text', () => {
@@ -36,9 +38,12 @@ describe('buildQuotationItemsFromOrder', () => {
       },
     });
     expect(items).toHaveLength(1);
-    expect(items[0].description).toContain('亞加力雙面');
-    expect(items[0].quantity).toBe(100);
-    expect(items[0].unit_price).toBe(12.5);
+    expect(items[0]).toMatchObject({
+      product_service: '亞加力雙面',
+      description: '',
+      quantity: 100,
+      unit_price: 12.5,
+    });
   });
 
   it('maps honour_lines into multiple quotation items', () => {
@@ -56,8 +61,65 @@ describe('buildQuotationItemsFromOrder', () => {
       },
     });
     expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({ description: 'Custom badges — Acrylic A', quantity: 50, unit_price: 8 });
-    expect(items[1]).toMatchObject({ description: 'Custom badges — Acrylic B', quantity: 20, unit_price: 12.5 });
+    expect(items[0]).toMatchObject({
+      product_service: 'Acrylic A',
+      description: '',
+      quantity: 50,
+      unit_price: 8,
+    });
+    expect(items[1]).toMatchObject({
+      product_service: 'Acrylic B',
+      description: '',
+      quantity: 20,
+      unit_price: 12.5,
+    });
+  });
+
+  it('fills description from filled craft fields only (one line each)', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: 'Ignore me',
+      name: '',
+      po_number: '',
+      fields: {
+        order_type: 'honour訂製',
+        honour_lines: JSON.stringify([
+          {
+            style: '金屬襟章',
+            quantity: '100',
+            unit_price: '5',
+            card_size: '30 x 15mm',
+            craft: '滴膠',
+            plating_color: '',
+            clasp: '蝴蝶扣',
+          },
+          {
+            style: 'Shipping',
+            quantity: '1',
+            unit_price: '35',
+            craft: 'should not appear',
+          },
+        ]),
+      },
+    });
+    expect(items[0]).toMatchObject({
+      product_service: '金屬襟章',
+      description: '紙卡尺寸: 30 x 15mm\n加工工藝: 滴膠\n背扣: 蝴蝶扣',
+    });
+    expect(items[1]).toMatchObject({
+      product_service: 'Shipping',
+      description: '',
+    });
+  });
+
+  it('summarizeHonourCraftDescription skips empty fields', () => {
+    expect(
+      summarizeHonourCraftDescription({
+        ...emptyHonourLine(),
+        craft: '亞加力-單面',
+        plating_color: '  ',
+        clasp: '四節圓圈',
+      })
+    ).toBe('加工工藝: 亞加力-單面\n背扣: 四節圓圈');
   });
 
   it('includes Shipping honour line as its own quotation item', () => {
@@ -74,8 +136,8 @@ describe('buildQuotationItemsFromOrder', () => {
       },
     });
     expect(items).toEqual([
-      { description: '燙貼織嘜', quantity: 300, unit_price: 861 },
-      { description: 'Shipping', quantity: 1, unit_price: 35 },
+      { product_service: '燙貼織嘜', description: '', quantity: 300, unit_price: 861 },
+      { product_service: 'Shipping', description: '', quantity: 1, unit_price: 35 },
     ]);
   });
 
@@ -111,8 +173,8 @@ describe('buildQuotationItemsFromOrder', () => {
       },
     });
     expect(items).toEqual([
-      { description: '星空金', quantity: 2, unit_price: 344 },
-      { description: '粉紅心意 - 桂花味', quantity: 1, unit_price: 128.5 },
+      { product_service: '星空金', description: '', quantity: 2, unit_price: 344 },
+      { product_service: '粉紅心意 - 桂花味', description: '', quantity: 1, unit_price: 128.5 },
     ]);
   });
 
@@ -130,8 +192,8 @@ describe('buildQuotationItemsFromOrder', () => {
       },
     });
     expect(items).toEqual([
-      { description: '星空金', quantity: 1, unit_price: 344 },
-      { description: 'Shipping', quantity: 1, unit_price: 35 },
+      { product_service: '星空金', description: '', quantity: 1, unit_price: 344 },
+      { product_service: 'Shipping', description: '', quantity: 1, unit_price: 35 },
     ]);
   });
 
@@ -143,21 +205,26 @@ describe('buildQuotationItemsFromOrder', () => {
       fields: { order_type: 'Nestiee 燕窩訂單' },
     });
     expect(items).toHaveLength(1);
-    expect(items[0].description).toBe('星空銀 x1');
+    expect(items[0].product_service).toBe('星空銀 x1');
+    expect(items[0].description).toBe('');
   });
 });
 
 describe('buildQuotationNotesFromOrder', () => {
-  it('combines order metadata', () => {
+  it('uses order notes and craft/pack fields without PO# or order description', () => {
     const notes = buildQuotationNotesFromOrder({
       notes: 'Rush order',
       po_number: 'PO-99',
       description: 'Badges',
-      fields: { pack_required: 'OPP' },
+      fields: { pack_required: 'OPP', craft: '滴膠' },
     });
     expect(notes).toContain('Rush order');
-    expect(notes).toContain('PO-99');
     expect(notes).toContain('OPP');
+    expect(notes).toContain('滴膠');
+    expect(notes).not.toContain('PO-99');
+    expect(notes).not.toContain('PO#');
+    expect(notes).not.toContain('Badges');
+    expect(notes).not.toContain('Description:');
   });
 });
 

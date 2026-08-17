@@ -52,8 +52,19 @@ function invoiceLineItems(inv: InvoiceWithDetails, money: (n: number) => string)
     .map((i) => {
       const product = (i.product_service || '').trim();
       const desc = (i.description || '').trim();
-      const name = product || desc || '—';
-      const description = product && desc && desc !== product ? desc : '';
+      let name: string;
+      let description: string;
+      if (product) {
+        name = product;
+        description = desc && desc !== product ? desc : '';
+      } else if (desc) {
+        const lines = desc.split(/\n/);
+        name = lines[0]?.trim() || '—';
+        description = lines.slice(1).join('\n').trim();
+      } else {
+        name = '—';
+        description = '';
+      }
       const amount = Number(i.amount) || Number(i.quantity) * Number(i.unit_price) || 0;
       return {
         name,

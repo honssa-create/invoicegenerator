@@ -89,9 +89,11 @@
 }
 
 @media print {
+  /* Zero page margin so content fills one A4; browser header/footer metadata
+     (title, URL, date) needs margin space and otherwise forces a second page. */
   @page {
     size: A4 portrait;
-    margin: 8mm;
+    margin: 0;
   }
 
   .no-print {

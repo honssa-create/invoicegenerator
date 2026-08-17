@@ -171,12 +171,13 @@ export default function NewInvoicePage() {
                 <div className="col-span-1"></div>
               </div>
               {items.map((item, i) => (
-                <div key={i} className="grid grid-cols-12 gap-3 items-center">
-                  <input
+                <div key={i} className="grid grid-cols-12 gap-3 items-start">
+                  <textarea
                     value={item.description}
                     onChange={(e) => updateItem(i, 'description', e.target.value)}
                     placeholder={bi('Service or product description', '服務或產品描述')}
-                    className="col-span-5 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
+                    rows={3}
+                    className="col-span-5 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm resize-y min-h-[4.5rem]"
                   />
                   <input
                     type="number" min="0" step="0.01"
@@ -190,10 +191,10 @@ export default function NewInvoicePage() {
                     onChange={(e) => updateItem(i, 'unit_price', Number(e.target.value))}
                     className="col-span-2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
                   />
-                  <div className="col-span-2 text-sm font-medium text-gray-900 px-1">
+                  <div className="col-span-2 text-sm font-medium text-gray-900 px-1 pt-2">
                     {formatCurrency(item.quantity * item.unit_price)}
                   </div>
-                  <button type="button" onClick={() => removeItem(i)} className="col-span-1 text-red-500 hover:text-red-700 text-sm">
+                  <button type="button" onClick={() => removeItem(i)} className="col-span-1 text-red-500 hover:text-red-700 text-sm pt-2">
                     ✕
                   </button>
                 </div>

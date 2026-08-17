@@ -4,15 +4,39 @@ import {
   getNestieeLines,
   isBadgeOrderType,
   isBirdNestOrderType,
+  isHonourShippingLine,
   isNestieeOrderType,
   parseHonourLines,
+  type HonourLineItem,
   type Order,
 } from './orders';
 
 export interface QuotationLineDraft {
+  /** Product/service name shown on the line (print title row). */
+  product_service: string;
+  /** Optional multi-line details under the product name. */
   description: string;
   quantity: number;
   unit_price: number;
+}
+
+/** Craft-section fields for honour / honour-en line → quotation description (filled only). */
+const HONOUR_CRAFT_SUMMARY_FIELDS: { key: keyof HonourLineItem; label: string }[] = [
+  { key: 'card_size', label: '紙卡尺寸' },
+  { key: 'craft', label: '加工工藝' },
+  { key: 'plating_color', label: '電鍍色' },
+  { key: 'clasp', label: '背扣' },
+];
+
+/** One line per filled craft field; empty when nothing is set (or Shipping row). */
+export function summarizeHonourCraftDescription(line: HonourLineItem): string {
+  if (isHonourShippingLine(line)) return '';
+  const lines: string[] = [];
+  for (const { key, label } of HONOUR_CRAFT_SUMMARY_FIELDS) {
+    const value = String(line[key] ?? '').trim();
+    if (value) lines.push(`${label}: ${value}`);
+  }
+  return lines.join('\n');
 }
 
 /** Extract the first numeric value from free-form text (e.g. "rmb 4.2", "4款各53個"). */
@@ -66,7 +90,8 @@ export function buildQuotationItemsFromOrder(
     const nestieeLines = getNestieeLines(f);
     if (nestieeLines.length) {
       return nestieeLines.map((line) => ({
-        description: line.name,
+        product_service: line.name,
+        description: '',
         quantity: line.quantity || 1,
         unit_price: line.unit_price || unitPrice,
       }));
@@ -78,7 +103,12 @@ export function buildQuotationItemsFromOrder(
     for (const flavor of BIRD_NEST_FLAVORS) {
       const qty = fieldNum(f, flavor.key);
       if (qty > 0) {
-        items.push({ description: flavor.label, quantity: qty, unit_price: unitPrice });
+        items.push({
+          product_service: flavor.label,
+          description: '',
+          quantity: qty,
+          unit_price: unitPrice,
+        });
       }
     }
     if (items.length) return items;
@@ -92,12 +122,11 @@ export function buildQuotationItemsFromOrder(
         const price = parseNumericFromText(line.unit_price);
         const style = line.style.trim();
         if (!style && qty <= 0 && price <= 0) return null;
-        const desc =
-          [order.description?.trim(), style].filter(Boolean).join(' — ') ||
-          style ||
-          orderType;
+        // Product name only — do not prefix with order description/name.
+        const product = style || orderType;
         return {
-          description: desc,
+          product_service: product,
+          description: summarizeHonourCraftDescription(line),
           quantity: qty || 1,
           unit_price: price || unitPrice,
         };
@@ -111,8 +140,26 @@ export function buildQuotationItemsFromOrder(
       fieldNum(f, 'badge_quantity') ||
       parseNumericFromText(fieldStr(f, 'qty_ordered')) ||
       1;
-    const desc = [order.description?.trim(), style].filter(Boolean).join(' — ') || orderType;
-    return [{ description: desc, quantity: qty, unit_price: unitPrice }];
+    const legacyCraft: HonourLineItem = {
+      style: style || orderType,
+      quantity: String(qty),
+      unit_price: '',
+      card_size: fieldStr(f, 'card_size'),
+      craft: fieldStr(f, 'craft'),
+      plating_color: fieldStr(f, 'plating_color'),
+      clasp: fieldStr(f, 'clasp'),
+      internal_pack: '',
+      pack_required: '',
+      other_options: '',
+    };
+    return [
+      {
+        product_service: style || orderType,
+        description: summarizeHonourCraftDescription(legacyCraft),
+        quantity: qty,
+        unit_price: unitPrice,
+      },
+    ];
   }
 
   const qty =
@@ -120,13 +167,13 @@ export function buildQuotationItemsFromOrder(
     fieldNum(f, 'badge_quantity') ||
     parseNumericFromText(fieldStr(f, 'supplier_qty')) ||
     1;
-  const desc =
+  const product =
     order.description?.trim() ||
     fieldStr(f, 'name') ||
     order.name?.trim() ||
     'Order items';
 
-  return [{ description: desc, quantity: qty || 1, unit_price: unitPrice }];
+  return [{ product_service: product, description: '', quantity: qty || 1, unit_price: unitPrice }];
 }
 
 export function buildQuotationNotesFromOrder(
@@ -134,8 +181,6 @@ export function buildQuotationNotesFromOrder(
 ): string | null {
   const parts: string[] = [];
   if (order.notes?.trim()) parts.push(order.notes.trim());
-  if (order.po_number?.trim()) parts.push(`PO#: ${order.po_number}`);
-  if (order.description?.trim()) parts.push(`Description: ${order.description.trim()}`);
 
   const pack = fieldStr(order.fields, 'pack_required') || firstHonourProductLine(parseHonourLines(order.fields))?.pack_required || '';
   if (pack) parts.push(`Packaging: ${pack}`);

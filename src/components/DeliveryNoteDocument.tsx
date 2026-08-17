@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 import {
   DEFAULT_QUOTATION_STYLE,
   quotationStyleToCssVars,
@@ -182,7 +182,7 @@ export default function DeliveryNoteDocument({
           font-size: 11px;
         }
         @media print {
-          @page { size: A4 portrait; margin: 12mm 14mm 16mm 14mm; }
+          @page { size: A4 portrait; margin: 0; }
           .quo-preview-page {
             width: 100% !important;
             min-height: auto !important;
@@ -270,22 +270,27 @@ export default function DeliveryNoteDocument({
         </thead>
         <tbody>
           {items.map((item, i) => (
-            <tr key={i} className="border-b border-gray-200">
-              <td className="px-3 py-3.5 align-top">
-                <p className="font-bold m-0 mb-1">
-                  {i + 1}. {item.name || '—'}
-                </p>
-                {item.description ? (
-                  <p
-                    className="m-0 muted whitespace-pre-wrap"
+            <Fragment key={i}>
+              <tr className={item.description ? undefined : 'border-b border-gray-200'}>
+                <td className="px-3 pt-3.5 pb-1 align-top">
+                  <p className="font-bold m-0">
+                    {i + 1}. {item.name || '—'}
+                  </p>
+                </td>
+                <td className="px-3 pt-3.5 pb-1 text-right align-top whitespace-nowrap">{item.qty}</td>
+              </tr>
+              {item.description ? (
+                <tr className="border-b border-gray-200">
+                  <td
+                    colSpan={2}
+                    className="px-3 pt-0 pb-3.5 align-top muted whitespace-pre-wrap"
                     style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}
                   >
                     {item.description}
-                  </p>
-                ) : null}
-              </td>
-              <td className="px-3 py-3.5 text-right align-top whitespace-nowrap">{item.qty}</td>
-            </tr>
+                  </td>
+                </tr>
+              ) : null}
+            </Fragment>
           ))}
         </tbody>
       </table>

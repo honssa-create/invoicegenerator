@@ -588,12 +588,13 @@ export default function InvoiceDetailPage() {
                         placeholder="Product / service"
                       />
                     </td>
-                    <td className="py-2 pr-2">
-                      <input
+                    <td className="py-2 pr-2 min-w-[220px]">
+                      <textarea
                         value={item.description}
                         onChange={(e) => updateItem(i, 'description', e.target.value)}
                         disabled={readOnly}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
+                        rows={3}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm resize-y min-h-[4.5rem]"
                         placeholder="Description"
                       />
                     </td>

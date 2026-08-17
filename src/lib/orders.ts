@@ -668,11 +668,11 @@ export const ORDER_TYPES = [
 ] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
-/** Sidebar / URL shortcuts that group related order types. */
+/** Sidebar shortcuts that set the Order Type filter to a specific type. */
 export const ORDER_NAV_TYPE_FILTERS = [
-  { param: 'honour', label: 'honour訂單' },
-  { param: 'wedding', label: '燕窩回禮' },
-  { param: 'nestiee', label: '燕窩訂單' },
+  { param: 'honour訂製', label: 'honour訂單' },
+  { param: '燕窩回禮燉製', label: '燕窩回禮' },
+  { param: 'Nestiee 燕窩訂單', label: '燕窩訂單' },
 ] as const;
 
 export type OrderNavTypeParam = (typeof ORDER_NAV_TYPE_FILTERS)[number]['param'];

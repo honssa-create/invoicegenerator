@@ -114,7 +114,7 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
                   {ORDER_NAV_TYPE_FILTERS.map((f) => (
                     <Link
                       key={f.param}
-                      href={`/orders?type=${f.param}`}
+                      href={`/orders?type=${encodeURIComponent(f.param)}`}
                       onClick={handleNav}
                       className="block rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-brand-50 hover:text-brand-700"
                     >

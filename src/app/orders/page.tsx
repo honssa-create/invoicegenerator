@@ -7,7 +7,6 @@ import dynamic from 'next/dynamic';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import {
-  ORDER_NAV_TYPE_FILTERS,
   ORDER_TYPES,
   STATUS_COLORS,
   getOrderType,
@@ -70,7 +69,7 @@ function OrdersPageContent() {
   };
   useEffect(() => { load(); }, []);
 
-  // Sidebar type shortcuts: /orders?type=honour|wedding|nestiee (or exact type)
+  // Sidebar type shortcuts: /orders?type=<exact order type>
   useEffect(() => {
     const raw = searchParams.get('type')?.trim() || '';
     setOrderType(raw);
@@ -85,10 +84,7 @@ function OrdersPageContent() {
     router.replace(qs ? `/orders?${qs}` : '/orders', { scroll: false });
   };
 
-  const typeOptions = useMemo(() => {
-    const fromData = orders.map(getOrderType).filter(Boolean);
-    return Array.from(new Set([...ORDER_TYPES, ...fromData]));
-  }, [orders]);
+  const typeOptions = ORDER_TYPES;
 
   const statusOptions = useMemo(
     () => statusesForOrderType(statusKeyForTypeFilter(orderType)),
@@ -303,9 +299,6 @@ function OrdersPageContent() {
           <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Order Type', '訂單類型')}</label>
           <select value={orderType} onChange={(e) => setOrderTypeAndUrl(e.target.value)} className={selectCls}>
             <option value="">{BTN.all}</option>
-            {ORDER_NAV_TYPE_FILTERS.map((f) => (
-              <option key={f.param} value={f.param}>{f.label}</option>
-            ))}
             {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>

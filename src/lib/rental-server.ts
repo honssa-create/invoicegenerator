@@ -1,6 +1,7 @@
 import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
+import { plainTextToHtml } from './payment-reminders';
 import { saveReceipt } from './receipt';
 import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
 import {
@@ -38,16 +39,16 @@ import {
   defaultRentPeriod,
   dueDateForPeriod,
   formatMoney,
-  formatUtilityAmount,
   formatDisplayDate,
   baseRentLineLabel,
+  defaultRentInvoiceBody,
+  defaultRentInvoiceSubject,
   buildDebitNotePaymentInstructionsText,
   debitNoteCompanyForUnit,
   resolveUnitBillingCompany,
   type DebitNoteCompanyId,
   debitNoteDueDate,
   formatDueDateChinese,
-  utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
   billingPeriodAfterLeaseEnd,
@@ -886,27 +887,6 @@ export async function materializeRentPeriod(userId: number | null, period = curr
 // Email HTML builders
 // ---------------------------------------------------------------------------
 
-function invoiceHtml(
-  unit: RentalUnit,
-  record: RentRecord,
-  note?: string | null,
-  paymentInstructionsText?: string | null,
-): string {
-  const lineItems = [
-    `<tr><td>${baseRentLineLabel(record)}</td><td align="right"><strong>${formatMoney(record.baseRent)}</strong></td></tr>`,
-    `<tr><td>${utilityLineLabel('water', record)}</td><td align="right">${formatUtilityAmount(record.waterFee)}</td></tr>`,
-    `<tr><td>${utilityLineLabel('electricity', record)}</td><td align="right">${formatUtilityAmount(record.electricityFee)}</td></tr>`,
-    `<tr style="border-top:2px solid #000"><td><strong>Total</strong></td><td align="right"><strong>${formatMoney(record.actualAmount)}</strong></td></tr>`,
-  ].join('');
-  return `<p>Dear ${unit.tenantName},</p>
-    <p>Rent invoice for <strong>${unit.unitName}</strong> — ${record.billingPeriod}.</p>
-    <table style="width:100%;border-collapse:collapse">${lineItems}</table>
-    <p>Due: ${formatDisplayDate(dueDateForPeriod(record.billingPeriod, unit.dueDateDay))}</p>
-    ${note ? `<p>${note}</p>` : ''}
-    ${paymentInstructionsText ? `<hr/><pre style="font-family:sans-serif;white-space:pre-wrap;font-size:13px">${paymentInstructionsText}</pre>` : ''}
-    <p>Thank you.</p>`;
-}
-
 function receiptHtml(unit: RentalUnit, record: RentRecord, note?: string | null, paymentAmount?: number): string {
   const paid = paymentAmount ?? (record.amountPaid || record.actualAmount);
   const balance = outstandingBalance(record);
@@ -936,6 +916,10 @@ export async function sendRentInvoice(
     note?: string | null;
     paymentTemplate?: DebitNotePaymentTemplateId;
     paymentRemark?: string | null;
+    /** Editable email fields (invoice-reminders style). */
+    to?: string | null;
+    subject?: string | null;
+    body?: string | null;
   }
 ) {
   const record = await getRentRecord(recordId, userId);
@@ -977,39 +961,72 @@ export async function sendRentInvoice(
       water_period_from = ?, water_period_to = ?,
       electricity_period_from = ?, electricity_period_to = ?,
       actual_amount = ?, invoice_ref = ?, custom_invoice_note = ?,
-      invoice_sent_at = datetime('now'), updated_at = datetime('now')
+      updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(water, elec, rentFrom, rentTo, waterFrom, waterTo, elecFrom, elecTo, total, invoiceRef, input.note?.trim() || null, record.id, userId);
 
   const fresh = (await getRentRecord(record.id, userId))!;
   await syncChargeItemsFromRecord(fresh);
-  let email: SendResult = { sent: false, provider: 'log' };
-  if (unit.tenantEmail) {
-    const issuedDate = new Date().toISOString().slice(0, 10);
-    const dueDate = debitNoteDueDate(issuedDate);
-    const dueDisplay = formatDisplayDate(dueDate);
-    const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
-    const templateId = input.paymentTemplate ?? resolveUnitBillingCompany(unit);
-    const savedTpl = await getRentalTemplate(userId, templateId);
-    const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
-    const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
-      templateId,
-      noteNo,
-      dueDateChinese,
-      input.paymentRemark,
-      savedTpl?.paymentInstructions,
-      resolveCompanyFromTemplate(templateId, savedTpl),
-    );
-    const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
-    email = await sendEmail(
-      unit.tenantEmail,
-      `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, invoiceNote, paymentInstructionsText),
-      { userId, brand: 'honour' },
-    );
+
+  const issuedDate = new Date().toISOString().slice(0, 10);
+  const dueDate = debitNoteDueDate(issuedDate);
+  const dueDisplay = formatDisplayDate(dueDate);
+  const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
+  const templateId = input.paymentTemplate ?? resolveUnitBillingCompany(unit);
+  const savedTpl = await getRentalTemplate(userId, templateId);
+  const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
+  const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+    templateId,
+    noteNo,
+    dueDateChinese,
+    input.paymentRemark,
+    savedTpl?.paymentInstructions,
+    resolveCompanyFromTemplate(templateId, savedTpl),
+  );
+  const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
+
+  const to = (input.to || '').trim() || unit.tenantEmail.trim();
+  if (!to) {
+    throw Object.assign(new Error('No recipient email — add an address before sending'), { status: 400 });
   }
-  await logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);
-  return { record: fresh, email };
+
+  const subject =
+    (input.subject || '').trim() ||
+    defaultRentInvoiceSubject(unit.unitName, fresh.billingPeriod);
+  const textBody =
+    (input.body || '').trim() ||
+    defaultRentInvoiceBody({
+      tenantName: unit.tenantName,
+      unitName: unit.unitName,
+      record: fresh,
+      dueDateDay: unit.dueDateDay,
+      note: invoiceNote,
+      paymentInstructionsText,
+    });
+
+  const email = await sendEmail(to, subject, plainTextToHtml(textBody), {
+    userId,
+    brand: 'honour',
+  });
+
+  // Only mark invoice sent when email actually went out (same as invoice reminders).
+  if (email.sent) {
+    await db.prepare(
+      `UPDATE rental_records SET invoice_sent_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    ).run(record.id, userId);
+  }
+
+  const sentRecord = (await getRentRecord(record.id, userId))!;
+  const today = new Date().toISOString().slice(0, 10);
+  const msg = email.sent
+    ? `Invoice email sent to ${to} on ${today} · Total ${formatMoney(total)}`
+    : email.provider === 'log'
+      ? `Invoice email prepared for ${to} on ${today} (no email provider — logged only)`
+      : `Invoice email to ${to} failed on ${today}: ${email.error || 'unknown error'}`;
+  await logRentalActivity(userId, unit.id, email.sent ? 'Invoice Sent' : 'Invoice Email Failed', msg, record.id);
+
+  return { record: sentRecord, email, to, subject };
 }
 
 // ---------------------------------------------------------------------------

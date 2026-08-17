@@ -34,6 +34,8 @@ import {
   daysRemaining,
   displayRentalStatus,
   isVirtualRentRecord,
+  defaultRentInvoiceBody,
+  defaultRentInvoiceSubject,
   formatDueDayLabel,
   formatDisplayDate,
   formatMoney,
@@ -49,6 +51,9 @@ import {
   calcWaterFeeFromMeter,
   DEBIT_NOTE_COMPANY_CHOICES,
   debitNoteCompanyForUnit,
+  buildDebitNotePaymentInstructionsText,
+  debitNoteDueDate,
+  formatDueDateChinese,
   resolveUnitBillingCompany,
   type DebitNoteCompanyId,
   resolveElectricityFormula,
@@ -228,6 +233,9 @@ function RentalDetailInner() {
   const [invoiceNote, setInvoiceNote] = useState('');
   const [invoicePaymentTemplate, setInvoicePaymentTemplate] = useState<DebitNotePaymentTemplateId>('label');
   const [invoicePaymentRemark, setInvoicePaymentRemark] = useState('');
+  const [invoiceTo, setInvoiceTo] = useState('');
+  const [invoiceSubject, setInvoiceSubject] = useState('');
+  const [invoiceBody, setInvoiceBody] = useState('');
 
   // paid modal
   const [showPaidModal, setShowPaidModal] = useState(false);
@@ -600,6 +608,10 @@ function RentalDetailInner() {
 
   const sendInvoice = async () => {
     if (!data?.currentRecord) return;
+    if (!invoiceTo.trim()) {
+      setToast(bi('Add a recipient email before sending', '請先填寫收件電郵'));
+      return;
+    }
     setBusy(true);
     const recordId = await ensurePeriodRecord();
     if (!recordId) {
@@ -615,10 +627,22 @@ function RentalDetailInner() {
         note: invoiceNote || null,
         paymentTemplate: invoicePaymentTemplate,
         paymentRemark: invoicePaymentRemark || null,
+        to: invoiceTo.trim(),
+        subject: invoiceSubject.trim(),
+        body: invoiceBody,
       }),
     });
+    const d = await res.json().catch(() => ({}));
     setBusy(false);
-    setToast(res.ok ? 'Invoice sent!' : 'Failed to send invoice');
+    if (!res.ok) {
+      setToast(d.error || bi('Failed to send invoice', '租金單發送失敗'));
+      return;
+    }
+    setToast(
+      d.sent
+        ? bi(`Invoice sent to ${d.to || invoiceTo}`, `已向 ${d.to || invoiceTo} 發送租金單`)
+        : bi('Invoice prepared (email not sent)', '租金單已準備（電郵未發送）'),
+    );
     setShowInvoiceModal(false);
     load();
   };
@@ -1385,9 +1409,51 @@ function RentalDetailInner() {
               <div className="flex flex-wrap gap-3">
                 {rec && (
                   <button onClick={() => {
-                    setInvoiceNote(rec.customInvoiceNote || '');
-                    setInvoicePaymentTemplate(debitNoteCompanyForUnit(unit.unitName));
+                    const note = rec.customInvoiceNote || '';
+                    const tpl = debitNoteCompanyForUnit(unit.unitName);
+                    setInvoiceNote(note);
+                    setInvoicePaymentTemplate(tpl);
                     setInvoicePaymentRemark('');
+                    const draftRent = Number(baseRent) || rec.baseRent;
+                    const draftWater = Number(waterFee) || 0;
+                    const draftElec = Number(electricityFee) || 0;
+                    const draftRecord = {
+                      ...rec,
+                      billingPeriod: period,
+                      baseRent: draftRent,
+                      waterFee: draftWater,
+                      electricityFee: draftElec,
+                      actualAmount: draftRent + draftWater + draftElec,
+                      baseRentPeriodFrom: fromFormDate(baseRentPeriodFrom),
+                      baseRentPeriodTo: fromFormDate(baseRentPeriodTo),
+                      waterPeriodFrom: fromFormDate(waterPeriodFrom),
+                      waterPeriodTo: fromFormDate(waterPeriodTo),
+                      electricityPeriodFrom: fromFormDate(electricityPeriodFrom),
+                      electricityPeriodTo: fromFormDate(electricityPeriodTo),
+                    };
+                    const issued = new Date().toISOString().slice(0, 10);
+                    const dueIso = debitNoteDueDate(issued);
+                    const dueChinese = formatDueDateChinese(
+                      formatDisplayDate(dueIso),
+                      period.split('-')[0],
+                    );
+                    const noteNo = `INV-${period.replace('-', '')}-${rec.id || 'draft'}`;
+                    const payText = buildDebitNotePaymentInstructionsText(
+                      tpl,
+                      noteNo,
+                      dueChinese,
+                      '',
+                    );
+                    setInvoiceTo(unit.tenantEmail || '');
+                    setInvoiceSubject(defaultRentInvoiceSubject(unit.unitName, period));
+                    setInvoiceBody(defaultRentInvoiceBody({
+                      tenantName: unit.tenantName,
+                      unitName: unit.unitName,
+                      record: draftRecord,
+                      dueDateDay: Number(dueDateDay) || unit.dueDateDay || 1,
+                      note,
+                      paymentInstructionsText: payText,
+                    }));
                     setShowInvoiceModal(true);
                   }}
                     disabled={contractEnded}
@@ -1590,7 +1656,7 @@ function RentalDetailInner() {
         </div>
       </div>
 
-      {/* Invoice Modal */}
+      {/* Invoice Modal — preview/edit/send like invoice payment reminders */}
       {showInvoiceModal && rec && (
         <Modal title="Send Invoice 發送租金單" onClose={() => setShowInvoiceModal(false)}>
           <div className="space-y-4">
@@ -1611,14 +1677,60 @@ function RentalDetailInner() {
                 </div>
                 <div className="flex justify-between font-bold border-t pt-1 mt-1">
                   <span>Total</span>
-                  <span className="text-lg">{formatMoney(rec.baseRent + Number(waterFee) + Number(electricityFee))}</span>
+                  <span className="text-lg">{formatMoney((Number(baseRent) || rec.baseRent) + Number(waterFee) + Number(electricityFee))}</span>
                 </div>
               </div>
             </div>
+
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Email preview note (optional)', '電郵預覽備註（選填）')}</label>
-              <textarea className={inp} rows={3} value={invoiceNote} onChange={(e) => setInvoiceNote(e.target.value)} placeholder={`Dear ${unit.tenantName},…`} />
-              <p className="text-xs text-gray-400 mt-1">Send to: {unit.tenantEmail || 'No email set — log only'}</p>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('To', '收件人')}</label>
+              <input
+                type="email"
+                className={inp}
+                value={invoiceTo}
+                onChange={(e) => setInvoiceTo(e.target.value)}
+                placeholder="tenant@email.com"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Subject', '主旨')}</label>
+              <input
+                type="text"
+                className={inp}
+                value={invoiceSubject}
+                onChange={(e) => setInvoiceSubject(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Body', '內文')}</label>
+              <textarea
+                className={`${inp} font-mono text-xs`}
+                rows={10}
+                value={invoiceBody}
+                onChange={(e) => setInvoiceBody(e.target.value)}
+              />
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {bi('Edit before sending. Same flow as invoice payment reminders.', '發送前可編輯。與發票催款郵件相同流程。')}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                {bi('Preview', '預覽')}
+              </p>
+              <p className="text-xs text-gray-500 mb-1">
+                <span className="font-medium text-gray-700">{bi('To', '收件人')}:</span> {invoiceTo || '—'}
+              </p>
+              <p className="text-xs text-gray-500 mb-2">
+                <span className="font-medium text-gray-700">{bi('Subject', '主旨')}:</span> {invoiceSubject || '—'}
+              </p>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap border-t border-gray-100 pt-2 max-h-48 overflow-y-auto">
+                {invoiceBody || '—'}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Stored invoice note (optional)', '儲存於租金單的備註（選填）')}</label>
+              <textarea className={inp} rows={2} value={invoiceNote} onChange={(e) => setInvoiceNote(e.target.value)} placeholder={`Dear ${unit.tenantName},…`} />
             </div>
             <DebitNotePaymentOptions
               templateId={invoicePaymentTemplate}
@@ -1642,7 +1754,7 @@ function RentalDetailInner() {
                 )}
               </div>
               <button onClick={sendInvoice} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
-                {busy ? 'Sending…' : 'Send Invoice Now'}
+                {busy ? bi('Sending…', '發送中…') : bi('Send invoice', '發送租金單')}
               </button>
             </div>
           </div>

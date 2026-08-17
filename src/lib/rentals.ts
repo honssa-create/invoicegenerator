@@ -409,6 +409,57 @@ export function utilityLineLabel(
   return period ? `${base} (${period})` : base;
 }
 
+/** Default subject for rental invoice email (editable before send, like invoice reminders). */
+export function defaultRentInvoiceSubject(unitName: string, billingPeriod: string): string {
+  return `租金單 ${unitName} ${billingPeriod}`;
+}
+
+/** Plain-text body draft for rental invoice email (editable before send). */
+export function defaultRentInvoiceBody(input: {
+  tenantName: string;
+  unitName: string;
+  record: Pick<
+    RentRecord,
+    | 'billingPeriod'
+    | 'baseRent'
+    | 'waterFee'
+    | 'electricityFee'
+    | 'actualAmount'
+    | 'baseRentPeriodFrom'
+    | 'baseRentPeriodTo'
+    | 'waterPeriodFrom'
+    | 'waterPeriodTo'
+    | 'electricityPeriodFrom'
+    | 'electricityPeriodTo'
+  >;
+  dueDateDay: number;
+  note?: string | null;
+  paymentInstructionsText?: string | null;
+}): string {
+  const { tenantName, unitName, record, dueDateDay, note, paymentInstructionsText } = input;
+  const due = formatDisplayDate(dueDateForPeriod(record.billingPeriod, dueDateDay));
+  const lines = [
+    `Dear ${tenantName},`,
+    '',
+    `Rent invoice for ${unitName} — ${record.billingPeriod}.`,
+    '',
+    `${baseRentLineLabel(record)}: ${formatMoney(record.baseRent)}`,
+    `${utilityLineLabel('water', record)}: ${formatUtilityAmount(record.waterFee)}`,
+    `${utilityLineLabel('electricity', record)}: ${formatUtilityAmount(record.electricityFee)}`,
+    `Total: ${formatMoney(record.actualAmount)}`,
+    '',
+    `Due: ${due}`,
+  ];
+  if (note?.trim()) {
+    lines.push('', note.trim());
+  }
+  if (paymentInstructionsText?.trim()) {
+    lines.push('', '---', '', paymentInstructionsText.trim());
+  }
+  lines.push('', 'Thank you.');
+  return lines.join('\n');
+}
+
 export function daysRemaining(leaseEndDate: string): number | null {
   const iso = isoFromDisplayDate(leaseEndDate) || leaseEndDate;
   if (!iso) return null;

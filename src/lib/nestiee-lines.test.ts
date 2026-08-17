@@ -10,6 +10,9 @@ import {
   appendNestieeShippingLine,
   computeNestieeGiftBoxQtysFromLines,
   applyNestieeGiftBoxAutoQtys,
+  isNestieeFastestShipOption,
+  isNestieeScheduledShipOption,
+  parseNestieeReceiptDateFromDeliveryOptions,
   resolveOrderAddressesForQuotation,
   stripHtml,
   NESTIEE_SHIPPING_LINE_NAME,
@@ -77,6 +80,146 @@ describe('parseNestieeLinesFromWoo', () => {
       { label: '選擇套裝數量', value: '🍊 小份心意剛剛好｜1套2盒', price: 598 },
       { label: '📦送貨安排', value: '⚡按最快日子寄出 (1-2個工作天寄出)', price: 0 },
     ]);
+  });
+});
+
+describe('parseNestieeReceiptDateFromDeliveryOptions', () => {
+  it('matches any 按最快寄出 variant under 送貨安排', () => {
+    expect(
+      isNestieeFastestShipOption({
+        label: '📦送貨安排',
+        value: '⚡按最快日子寄出 (1-2個工作天寄出)',
+      })
+    ).toBe(true);
+    expect(
+      isNestieeFastestShipOption({
+        label: '<b>📦送貨安排</b>',
+        value: '⚡按最快日子寄出 (1-2個工作天)',
+      })
+    ).toBe(true);
+    expect(
+      isNestieeFastestShipOption({
+        label: '📦送貨安排',
+        value: '⚡按最快寄出(1-2個工作天)',
+      })
+    ).toBe(true);
+    expect(
+      isNestieeFastestShipOption({
+        label: '📦送貨安排',
+        value: '⚡按最快日子寄出 (4月24日)',
+      })
+    ).toBe(true);
+    expect(
+      isNestieeFastestShipOption({
+        label: '📦送貨安排',
+        value: '📅 預約指定日子',
+      })
+    ).toBe(false);
+    expect(
+      isNestieeFastestShipOption({
+        label: '📦送貨安排',
+        value: '📦5月9日順豐站自取',
+      })
+    ).toBe(false);
+    expect(
+      isNestieeFastestShipOption({
+        label: '其他選項',
+        value: '⚡按最快寄出(1-2個工作天)',
+      })
+    ).toBe(false);
+  });
+
+  it('sets ASAP receipt date to created + 2 calendar days', () => {
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        price: 100,
+        total: '100',
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              {
+                name: '<b>📦送貨安排</b>',
+                value: '⚡按最快日子寄出 (1-2個工作天寄出)',
+                price: 0,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-08-14T09:40:02')).toBe(
+      '2026-08-16'
+    );
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-08-30')).toBe('2026-09-01');
+  });
+
+  it('sets 預約指定日子 from companion 預約送達日期 (DD/MM/YYYY)', () => {
+    expect(
+      isNestieeScheduledShipOption({
+        label: '📦送貨安排',
+        value: '📅 預約指定日子',
+      })
+    ).toBe(true);
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        price: 100,
+        total: '100',
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              {
+                name: '<b>📦送貨安排</b>',
+                value: '📅 預約指定日子',
+                price: 0,
+              },
+              {
+                name: '<b>📦預約送達日期  | 會提早於到貨日前 2–3 日寄出 (選用順豐寄出)</b>',
+                value: '24/05/2026',
+                price: 0,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-05-15T14:43:11')).toBe(
+      '2026-05-24'
+    );
+  });
+
+  it('returns empty when option missing or created date unparseable', () => {
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions(
+        [{ name: 'x', quantity: 1, unit_price: 1, line_total: 1 }],
+        '2026-08-14'
+      )
+    ).toBe('');
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        price: 100,
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              {
+                name: '<b>📦送貨安排</b>',
+                value: '⚡按最快日子寄出 (1-2個工作天寄出)',
+                price: 0,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '')).toBe('');
   });
 });
 

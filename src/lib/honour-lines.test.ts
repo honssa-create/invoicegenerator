@@ -3,12 +3,11 @@ import {
   parseHonourLinesFromWoo,
   appendHonourShippingLine,
   extractHonourCpoOptions,
-  applyHonourOptionsToFields,
   applyHonourOptionsToLine,
   buildHonourLinesFromWoo,
   collectHonourCpoOptionsFromLines,
   parseHonourCpoNotesFromLines,
-  parseHonourEstimateDelivery,
+  parseHonourEstimateMinDate,
   parseHonourPaymentFromWoo,
   parseHonourLines,
   parseHonourSuppliers,
@@ -19,6 +18,7 @@ import {
   mergeHonourLinesPreservingLocal,
   emptyHonourLine,
   emptyHonourSupplier,
+  pruneStaleOrderFields,
   HONOUR_SHIPPING_LINE_STYLE,
   type WooLineItemLike,
 } from './orders';
@@ -205,55 +205,56 @@ describe('appendHonourShippingLine', () => {
   });
 });
 
-describe('extractHonourCpoOptions / applyHonourOptionsToFields', () => {
+describe('extractHonourCpoOptions / applyHonourOptionsToLine', () => {
   it('maps iron-on custom size; colour count stays in dump only', () => {
     const { options, sizeMeta } = collectHonourCpoOptionsFromLines([ironOnLine]);
-    const fields: Record<string, unknown> = {};
-    applyHonourOptionsToFields(fields, options, sizeMeta);
-    expect(fields.card_size).toBe('26×52');
-    expect(fields.plating_color).toBeUndefined();
-    expect(String(fields.other_craft)).toContain('請選擇尺寸');
-    expect(String(fields.other_craft)).toContain('顏色數量: 1 - 5');
-    expect(String(fields.other_craft)).toContain('請選擇數量: 300個');
+    const line = applyHonourOptionsToLine(emptyHonourLine(), options, sizeMeta);
+    expect(line.card_size).toBe('26×52');
+    expect(line.plating_color).toBe('');
+    expect(line.other_options).toContain('請選擇尺寸');
+    expect(line.other_options).toContain('顏色數量: 1 - 5');
+    expect(line.other_options).toContain('請選擇數量: 300個');
   });
 
   it('maps flat woven size; seam/colours stay in dump only', () => {
     const { options, sizeMeta } = collectHonourCpoOptionsFromLines([flatWovenLine]);
-    const fields: Record<string, unknown> = {};
-    applyHonourOptionsToFields(fields, options, sizeMeta);
-    expect(fields.card_size).toBe('30 x 15mm');
-    expect(fields.plating_color).toBeUndefined();
-    expect(fields.clasp).toBeUndefined();
-    expect(String(fields.other_craft)).toContain('車縫緣邊處理');
-    expect(String(fields.other_craft)).toContain('顏色數量: 1 - 5');
+    const line = applyHonourOptionsToLine(emptyHonourLine(), options, sizeMeta);
+    expect(line.card_size).toBe('30 x 15mm');
+    expect(line.plating_color).toBe('');
+    expect(line.clasp).toBe('');
+    expect(line.other_options).toContain('車縫緣邊處理');
+    expect(line.other_options).toContain('顏色數量: 1 - 5');
   });
 
   it('maps student label size; text colour stays in dump only', () => {
     const { options, sizeMeta } = collectHonourCpoOptionsFromLines([studentLine]);
-    const fields: Record<string, unknown> = {};
-    applyHonourOptionsToFields(fields, options, sizeMeta);
-    expect(fields.card_size).toBe('25 x 50mm (最多兩行文字)');
-    expect(fields.plating_color).toBeUndefined();
-    expect(String(fields.other_craft)).toContain('文字顏色: 黑色');
-    expect(String(fields.other_craft)).toContain('Arial');
-    expect(String(fields.other_craft)).toContain('Luk Myles');
-    expect(String(fields.other_craft)).toContain('人數');
-    expect(String(fields.other_craft)).toContain('尺寸:');
+    const line = applyHonourOptionsToLine(emptyHonourLine(), options, sizeMeta);
+    expect(line.card_size).toBe('25 x 50mm (最多兩行文字)');
+    expect(line.plating_color).toBe('');
+    expect(line.other_options).toContain('文字顏色: 黑色');
+    expect(line.other_options).toContain('Arial');
+    expect(line.other_options).toContain('Luk Myles');
+    expect(line.other_options).toContain('人數');
+    expect(line.other_options).toContain('尺寸:');
   });
 
   it('does not overwrite non-empty craft fields on re-import', () => {
     const { options, sizeMeta } = collectHonourCpoOptionsFromLines([flatWovenLine]);
-    const fields: Record<string, unknown> = {
-      card_size: 'manual size',
-      plating_color: 'manual color',
-      clasp: 'manual clasp',
-      other_craft: 'manual dump',
-    };
-    applyHonourOptionsToFields(fields, options, sizeMeta);
-    expect(fields.card_size).toBe('manual size');
-    expect(fields.plating_color).toBe('manual color');
-    expect(fields.clasp).toBe('manual clasp');
-    expect(fields.other_craft).toBe('manual dump');
+    const line = applyHonourOptionsToLine(
+      {
+        ...emptyHonourLine(),
+        card_size: 'manual size',
+        plating_color: 'manual color',
+        clasp: 'manual clasp',
+        other_options: 'manual dump',
+      },
+      options,
+      sizeMeta
+    );
+    expect(line.card_size).toBe('manual size');
+    expect(line.plating_color).toBe('manual color');
+    expect(line.clasp).toBe('manual clasp');
+    expect(line.other_options).toBe('manual dump');
   });
 
   it('skips upload internals from visible options', () => {
@@ -263,20 +264,19 @@ describe('extractHonourCpoOptions / applyHonourOptionsToFields', () => {
   });
 
   it('maps Honour-specific craft labels to their related fields (not other dump)', () => {
-    const fields: Record<string, unknown> = {};
-    applyHonourOptionsToFields(fields, [
+    const line = applyHonourOptionsToLine(emptyHonourLine(), [
       { key: '_uni_cpo_plating', label: '金屬電鍍色', value: '古銅色' },
       { key: '_uni_cpo_back', label: '背面配件', value: '蝴蝶扣' },
       { key: '_uni_cpo_method', label: '做法', value: '滴膠' },
       { key: '_uni_cpo_pack', label: '交貨包裝', value: 'OPP' },
       { key: '_uni_cpo_extra', label: '顏色數量', value: '1 - 5' },
     ]);
-    expect(fields.plating_color).toBe('古銅色');
-    expect(fields.clasp).toBe('蝴蝶扣');
-    expect(fields.craft).toBe('滴膠');
-    expect(fields.pack_required).toBe('OPP');
-    expect(fields.other_craft).toBe('顏色數量: 1 - 5');
-    expect(String(fields.other_craft)).not.toContain('金屬電鍍色');
+    expect(line.plating_color).toBe('古銅色');
+    expect(line.clasp).toBe('蝴蝶扣');
+    expect(line.craft).toBe('滴膠');
+    expect(line.pack_required).toBe('OPP');
+    expect(line.other_options).toBe('顏色數量: 1 - 5');
+    expect(line.other_options).not.toContain('金屬電鍍色');
   });
 
   it('extracts 備註(如有) for order notes', () => {
@@ -357,7 +357,9 @@ describe('per-line honour options / suppliers', () => {
     });
     const derived = honourLinesDerivedFields(lines);
     expect(derived.craft).toBe('legacy craft');
-    expect(derived.other_craft).toBe('legacy dump');
+    expect(derived.pack_required).toBe('OPP');
+    expect(derived).not.toHaveProperty('other_craft');
+    expect(derived).not.toHaveProperty('internal_pack');
   });
 
   it('pads suppliers to product count without shrinking', () => {
@@ -371,24 +373,38 @@ describe('per-line honour options / suppliers', () => {
     expect(seeded[1].supplier).toBe('');
     expect(ensureHonourSupplierCount(seeded, 1)).toHaveLength(2);
     const derived = honourSuppliersDerivedFields([
-      { ...emptyHonourSupplier(), supplier: 'A', carton_count: '3' },
+      { ...emptyHonourSupplier(), supplier: 'A', carton_count: '3', supplier_price: '1.5' },
       { ...emptyHonourSupplier(), supplier: 'B' },
     ]);
-    expect(derived.supplier).toBe('A');
+    expect(derived.supplier_price).toBe('1.5');
+    expect(derived).not.toHaveProperty('supplier');
+    expect(derived).not.toHaveProperty('mould_print_fee');
     expect(JSON.parse(derived.honour_suppliers)).toHaveLength(2);
+  });
+
+  it('prunes stale unused fields_json keys', () => {
+    const fields: Record<string, unknown> = {
+      requested_delivery: '2026/08/13 - 2026/08/18',
+      external_payload: { id: 1 },
+      external_sync: true,
+      invoice_receipt: 'x',
+      craft: 'keep',
+    };
+    pruneStaleOrderFields(fields);
+    expect(fields).toEqual({ craft: 'keep' });
   });
 });
 
-describe('parseHonourEstimateDelivery / payment', () => {
-  it('joins pi overall estimate min/max dates', () => {
+describe('parseHonourEstimateMinDate / payment', () => {
+  it('normalizes pi overall estimate min date', () => {
     expect(
-      parseHonourEstimateDelivery({
+      parseHonourEstimateMinDate({
         meta_data: [
           { key: 'pi_overall_estimate_min_date', value: '2026/08/13' },
           { key: 'pi_overall_estimate_max_date', value: '2026/08/18' },
         ],
       })
-    ).toBe('2026/08/13 - 2026/08/18');
+    ).toBe('2026-08-13');
   });
 
   it('maps FPS payment title', () => {

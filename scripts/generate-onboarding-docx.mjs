@@ -521,11 +521,11 @@ function buildChildren() {
     p('Largest and most integration-heavy module. ClickUp-style detail with custom fields.'),
     bullet('UI: /orders, /orders/[id] (two-pane: content + Activity), delivery-note, production-note, /hub'),
     bullet('API: /api/orders, /api/orders/[id], files, payment-receipt, sf-express, convert-to-quotation; Hub routes under /api/hub/*; POST /api/payments/scan'),
-    bullet('Lib: orders.ts (ORDER_FIELDS, parsers, bird-nest formulas — client-safe), order-server.ts, hub-server.ts, hub-sync.ts, woocommerce*, delivery-note-print.ts, sf-express*'),
+    bullet('Lib: orders.ts (ORDER_SHIPPING_METHODS, parsers, bird-nest formulas — client-safe), order-server.ts, hub-server.ts, hub-sync.ts, woocommerce*, delivery-note-print.ts, sf-express*'),
     bullet('Tables: orders, order_files, hub_order_sequences, integration_sync_state'),
     rich(
       { text: 'fields_json: ', bold: true },
-      'Most custom fields live in a JSON blob. ORDER_FIELDS in orders.ts defines the field list; fields with a col map to first-class columns, the rest stay in fields_json.',
+      'Most custom fields live in a JSON blob (fields_json). Curated Order/Payment/Shipment boxes and Honour line/supplier cards own the UI; shipping-method options are ORDER_SHIPPING_METHODS.',
     ),
     bullet('Order types drive UI boxes: honour訂製 / honour en訂製 → honour_lines; 燕窩回禮燉製 → bird-nest formulas; Nestiee 燕窩訂單 → nestiee_lines + gift-box qtys.'),
     bullet('Payment Detail: three installment slots (payment_*, payment2_*, payment3_*) including receipt paths and payment_verified.'),
@@ -756,7 +756,7 @@ function buildChildren() {
       [
         ['ownerId / data owner', 'Org admin user id used as user_id on business rows (getDataOwnerId)'],
         ['fields_json', 'JSON blob on orders for long custom-field list'],
-        ['ORDER_FIELDS', 'Client-safe field definitions in orders.ts'],
+        ['ORDER_SHIPPING_METHODS', 'Shipment Detail shipping options in orders.ts'],
         ['Expense ID', 'Global EXP-0000001 serial (batch_id)'],
         ['Receipt No.', 'EXP-YYYYMM-{code}{serial} per month + funding source'],
         ['Hub', 'Order Hub import/sync from WooCommerce / QuickBooks'],

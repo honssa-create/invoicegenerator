@@ -22,7 +22,10 @@ import {
   honourSuppliersDerivedFields,
   parseHonourCpoNotesFromLines,
   parseHonourPaymentFromWoo,
-  parseHonourEstimateDelivery,
+  parseHonourEstimateMinDate,
+  normalizeOrderDueDate,
+  parseNestieeReceiptDateFromDeliveryOptions,
+  pruneStaleOrderFields,
   WOO_PLATFORM_ORDER_TYPE,
   type WooAddressLike,
   type WooLineItemLike,
@@ -137,8 +140,7 @@ export async function upsertHubOrder(
     }
   }
   fields.order_from = input.source_platform;
-  fields.external_sync = true;
-  if (input.raw_payload) fields.external_payload = input.raw_payload;
+  pruneStaleOrderFields(fields);
   const mappedType = WOO_PLATFORM_ORDER_TYPE[input.source_platform as keyof typeof WOO_PLATFORM_ORDER_TYPE];
   if (mappedType) fields.order_type = mappedType;
 
@@ -159,6 +161,19 @@ export async function upsertHubOrder(
     const shipMethod = parseWooShippingMethod(payload);
     if (shipMethod && !String(fields.shipping_method || '').trim()) {
       fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
+    }
+
+    // ASAP 送貨安排 → 客人收貨日期 = order created + 2 days (same linked keys as UI).
+    const receiptDate =
+      normalizeOrderDueDate(String(fields.due_date || '')) ||
+      normalizeOrderDueDate(String(fields.client_delivery_date || '')) ||
+      parseNestieeReceiptDateFromDeliveryOptions(
+        nestieeLines,
+        typeof payload.date_created === 'string' ? payload.date_created : ''
+      );
+    if (receiptDate) {
+      fields.due_date = receiptDate;
+      fields.client_delivery_date = receiptDate;
     }
 
     const verified = fields.payment_verified === true || fields.payment_verified === 'true';
@@ -208,9 +223,16 @@ export async function upsertHubOrder(
       fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
     }
 
-    const estimate = parseHonourEstimateDelivery(payload);
-    if (estimate && !String(fields.requested_delivery || '').trim()) {
-      fields.requested_delivery = estimate;
+    // The status-bar and Shipment Detail inputs are the same receipt date.
+    // Preserve a manual value on re-sync; otherwise seed both linked keys from
+    // Honour's earliest overall delivery estimate.
+    const receiptDate =
+      normalizeOrderDueDate(String(fields.due_date || '')) ||
+      normalizeOrderDueDate(String(fields.client_delivery_date || '')) ||
+      parseHonourEstimateMinDate(payload);
+    if (receiptDate) {
+      fields.due_date = receiptDate;
+      fields.client_delivery_date = receiptDate;
     }
 
     const verified = fields.payment_verified === true || fields.payment_verified === 'true';

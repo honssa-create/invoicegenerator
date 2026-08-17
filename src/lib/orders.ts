@@ -4,18 +4,7 @@ import {
   type PrepCapacity,
   type PrepFlavor,
 } from '@/lib/kitchen-prep';
-
-export type OrderFieldType = 'text' | 'textarea' | 'date' | 'checkbox' | 'select';
-
-export interface OrderFieldDef {
-  key: string;
-  label: string;
-  type: OrderFieldType;
-  /** If set, this field is stored in a first-class column instead of fields_json. */
-  col?: keyof CoreColumns;
-  options?: string[];
-  placeholder?: string;
-}
+import { addCalendarDays } from '@/lib/wedding-gift-confirmation';
 
 export interface CoreColumns {
   po_number: string;
@@ -99,6 +88,14 @@ export function normalizeOrderDueDate(raw: string | null | undefined): string | 
   if (!s) return null;
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const ymd = s.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+  if (ymd) {
+    const month = Number(ymd[2]);
+    const day = Number(ymd[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${ymd[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
   const dmy = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (dmy) {
     let y = Number(dmy[3]);
@@ -256,43 +253,8 @@ export const STATUS_COLUMN_ACCENT: Record<string, string> = {
   'completed': 'border-t-[#16A34A]',
 };
 
-// The full custom-field list shown in the order detail "Fields" panel, in order.
-export const ORDER_FIELDS: OrderFieldDef[] = [
-  { key: 'email', label: 'E-mail', type: 'text', col: 'customer_email', placeholder: 'name@email.com' },
-  { key: 'shipping', label: 'Shipping Address (最後寄出地址)', type: 'textarea', col: 'shipping_address' },
-  { key: 'phone', label: '電話', type: 'text', col: 'phone', placeholder: '+852…' },
-  { key: 'po', label: 'PO#', type: 'text', col: 'po_number' },
-  { key: 'qty_ordered', label: '客人下單數量 Quantity', type: 'text', placeholder: 'e.g. 4款各53個' },
-  { key: 'name', label: 'Name', type: 'text', col: 'name' },
-  { key: 'pack_required', label: '客戶要求交貨包裝', type: 'text', placeholder: 'e.g. OPP 獨立包裝' },
-  { key: 'supplier_qty', label: '供應商生產數量', type: 'text' },
-  { key: 'supplier_price', label: '供應商單價', type: 'text', placeholder: 'e.g. rmb 4.2' },
-  { key: 'invoice_receipt', label: '發票及收據', type: 'text', placeholder: 'e.g. 1 Invoice, 1 Receipt' },
-  { key: 'quotation_no', label: 'Quotation No. #', type: 'text' },
-  { key: 'supplier_received_qty', label: '供應商到貨數量(及次數)', type: 'text' },
-  { key: 'mould_print_fee', label: '供應商-模費/印刷費', type: 'text' },
-  { key: 'supplier_ship_date', label: '供應商寄出日期', type: 'text', placeholder: 'e.g. 15/1/26' },
-  { key: 'product_type', label: '產品/樣品', type: 'select', options: ['大貨產品', '樣品', '打樣'] },
-  { key: 'plating_color', label: '電鍍色', type: 'text' },
-  { key: 'clasp', label: '背扣', type: 'text', placeholder: 'e.g. 四節圓圈' },
-  { key: 'craft', label: '加工工藝', type: 'text', placeholder: 'e.g. 亞加力-單面' },
-  { key: 'supplier', label: '供應商', type: 'text', placeholder: 'e.g. 亞加力-和夫' },
-  { key: 'supplier_pack', label: '供應商出貨包裝', type: 'text', placeholder: 'e.g. OPP獨立包裝' },
-  { key: 'payment_option', label: '下單時付款選項', type: 'text', placeholder: 'e.g. yedpay' },
-  { key: 'internal_pack', label: '內部包裝處理', type: 'text', placeholder: 'e.g. 不需要' },
-  { key: 'all_products_check', label: '有關此訂單的，所有產品…', type: 'checkbox' },
-  { key: 'invoice_before_ship', label: '出貨前要開Invoice', type: 'text' },
-  { key: 'invoice_no', label: 'Invoice #', type: 'text', placeholder: 'e.g. 10013205' },
-  { key: 'payment_terms', label: '款項', type: 'select', options: ['100% Payment (全數付清)', '50% 訂金', '待付款'] },
-  { key: 'requested_delivery', label: '客人要求收貨日期', type: 'text', placeholder: 'e.g. 28/1/26' },
-  { key: 'order_from', label: 'Order From 下單平台', type: 'text' },
-  { key: 'card_size', label: '紙卡尺寸', type: 'text' },
-  { key: 'tracking_no', label: 'Tracking Number 運單號', type: 'text', placeholder: 'e.g. SF5120793357800' },
-  { key: 'shipping_method', label: 'Shipping 寄出方式', type: 'select', options: ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] },
-  { key: 'other_craft', label: '其他加工', type: 'textarea' },
-  { key: 'carton_count', label: 'Number of Cartons / 箱數', type: 'text', col: 'carton_count', placeholder: 'e.g. 5' },
-  { key: 'extra_actions', label: '額外動作', type: 'textarea' },
-];
+/** Shipment Detail / Woo normalize options for 寄出方式. */
+export const ORDER_SHIPPING_METHODS = ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] as const;
 
 /** Synthetic Honour line style for Woo shipping fees. */
 export const HONOUR_SHIPPING_LINE_STYLE = 'Shipping';
@@ -485,7 +447,10 @@ export function firstHonourProductLine(lines: HonourLineItem[]): HonourLineItem 
   return honourProductLines(lines)[0];
 }
 
-/** Derived fields kept in sync for delivery-note / legacy readers. */
+/**
+ * Derived fields kept in sync for delivery-note / legacy readers.
+ * Per-line-only craft (`internal_pack`, `other_options`) stays inside honour_lines JSON.
+ */
 export function honourLinesDerivedFields(lines: HonourLineItem[]): Record<string, string> {
   const { totalQuantity } = computeHonourLineTotals(lines);
   const first = firstHonourProductLine(lines) || lines[0];
@@ -499,9 +464,7 @@ export function honourLinesDerivedFields(lines: HonourLineItem[]): Record<string
     craft: first?.craft ?? '',
     plating_color: first?.plating_color ?? '',
     clasp: first?.clasp ?? '',
-    internal_pack: first?.internal_pack ?? '',
     pack_required: first?.pack_required ?? '',
-    other_craft: first?.other_options ?? '',
   };
 }
 
@@ -602,18 +565,37 @@ export function serializeHonourSuppliers(suppliers: HonourSupplierItem[]): strin
   );
 }
 
-/** Mirror first supplier into legacy flat keys; persist honour_suppliers JSON. */
+/**
+ * Persist honour_suppliers JSON and mirror only flats still read by print/quotation.
+ * Card-only fields (`supplier`, `mould_print_fee`, `supplier_pack`) stay inside the JSON.
+ */
 export function honourSuppliersDerivedFields(suppliers: HonourSupplierItem[]): Record<string, string> {
   const first = suppliers[0] || emptyHonourSupplier();
   return {
     honour_suppliers: serializeHonourSuppliers(suppliers),
-    supplier: first.supplier,
     supplier_price: first.supplier_price,
-    mould_print_fee: first.mould_print_fee,
     supplier_qty: first.supplier_qty,
-    supplier_pack: first.supplier_pack,
     supplier_ship_date: first.supplier_ship_date,
   };
+}
+
+/** Dead fields_json keys — never shown and no longer written. */
+export const STALE_ORDER_FIELD_KEYS = [
+  'requested_delivery',
+  'external_sync',
+  'external_payload',
+  'invoice_receipt',
+  'supplier_received_qty',
+  'product_type',
+  'all_products_check',
+  'invoice_before_ship',
+] as const;
+
+/** Drop unused legacy keys from an order fields blob (in place). */
+export function pruneStaleOrderFields(fields: Record<string, unknown>): void {
+  for (const key of STALE_ORDER_FIELD_KEYS) {
+    delete fields[key];
+  }
 }
 
 export interface OrderFile {
@@ -998,6 +980,69 @@ export function parseNestieeLinesFromWoo(lineItems: WooLineItemLike[] | null | u
   return out;
 }
 
+/** True when Nestiee EPO option is any ASAP / 按最快寄出 送貨安排 variant. */
+export function isNestieeFastestShipOption(opt: Pick<NestieeLineOption, 'label' | 'value'>): boolean {
+  const label = stripHtml(String(opt.label || ''));
+  const value = stripHtml(String(opt.value || ''));
+  if (!/送貨安排/.test(label)) return false;
+  // Covers 按最快寄出… and 按最快日子寄出…
+  return /按最快(?:日子)?寄出/.test(value);
+}
+
+/** True when Nestiee EPO option is 預約指定日子 under 送貨安排. */
+export function isNestieeScheduledShipOption(opt: Pick<NestieeLineOption, 'label' | 'value'>): boolean {
+  const label = stripHtml(String(opt.label || ''));
+  const value = stripHtml(String(opt.value || ''));
+  if (!/送貨安排/.test(label)) return false;
+  return /預約指定日子/.test(value);
+}
+
+/** Companion date field shown when customer books a delivery day. */
+export function isNestieeScheduledDeliveryDateOption(
+  opt: Pick<NestieeLineOption, 'label' | 'value'>
+): boolean {
+  const label = stripHtml(String(opt.label || ''));
+  return /預約送達日期|請選擇送貨日/.test(label);
+}
+
+function nestieeOrderCreatedIso(orderCreatedAt: string | null | undefined): string {
+  return (
+    normalizeOrderDueDate(String(orderCreatedAt || '').slice(0, 10)) ||
+    normalizeOrderDueDate(String(orderCreatedAt || '')) ||
+    ''
+  );
+}
+
+/**
+ * Nestiee 送貨安排 → 客人收貨日期:
+ * - 按最快寄出… → order created + 2 calendar days
+ * - 預約指定日子 → companion 預約送達日期 / 請選擇送貨日 value (DD/MM/YYYY)
+ */
+export function parseNestieeReceiptDateFromDeliveryOptions(
+  lines: NestieeLineItem[] | null | undefined,
+  orderCreatedAt: string | null | undefined
+): string {
+  if (!Array.isArray(lines) || !lines.length) return '';
+
+  for (const line of lines) {
+    const opts = line.options || [];
+    if (!opts.some((opt) => isNestieeScheduledShipOption(opt))) continue;
+    for (const opt of opts) {
+      if (!isNestieeScheduledDeliveryDateOption(opt)) continue;
+      const iso = normalizeOrderDueDate(opt.value);
+      if (iso) return iso;
+    }
+  }
+
+  const hasFastest = lines.some((line) =>
+    (line.options || []).some((opt) => isNestieeFastestShipOption(opt))
+  );
+  if (!hasFastest) return '';
+  const created = nestieeOrderCreatedIso(orderCreatedAt);
+  if (!created) return '';
+  return addCalendarDays(created, 2);
+}
+
 /** Read `fields.nestiee_lines` (JSON string or already-parsed array). */
 export function getNestieeLines(
   fields: Record<string, string | boolean | unknown>
@@ -1148,8 +1193,6 @@ export function parseWooShippingMethod(payload: Record<string, unknown> | null |
   }
   return '';
 }
-
-const ORDER_SHIPPING_METHODS = ['SF 順豐', '順豐', 'EMS', '香港郵政', '其他'] as const;
 
 /** Map Woo shipping titles onto Shipment Detail select options when possible. */
 export function normalizeOrderShippingMethod(raw: string | null | undefined): string {
@@ -1348,62 +1391,6 @@ export function applyHonourOptionsToLine(
   return next;
 }
 
-/**
- * Legacy flat-field mapper (order-level). Prefers applying into first empty craft keys.
- * Kept for tests / older call sites; Hub ingest uses per-line mapping instead.
- */
-export function applyHonourOptionsToFields(
-  fields: Record<string, unknown>,
-  options: HonourCpoOption[],
-  metaForSize?: WooMetaDatum[] | null
-): string[] {
-  const written: string[] = [];
-  const setIfEmpty = (key: string, value: string) => {
-    if (!value.trim()) return;
-    if (String(fields[key] ?? '').trim()) return;
-    fields[key] = value.trim();
-    written.push(key);
-  };
-
-  const cardSize = honourCardSizeFromMeta(metaForSize || null);
-  if (cardSize) setIfEmpty('card_size', cardSize);
-
-  const otherLines: string[] = [];
-  for (const opt of options) {
-    const label = opt.label;
-    const value = opt.value;
-    if (/備註|notes?/i.test(label)) continue;
-
-    if (label === '金屬電鍍色') {
-      setIfEmpty('plating_color', value);
-      continue;
-    }
-    if (label === '背面配件') {
-      setIfEmpty('clasp', value);
-      continue;
-    }
-    if (label === '做法') {
-      setIfEmpty('craft', value);
-      continue;
-    }
-    if (label === '內部包裝處理' || /內部包裝/.test(label)) {
-      setIfEmpty('internal_pack', value);
-      continue;
-    }
-    if (
-      label === '交貨包裝' ||
-      label === '客戶要求交貨包裝' ||
-      /交貨包裝|客戶.*包裝/.test(label)
-    ) {
-      setIfEmpty('pack_required', value);
-      continue;
-    }
-    otherLines.push(`${label}: ${value}`);
-  }
-  if (otherLines.length) setIfEmpty('other_craft', otherLines.join('\n'));
-  return written;
-}
-
 /** Preserve non-empty per-line craft/packaging when Hub re-syncs style/qty/price. */
 export function mergeHonourLinesPreservingLocal(
   incoming: HonourLineItem[],
@@ -1501,8 +1488,8 @@ export function parseHonourPaymentFromWoo(
   return parseNestieePaymentFromWoo(payload);
 }
 
-/** Build requested_delivery from pi_overall_estimate_min/max_date. */
-export function parseHonourEstimateDelivery(
+/** Honour's earliest overall estimate, normalized for the receipt-date input. */
+export function parseHonourEstimateMinDate(
   payload: Record<string, unknown> | null | undefined
 ): string {
   if (!payload) return '';
@@ -1510,11 +1497,7 @@ export function parseHonourEstimateDelivery(
   const min = String(
     meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_min_date')?.value ?? ''
   ).trim();
-  const max = String(
-    meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_max_date')?.value ?? ''
-  ).trim();
-  if (min && max && min !== max) return `${min} - ${max}`;
-  return min || max || '';
+  return normalizeOrderDueDate(min) || '';
 }
 
 /** Collect CPO options across all product line items. */

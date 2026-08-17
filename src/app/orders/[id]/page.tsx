@@ -15,7 +15,7 @@ import { mergeSupplierLists } from '@/lib/expense-suppliers';
 import { compressImage } from '@/lib/imageCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
 import {
-  ORDER_FIELDS,
+  ORDER_SHIPPING_METHODS,
   ORDER_TYPES,
   ORDER_PAYMENT_METHODS,
   ORDER_PAYMENT_METHOD_OTHER,
@@ -1145,7 +1145,7 @@ export default function OrderDetailPage() {
                     className={softInput}
                   >
                     <option value="">—</option>
-                    {(ORDER_FIELDS.find((f) => f.key === 'shipping_method')?.options || []).map((o) => (
+                    {ORDER_SHIPPING_METHODS.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>

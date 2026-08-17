@@ -1,7 +1,7 @@
 import { ensureSchema, getPool } from './db';
 
 /** Tables never truncated by clearDatabaseExceptUsers. */
-const KEEP_TABLES = new Set(['users']);
+const KEEP_TABLES = new Set(['users', 'integration_settings']);
 
 /** True when ALLOW_CLEAR_DB is 1 / true / yes (case-insensitive). */
 export function isClearDbAllowed(): boolean {
@@ -10,8 +10,8 @@ export function isClearDbAllowed(): boolean {
 }
 
 /**
- * Truncate every public table except `users`, then re-seed singleton rows
- * (record sequences + role permissions) so the app keeps working.
+ * Truncate every public table except `users` and `integration_settings`,
+ * then re-seed singleton rows (record sequences + role permissions) so the app keeps working.
  *
  * Guarded by ALLOW_CLEAR_DB — throws if the env flag is not set.
  */

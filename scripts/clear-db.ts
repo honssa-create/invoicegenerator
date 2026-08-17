@@ -1,5 +1,5 @@
 /**
- * Truncate all Postgres tables except `users`.
+ * Truncate all Postgres tables except `users` and `integration_settings`.
  *
  * Usage:
  *   ALLOW_CLEAR_DB=true DATABASE_URL=postgresql://… npm run db:clear
@@ -13,11 +13,11 @@ async function main() {
     process.exit(1);
   }
 
-  console.warn('Clearing all database tables except users…');
+  console.warn('Clearing all database tables except users and integration_settings…');
   const result = await clearDatabaseExceptUsers();
   console.log(`Truncated ${result.truncated.length} table(s):`);
   for (const t of result.truncated) console.log(`  - ${t}`);
-  console.log('Users preserved. Expense sequence + role permissions re-seeded.');
+  console.log('Users and API integration settings preserved. Expense sequence + role permissions re-seeded.');
 }
 
 main()

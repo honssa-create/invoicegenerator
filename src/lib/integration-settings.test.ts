@@ -8,7 +8,7 @@ import {
 import { SF_EXPRESS_DEFAULT_PRINT_TEMPLATE } from './integration-settings';
 import db from './db';
 
-const TEST_USER_ID = 99901;
+const TEST_USER_ID = 99903;
 
 describe('integration settings', () => {
   it('saves and merges woocommerce credentials without clearing secrets', async () => {

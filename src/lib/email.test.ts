@@ -3,7 +3,7 @@ import { sendEmail } from './email';
 import db from './db';
 import { saveIntegrationSettings } from './integration-settings-server';
 
-const TEST_USER_ID = 99902;
+const TEST_USER_ID = 99904;
 
 describe('sendEmail dual Resend routing', () => {
   beforeEach(async () => {

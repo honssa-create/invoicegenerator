@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     receipt_path?: string;
     payment_method?: string;
     deposit_time?: string;
+    transaction_id?: string;
   };
   try {
     body = await request.json();
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
       receipt_path: body.receipt_path,
       payment_method: paymentMethodRaw as PaymentMethod,
       deposit_time: body.deposit_time,
+      transaction_id: body.transaction_id,
       created_by: session.name,
     });
     return NextResponse.json({ record }, { status: 201 });

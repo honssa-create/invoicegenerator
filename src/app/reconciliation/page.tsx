@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, Fragment } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import AccountingTable from '@/components/AccountingTable';
@@ -48,14 +48,24 @@ interface Summary {
 }
 
 type ZoneFilter = 'high' | 'medium' | 'attention' | 'matched';
-type SortKey = 'deposit_time' | 'gross_amount' | 'status' | 'created_at' | 'created_by';
+type SortKey =
+  | 'deposit_time'
+  | 'gross_amount'
+  | 'transaction_fee'
+  | 'net_amount'
+  | 'status'
+  | 'created_at'
+  | 'created_by';
 type ReconciliationView = 'reconciliation' | 'accounting';
+
+const TABLE_COL_COUNT = 7;
 
 const PAGE_SIZE = 50;
 
 const EMPTY_MANUAL = {
   amount: '',
   payment_method: 'FPS' as PaymentMethod,
+  transaction_id: '',
   invoice_no: '',
   order_no: '',
   remarks: '',
@@ -179,6 +189,7 @@ function ReconciliationContent() {
     dir: 'desc',
   });
   const [page, setPage] = useState(1);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const receiptRef = useRef<HTMLInputElement>(null);
   const canViewAccounting = canAccess('accounting');
@@ -357,8 +368,12 @@ function ReconciliationContent() {
     list = [...list].sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
-      if (sort.key === 'gross_amount') {
-        return ((a.gross_amount || 0) - (b.gross_amount || 0)) * dir;
+      if (
+        sort.key === 'gross_amount' ||
+        sort.key === 'transaction_fee' ||
+        sort.key === 'net_amount'
+      ) {
+        return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
       }
       const as = String(av ?? '');
       const bs = String(bv ?? '');
@@ -623,6 +638,7 @@ function ReconciliationContent() {
       body: JSON.stringify({
         amount,
         payment_method: manualForm.payment_method,
+        transaction_id: manualForm.transaction_id.trim() || undefined,
         invoice_no: manualForm.invoice_no.trim() || undefined,
         order_no: manualForm.order_no.trim() || undefined,
         remarks: manualForm.remarks.trim() || undefined,
@@ -664,70 +680,72 @@ function ReconciliationContent() {
     return v.replace('T', ' ').slice(0, 16);
   };
 
-  const invoiceCell = (r: ReconciliationRecord) => {
+  const suggestionCell = (r: ReconciliationRecord) => {
     const matched = r.status === 'Matched';
-    const id = matched ? r.invoice_id : r.suggested_invoice_id;
-    const no = matched ? r.invoice_number : r.suggested_invoice_number;
-    if (id && no) {
-      return (
-        <Link href={`/invoices/${id}`} className="font-mono text-brand-600 hover:text-brand-700">
-          {no}
-        </Link>
-      );
-    }
-    return <span className="text-gray-400">—</span>;
-  };
+    const orderId = matched ? r.order_id : r.suggested_order_id;
+    const orderNo = matched
+      ? r.order_no || (orderId ? `#${orderId}` : null)
+      : r.suggested_order_no || r.order_no || (orderId ? `#${orderId}` : null);
+    const invoiceId = matched ? r.invoice_id : r.suggested_invoice_id;
+    const invoiceNo = matched ? r.invoice_number : r.suggested_invoice_number;
 
-  const orderCell = (r: ReconciliationRecord) => {
-    const matched = r.status === 'Matched';
-    const id = matched ? r.order_id : r.suggested_order_id;
-    const no = matched
-      ? r.order_no || (id ? `#${id}` : null)
-      : r.suggested_order_no || r.order_no || (id ? `#${id}` : null);
-    if (id && no) {
-      return (
-        <Link href={`/orders/${id}`} className="font-mono text-brand-600 hover:text-brand-700">
-          {no}
-        </Link>
-      );
-    }
-    if (no) return <span className="font-mono text-gray-700">{no}</span>;
-    return <span className="text-gray-400">—</span>;
-  };
-
-  const amountCell = (r: ReconciliationRecord) => {
-    const receiptUrl = reconciliationReceiptUrl(r.id, r.receipt_path);
     return (
-      <div className="flex gap-2 items-center">
-        {receiptUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={receiptUrl}
-            alt="receipt"
-            onClick={() => setLightbox(receiptUrl)}
-            className="h-9 w-9 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 shrink-0"
-          />
-        ) : null}
-        <div>
-          <div className="font-medium text-gray-900">{formatMoney(r.gross_amount)}</div>
-          <div className="text-[11px] text-gray-400">{PAYMENT_METHOD_LABELS[r.payment_method]}</div>
+      <div className="space-y-0.5 text-xs leading-snug">
+        <div className="text-gray-700">
+          <span className="text-gray-400">order:</span>{' '}
+          {orderId && orderNo ? (
+            <Link href={`/orders/${orderId}`} className="font-mono text-brand-600 hover:text-brand-700">
+              {orderNo}
+            </Link>
+          ) : orderNo ? (
+            <span className="font-mono text-gray-700">{orderNo}</span>
+          ) : (
+            <span className="text-gray-400">—</span>
+          )}
+        </div>
+        <div className="text-gray-700">
+          <span className="text-gray-400">Invoice:</span>{' '}
+          {invoiceId && invoiceNo ? (
+            <Link href={`/invoices/${invoiceId}`} className="font-mono text-brand-600 hover:text-brand-700">
+              {invoiceNo}
+            </Link>
+          ) : invoiceNo ? (
+            <span className="font-mono text-gray-700">{invoiceNo}</span>
+          ) : (
+            <span className="text-gray-400">—</span>
+          )}
         </div>
       </div>
     );
   };
 
+  const toggleExpanded = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const amountCell = (r: ReconciliationRecord) => (
+    <span className="font-medium text-gray-900 whitespace-nowrap">{formatMoney(r.gross_amount)}</span>
+  );
+
   const statusCell = (r: ReconciliationRecord) => (
     <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${RECON_STATUS_COLORS[r.status]}`}>
       {r.status}
+      {r.confidence ? (
+        <span className="ml-1 opacity-70">· {r.confidence}</span>
+      ) : null}
     </span>
   );
 
   const colHeaders = () => {
-    const matchedOnly = zoneFilter === 'matched';
-    const inv = matchedOnly ? '對應 Invoice' : zoneFilter ? '建議 Invoice' : 'Invoice';
-    const ord = matchedOnly ? '對應 Order' : zoneFilter ? '建議 Order' : 'Order';
+    const matchedOnly = zoneFilter === 'matched' || focusRecordId != null || matchedOrderId != null;
+    const suggestionTitle = matchedOnly ? '對應' : '建議';
     const sortBtn = (key: SortKey, label: string) => (
-      <th className="px-4 py-2 whitespace-nowrap">
+      <th className="px-2 py-2 whitespace-nowrap">
         <button
           type="button"
           onClick={() => toggleSort(key)}
@@ -740,14 +758,125 @@ function ReconciliationContent() {
     );
     return (
       <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-100">
+        <th className="px-1.5 py-2 w-8" aria-label="Expand" />
         {sortBtn('deposit_time', '入帳日期')}
-        {sortBtn('gross_amount', '銀碼')}
-        <th className="px-4 py-2 whitespace-nowrap">{inv}</th>
-        <th className="px-4 py-2 whitespace-nowrap">{ord}</th>
+        {sortBtn('gross_amount', '金額')}
+        {sortBtn('net_amount', '凈額')}
+        <th className="px-2 py-2 whitespace-nowrap">{suggestionTitle}</th>
         {sortBtn('status', 'Status')}
-        {sortBtn('created_at', '建立日期')}
-        {sortBtn('created_by', '上傳人')}
-        <th className="px-4 py-2 whitespace-nowrap">Actions</th>
+        <th className="px-2 py-2 whitespace-nowrap">Actions</th>
+      </tr>
+    );
+  };
+
+  const moreInfoPanel = (r: ReconciliationRecord) => {
+    const receiptUrl = reconciliationReceiptUrl(r.id, r.receipt_path);
+    const sourceLabel =
+      r.source === 'yedpay' ? 'Yedpay' : r.source === 'bank_upload' ? 'Bank upload' : 'Manual';
+    const fromLabel = PAYMENT_METHOD_LABELS[r.payment_method] || r.payment_method;
+    const txnId = r.external_id || null;
+    const notes = r.remarks?.trim() || null;
+
+    return (
+      <tr className="bg-gray-50/80">
+        <td colSpan={TABLE_COL_COUNT} className="px-4 py-3">
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
+              More info 詳細資料
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div>
+                <p className="text-[11px] font-medium text-gray-500 mb-0.5">Transaction ID</p>
+                <p className="font-mono text-gray-800 break-all">{txnId || '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500 mb-0.5">From 來源方式</p>
+                <p className="text-gray-800">
+                  {fromLabel}
+                  <span className="text-gray-400"> · {sourceLabel}</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500 mb-0.5">Record #</p>
+                <p className="font-mono text-gray-800">{r.id}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500 mb-0.5">建立日期 Created</p>
+                <p className="text-gray-800">{fmtDt(r.created_at)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500 mb-0.5">上傳人 Uploaded by</p>
+                <p className="text-gray-800">{r.created_by || '—'}</p>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-3">
+                <p className="text-[11px] font-medium text-gray-500 mb-0.5">Notes 備註</p>
+                <p className="text-gray-800 whitespace-pre-wrap">{notes || '—'}</p>
+              </div>
+              {r.suggested_customer_name ? (
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-0.5">Suggested customer</p>
+                  <p className="text-gray-800">{r.suggested_customer_name}</p>
+                </div>
+              ) : null}
+              {r.suggested_amount != null ? (
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-0.5">Suggested amount</p>
+                  <p className="text-gray-800">{formatMoney(r.suggested_amount)}</p>
+                </div>
+              ) : null}
+              {r.confidence ? (
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-0.5">Confidence</p>
+                  <p className="text-gray-800 capitalize">{r.confidence}</p>
+                </div>
+              ) : null}
+              {r.matched_at ? (
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-0.5">Matched at</p>
+                  <p className="text-gray-800">{fmtDt(r.matched_at)}</p>
+                </div>
+              ) : null}
+              {r.approved_by ? (
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-0.5">Approved by</p>
+                  <p className="text-gray-800">
+                    {r.approved_by}
+                    {r.approved_at ? ` · ${fmtDt(r.approved_at)}` : ''}
+                  </p>
+                </div>
+              ) : null}
+              {r.candidates?.length ? (
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <p className="text-[11px] font-medium text-gray-500 mb-1">Candidates</p>
+                  <ul className="space-y-1 text-gray-700">
+                    {r.candidates.map((c) => (
+                      <li key={`${c.order_id}-${c.invoice_id ?? 'x'}`} className="font-mono text-xs">
+                        {c.order_no || `#${c.order_id}`}
+                        {c.invoice_number ? ` · ${c.invoice_number}` : ''}
+                        {c.amount != null ? ` · ${formatMoney(c.amount)}` : ''}
+                        {c.customer_name ? ` · ${c.customer_name}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <div className="sm:col-span-2 lg:col-span-3">
+                <p className="text-[11px] font-medium text-gray-500 mb-1">Receipt 收據</p>
+                {receiptUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={receiptUrl}
+                    alt="receipt"
+                    onClick={() => setLightbox(receiptUrl)}
+                    className="h-28 w-auto max-w-full object-contain rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 bg-gray-50"
+                  />
+                ) : (
+                  <p className="text-gray-400">—</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </td>
       </tr>
     );
   };
@@ -837,23 +966,36 @@ function ReconciliationContent() {
     );
   };
 
-  const recordRow = (r: ReconciliationRecord) => (
-    <tr key={r.id} className="hover:bg-gray-50">
-      <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{fmtDt(r.deposit_time)}</td>
-      <td className="px-4 py-3">{amountCell(r)}</td>
-      <td className="px-4 py-3">{invoiceCell(r)}</td>
-      <td className="px-4 py-3">
-        {orderCell(r)}
-        {r.status !== 'Matched' && r.suggested_customer_name ? (
-          <div className="text-xs text-gray-500">{r.suggested_customer_name}</div>
-        ) : null}
-      </td>
-      <td className="px-4 py-3">{statusCell(r)}</td>
-      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDt(r.created_at)}</td>
-      <td className="px-4 py-3 text-gray-600">{r.created_by || '—'}</td>
-      <td className="px-4 py-3">{actionsFor(r)}</td>
-    </tr>
-  );
+  const recordRow = (r: ReconciliationRecord) => {
+    const expanded = expandedIds.has(r.id);
+    return (
+      <Fragment key={r.id}>
+        <tr className="hover:bg-gray-50">
+          <td className="px-1.5 py-2">
+            <button
+              type="button"
+              onClick={() => toggleExpanded(r.id)}
+              aria-expanded={expanded}
+              className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100 text-xs"
+              title={expanded ? 'Hide details' : 'More info'}
+            >
+              {expanded ? '▾' : '▸'}
+            </button>
+          </td>
+          <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{fmtDt(r.deposit_time)}</td>
+          <td className="px-2 py-2">{amountCell(r)}</td>
+          <td className="px-2 py-2 whitespace-nowrap">
+            <div className="font-medium text-gray-900">{formatMoney(r.net_amount)}</div>
+            <div className="text-[11px] text-gray-400">費用 {formatMoney(r.transaction_fee || 0)}</div>
+          </td>
+          <td className="px-2 py-2">{suggestionCell(r)}</td>
+          <td className="px-2 py-2">{statusCell(r)}</td>
+          <td className="px-2 py-2">{actionsFor(r)}</td>
+        </tr>
+        {expanded ? moreInfoPanel(r) : null}
+      </Fragment>
+    );
+  };
 
   return (
     <AppLayout>
@@ -1129,7 +1271,7 @@ function ReconciliationContent() {
             <div className="p-10 text-center text-sm text-gray-500">No records match these filters.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] text-sm">
+              <table className="w-full text-sm">
                 <thead>{colHeaders()}</thead>
                 <tbody className="divide-y divide-gray-50">{pageRows.map(recordRow)}</tbody>
               </table>
@@ -1250,6 +1392,15 @@ function ReconciliationContent() {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Transaction ID</label>
+                <input
+                  value={manualForm.transaction_id}
+                  onChange={(e) => setManualForm({ ...manualForm, transaction_id: e.target.value })}
+                  className={selectCls}
+                  placeholder="e.g. bank / PayMe / FPS reference"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Invoice no.</label>

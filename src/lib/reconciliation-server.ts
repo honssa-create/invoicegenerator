@@ -559,6 +559,7 @@ export interface ManualPaymentInput {
   receipt_path?: string | null;
   payment_method?: PaymentMethod;
   deposit_time?: string | null;
+  transaction_id?: string | null;
   created_by?: string | null;
 }
 
@@ -576,6 +577,13 @@ export async function createManualPayment(
   const orderNo = input.order_no?.trim() || '';
   const depositTime = toIsoDateTime(input.deposit_time?.trim() || nowIso());
   const paymentMethod: PaymentMethod = input.payment_method || 'FPS';
+  const transactionId = input.transaction_id?.trim() || '';
+  const externalId =
+    transactionId || `manual:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+
+  if (transactionId && (await recordExistsByExternalId(userId, externalId))) {
+    throw new Error('Transaction ID already exists');
+  }
 
   const reconInput: ReconciliationInput = {
     deposit_time: depositTime,
@@ -586,7 +594,7 @@ export async function createManualPayment(
     remarks: input.remarks?.trim() || null,
     receipt_path: input.receipt_path?.trim() || null,
     source: 'manual',
-    external_id: `manual:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+    external_id: externalId,
     created_by: input.created_by?.trim() || null,
   };
 

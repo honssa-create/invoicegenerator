@@ -62,7 +62,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    if (!items.length) {
+    const lineItems = (Array.isArray(items) ? items : [])
+      .map((item: { description?: unknown; quantity?: unknown; unit_price?: unknown }) => ({
+        description: String(item?.description ?? '').trim(),
+        quantity: Number(item?.quantity) || 0,
+        unit_price: Number(item?.unit_price) || 0,
+      }))
+      .filter((item) => item.description);
+
+    if (!lineItems.length) {
       return NextResponse.json({ error: 'At least one line item is required' }, { status: 400 });
     }
 
@@ -85,16 +93,23 @@ export async function POST(request: Request) {
           terms?.trim() || null
         );
 
-      const invoiceId = result.lastInsertRowid as number;
+      const invoiceId = Number(result.lastInsertRowid);
+      if (!invoiceId) {
+        throw new Error('Invoice insert did not return an id');
+      }
       const insertItem = db.prepare(
         `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
          VALUES (?, ?, ?, ?, ?)`
       );
 
-      for (const item of items) {
-        const qty = Number(item.quantity) || 0;
-        const price = Number(item.unit_price) || 0;
-        await insertItem.run(invoiceId, item.description.trim(), qty, price, qty * price);
+      for (const item of lineItems) {
+        await insertItem.run(
+          invoiceId,
+          item.description,
+          item.quantity,
+          item.unit_price,
+          item.quantity * item.unit_price,
+        );
       }
 
       return { invoiceId, invoiceNumber };
@@ -102,9 +117,13 @@ export async function POST(request: Request) {
 
     await logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
     const invoice = await getInvoiceWithDetails(invoiceId, ownerId);
+    if (!invoice) {
+      throw new Error('Invoice was created but could not be reloaded');
+    }
 
     return NextResponse.json({ invoice }, { status: 201 });
-  } catch {
+  } catch (err) {
+    console.error('[POST /api/invoices]', err);
     return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
   }
 }

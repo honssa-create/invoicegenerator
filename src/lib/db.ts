@@ -9,11 +9,11 @@ import { assignLegacyDocumentNumbers } from './record-numbering-core';
 type Queryable = Pool | PoolClient;
 
 const txStorage = new AsyncLocalStorage<PoolClient>();
+/** True only for nested ensureSchema calls that run inside the boot promise. */
+const schemaBootAls = new AsyncLocalStorage<boolean>();
 
 let pool: Pool | null = null;
 let schemaReady: Promise<void> | null = null;
-/** True while the schema boot promise is executing — nested ensureSchema must no-op to avoid deadlock. */
-let schemaBootInProgress = false;
 
 function databaseUrl(): string {
   if (process.env.NEXT_PHASE === 'phase-production-build') {
@@ -650,13 +650,12 @@ export async function ensureSchema(): Promise<void> {
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
   // Nested call from boot helpers (e.g. seedRolePermissionsIfEmpty → db.prepare) must not
   // await the in-flight schemaReady promise — that deadlocks login and every first DB use.
-  if (schemaBootInProgress) {
+  if (schemaBootAls.getStore()) {
     return;
   }
   if (!schemaReady) {
-    schemaReady = (async () => {
-      schemaBootInProgress = true;
-      try {
+    schemaReady = schemaBootAls
+      .run(true, async () => {
         const sql = await loadSchemaSql();
         // Autocommit each statement so AccessExclusiveLock is released between ALTERs.
         // A single multi-statement Query holds locks across invoices + reconciliation_records
@@ -667,13 +666,11 @@ export async function ensureSchema(): Promise<void> {
         await runBootDataFixes();
         warnIfEphemeralReceiptStorage();
         warnIfR2Misconfigured();
-      } finally {
-        schemaBootInProgress = false;
-      }
-    })().catch((err) => {
-      schemaReady = null;
-      throw err;
-    });
+      })
+      .catch((err) => {
+        schemaReady = null;
+        throw err;
+      });
   }
   await schemaReady;
 }

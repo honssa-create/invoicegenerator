@@ -249,17 +249,23 @@ export default function QuotationDetailPage() {
 
   const copyToInvoice = async () => {
     setCopying(true);
-    await save();
-    const res = await fetch(`/api/quotations/${id}/copy-to-invoice`, { method: 'POST' });
-    const data = await res.json();
-    setCopying(false);
-    if (!res.ok) {
-      setToast({ text: data.error || 'Failed to copy quotation', kind: 'error' });
+    try {
+      await save();
+      const res = await fetch(`/api/quotations/${id}/copy-to-invoice`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast({ text: (data as { error?: string }).error || 'Failed to copy quotation', kind: 'error' });
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      setToast({ text: 'Successfully copied Quotation to a new Invoice!', kind: 'success' });
+      setTimeout(() => router.push(`/invoices/${(data as { id: number }).id}`), 1500);
+    } catch {
+      setToast({ text: 'Failed to copy quotation', kind: 'error' });
       setTimeout(() => setToast(null), 5000);
-      return;
+    } finally {
+      setCopying(false);
     }
-    setToast({ text: 'Successfully copied Quotation to a new Invoice!', kind: 'success' });
-    setTimeout(() => router.push(`/invoices/${data.id}`), 1500);
   };
 
   const duplicate = async () => {

@@ -62,32 +62,52 @@ export default function NewInvoicePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setSaving(true);
 
-    const res = await fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customer_id: Number(customerId),
-        issue_date: issueDate,
-        due_date: dueDate,
-        tax_rate: taxRate,
-        notes,
-        terms,
-        status,
-        items: items.filter((i) => i.description.trim()),
-      }),
-    });
-
-    const data = await res.json();
-    setSaving(false);
-
-    if (!res.ok) {
-      setError(data.error || 'Failed to create invoice');
+    const lineItems = items.filter((i) => i.description.trim());
+    if (!customerId) {
+      setError(bi('Select a customer.', '請選擇客戶。'));
+      return;
+    }
+    if (!lineItems.length) {
+      setError(bi('Add at least one line item with a description.', '請至少新增一項有描述的明細。'));
       return;
     }
 
-    router.push(`/invoices/${data.invoice.id}`);
+    setSaving(true);
+    try {
+      const res = await fetch('/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: Number(customerId),
+          issue_date: issueDate,
+          due_date: dueDate,
+          tax_rate: taxRate,
+          notes,
+          terms,
+          status,
+          items: lineItems,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data as { error?: string }).error || 'Failed to create invoice');
+        return;
+      }
+
+      const createdId = (data as { invoice?: { id?: number } }).invoice?.id;
+      if (!createdId) {
+        setError('Failed to create invoice');
+        return;
+      }
+
+      router.push(`/invoices/${createdId}`);
+    } catch {
+      setError(bi('Failed to create invoice. Please try again.', '建立發票失敗，請再試一次。'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -177,6 +197,7 @@ export default function NewInvoicePage() {
                     onChange={(e) => updateItem(i, 'description', e.target.value)}
                     placeholder={bi('Service or product description', '服務或產品描述')}
                     rows={3}
+                    required={i === 0}
                     className="col-span-5 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm resize-y min-h-[4.5rem]"
                   />
                   <input
@@ -224,7 +245,7 @@ export default function NewInvoicePage() {
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button type="submit" disabled={saving}
               className="px-6 py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
               {saving ? BTN.creating : bi('Create Invoice', '建立發票')}
@@ -232,6 +253,7 @@ export default function NewInvoicePage() {
             <Link href="/invoices" className="px-6 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">
               {BTN.cancel}
             </Link>
+            {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
         </form>
       )}

@@ -902,7 +902,6 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 /** Sidebar shortcuts that set the Order Type filter to a specific type. */
 export const ORDER_NAV_TYPE_FILTERS = [
   { param: 'honour訂製', label: 'honour訂單' },
-  { param: 'honour en訂製', label: 'honour en訂單' },
   { param: '燕窩回禮燉製', label: '燕窩回禮' },
   { param: 'Nestiee 燕窩訂單', label: '燕窩訂單' },
 ] as const;

@@ -88,6 +88,38 @@ describe('prefillProductionNote', () => {
     });
     expect(prefillProductionNote(order).details).toBe('line craft, 金, 磁扣');
   });
+
+  it('prefers craft from supplier production cards over line legacy fields', () => {
+    const order = baseOrder({
+      po_number: 'H10',
+      fields: {
+        honour_lines: JSON.stringify([
+          {
+            style: 'Badge',
+            quantity: '10',
+            unit_price: '1',
+            craft: 'line craft',
+            plating_color: '銀',
+            clasp: '舊扣',
+          },
+        ]),
+        honour_suppliers: JSON.stringify([
+          {
+            supplier: '和夫',
+            craft: 'card craft',
+            plating_color: '金',
+            clasp: '磁扣',
+            supplier_price: '4.2',
+            supplier_ship_date: '1/1/26',
+          },
+        ]),
+      },
+    });
+    const note = prefillProductionNote(order);
+    expect(note.details).toBe('card craft, 金, 磁扣');
+    expect(note.price).toBe('4.2');
+    expect(note.shipDate).toBe('1/1/26');
+  });
 });
 
 describe('productionNoteTextLines', () => {

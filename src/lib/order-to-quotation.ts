@@ -4,12 +4,14 @@ import {
   getNestieeLines,
   isBadgeOrderType,
   isBirdNestOrderType,
-  isHonourShippingLine,
   isNestieeOrderType,
   parseHonourLines,
+  summarizeHonourCraftDescription,
   type HonourLineItem,
   type Order,
 } from './orders';
+
+export { summarizeHonourCraftDescription } from './orders';
 
 export interface QuotationLineDraft {
   /** Product/service name shown on the line (print title row). */
@@ -18,25 +20,6 @@ export interface QuotationLineDraft {
   description: string;
   quantity: number;
   unit_price: number;
-}
-
-/** Craft-section fields for honour / honour-en line → quotation description (filled only). */
-const HONOUR_CRAFT_SUMMARY_FIELDS: { key: keyof HonourLineItem; label: string }[] = [
-  { key: 'card_size', label: '紙卡尺寸' },
-  { key: 'craft', label: '加工工藝' },
-  { key: 'plating_color', label: '電鍍色' },
-  { key: 'clasp', label: '背扣' },
-];
-
-/** One line per filled craft field; empty when nothing is set (or Shipping row). */
-export function summarizeHonourCraftDescription(line: HonourLineItem): string {
-  if (isHonourShippingLine(line)) return '';
-  const lines: string[] = [];
-  for (const { key, label } of HONOUR_CRAFT_SUMMARY_FIELDS) {
-    const value = String(line[key] ?? '').trim();
-    if (value) lines.push(`${label}: ${value}`);
-  }
-  return lines.join('\n');
 }
 
 /** Extract the first numeric value from free-form text (e.g. "rmb 4.2", "4款各53個"). */
@@ -126,7 +109,7 @@ export function buildQuotationItemsFromOrder(
         const product = style || orderType;
         return {
           product_service: product,
-          description: summarizeHonourCraftDescription(line),
+          description: (line.description || '').trim() || summarizeHonourCraftDescription(line),
           quantity: qty || 1,
           unit_price: price || unitPrice,
         };
@@ -144,6 +127,7 @@ export function buildQuotationItemsFromOrder(
       style: style || orderType,
       quantity: String(qty),
       unit_price: '',
+      description: '',
       card_size: fieldStr(f, 'card_size'),
       craft: fieldStr(f, 'craft'),
       plating_color: fieldStr(f, 'plating_color'),

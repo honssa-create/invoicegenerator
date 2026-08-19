@@ -75,7 +75,7 @@ describe('buildQuotationItemsFromOrder', () => {
     });
   });
 
-  it('fills description from filled craft fields only (one line each)', () => {
+  it('fills description from free-text field, else craft summary seed', () => {
     const items = buildQuotationItemsFromOrder({
       description: 'Ignore me',
       name: '',
@@ -87,6 +87,7 @@ describe('buildQuotationItemsFromOrder', () => {
             style: '金屬襟章',
             quantity: '100',
             unit_price: '5',
+            description: 'Custom note\nLine 2',
             card_size: '30 x 15mm',
             craft: '滴膠',
             plating_color: '',
@@ -103,11 +104,37 @@ describe('buildQuotationItemsFromOrder', () => {
     });
     expect(items[0]).toMatchObject({
       product_service: '金屬襟章',
-      description: '紙卡尺寸: 30 x 15mm\n加工工藝: 滴膠\n背扣: 蝴蝶扣',
+      description: 'Custom note\nLine 2',
     });
     expect(items[1]).toMatchObject({
       product_service: 'Shipping',
       description: '',
+    });
+  });
+
+  it('seeds quotation description from craft fields when description empty', () => {
+    const items = buildQuotationItemsFromOrder({
+      description: 'Ignore me',
+      name: '',
+      po_number: '',
+      fields: {
+        order_type: 'honour訂製',
+        honour_lines: JSON.stringify([
+          {
+            style: '金屬襟章',
+            quantity: '100',
+            unit_price: '5',
+            card_size: '30 x 15mm',
+            craft: '滴膠',
+            plating_color: '',
+            clasp: '蝴蝶扣',
+          },
+        ]),
+      },
+    });
+    expect(items[0]).toMatchObject({
+      product_service: '金屬襟章',
+      description: '紙卡尺寸: 30 x 15mm\n加工工藝: 滴膠\n背扣: 蝴蝶扣',
     });
   });
 

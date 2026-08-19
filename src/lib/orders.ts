@@ -261,15 +261,19 @@ export interface HonourLineItem {
   style: string;
   quantity: string;
   unit_price: string;
-  /** Per-line craft */
+  /** Free-text multi-line description (quotation-style). */
+  description: string;
+  /**
+   * Legacy per-line craft/packaging — kept for read-migration / Woo ingest.
+   * UI edits live on HonourSupplierItem production cards.
+   */
   card_size: string;
   craft: string;
   plating_color: string;
   clasp: string;
-  /** Per-line packaging */
   internal_pack: string;
   pack_required: string;
-  /** Unmatched CPO options for this line */
+  /** Unmatched CPO options for this line (seeded into description when empty). */
   other_options: string;
 }
 
@@ -278,6 +282,7 @@ export function emptyHonourLine(): HonourLineItem {
     style: '',
     quantity: '',
     unit_price: '',
+    description: '',
     card_size: '',
     craft: '',
     plating_color: '',
@@ -288,7 +293,7 @@ export function emptyHonourLine(): HonourLineItem {
   };
 }
 
-/** Supplier cards stored as JSON in fields.honour_suppliers. */
+/** Combined supplier + craft + packaging cards in fields.honour_suppliers. */
 export interface HonourSupplierItem {
   supplier: string;
   supplier_price: string;
@@ -297,6 +302,14 @@ export interface HonourSupplierItem {
   supplier_pack: string;
   supplier_ship_date: string;
   carton_count: string;
+  /** Craft (moved from product lines). */
+  card_size: string;
+  craft: string;
+  plating_color: string;
+  clasp: string;
+  /** Packaging (moved from product lines). */
+  internal_pack: string;
+  pack_required: string;
 }
 
 export function emptyHonourSupplier(): HonourSupplierItem {
@@ -308,6 +321,81 @@ export function emptyHonourSupplier(): HonourSupplierItem {
     supplier_pack: '',
     supplier_ship_date: '',
     carton_count: '',
+    card_size: '',
+    craft: '',
+    plating_color: '',
+    clasp: '',
+    internal_pack: '',
+    pack_required: '',
+  };
+}
+
+/** Craft-section fields → multi-line description seed (filled only). */
+const HONOUR_CRAFT_SUMMARY_FIELDS: { key: keyof HonourLineItem; label: string }[] = [
+  { key: 'card_size', label: '紙卡尺寸' },
+  { key: 'craft', label: '加工工藝' },
+  { key: 'plating_color', label: '電鍍色' },
+  { key: 'clasp', label: '背扣' },
+];
+
+/** One line per filled craft field; empty when nothing is set (or Shipping row). */
+export function summarizeHonourCraftDescription(line: HonourLineItem): string {
+  if (isHonourShippingLine(line)) return '';
+  const lines: string[] = [];
+  for (const { key, label } of HONOUR_CRAFT_SUMMARY_FIELDS) {
+    const value = String(line[key] ?? '').trim();
+    if (value) lines.push(`${label}: ${value}`);
+  }
+  return lines.join('\n');
+}
+
+/** Seed free-text description from craft summary + other_options when empty. */
+export function seedHonourLineDescription(line: HonourLineItem): HonourLineItem {
+  if (isHonourShippingLine(line)) return line;
+  if (String(line.description ?? '').trim()) return line;
+  const craftSummary = summarizeHonourCraftDescription(line);
+  const other = String(line.other_options ?? '').trim();
+  const parts = [craftSummary, other].filter(Boolean);
+  if (!parts.length) return line;
+  return { ...line, description: parts.join('\n\n') };
+}
+
+function supplierCraftPackEmpty(s: HonourSupplierItem): boolean {
+  return !(
+    s.card_size ||
+    s.craft ||
+    s.plating_color ||
+    s.clasp ||
+    s.internal_pack ||
+    s.pack_required
+  );
+}
+
+function craftPackFromLine(line: HonourLineItem): Pick<
+  HonourSupplierItem,
+  'card_size' | 'craft' | 'plating_color' | 'clasp' | 'internal_pack' | 'pack_required'
+> {
+  return {
+    card_size: line.card_size,
+    craft: line.craft,
+    plating_color: line.plating_color,
+    clasp: line.clasp,
+    internal_pack: line.internal_pack,
+    pack_required: line.pack_required,
+  };
+}
+
+function craftPackFromLegacyFlats(fields: Record<string, string | boolean>): Pick<
+  HonourSupplierItem,
+  'card_size' | 'craft' | 'plating_color' | 'clasp' | 'internal_pack' | 'pack_required'
+> {
+  return {
+    card_size: fieldAsString(fields, 'card_size'),
+    craft: fieldAsString(fields, 'craft'),
+    plating_color: fieldAsString(fields, 'plating_color'),
+    clasp: fieldAsString(fields, 'clasp'),
+    internal_pack: fieldAsString(fields, 'internal_pack'),
+    pack_required: fieldAsString(fields, 'pack_required'),
   };
 }
 
@@ -335,6 +423,7 @@ function normalizeHonourLineRow(row: Record<string, unknown>): HonourLineItem {
     style: String(row.style ?? ''),
     quantity: String(row.quantity ?? ''),
     unit_price: String(row.unit_price ?? ''),
+    description: String(row.description ?? ''),
     card_size: String(row.card_size ?? ''),
     craft: String(row.craft ?? ''),
     plating_color: String(row.plating_color ?? ''),
@@ -379,16 +468,18 @@ function seedLegacyCraftOntoFirstProduct(lines: HonourLineItem[], fields: Record
 
 /** Parse honour_lines JSON; seed one row from legacy badge_style / badge_quantity when empty. */
 export function parseHonourLines(fields: Record<string, string | boolean>): HonourLineItem[] {
+  let lines: HonourLineItem[];
   const raw = fields.honour_lines;
   if (typeof raw === 'string' && raw.trim()) {
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const lines = parsed.map((row) => {
+        lines = parsed.map((row) => {
           const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
           return normalizeHonourLineRow(r);
         });
-        return seedLegacyCraftOntoFirstProduct(lines, fields);
+        lines = seedLegacyCraftOntoFirstProduct(lines, fields);
+        return lines.map(seedHonourLineDescription);
       }
     } catch {
       /* fall through to legacy seed */
@@ -397,7 +488,8 @@ export function parseHonourLines(fields: Record<string, string | boolean>): Hono
   const style = fieldAsString(fields, 'badge_style');
   const quantity = fieldAsString(fields, 'badge_quantity');
   if (style || quantity) {
-    return seedLegacyCraftOntoFirstProduct([{ ...emptyHonourLine(), style, quantity }], fields);
+    lines = seedLegacyCraftOntoFirstProduct([{ ...emptyHonourLine(), style, quantity }], fields);
+    return lines.map(seedHonourLineDescription);
   }
   return [emptyHonourLine()];
 }
@@ -408,6 +500,7 @@ export function serializeHonourLines(lines: HonourLineItem[]): string {
       style: String(l.style ?? ''),
       quantity: String(l.quantity ?? ''),
       unit_price: String(l.unit_price ?? ''),
+      description: String(l.description ?? ''),
       card_size: String(l.card_size ?? ''),
       craft: String(l.craft ?? ''),
       plating_color: String(l.plating_color ?? ''),
@@ -446,7 +539,7 @@ export function firstHonourProductLine(lines: HonourLineItem[]): HonourLineItem 
 
 /**
  * Derived fields kept in sync for delivery-note / legacy readers.
- * Per-line-only craft (`internal_pack`, `other_options`) stays inside honour_lines JSON.
+ * Craft/packaging flats are mirrored from production cards via honourSuppliersDerivedFields.
  */
 export function honourLinesDerivedFields(lines: HonourLineItem[]): Record<string, string> {
   const { totalQuantity } = computeHonourLineTotals(lines);
@@ -456,12 +549,6 @@ export function honourLinesDerivedFields(lines: HonourLineItem[]): Record<string
     badge_style: first?.style ?? '',
     badge_quantity: first?.quantity ?? (totalQuantity ? String(totalQuantity) : ''),
     qty_ordered: totalQuantity ? String(totalQuantity) : '',
-    // Mirror first product line craft/packaging for production-note / quotation notes.
-    card_size: first?.card_size ?? '',
-    craft: first?.craft ?? '',
-    plating_color: first?.plating_color ?? '',
-    clasp: first?.clasp ?? '',
-    pack_required: first?.pack_required ?? '',
   };
 }
 
@@ -474,10 +561,17 @@ function normalizeHonourSupplierRow(row: Record<string, unknown>): HonourSupplie
     supplier_pack: String(row.supplier_pack ?? ''),
     supplier_ship_date: String(row.supplier_ship_date ?? ''),
     carton_count: String(row.carton_count ?? ''),
+    card_size: String(row.card_size ?? ''),
+    craft: String(row.craft ?? ''),
+    plating_color: String(row.plating_color ?? ''),
+    clasp: String(row.clasp ?? ''),
+    internal_pack: String(row.internal_pack ?? ''),
+    pack_required: String(row.pack_required ?? ''),
   };
 }
 
 function seedLegacySupplier(fields: Record<string, string | boolean>, cartonCountCore?: string): HonourSupplierItem {
+  const craft = craftPackFromLegacyFlats(fields);
   return {
     supplier: fieldAsString(fields, 'supplier'),
     supplier_price: fieldAsString(fields, 'supplier_price'),
@@ -486,16 +580,43 @@ function seedLegacySupplier(fields: Record<string, string | boolean>, cartonCoun
     supplier_pack: fieldAsString(fields, 'supplier_pack'),
     supplier_ship_date: fieldAsString(fields, 'supplier_ship_date'),
     carton_count: fieldAsString(fields, 'carton_count') || String(cartonCountCore ?? '').trim(),
+    ...craft,
   };
+}
+
+/**
+ * Copy craft/pack from product lines (by index) onto empty production cards.
+ * Card 0 also falls back to legacy flat craft fields.
+ */
+function migrateCraftOntoSuppliers(
+  suppliers: HonourSupplierItem[],
+  fields: Record<string, string | boolean>,
+  productLines?: HonourLineItem[]
+): HonourSupplierItem[] {
+  const products = productLines ?? honourProductLines(parseHonourLines(fields));
+  const legacyCraft = craftPackFromLegacyFlats(fields);
+  const hasLegacyCraft = Object.values(legacyCraft).some(Boolean);
+
+  return suppliers.map((sup, index) => {
+    if (!supplierCraftPackEmpty(sup)) return sup;
+    const fromLine = products[index];
+    if (fromLine) {
+      const pack = craftPackFromLine(fromLine);
+      if (Object.values(pack).some(Boolean)) return { ...sup, ...pack };
+    }
+    if (index === 0 && hasLegacyCraft) return { ...sup, ...legacyCraft };
+    return sup;
+  });
 }
 
 /**
  * Parse honour_suppliers JSON. Seeds Supplier-1 from legacy flat fields when empty.
  * Pads to at least `minCount` (default: product line count) without shrinking.
+ * Migrates craft/packaging from product lines onto empty cards.
  */
 export function parseHonourSuppliers(
   fields: Record<string, string | boolean>,
-  opts?: { minCount?: number; cartonCountCore?: string }
+  opts?: { minCount?: number; cartonCountCore?: string; productLines?: HonourLineItem[] }
 ): HonourSupplierItem[] {
   const minCount = Math.max(1, opts?.minCount ?? 1);
   let suppliers: HonourSupplierItem[] = [];
@@ -530,10 +651,17 @@ export function parseHonourSuppliers(
         supplier_pack: first.supplier_pack || legacy.supplier_pack,
         supplier_ship_date: first.supplier_ship_date || legacy.supplier_ship_date,
         carton_count: first.carton_count || legacy.carton_count,
+        card_size: first.card_size || legacy.card_size,
+        craft: first.craft || legacy.craft,
+        plating_color: first.plating_color || legacy.plating_color,
+        clasp: first.clasp || legacy.clasp,
+        internal_pack: first.internal_pack || legacy.internal_pack,
+        pack_required: first.pack_required || legacy.pack_required,
       };
     }
   }
-  return ensureHonourSupplierCount(suppliers, minCount);
+  suppliers = ensureHonourSupplierCount(suppliers, minCount);
+  return migrateCraftOntoSuppliers(suppliers, fields, opts?.productLines);
 }
 
 /** Grow-only pad to minCount; never shrink. */
@@ -558,13 +686,19 @@ export function serializeHonourSuppliers(suppliers: HonourSupplierItem[]): strin
       supplier_pack: String(s.supplier_pack ?? ''),
       supplier_ship_date: String(s.supplier_ship_date ?? ''),
       carton_count: String(s.carton_count ?? ''),
+      card_size: String(s.card_size ?? ''),
+      craft: String(s.craft ?? ''),
+      plating_color: String(s.plating_color ?? ''),
+      clasp: String(s.clasp ?? ''),
+      internal_pack: String(s.internal_pack ?? ''),
+      pack_required: String(s.pack_required ?? ''),
     }))
   );
 }
 
 /**
- * Persist honour_suppliers JSON and mirror only flats still read by print/quotation.
- * Card-only fields (`supplier`, `mould_print_fee`, `supplier_pack`) stay inside the JSON.
+ * Persist honour_suppliers JSON and mirror flats still read by print/quotation/production-note.
+ * Card-only fields (`supplier`, `mould_print_fee`, `supplier_pack`, `internal_pack`) stay in JSON.
  */
 export function honourSuppliersDerivedFields(suppliers: HonourSupplierItem[]): Record<string, string> {
   const first = suppliers[0] || emptyHonourSupplier();
@@ -573,6 +707,11 @@ export function honourSuppliersDerivedFields(suppliers: HonourSupplierItem[]): R
     supplier_price: first.supplier_price,
     supplier_qty: first.supplier_qty,
     supplier_ship_date: first.supplier_ship_date,
+    card_size: first.card_size,
+    craft: first.craft,
+    plating_color: first.plating_color,
+    clasp: first.clasp,
+    pack_required: first.pack_required,
   };
 }
 
@@ -1422,7 +1561,7 @@ export function applyHonourOptionsToLine(
     otherLines.push(`${label}: ${value}`);
   }
   if (otherLines.length) setIfEmpty('other_options', otherLines.join('\n'));
-  return next;
+  return seedHonourLineDescription(next);
 }
 
 /** Preserve non-empty per-line craft/packaging when Hub re-syncs style/qty/price. */
@@ -1436,6 +1575,7 @@ export function mergeHonourLinesPreservingLocal(
     if (!prev || isHonourShippingLine(prev)) return line;
     return {
       ...line,
+      description: prev.description || line.description,
       card_size: prev.card_size || line.card_size,
       craft: prev.craft || line.craft,
       plating_color: prev.plating_color || line.plating_color,

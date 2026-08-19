@@ -7,6 +7,7 @@ import {
   computeHonourLineTotals,
   firstHonourProductLine,
   parseHonourLines,
+  parseHonourSuppliers,
   type Order,
 } from './orders';
 
@@ -40,6 +41,12 @@ export function prefillProductionNote(order: Order): ProductionNoteFields {
   const f = order.fields || {};
   const lines = parseHonourLines(f);
   const { totalQuantity } = computeHonourLineTotals(lines);
+  const suppliers = parseHonourSuppliers(f, {
+    minCount: 1,
+    cartonCountCore: order.carton_count,
+    productLines: lines,
+  });
+  const firstSup = suppliers[0];
 
   const poRaw = (order.po_number || '').trim();
   const po = poRaw
@@ -47,26 +54,32 @@ export function prefillProductionNote(order: Order): ProductionNoteFields {
       ? poRaw
       : `#${poRaw}`
     : order.id
-      ? `#${order.id}`
-      : '';
+    ? `#${order.id}`
+    : '';
 
-  const craft = fieldStr(f, 'craft') || firstHonourProductLine(lines)?.craft || '';
-  const clasp = fieldStr(f, 'clasp') || firstHonourProductLine(lines)?.clasp || '';
-  const plating = fieldStr(f, 'plating_color') || firstHonourProductLine(lines)?.plating_color || '';
+  const craft =
+    firstSup?.craft || fieldStr(f, 'craft') || firstHonourProductLine(lines)?.craft || '';
+  const clasp =
+    firstSup?.clasp || fieldStr(f, 'clasp') || firstHonourProductLine(lines)?.clasp || '';
+  const plating =
+    firstSup?.plating_color ||
+    fieldStr(f, 'plating_color') ||
+    firstHonourProductLine(lines)?.plating_color ||
+    '';
   const detailsParts = [craft, plating, clasp].filter(Boolean);
   const details = detailsParts.join(', ');
 
   const qty =
     totalQuantity > 0
       ? String(Math.round(totalQuantity) === totalQuantity ? Math.round(totalQuantity) : totalQuantity)
-      : fieldStr(f, 'supplier_qty') || fieldStr(f, 'badge_quantity') || '';
+      : firstSup?.supplier_qty || fieldStr(f, 'supplier_qty') || fieldStr(f, 'badge_quantity') || '';
 
   return {
     po,
     details,
     quantity: qty,
-    price: fieldStr(f, 'supplier_price'),
-    shipDate: fieldStr(f, 'supplier_ship_date'),
+    price: firstSup?.supplier_price || fieldStr(f, 'supplier_price'),
+    shipDate: firstSup?.supplier_ship_date || fieldStr(f, 'supplier_ship_date'),
   };
 }
 

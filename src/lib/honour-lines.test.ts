@@ -319,30 +319,47 @@ describe('per-line honour options / suppliers', () => {
     expect(lines[2]).toMatchObject({ style: HONOUR_SHIPPING_LINE_STYLE, unit_price: '35' });
   });
 
-  it('applyHonourOptionsToLine keeps known craft out of other_options', () => {
+  it('applyHonourOptionsToLine keeps known craft out of other_options and seeds description', () => {
     const line = applyHonourOptionsToLine(emptyHonourLine(), [
       { key: 'a', label: '做法', value: '滴膠' },
       { key: 'b', label: '顏色數量', value: '3' },
     ]);
     expect(line.craft).toBe('滴膠');
     expect(line.other_options).toBe('顏色數量: 3');
+    expect(line.description).toContain('加工工藝: 滴膠');
+    expect(line.description).toContain('顏色數量: 3');
   });
 
-  it('mergeHonourLinesPreservingLocal keeps local craft edits', () => {
+  it('mergeHonourLinesPreservingLocal keeps local craft and description edits', () => {
     const existing = [
-      { ...emptyHonourLine(), style: 'A', quantity: '10', craft: 'manual craft', other_options: 'keep me' },
+      {
+        ...emptyHonourLine(),
+        style: 'A',
+        quantity: '10',
+        craft: 'manual craft',
+        description: 'manual desc',
+        other_options: 'keep me',
+      },
     ];
     const incoming = [
-      { ...emptyHonourLine(), style: 'A', quantity: '20', craft: 'imported', other_options: 'new dump' },
+      {
+        ...emptyHonourLine(),
+        style: 'A',
+        quantity: '20',
+        craft: 'imported',
+        description: 'imported desc',
+        other_options: 'new dump',
+      },
     ];
     expect(mergeHonourLinesPreservingLocal(incoming, existing)[0]).toMatchObject({
       quantity: '20',
       craft: 'manual craft',
+      description: 'manual desc',
       other_options: 'keep me',
     });
   });
 
-  it('seeds legacy craft onto first product line and mirrors on derive', () => {
+  it('seeds legacy craft onto first product line and description; craft mirrors via suppliers', () => {
     const lines = parseHonourLines({
       honour_lines: JSON.stringify([{ style: 'Badge', quantity: '50', unit_price: '3' }]),
       craft: 'legacy craft',
@@ -355,11 +372,100 @@ describe('per-line honour options / suppliers', () => {
       pack_required: 'OPP',
       other_options: 'legacy dump',
     });
+    expect(lines[0].description).toContain('加工工藝: legacy craft');
+    expect(lines[0].description).toContain('legacy dump');
     const derived = honourLinesDerivedFields(lines);
-    expect(derived.craft).toBe('legacy craft');
-    expect(derived.pack_required).toBe('OPP');
+    expect(derived).not.toHaveProperty('craft');
+    expect(derived).not.toHaveProperty('pack_required');
     expect(derived).not.toHaveProperty('other_craft');
     expect(derived).not.toHaveProperty('internal_pack');
+
+    const suppliers = parseHonourSuppliers(
+      {
+        honour_lines: JSON.stringify(lines),
+        craft: 'legacy craft',
+        pack_required: 'OPP',
+      },
+      { minCount: 1, productLines: lines }
+    );
+    expect(suppliers[0]).toMatchObject({
+      craft: 'legacy craft',
+      pack_required: 'OPP',
+    });
+    const supDerived = honourSuppliersDerivedFields(suppliers);
+    expect(supDerived.craft).toBe('legacy craft');
+    expect(supDerived.pack_required).toBe('OPP');
+  });
+
+  it('seeds description from craft + other_options when empty', () => {
+    const lines = parseHonourLines({
+      honour_lines: JSON.stringify([
+        {
+          style: 'Badge',
+          quantity: '10',
+          craft: '滴膠',
+          clasp: '磁扣',
+          other_options: '顏色數量: 3',
+        },
+      ]),
+    });
+    expect(lines[0].description).toBe('加工工藝: 滴膠\n背扣: 磁扣\n\n顏色數量: 3');
+  });
+
+  it('migrates craft/pack from product lines onto supplier cards by index', () => {
+    const lines = [
+      {
+        ...emptyHonourLine(),
+        style: 'A',
+        quantity: '10',
+        craft: 'craft-A',
+        card_size: '30mm',
+        pack_required: 'OPP',
+      },
+      {
+        ...emptyHonourLine(),
+        style: 'B',
+        quantity: '20',
+        craft: 'craft-B',
+        plating_color: '金',
+        internal_pack: '不需要',
+      },
+    ];
+    const suppliers = parseHonourSuppliers(
+      {
+        honour_lines: JSON.stringify(lines),
+        honour_suppliers: JSON.stringify([
+          { ...emptyHonourSupplier(), supplier: 'S1' },
+          { ...emptyHonourSupplier(), supplier: 'S2' },
+        ]),
+      },
+      { minCount: 2, productLines: lines }
+    );
+    expect(suppliers[0]).toMatchObject({
+      supplier: 'S1',
+      craft: 'craft-A',
+      card_size: '30mm',
+      pack_required: 'OPP',
+    });
+    expect(suppliers[1]).toMatchObject({
+      supplier: 'S2',
+      craft: 'craft-B',
+      plating_color: '金',
+      internal_pack: '不需要',
+    });
+  });
+
+  it('does not overwrite supplier craft already set', () => {
+    const lines = [{ ...emptyHonourLine(), style: 'A', craft: 'from-line' }];
+    const suppliers = parseHonourSuppliers(
+      {
+        honour_suppliers: JSON.stringify([
+          { ...emptyHonourSupplier(), supplier: 'S1', craft: 'from-card' },
+        ]),
+      },
+      { minCount: 1, productLines: lines }
+    );
+    expect(suppliers[0].craft).toBe('from-card');
   });
 
   it('pads suppliers to product count without shrinking', () => {

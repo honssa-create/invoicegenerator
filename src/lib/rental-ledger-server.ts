@@ -334,7 +334,12 @@ export async function syncChargeItemsFromRecord(record: RentRecord) {
     const row = await db.prepare(
       `SELECT id, amount_due FROM rental_charge_items
        WHERE user_id = ? AND unit_id = ? AND billing_period = ? AND charge_type = ?`
-    ).get(record.user_id, record.unitId, record.billingPeriod, type) as { id: number; amount_due: number };
+    ).get(record.user_id, record.unitId, record.billingPeriod, type) as { id: number; amount_due: number } | undefined;
+    if (!row) {
+      throw new Error(
+        `Failed to upsert rental charge ${type} for unit ${record.unitId} period ${record.billingPeriod}`
+      );
+    }
     itemIds.push({ id: row.id, due: row.amount_due });
   }
 

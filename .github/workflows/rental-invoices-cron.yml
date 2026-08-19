@@ -23,7 +23,8 @@ jobs:
           fi
           # Strip trailing slash from APP_URL
           BASE="${APP_URL%/}"
-          HTTP_CODE=$(curl -sS -o /tmp/rental-cron-body.json -w '%{http_code}' \
+          HTTP_CODE=$(curl -sS --max-time 120 -o /tmp/rental-cron-body.json -w '%{http_code}' \
+            -X POST \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${BASE}/api/cron/rental-invoices")
           echo "HTTP ${HTTP_CODE}"

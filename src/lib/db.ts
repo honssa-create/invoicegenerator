@@ -626,6 +626,24 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('drop_legacy_kitchen_and_order_activities_v1') ON CONFLICT DO NOTHING`
     );
   }
+
+  // Needed for rental charge upsert ON CONFLICT; ignore if duplicate rows already exist.
+  const migChargeUnique = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'rental_charge_items_upsert_unique_v1'`
+  );
+  if (!migChargeUnique.rows.length) {
+    try {
+      await client().query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rental_charge_items_upsert
+        ON rental_charge_items(user_id, unit_id, billing_period, charge_type)
+      `);
+    } catch (err) {
+      console.error('[InvoiceFlow] Could not create rental_charge_items unique index:', err);
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('rental_charge_items_upsert_unique_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

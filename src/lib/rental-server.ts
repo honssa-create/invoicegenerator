@@ -547,9 +547,7 @@ export async function ensureRentRecord(
       if (syncCharges) await syncChargeItemsFromRecord(synced);
       return synced;
     }
-    const hydrated = hydrateRecord(found);
-    if (syncCharges) await syncChargeItemsFromRecord(hydrated);
-    return hydrated;
+    return hydrateRecord(found);
   }
 
   const base = await resolveBaseRentForPeriod(unit, period, unit.user_id, opts?.lease) || unit.currentYearRent;
@@ -863,24 +861,58 @@ export async function materializeRentPeriod(userId: number | null, period = curr
   ).all(...(userId === null ? [] : [userId])) as UnitRow[];
 
   const leasesByUser = new Map<number, Map<number, RentalLease>>();
-  const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
+  const userIds = Array.from(new Set(rows.map((r) => Number(r.user_id))));
   for (const uid of userIds) {
     leasesByUser.set(uid, await loadCurrentLeases(uid));
   }
 
   let createdOrUpdated = 0;
+  let skipped = 0;
+  const errors: { unit: string; userId: number; error: string }[] = [];
+
   for (const unitRow of rows) {
     const unit = hydrateUnit(unitRow);
+    if (isVacantUnitName(unit.tenantName) || unit.automationEnabled === false) {
+      skipped += 1;
+      continue;
+    }
     const lease = leasesByUser.get(unit.user_id)?.get(unit.id) ?? null;
-    await ensureRentRecord(unit, period, { syncCharges: true, lease });
-    createdOrUpdated += 1;
+    if (lease) {
+      const display = computeLeaseDisplayStatus(lease);
+      if (display === 'ended' || display === 'terminated' || display === 'vacant') {
+        skipped += 1;
+        continue;
+      }
+      if (billingPeriodAfterLeaseEnd(period, lease.actualEndDate || lease.leaseEndDate)) {
+        skipped += 1;
+        continue;
+      }
+    }
+    try {
+      await ensureRentRecord(unit, period, { syncCharges: true, lease });
+      createdOrUpdated += 1;
+    } catch (err) {
+      errors.push({
+        unit: unit.unitName,
+        userId: unit.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   for (const uid of userIds) {
-    await applyOverdueStatuses(uid, period);
+    try {
+      await applyOverdueStatuses(uid, period);
+    } catch (err) {
+      errors.push({
+        unit: `(overdue user ${uid})`,
+        userId: uid,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
-  return { period, units: createdOrUpdated, users: userIds.length };
+  return { period, units: createdOrUpdated, skipped, users: userIds.length, errors };
 }
 
 // ---------------------------------------------------------------------------

@@ -3,19 +3,27 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { currentBillingPeriod } from '@/lib/rentals';
 import { runRentalInvoiceDispatch } from '@/lib/rental-server';
 
+export const dynamic = 'force-dynamic';
+
 async function handle(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const period = searchParams.get('period') || currentBillingPeriod();
-  const authHeader = request.headers.get('authorization') || '';
-  const cronSecret = process.env.CRON_SECRET;
+  try {
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get('period') || currentBillingPeriod();
+    const authHeader = request.headers.get('authorization') || '';
+    const cronSecret = process.env.CRON_SECRET;
 
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
-    return NextResponse.json(await runRentalInvoiceDispatch(null, period));
+    if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+      return NextResponse.json(await runRentalInvoiceDispatch(null, period));
+    }
+
+    const session = await getSessionFromRequest(request);
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json(await runRentalInvoiceDispatch(session.userId, period));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[cron/rental-invoices]', err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const session = await getSessionFromRequest(request);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  return NextResponse.json(await runRentalInvoiceDispatch(session.userId, period));
 }
 
 export async function GET(request: Request) {

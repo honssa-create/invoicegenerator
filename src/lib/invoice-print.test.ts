@@ -106,12 +106,7 @@ describe('invoiceToReceiptPreview', () => {
 
     const now = new Date();
     const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    expect(receiptModel.date).toBe(
-      new Date(`${todayIso}T00:00:00`).toLocaleDateString('en-GB', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      }),
-    );
+    const [y, m, d] = todayIso.split('-');
+    expect(receiptModel.date).toBe(`${d}/${m}/${y}`);
   });
 });

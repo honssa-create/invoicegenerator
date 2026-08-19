@@ -141,11 +141,8 @@ export function formatQuotationDate(dateStr: string | null | undefined): string 
   if (!dateStr?.trim()) return '';
   const raw = dateStr.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return new Date(`${raw}T00:00:00`).toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    const [y, m, d] = raw.split('-');
+    return `${d}/${m}/${y}`;
   }
   return raw;
 }

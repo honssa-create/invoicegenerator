@@ -180,6 +180,7 @@ export default function InvoiceReceiptPage() {
           documentTitle="RECEIPT"
           numberLabel="Invoice No."
           dateLabel="RECEIPT DATE"
+          billingLabel="To"
           remarksMode="plain"
         />
       </div>

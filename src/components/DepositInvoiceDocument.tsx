@@ -1,11 +1,13 @@
 'use client';
 
-import { Fragment, type CSSProperties } from 'react';
+import { Fragment, useRef, type CSSProperties } from 'react';
 import {
   DEFAULT_QUOTATION_STYLE,
   quotationStyleToCssVars,
   type QuotationStyleTemplate,
 } from '@/lib/quotation-style';
+import { PRINT_PAGE_HEIGHT_MM } from '@/lib/print-page-numbers';
+import PrintPageNumbers, { useA4PrintPageCount } from '@/components/PrintPageNumbers';
 
 /** Live preview / print of public/deposit-invoice-template.html */
 
@@ -99,14 +101,18 @@ export default function DepositInvoiceDocument({
   const cssVars = quotationStyleToCssVars(style);
   const items = model.items.length ? model.items : DEFAULT_DEPOSIT_INVOICE_PREVIEW.items;
   const signName = model.companySignName || six[0] || 'Honour Label Limited';
+  const pageRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const pageCount = useA4PrintPageCount(pageRef, bodyRef);
 
   return (
     <div
+      ref={pageRef}
       className={`quo-preview-page relative bg-white mx-auto ${printMode ? 'quo-print-mode shadow-none' : 'shadow-lg'}`}
       style={
         {
           width: '210mm',
-          minHeight: '297mm',
+          minHeight: `calc(${pageCount} * ${PRINT_PAGE_HEIGHT_MM}mm)`,
           padding: 'var(--quo-page-padding)',
           ...cssVars,
         } as CSSProperties
@@ -150,14 +156,20 @@ export default function DepositInvoiceDocument({
         }
         .quo-preview-page .quo-page-number {
           position: absolute;
-          right: 52px;
-          bottom: 24px;
+          left: 0;
+          right: 0;
+          height: 297mm;
+          display: flex;
+          align-items: flex-end;
+          justify-content: flex-end;
+          padding: 0 52px 24px 0;
           font-size: var(--quo-page-number-size);
           line-height: 1;
           color: var(--quo-page-number-color);
           text-align: right;
           pointer-events: none;
           user-select: none;
+          z-index: 2;
         }
         .quo-preview-page .quo-title {
           color: var(--quo-color-accent);
@@ -202,15 +214,8 @@ export default function DepositInvoiceDocument({
           @page { size: A4 portrait; margin: 0; }
           .quo-preview-page {
             width: 100% !important;
-            min-height: auto !important;
             box-shadow: none !important;
             margin: 0 !important;
-          }
-          .quo-preview-page .quo-page-number {
-            position: fixed;
-            right: 14mm;
-            bottom: 10mm;
-            z-index: 9999;
           }
           .quo-preview-page .accent-bg {
             -webkit-print-color-adjust: exact;
@@ -219,6 +224,7 @@ export default function DepositInvoiceDocument({
         }
       `}</style>
 
+      <div ref={bodyRef}>
       <header className="flex justify-between items-start gap-6 mb-7">
         <div className="shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -408,10 +414,9 @@ export default function DepositInvoiceDocument({
           </p>
         </div>
       </footer>
-
-      <div className="quo-page-number" aria-label="Page number">
-        1
       </div>
+
+      <PrintPageNumbers total={pageCount} />
     </div>
   );
 }

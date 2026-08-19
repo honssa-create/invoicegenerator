@@ -1,11 +1,13 @@
 'use client';
 
-import { Fragment, type CSSProperties } from 'react';
+import { Fragment, useRef, type CSSProperties } from 'react';
 import {
   DEFAULT_QUOTATION_STYLE,
   quotationStyleToCssVars,
   type QuotationStyleTemplate,
 } from '@/lib/quotation-style';
+import { PRINT_PAGE_HEIGHT_MM } from '@/lib/print-page-numbers';
+import PrintPageNumbers, { useA4PrintPageCount } from '@/components/PrintPageNumbers';
 
 /** Live preview / print of the Honour Label quotation layout (mirrors public/quotation-template-*.html). */
 
@@ -85,6 +87,7 @@ export default function FormalQuotationDocument({
   documentTitle = 'QUOTATION',
   numberLabel = 'Quotation No.',
   dateLabel = 'Date',
+  billingLabel = 'Invoice To',
   remarksMode = 'list',
 }: {
   model?: QuotationPreviewModel;
@@ -105,6 +108,8 @@ export default function FormalQuotationDocument({
   numberLabel?: string;
   /** Right-meta date row label. */
   dateLabel?: string;
+  /** Left address column label (Invoice To / To). */
+  billingLabel?: string;
   /** Quotation uses a numbered Remarks list; invoice HTML uses plain payment text. */
   remarksMode?: 'list' | 'plain';
 }) {
@@ -115,14 +120,18 @@ export default function FormalQuotationDocument({
   const items = model.items.length ? model.items : DEFAULT_QUOTATION_PREVIEW.items;
   const hasRemarksBlock = Boolean(model.message) || model.remarks.length > 0;
   const showBottom = hasRemarksBlock || showSum;
+  const pageRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const pageCount = useA4PrintPageCount(pageRef, bodyRef);
 
   return (
     <div
+      ref={pageRef}
       className={`quo-preview-page relative bg-white mx-auto ${printMode ? 'quo-print-mode shadow-none' : 'shadow-lg'}`}
       style={
         {
           width: '210mm',
-          minHeight: '297mm',
+          minHeight: `calc(${pageCount} * ${PRINT_PAGE_HEIGHT_MM}mm)`,
           padding: 'var(--quo-page-padding)',
           ...cssVars,
         } as CSSProperties
@@ -166,14 +175,20 @@ export default function FormalQuotationDocument({
         }
         .quo-preview-page .quo-page-number {
           position: absolute;
-          right: 52px;
-          bottom: 24px;
+          left: 0;
+          right: 0;
+          height: 297mm;
+          display: flex;
+          align-items: flex-end;
+          justify-content: flex-end;
+          padding: 0 52px 24px 0;
           font-size: var(--quo-page-number-size);
           line-height: 1;
           color: var(--quo-page-number-color);
           text-align: right;
           pointer-events: none;
           user-select: none;
+          z-index: 2;
         }
         .quo-preview-page .quo-title {
           color: var(--quo-color-accent);
@@ -203,15 +218,8 @@ export default function FormalQuotationDocument({
           @page { size: A4 portrait; margin: 0; }
           .quo-preview-page {
             width: 100% !important;
-            min-height: auto !important;
             box-shadow: none !important;
             margin: 0 !important;
-          }
-          .quo-preview-page .quo-page-number {
-            position: fixed;
-            right: 12mm;
-            bottom: 8mm;
-            z-index: 9999;
           }
           .quo-preview-page .accent-bg {
             -webkit-print-color-adjust: exact;
@@ -220,6 +228,7 @@ export default function FormalQuotationDocument({
         }
       `}</style>
 
+      <div ref={bodyRef}>
       <header className="flex justify-between items-start gap-6 mb-7">
         <div className="shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -245,7 +254,7 @@ export default function FormalQuotationDocument({
 
       <section className="grid grid-cols-3 gap-4 mb-7">
         <div>
-          <p className="label mb-2">Invoice To</p>
+          <p className="label mb-2">{billingLabel}</p>
           <p className="quo-field whitespace-pre-wrap m-0">{model.billingAddress || '—'}</p>
         </div>
         <div>
@@ -405,10 +414,9 @@ export default function FormalQuotationDocument({
           ) : null}
         </footer>
       ) : null}
-
-      <div className="quo-page-number" aria-label="Page number">
-        1
       </div>
+
+      <PrintPageNumbers total={pageCount} />
     </div>
   );
 }

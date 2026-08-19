@@ -84,17 +84,23 @@
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
     }
 
-    /* Screen / PDF preview page number (bottom-right). */
+    /* One footer per A4 slice: "Page X of Y" (see print-page-numbers.js). */
     .quo-page-number {
       position: absolute;
-      right: 52px;
-      bottom: 24px;
+      left: 0;
+      right: 0;
+      height: 297mm;
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      padding: 0 52px 24px 0;
       font-size: var(--quo-page-number-size);
       line-height: 1;
       color: var(--quo-page-number-color);
       text-align: right;
       pointer-events: none;
       user-select: none;
+      z-index: 2;
     }
 
     .formal-quotation {
@@ -371,15 +377,7 @@
         margin: 0;
         box-shadow: none;
         width: 100%;
-        min-height: auto;
         padding-bottom: 40px;
-      }
-      /* Fallback for browsers that ignore @page margin boxes (e.g. Chrome): fixed bottom-right. */
-      .quo-page-number {
-        position: fixed;
-        right: 14mm;
-        bottom: 10mm;
-        z-index: 9999;
       }
       .quo-table thead th {
         -webkit-print-color-adjust: exact;
@@ -519,9 +517,10 @@ HANG SENG BANK (bank code : 024)
         </div>
       </footer>
 
-      <div class="quo-page-number" aria-label="Page number">1</div>
+      <div class="quo-page-number" aria-label="Page 1 of 1">Page 1 of 1</div>
 
     </div>
   </main>
+  <script src="print-page-numbers.js"></script>
 </body>
 </html>

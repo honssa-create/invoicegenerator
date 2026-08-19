@@ -412,6 +412,8 @@ export interface HonourSupplierItem {
   craft: string;
   plating_color: string;
   clasp: string;
+  /** Per-card extra actions / notes (was a single order-level field). */
+  extra_actions: string;
   /** Packaging (moved from product lines). */
   internal_pack: string;
   pack_required: string;
@@ -430,6 +432,7 @@ export function emptyHonourSupplier(): HonourSupplierItem {
     craft: '',
     plating_color: '',
     clasp: '',
+    extra_actions: '',
     internal_pack: '',
     pack_required: '',
   };
@@ -670,6 +673,7 @@ function normalizeHonourSupplierRow(row: Record<string, unknown>): HonourSupplie
     craft: String(row.craft ?? ''),
     plating_color: String(row.plating_color ?? ''),
     clasp: String(row.clasp ?? ''),
+    extra_actions: String(row.extra_actions ?? ''),
     internal_pack: String(row.internal_pack ?? ''),
     pack_required: String(row.pack_required ?? ''),
   };
@@ -686,6 +690,7 @@ function seedLegacySupplier(fields: Record<string, string | boolean>, cartonCoun
     supplier_ship_date: fieldAsString(fields, 'supplier_ship_date'),
     carton_count: fieldAsString(fields, 'carton_count') || String(cartonCountCore ?? '').trim(),
     ...craft,
+    extra_actions: fieldAsString(fields, 'extra_actions'),
   };
 }
 
@@ -760,6 +765,7 @@ export function parseHonourSuppliers(
         craft: first.craft || legacy.craft,
         plating_color: first.plating_color || legacy.plating_color,
         clasp: first.clasp || legacy.clasp,
+        extra_actions: first.extra_actions || legacy.extra_actions,
         internal_pack: first.internal_pack || legacy.internal_pack,
         pack_required: first.pack_required || legacy.pack_required,
       };
@@ -795,6 +801,7 @@ export function serializeHonourSuppliers(suppliers: HonourSupplierItem[]): strin
       craft: String(s.craft ?? ''),
       plating_color: String(s.plating_color ?? ''),
       clasp: String(s.clasp ?? ''),
+      extra_actions: String(s.extra_actions ?? ''),
       internal_pack: String(s.internal_pack ?? ''),
       pack_required: String(s.pack_required ?? ''),
     }))
@@ -817,6 +824,7 @@ export function honourSuppliersDerivedFields(suppliers: HonourSupplierItem[]): R
     plating_color: first.plating_color,
     clasp: first.clasp,
     pack_required: first.pack_required,
+    extra_actions: first.extra_actions,
   };
 }
 
@@ -894,6 +902,7 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 /** Sidebar shortcuts that set the Order Type filter to a specific type. */
 export const ORDER_NAV_TYPE_FILTERS = [
   { param: 'honour訂製', label: 'honour訂單' },
+  { param: 'honour en訂製', label: 'honour en訂單' },
   { param: '燕窩回禮燉製', label: '燕窩回禮' },
   { param: 'Nestiee 燕窩訂單', label: '燕窩訂單' },
 ] as const;
@@ -1376,8 +1385,11 @@ export function resolveOrderAddressesForQuotation(order: {
 }
 
 /** Default order_type when ingesting from a WooCommerce store platform. */
-export const WOO_PLATFORM_ORDER_TYPE: Partial<Record<'nestiee' | 'honour' | 'cupmoka', OrderType>> = {
+export const WOO_PLATFORM_ORDER_TYPE: Partial<
+  Record<'nestiee' | 'honour' | 'honour_en' | 'cupmoka', OrderType>
+> = {
   honour: 'honour訂製',
+  honour_en: 'honour en訂製',
   nestiee: NESTIEE_ORDER_TYPE,
   cupmoka: 'Cupmoka',
 };

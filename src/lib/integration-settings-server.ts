@@ -4,6 +4,7 @@ import {
   EMPTY_INTEGRATION_SETTINGS,
   RESEND_BRAND_KEYS,
   SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+  WOO_PLATFORM_KEYS,
   normalizeResendOrderTypes,
   type IntegrationSettings,
   type IntegrationSettingsMasked,
@@ -46,6 +47,7 @@ function parseSettings(json: string | null | undefined): IntegrationSettings {
       woocommerce: {
         nestiee: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.nestiee, ...parsed.woocommerce?.nestiee },
         honour: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.honour, ...parsed.woocommerce?.honour },
+        honour_en: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.honour_en, ...parsed.woocommerce?.honour_en },
         cupmoka: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.cupmoka, ...parsed.woocommerce?.cupmoka },
       },
       quickbooks: { ...EMPTY_INTEGRATION_SETTINGS.quickbooks, ...parsed.quickbooks },
@@ -81,6 +83,7 @@ function envWoo(platform: WooPlatformKey): WooStoreSettings {
   const envMap: Record<WooPlatformKey, string> = {
     nestiee: 'NESTIEE',
     honour: 'HONOUR',
+    honour_en: 'HONOUR_EN',
     cupmoka: 'CUPMOKA',
   };
   const key = envMap[platform];
@@ -157,6 +160,7 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
     woocommerce: {
       nestiee: pickWoo(settings.woocommerce.nestiee, 'nestiee'),
       honour: pickWoo(settings.woocommerce.honour, 'honour'),
+      honour_en: pickWoo(settings.woocommerce.honour_en, 'honour_en'),
       cupmoka: pickWoo(settings.woocommerce.cupmoka, 'cupmoka'),
     },
     quickbooks: {
@@ -234,6 +238,7 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
     woocommerce: {
       nestiee: maskWoo(s.woocommerce.nestiee),
       honour: maskWoo(s.woocommerce.honour),
+      honour_en: maskWoo(s.woocommerce.honour_en),
       cupmoka: maskWoo(s.woocommerce.cupmoka),
     },
     quickbooks: {
@@ -338,7 +343,7 @@ export async function saveIntegrationSettings(userId: number, update: Integratio
   };
 
   if (update.woocommerce) {
-    for (const platform of ['nestiee', 'honour', 'cupmoka'] as WooPlatformKey[]) {
+    for (const platform of WOO_PLATFORM_KEYS) {
       const patch = update.woocommerce[platform];
       if (!patch) continue;
       let url = keepOrReplace(current.woocommerce[platform].url, patch.url, true);

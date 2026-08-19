@@ -5,6 +5,7 @@ import {
   RESEND_BRAND_LABELS,
   RESEND_UI_BRAND_KEYS,
   SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+  WOO_PLATFORM_KEYS,
   WOO_PLATFORM_LABELS,
   type IntegrationSettingsMasked,
   type ResendBrandKey,
@@ -15,11 +16,20 @@ import { ORDER_TYPES } from '@/lib/orders';
 const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
+const EMPTY_WOO_MASKED = {
+  url: '',
+  key_set: false,
+  key_hint: '',
+  secret_set: false,
+  secret_hint: '',
+};
+
 const EMPTY_MASKED: IntegrationSettingsMasked = {
   woocommerce: {
-    nestiee: { url: '', key_set: false, key_hint: '', secret_set: false, secret_hint: '' },
-    honour: { url: '', key_set: false, key_hint: '', secret_set: false, secret_hint: '' },
-    cupmoka: { url: '', key_set: false, key_hint: '', secret_set: false, secret_hint: '' },
+    nestiee: { ...EMPTY_WOO_MASKED },
+    honour: { ...EMPTY_WOO_MASKED },
+    honour_en: { ...EMPTY_WOO_MASKED },
+    cupmoka: { ...EMPTY_WOO_MASKED },
   },
   quickbooks: {
     client_id: '',
@@ -55,6 +65,15 @@ const EMPTY_MASKED: IntegrationSettingsMasked = {
 type WooForm = Record<WooPlatformKey, { url: string; key: string; secret: string }>;
 type ResendForm = Record<ResendBrandKey, { api_key: string; from_email: string; order_types: string[] }>;
 
+function emptyWooForm(): WooForm {
+  return {
+    nestiee: { url: '', key: '', secret: '' },
+    honour: { url: '', key: '', secret: '' },
+    honour_en: { url: '', key: '', secret: '' },
+    cupmoka: { url: '', key: '', secret: '' },
+  };
+}
+
 export default function IntegrationsSettingsPanel({
   onToast,
 }: {
@@ -63,11 +82,7 @@ export default function IntegrationsSettingsPanel({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [masked, setMasked] = useState<IntegrationSettingsMasked>(EMPTY_MASKED);
-  const [woo, setWoo] = useState<WooForm>({
-    nestiee: { url: '', key: '', secret: '' },
-    honour: { url: '', key: '', secret: '' },
-    cupmoka: { url: '', key: '', secret: '' },
-  });
+  const [woo, setWoo] = useState<WooForm>(emptyWooForm());
   const [qb, setQb] = useState({
     client_id: '',
     client_secret: '',
@@ -99,6 +114,7 @@ export default function IntegrationsSettingsPanel({
     setWoo({
       nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '' },
       honour: { url: s.woocommerce.honour.url, key: '', secret: '' },
+      honour_en: { url: s.woocommerce.honour_en.url, key: '', secret: '' },
       cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '' },
     });
     setQb({
@@ -175,6 +191,11 @@ export default function IntegrationsSettingsPanel({
         woocommerce: {
           nestiee: { url: woo.nestiee.url, ...(woo.nestiee.key ? { key: woo.nestiee.key } : {}), ...(woo.nestiee.secret ? { secret: woo.nestiee.secret } : {}) },
           honour: { url: woo.honour.url, ...(woo.honour.key ? { key: woo.honour.key } : {}), ...(woo.honour.secret ? { secret: woo.honour.secret } : {}) },
+          honour_en: {
+            url: woo.honour_en.url,
+            ...(woo.honour_en.key ? { key: woo.honour_en.key } : {}),
+            ...(woo.honour_en.secret ? { secret: woo.honour_en.secret } : {}),
+          },
           cupmoka: { url: woo.cupmoka.url, ...(woo.cupmoka.key ? { key: woo.cupmoka.key } : {}), ...(woo.cupmoka.secret ? { secret: woo.cupmoka.secret } : {}) },
         },
         quickbooks: {
@@ -273,11 +294,13 @@ export default function IntegrationsSettingsPanel({
       {/* WooCommerce */}
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
-          <h2 className="text-lg font-semibold text-gray-900">WooCommerce (3 stores)</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            WooCommerce ({WOO_PLATFORM_KEYS.length} stores)
+          </h2>
           <p className="text-sm text-gray-500 mt-1">WooCommerce → Settings → Advanced → REST API → Add key (Read permission)</p>
         </div>
         <div className="divide-y divide-gray-100">
-          {(['nestiee', 'honour', 'cupmoka'] as WooPlatformKey[]).map((platform) => (
+          {WOO_PLATFORM_KEYS.map((platform) => (
             <div key={platform} className="px-5 py-4">
               <h3 className="text-sm font-semibold text-gray-800 mb-3">{WOO_PLATFORM_LABELS[platform]}</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

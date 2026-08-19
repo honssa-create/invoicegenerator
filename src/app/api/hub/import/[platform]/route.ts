@@ -7,7 +7,7 @@ import { getWooStoreSetupIssue } from '@/lib/woocommerce';
 import { getQuickBooksCredentials } from '@/lib/integration-settings-server';
 import { parseHubImportDateRange } from '@/lib/hub-import';
 
-const PLATFORMS = ['nestiee', 'honour', 'cupmoka', 'quickbooks'] as const;
+const PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks'] as const;
 type ImportPlatform = (typeof PLATFORMS)[number];
 
 function isImportPlatform(value: string): value is ImportPlatform {

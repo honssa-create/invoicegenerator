@@ -71,7 +71,7 @@ async function main() {
       const platform = String(fields.order_from || '');
       const orderType = String(fields.order_type || '');
 
-      if (platform === 'honour' || orderType.includes('honour')) {
+      if (platform === 'honour' || platform === 'honour_en' || orderType.includes('honour')) {
         nextReceipt =
           parseHonourEstimateMinDate(payload) ||
           receiptFromRequestedDelivery(fields.requested_delivery);

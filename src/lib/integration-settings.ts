@@ -2,7 +2,9 @@
 
 import { ORDER_TYPES } from './orders';
 
-export type WooPlatformKey = 'nestiee' | 'honour' | 'cupmoka';
+export type WooPlatformKey = 'nestiee' | 'honour' | 'honour_en' | 'cupmoka';
+
+export const WOO_PLATFORM_KEYS: WooPlatformKey[] = ['nestiee', 'honour', 'honour_en', 'cupmoka'];
 
 export type ResendBrandKey = 'honour' | 'nestiee' | 'cupmoka';
 
@@ -141,6 +143,7 @@ export interface IntegrationSettingsMasked {
 export const WOO_PLATFORM_LABELS: Record<WooPlatformKey, string> = {
   nestiee: 'Nestiee (nestiee.com.hk)',
   honour: 'Honour (honour.com.hk)',
+  honour_en: 'Honour EN',
   cupmoka: 'Cup Moka (cupmoka.com.hk)',
 };
 
@@ -148,6 +151,7 @@ export const EMPTY_INTEGRATION_SETTINGS: IntegrationSettings = {
   woocommerce: {
     nestiee: { url: '', key: '', secret: '' },
     honour: { url: '', key: '', secret: '' },
+    honour_en: { url: '', key: '', secret: '' },
     cupmoka: { url: '', key: '', secret: '' },
   },
   quickbooks: {

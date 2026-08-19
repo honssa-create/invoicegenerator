@@ -468,6 +468,27 @@ describe('per-line honour options / suppliers', () => {
     expect(suppliers[0].craft).toBe('from-card');
   });
 
+  it('migrates legacy flat extra_actions onto supplier card 0 and mirrors back', () => {
+    const suppliers = parseHonourSuppliers(
+      {
+        honour_suppliers: JSON.stringify([{ ...emptyHonourSupplier(), supplier: 'S1' }]),
+        extra_actions: 'laser etch logo',
+      },
+      { minCount: 1 }
+    );
+    expect(suppliers[0].extra_actions).toBe('laser etch logo');
+
+    const withPerCard = [
+      { ...emptyHonourSupplier(), supplier: 'S1', extra_actions: 'card-1 note' },
+      { ...emptyHonourSupplier(), supplier: 'S2', extra_actions: 'card-2 note' },
+    ];
+    const derived = honourSuppliersDerivedFields(withPerCard);
+    expect(derived.extra_actions).toBe('card-1 note');
+    const parsed = JSON.parse(derived.honour_suppliers) as Array<{ extra_actions: string }>;
+    expect(parsed[0].extra_actions).toBe('card-1 note');
+    expect(parsed[1].extra_actions).toBe('card-2 note');
+  });
+
   it('pads suppliers to product count without shrinking', () => {
     expect(honourProductLineCount(buildHonourLinesFromWoo([ironOnLine, flatWovenLine], 10))).toBe(2);
     const seeded = parseHonourSuppliers(

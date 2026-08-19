@@ -7,7 +7,7 @@ import { getIntegrationSettings } from '@/lib/integration-settings-server';
 import { getWooStoreSetupIssue } from '@/lib/woocommerce';
 import { normalizeWooStoreUrl } from '@/lib/woo-url';
 
-const WOO_PLATFORMS = ['nestiee', 'honour', 'cupmoka'] as const;
+const WOO_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka'] as const;
 type WooPlatform = (typeof WOO_PLATFORMS)[number];
 
 function isWooPlatform(value: string): value is WooPlatform {

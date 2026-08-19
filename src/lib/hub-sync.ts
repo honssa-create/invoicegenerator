@@ -142,7 +142,7 @@ export async function syncAllWooStores(userId: number, dateRange?: HubImportDate
 
 export async function importHubPlatform(
   userId: number,
-  platform: 'nestiee' | 'honour' | 'cupmoka' | 'quickbooks',
+  platform: 'nestiee' | 'honour' | 'honour_en' | 'cupmoka' | 'quickbooks',
   dateRange?: HubImportDateRange
 ): Promise<HubSyncResult> {
   if (platform === 'quickbooks') {

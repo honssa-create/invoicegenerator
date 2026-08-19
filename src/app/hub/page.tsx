@@ -26,14 +26,15 @@ interface HubResponse {
 const PLATFORM_COLORS: Record<HubPlatform, string> = {
   nestiee: 'bg-pink-100 text-pink-800',
   honour: 'bg-indigo-100 text-indigo-800',
+  honour_en: 'bg-violet-100 text-violet-800',
   cupmoka: 'bg-orange-100 text-orange-800',
   quickbooks: 'bg-green-100 text-green-800',
   manual: 'bg-gray-100 text-gray-700',
 };
 
-const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'cupmoka', 'quickbooks'] as const;
+const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks'] as const;
 type ImportPlatform = (typeof IMPORTABLE_PLATFORMS)[number];
-const WOO_IMPORT_PLATFORMS = ['nestiee', 'honour', 'cupmoka'] as const;
+const WOO_IMPORT_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka'] as const;
 type WooImportPlatform = (typeof WOO_IMPORT_PLATFORMS)[number];
 
 function isWooImportPlatform(platform: ImportPlatform): platform is WooImportPlatform {
@@ -367,7 +368,7 @@ function OrderHubContent() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard title="Total Orders 總訂單" value={String(data?.summary.total ?? 0)} icon="📦" color="bg-gray-50 text-gray-700" />
         <StatCard title="External Sync 外部同步" value={String(data?.summary.external ?? 0)} icon="🛰️" color="bg-brand-50 text-brand-700" />
-        <StatCard title="WooCommerce" value={String((data?.summary.byPlatform.nestiee || 0) + (data?.summary.byPlatform.honour || 0) + (data?.summary.byPlatform.cupmoka || 0))} icon="🛒" color="bg-pink-50 text-pink-700" />
+        <StatCard title="WooCommerce" value={String((data?.summary.byPlatform.nestiee || 0) + (data?.summary.byPlatform.honour || 0) + (data?.summary.byPlatform.honour_en || 0) + (data?.summary.byPlatform.cupmoka || 0))} icon="🛒" color="bg-pink-50 text-pink-700" />
         <StatCard title="QuickBooks" value={String(data?.summary.byPlatform.quickbooks || 0)} icon="📒" color="bg-green-50 text-green-700" />
       </div>
 

@@ -71,6 +71,7 @@ const STORE_META: Array<{
 }> = [
   { platform: 'nestiee', label: 'nestiee.com.hk' },
   { platform: 'honour', label: 'honour.com.hk' },
+  { platform: 'honour_en', label: 'Honour EN' },
   { platform: 'cupmoka', label: 'cupmoka.com.hk' },
 ];
 

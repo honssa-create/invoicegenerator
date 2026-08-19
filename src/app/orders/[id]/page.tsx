@@ -1418,7 +1418,14 @@ export default function OrderDetailPage() {
                 <div className="border-t border-dashed border-gray-200 pt-6 space-y-5">
                   <h3 className="text-sm font-semibold text-gray-700">Platform 下單平台</h3>
                   <div className="grid md:grid-cols-2 gap-5">
-                    {labeled('platform 下單平台', fInput('order_from', 'text', 'e.g. honour.com.hk'))}
+                    {labeled(
+                      'platform 下單平台',
+                      fInput(
+                        'order_from',
+                        'text',
+                        orderType === 'honour en訂製' ? 'e.g. Honour EN store URL' : 'e.g. honour.com.hk',
+                      ),
+                    )}
                     {labeled('payment option 下單時付款選項', fInput('payment_option', 'text', 'e.g. yedpay'))}
                   </div>
                 </div>
@@ -1596,6 +1603,17 @@ export default function OrderDetailPage() {
                                 />
                               )}
                             </div>
+                            {labeled(
+                              '額外動作',
+                              <textarea
+                                value={sup.extra_actions}
+                                onChange={(e) => updateSup({ extra_actions: e.target.value }, false)}
+                                onBlur={(e) => updateSup({ extra_actions: e.target.value }, true)}
+                                rows={3}
+                                placeholder="Extra actions / notes…"
+                                className={softInput}
+                              />
+                            )}
                           </div>
 
                           <div className="border-t border-dashed border-gray-100 pt-4 space-y-4">
@@ -1629,21 +1647,6 @@ export default function OrderDetailPage() {
                       );
                     })}
                   </div>
-                </div>
-
-                {/* Extra actions */}
-                <div className="border-t border-dashed border-gray-200 pt-6">
-                  {labeled(
-                    '額外動作',
-                    <textarea
-                      value={fVal('extra_actions')}
-                      onChange={(e) => setFieldLocal('extra_actions', e.target.value)}
-                      onBlur={(e) => patch({ fields: { extra_actions: e.target.value } })}
-                      rows={3}
-                      placeholder="Extra actions / notes…"
-                      className={softInput}
-                    />
-                  )}
                 </div>
               </div>
             )}

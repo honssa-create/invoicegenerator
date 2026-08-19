@@ -203,7 +203,10 @@ export async function upsertHubOrder(
     }
   }
 
-  if (input.source_platform === 'honour' && input.raw_payload) {
+  if (
+    (input.source_platform === 'honour' || input.source_platform === 'honour_en') &&
+    input.raw_payload
+  ) {
     const payload = input.raw_payload;
     const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
     const shippingTotal = parseWooShippingTotal(payload);

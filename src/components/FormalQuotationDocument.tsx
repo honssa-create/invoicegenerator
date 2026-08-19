@@ -81,8 +81,10 @@ export default function FormalQuotationDocument({
   showSum = true,
   showSignature = true,
   showChop = true,
+  showAcceptedBy = true,
   documentTitle = 'QUOTATION',
   numberLabel = 'Quotation No.',
+  dateLabel = 'Date',
   remarksMode = 'list',
 }: {
   model?: QuotationPreviewModel;
@@ -95,10 +97,14 @@ export default function FormalQuotationDocument({
   showSignature?: boolean;
   /** Show company chop image inside the signature block (sum-sign / sign HTML). */
   showChop?: boolean;
+  /** Show left “Accepted by & Date” signature line. */
+  showAcceptedBy?: boolean;
   /** Document heading (QUOTATION / INVOICE). */
   documentTitle?: string;
   /** Right-meta number row label. */
   numberLabel?: string;
+  /** Right-meta date row label. */
+  dateLabel?: string;
   /** Quotation uses a numbered Remarks list; invoice HTML uses plain payment text. */
   remarksMode?: 'list' | 'plain';
 }) {
@@ -256,7 +262,7 @@ export default function FormalQuotationDocument({
             <span className="inline-block min-w-[5.5em] text-left">{model.quotationNo || '—'}</span>
           </p>
           <p className="m-0">
-            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">Date</span>
+            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">{dateLabel}</span>
             <span className="inline-block min-w-[5.5em] text-left">{model.date || '—'}</span>
           </p>
         </div>
@@ -359,34 +365,46 @@ export default function FormalQuotationDocument({
         </section>
       ) : null}
 
-      <footer className={`mt-6 ${showSignature ? 'grid grid-cols-2 gap-6' : ''}`}>
-        <div className={showSignature ? 'self-end' : 'w-1/2'}>
-          <p className="m-0 mb-7">Accepted by &amp; Date</p>
-          <hr className="border-0 border-t border-gray-800 w-[85%] m-0" />
-        </div>
-        {showSignature ? (
-          <div className="text-center self-end">
-            <p className="m-0 mb-2.5 whitespace-pre-line" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
-              {'For and on behalf of\nHonour Label Limited'}
-            </p>
-            {showChop ? (
-              <img
-                className="quo-chop"
-                src={model.chopSrc || '/company-chop.png'}
-                alt="Company chop"
+      {showAcceptedBy || showSignature ? (
+        <footer
+          className={`mt-6 ${
+            showAcceptedBy && showSignature
+              ? 'grid grid-cols-2 gap-6'
+              : showSignature
+                ? 'flex justify-end'
+                : ''
+          }`}
+        >
+          {showAcceptedBy ? (
+            <div className={showSignature ? 'self-end' : 'w-1/2'}>
+              <p className="m-0 mb-7">Accepted by &amp; Date</p>
+              <hr className="border-0 border-t border-gray-800 w-[85%] m-0" />
+            </div>
+          ) : null}
+          {showSignature ? (
+            <div className={`text-center self-end ${showAcceptedBy ? '' : 'w-1/2'}`}>
+              <p className="m-0 mb-2.5 whitespace-pre-line" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+                {'For and on behalf of\nHonour Label Limited'}
+              </p>
+              {showChop ? (
+                <img
+                  className="quo-chop"
+                  src={model.chopSrc || '/company-chop.png'}
+                  alt="Company chop"
+                />
+              ) : null}
+              <hr
+                className={`border-0 border-t border-gray-800 w-[70%] mx-auto mb-2 ${
+                  showChop ? 'mt-3' : 'mt-[72px]'
+                }`}
               />
-            ) : null}
-            <hr
-              className={`border-0 border-t border-gray-800 w-[70%] mx-auto mb-2 ${
-                showChop ? 'mt-3' : 'mt-[72px]'
-              }`}
-            />
-            <p className="m-0" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
-              Authorized Signature
-            </p>
-          </div>
-        ) : null}
-      </footer>
+              <p className="m-0" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+                Authorized Signature
+              </p>
+            </div>
+          ) : null}
+        </footer>
+      ) : null}
 
       <div className="quo-page-number" aria-label="Page number">
         1

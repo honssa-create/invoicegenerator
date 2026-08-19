@@ -63,12 +63,26 @@ export async function POST(request: Request) {
     }
 
     const lineItems = (Array.isArray(items) ? items : [])
-      .map((item: { description?: unknown; quantity?: unknown; unit_price?: unknown }) => ({
-        description: String(item?.description ?? '').trim(),
-        quantity: Number(item?.quantity) || 0,
-        unit_price: Number(item?.unit_price) || 0,
-      }))
-      .filter((item) => item.description);
+      .map((item: {
+        service_date?: unknown;
+        product_service?: unknown;
+        description?: unknown;
+        quantity?: unknown;
+        unit_price?: unknown;
+        class_name?: unknown;
+      }) => {
+        const product = String(item?.product_service ?? '').trim();
+        const description = String(item?.description ?? '').trim();
+        return {
+          service_date: String(item?.service_date ?? '').trim() || null,
+          product_service: product || null,
+          description: description || product,
+          quantity: Number(item?.quantity) || 0,
+          unit_price: Number(item?.unit_price) || 0,
+          class_name: String(item?.class_name ?? '').trim() || null,
+        };
+      })
+      .filter((item) => item.description || item.product_service);
 
     if (!lineItems.length) {
       return NextResponse.json({ error: 'At least one line item is required' }, { status: 400 });
@@ -98,17 +112,21 @@ export async function POST(request: Request) {
         throw new Error('Invoice insert did not return an id');
       }
       const insertItem = db.prepare(
-        `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO invoice_items (
+           invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       for (const item of lineItems) {
         await insertItem.run(
           invoiceId,
+          item.service_date,
+          item.product_service,
           item.description,
           item.quantity,
           item.unit_price,
           item.quantity * item.unit_price,
+          item.class_name,
         );
       }
 

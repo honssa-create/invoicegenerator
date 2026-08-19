@@ -92,8 +92,8 @@ describe('computeBalanceDueAmount', () => {
 });
 
 describe('invoiceToReceiptPreview', () => {
-  it('uses thank-you remarks instead of payment instructions', () => {
-    const inv = minimalInvoice();
+  it('uses thank-you remarks and today as the receipt date', () => {
+    const inv = minimalInvoice({ issue_date: '2020-01-01' });
     const invoiceModel = invoiceToFormalPreview(inv);
     const receiptModel = invoiceToReceiptPreview(inv);
 
@@ -102,5 +102,16 @@ describe('invoiceToReceiptPreview', () => {
     expect(invoiceModel.remarks[0]).toContain('Bank transfer detail');
     expect(receiptModel.quotationNo).toBe(invoiceModel.quotationNo);
     expect(receiptModel.total).toBe(invoiceModel.total);
+    expect(receiptModel.date).not.toBe(invoiceModel.date);
+
+    const now = new Date();
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    expect(receiptModel.date).toBe(
+      new Date(`${todayIso}T00:00:00`).toLocaleDateString('en-GB', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      }),
+    );
   });
 });

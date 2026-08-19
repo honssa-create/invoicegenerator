@@ -130,8 +130,11 @@ export function invoiceToReceiptPreview(
   inv: InvoiceWithDetails,
   business?: InvoicePrintBusiness | null,
 ): QuotationPreviewModel {
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return {
     ...invoiceToFormalPreview(inv, business),
+    date: formatQuotationDate(todayIso) || '—',
     remarks: [defaultReceiptPaymentRemarks()],
   };
 }

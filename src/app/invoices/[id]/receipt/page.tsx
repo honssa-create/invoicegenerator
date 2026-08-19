@@ -176,8 +176,10 @@ export default function InvoiceReceiptPage() {
           showSum
           showSignature
           showChop={chopMode === 'chop'}
+          showAcceptedBy={false}
           documentTitle="RECEIPT"
           numberLabel="Invoice No."
+          dateLabel="RECEIPT DATE"
           remarksMode="plain"
         />
       </div>

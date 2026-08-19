@@ -14,6 +14,12 @@ const LIVE_MAX_SQL: Record<GlobalRecordType, string> = {
   invoice: `COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'), 0)`,
 };
 
+const TAKEN_SQL: Record<GlobalRecordType, string> = {
+  order: `SELECT 1 FROM orders WHERE reference_number = $1 LIMIT 1`,
+  quotation: `SELECT 1 FROM quotations WHERE quote_number = $1 LIMIT 1`,
+  invoice: `SELECT 1 FROM invoices WHERE invoice_number = $1 LIMIT 1`,
+};
+
 /**
  * Sequence updates must use the pool (autocommit), never the ambient transaction.
  * Callers allocate inside `db.transaction` before INSERT; if that INSERT fails and
@@ -50,21 +56,36 @@ async function nextSerialRow(recordType: GlobalRecordType): Promise<{ serial: nu
   return row ? { serial: Number(row.serial) } : undefined;
 }
 
+function formatRecordNumber(recordType: GlobalRecordType, serial: number): string {
+  return recordType === 'order' ? formatOrderReference(serial) : formatDocumentNumber(serial);
+}
+
+async function isNumberTaken(recordType: GlobalRecordType, value: string): Promise<boolean> {
+  const res = await getPool().query(TAKEN_SQL[recordType], [value]);
+  return res.rows.length > 0;
+}
+
 /** Atomically reserve the next office-wide number. Safe to call inside a record insert transaction. */
 export async function allocateGlobalRecordNumber(recordType: GlobalRecordType): Promise<string> {
-  await bumpSequenceToLiveMax(recordType);
-  let row = await nextSerialRow(recordType);
-  if (!row) {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
     await bumpSequenceToLiveMax(recordType);
-    row = await nextSerialRow(recordType);
-  }
+    let row = await nextSerialRow(recordType);
+    if (!row) {
+      await bumpSequenceToLiveMax(recordType);
+      row = await nextSerialRow(recordType);
+    }
 
-  if (!row) {
-    throw new Error(`Global ${recordType} sequence is not initialized`);
+    if (!row) {
+      throw new Error(`Global ${recordType} sequence is not initialized`);
+    }
+    const serial = Number(row.serial);
+    if (serial > MAX_RECORD_SERIAL[recordType]) {
+      throw new Error(`Global ${recordType} sequence is exhausted`);
+    }
+    const value = formatRecordNumber(recordType, serial);
+    if (!(await isNumberTaken(recordType, value))) {
+      return value;
+    }
   }
-  const serial = Number(row.serial);
-  if (serial > MAX_RECORD_SERIAL[recordType]) {
-    throw new Error(`Global ${recordType} sequence is exhausted`);
-  }
-  return recordType === 'order' ? formatOrderReference(serial) : formatDocumentNumber(serial);
+  throw new Error(`Unable to allocate a free ${recordType} number`);
 }

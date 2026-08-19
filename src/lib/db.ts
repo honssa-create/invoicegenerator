@@ -272,6 +272,39 @@ export function splitSqlStatements(sql: string): string[] {
   return out;
 }
 
+async function tableNumbersAlreadyNormalized(
+  conn: PoolClient,
+  sql: string,
+): Promise<boolean> {
+  const row = (await conn.query<{ total: number; valid: number; distinct: number }>(sql)).rows[0];
+  const total = Number(row?.total || 0);
+  const valid = Number(row?.valid || 0);
+  const distinct = Number(row?.distinct || 0);
+  return total === valid && total === distinct;
+}
+
+async function applyUnifiedNumberingConstraints(conn: PoolClient): Promise<void> {
+  await conn.query(`ALTER TABLE orders ALTER COLUMN reference_number SET NOT NULL`);
+  await conn.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_reference_number_format`);
+  await conn.query(`
+    ALTER TABLE orders
+    ADD CONSTRAINT orders_reference_number_format CHECK (reference_number ~ '^ORD-[0-9]{7}$')
+  `);
+  await conn.query(`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_number_format`);
+  await conn.query(`
+    ALTER TABLE invoices
+    ADD CONSTRAINT invoices_number_format CHECK (invoice_number ~ '^[0-9]{8}$')
+  `);
+  await conn.query(`ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_number_format`);
+  await conn.query(`
+    ALTER TABLE quotations
+    ADD CONSTRAINT quotations_number_format CHECK (quote_number ~ '^[0-9]{8}$')
+  `);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reference_number ON orders(reference_number)`);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number_global ON invoices(invoice_number)`);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_number_global ON quotations(quote_number)`);
+}
+
 async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
   const conn = await getPool().connect();
   try {
@@ -285,6 +318,55 @@ async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
       return;
     }
 
+    const ordersNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE reference_number ~ '^ORD-[0-9]{7}$')::int AS valid,
+              COUNT(DISTINCT reference_number)::int AS distinct
+       FROM orders`,
+    );
+    const invoicesNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE invoice_number ~ '^[0-9]{8}$')::int AS valid,
+              COUNT(DISTINCT invoice_number)::int AS distinct
+       FROM invoices`,
+    );
+    const quotesNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE quote_number ~ '^[0-9]{8}$')::int AS valid,
+              COUNT(DISTINCT quote_number)::int AS distinct
+       FROM quotations`,
+    );
+
+    let maxInvoice = 0;
+    let maxQuote = 0;
+    let orderSerial = 1;
+
+    if (invoicesNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(invoice_number AS INTEGER)) AS m FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'`,
+      );
+      maxInvoice = Number(maxRow.rows[0]?.m || 0);
+    }
+    if (quotesNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(quote_number AS INTEGER)) AS m FROM quotations WHERE quote_number ~ '^[0-9]{8}$'`,
+      );
+      maxQuote = Number(maxRow.rows[0]?.m || 0);
+    }
+    if (ordersNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) AS m
+         FROM orders WHERE reference_number ~ '^ORD-[0-9]{7}$'`,
+      );
+      orderSerial = Number(maxRow.rows[0]?.m || 0) + 1;
+    }
+
+    // Numbers already unique and in the office format: do not re-stamp ORD-0000001…
+    // (that UPDATE collides with live rows when the migration key is missing).
+    if (!invoicesNormalized || !quotesNormalized || !ordersNormalized) {
     await conn.query(`
       UPDATE invoices
       SET external_invoice_number = invoice_number
@@ -292,32 +374,16 @@ async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
         AND (source_platform <> 'manual' OR invoice_number !~ '^[0-9]+$')
     `);
 
+    if (!invoicesNormalized) {
     const invoiceRows = await conn.query<{
       id: number;
       invoice_number: string;
       created_at: string;
     }>(`SELECT id, invoice_number, created_at FROM invoices ORDER BY created_at, id`);
-    const quoteRows = await conn.query<{
-      id: number;
-      quote_number: string;
-      created_at: string;
-    }>(`SELECT id, quote_number, created_at FROM quotations ORDER BY created_at, id`);
-    const orderRows = await conn.query<{ id: number }>(
-      `SELECT id FROM orders ORDER BY created_at, id`,
-    );
-
     const invoiceNumbers = assignLegacyDocumentNumbers(
       invoiceRows.rows.map((row) => ({ id: row.id, value: row.invoice_number, created_at: row.created_at })),
     );
-    const quoteNumbers = assignLegacyDocumentNumbers(
-      quoteRows.rows.map((row) => ({ id: row.id, value: row.quote_number, created_at: row.created_at })),
-    );
-
-    // Temporary globally unique values avoid legacy per-user uniqueness collisions while normalizing.
     await conn.query(`UPDATE invoices SET invoice_number = '__legacy_invoice_' || id`);
-    await conn.query(`UPDATE quotations SET quote_number = '__legacy_quote_' || id`);
-
-    let maxInvoice = 0;
     for (const [id, serial] of Array.from(invoiceNumbers.entries())) {
       maxInvoice = Math.max(maxInvoice, serial);
       await conn.query(`UPDATE invoices SET invoice_number = $1 WHERE id = $2`, [
@@ -325,8 +391,18 @@ async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
         id,
       ]);
     }
+    }
 
-    let maxQuote = 0;
+    if (!quotesNormalized) {
+    const quoteRows = await conn.query<{
+      id: number;
+      quote_number: string;
+      created_at: string;
+    }>(`SELECT id, quote_number, created_at FROM quotations ORDER BY created_at, id`);
+    const quoteNumbers = assignLegacyDocumentNumbers(
+      quoteRows.rows.map((row) => ({ id: row.id, value: row.quote_number, created_at: row.created_at })),
+    );
+    await conn.query(`UPDATE quotations SET quote_number = '__legacy_quote_' || id`);
     for (const [id, serial] of Array.from(quoteNumbers.entries())) {
       maxQuote = Math.max(maxQuote, serial);
       await conn.query(`UPDATE quotations SET quote_number = $1 WHERE id = $2`, [
@@ -334,14 +410,21 @@ async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
         id,
       ]);
     }
+    }
 
-    let orderSerial = 1;
+    if (!ordersNormalized) {
+    const orderRows = await conn.query<{ id: number }>(
+      `SELECT id FROM orders ORDER BY created_at, id`,
+    );
+    orderSerial = 1;
     for (const row of orderRows.rows) {
       await conn.query(`UPDATE orders SET reference_number = $1 WHERE id = $2`, [
         `ORD-${String(orderSerial).padStart(7, '0')}`,
         row.id,
       ]);
       orderSerial += 1;
+    }
+    }
     }
 
     const linkedQuotes = await conn.query<{
@@ -374,25 +457,7 @@ async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
       SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
     `, [orderSerial, maxQuote + 1, maxInvoice + 1]);
 
-    await conn.query(`ALTER TABLE orders ALTER COLUMN reference_number SET NOT NULL`);
-    await conn.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_reference_number_format`);
-    await conn.query(`
-      ALTER TABLE orders
-      ADD CONSTRAINT orders_reference_number_format CHECK (reference_number ~ '^ORD-[0-9]{7}$')
-    `);
-    await conn.query(`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_number_format`);
-    await conn.query(`
-      ALTER TABLE invoices
-      ADD CONSTRAINT invoices_number_format CHECK (invoice_number ~ '^[0-9]{8}$')
-    `);
-    await conn.query(`ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_number_format`);
-    await conn.query(`
-      ALTER TABLE quotations
-      ADD CONSTRAINT quotations_number_format CHECK (quote_number ~ '^[0-9]{8}$')
-    `);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reference_number ON orders(reference_number)`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number_global ON invoices(invoice_number)`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_number_global ON quotations(quote_number)`);
+    await applyUnifiedNumberingConstraints(conn);
     await conn.query(
       `INSERT INTO app_migrations (key) VALUES ('unified_global_record_numbering_v1') ON CONFLICT DO NOTHING`,
     );
@@ -434,12 +499,12 @@ async function migrateOrderStatusesV2Once(): Promise<void> {
 }
 
 async function syncGlobalRecordSequences(): Promise<void> {
-  await client().query(`
+  await getPool().query(`
     INSERT INTO global_record_sequences (record_type, next_serial)
     VALUES
-      ('order', COALESCE((SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) + 1 FROM orders), 1)),
-      ('quotation', COALESCE((SELECT MAX(CAST(quote_number AS INTEGER)) + 1 FROM quotations), 1)),
-      ('invoice', COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) + 1 FROM invoices), 1))
+      ('order', COALESCE((SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) + 1 FROM orders WHERE reference_number ~ '^ORD-[0-9]{7}$'), 1)),
+      ('quotation', COALESCE((SELECT MAX(CAST(quote_number AS INTEGER)) + 1 FROM quotations WHERE quote_number ~ '^[0-9]{8}$'), 1)),
+      ('invoice', COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) + 1 FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'), 1))
     ON CONFLICT (record_type) DO UPDATE
     SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
   `);
@@ -448,6 +513,8 @@ async function syncGlobalRecordSequences(): Promise<void> {
 async function runBootDataFixes(): Promise<void> {
   await migrateUnifiedRecordNumberingOnce();
   await migrateOrderStatusesV2Once();
+  // Keep counters at or above live max so a stale sequence cannot reissue ORD-0000008.
+  await syncGlobalRecordSequences();
 
   // Sequence MAX scans once per DB (not every process cold start).
   const migSeq = await client().query<{ key: string }>(

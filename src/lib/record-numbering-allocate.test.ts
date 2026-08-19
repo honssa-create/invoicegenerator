@@ -79,4 +79,21 @@ describe('allocateGlobalRecordNumber', () => {
     const ref = await allocateGlobalRecordNumber('order');
     expect(ref).toBe('ORD-9999913');
   });
+
+  it('skips a live ORD number when the sequence still points at it', async () => {
+    await db
+      .prepare(
+        `INSERT INTO orders (user_id, reference_number, name, status, fields_json)
+         VALUES (?, ?, 'existing', 'OPEN', '{}')`,
+      )
+      .run(TEST_USER_ID, FIXTURE_A);
+    await db
+      .prepare(`UPDATE global_record_sequences SET next_serial = 9999908 WHERE record_type = 'order'`)
+      .run();
+
+    const ref = await allocateGlobalRecordNumber('order');
+    expect(ref).not.toBe(FIXTURE_A);
+    expect(ref).toMatch(/^ORD-\d{7}$/);
+    expect(Number(ref.slice(4))).toBeGreaterThan(9999908);
+  });
 });

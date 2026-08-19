@@ -1,4 +1,4 @@
-import db from './db';
+import { ensureSchema, getPool } from './db';
 import {
   MAX_RECORD_SERIAL,
   formatDocumentNumber,
@@ -14,45 +14,47 @@ const LIVE_MAX_SQL: Record<GlobalRecordType, string> = {
   invoice: `COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'), 0)`,
 };
 
-async function nextSerialRow(recordType: GlobalRecordType): Promise<{ serial: number } | undefined> {
-  return (await db
-    .prepare(
-      `UPDATE global_record_sequences
-       SET next_serial = next_serial + 1
-       WHERE record_type = ?
-       RETURNING next_serial - 1 AS serial`,
-    )
-    .get(recordType)) as { serial: number } | undefined;
-}
-
-/** Keep the sequence at or above MAX(live numbers)+1 so inserts cannot collide. */
+/**
+ * Sequence updates must use the pool (autocommit), never the ambient transaction.
+ * Callers allocate inside `db.transaction` before INSERT; if that INSERT fails and
+ * rolls back, a transactional sequence UPDATE would rewind and re-issue the same
+ * number forever (e.g. stuck on ORD-0000008).
+ */
 async function bumpSequenceToLiveMax(recordType: GlobalRecordType): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO global_record_sequences (record_type, next_serial)
-       VALUES (?, 1)
-       ON CONFLICT (record_type) DO NOTHING`,
-    )
-    .run(recordType);
-  await db
-    .prepare(
-      `UPDATE global_record_sequences
-       SET next_serial = GREATEST(next_serial, (${LIVE_MAX_SQL[recordType]}) + 1)
-       WHERE record_type = ?`,
-    )
-    .run(recordType);
+  await ensureSchema();
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO global_record_sequences (record_type, next_serial)
+     VALUES ($1, 1)
+     ON CONFLICT (record_type) DO NOTHING`,
+    [recordType],
+  );
+  await pool.query(
+    `UPDATE global_record_sequences
+     SET next_serial = GREATEST(next_serial, (${LIVE_MAX_SQL[recordType]}) + 1)
+     WHERE record_type = $1`,
+    [recordType],
+  );
 }
 
-/** Atomically reserve the next office-wide number. Call inside the record insert transaction. */
+async function nextSerialRow(recordType: GlobalRecordType): Promise<{ serial: number } | undefined> {
+  await ensureSchema();
+  const res = await getPool().query<{ serial: string | number }>(
+    `UPDATE global_record_sequences
+     SET next_serial = next_serial + 1
+     WHERE record_type = $1
+     RETURNING next_serial - 1 AS serial`,
+    [recordType],
+  );
+  const row = res.rows[0];
+  return row ? { serial: Number(row.serial) } : undefined;
+}
+
+/** Atomically reserve the next office-wide number. Safe to call inside a record insert transaction. */
 export async function allocateGlobalRecordNumber(recordType: GlobalRecordType): Promise<string> {
   await bumpSequenceToLiveMax(recordType);
   let row = await nextSerialRow(recordType);
   if (!row) {
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO global_record_sequences (record_type, next_serial) VALUES (?, 1)`,
-      )
-      .run(recordType);
     await bumpSequenceToLiveMax(recordType);
     row = await nextSerialRow(recordType);
   }

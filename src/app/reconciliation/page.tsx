@@ -1,13 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import AccountingTable from '@/components/AccountingTable';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import FilterBar from '@/components/FilterBar';
 import { formatMoney } from '@/lib/cashflow';
 import { compressImage } from '@/lib/imageCompression';
 import { reconciliationReceiptUrl } from '@/lib/image-url';
 import {
+  AMOUNT_TOLERANCE,
+  amountsClose,
+  isWithinHours,
+  MEDIUM_MATCH_WINDOW_HOURS,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   RECON_STATUS_COLORS,
@@ -42,6 +49,7 @@ interface Summary {
 
 type ZoneFilter = 'high' | 'medium' | 'attention' | 'matched';
 type SortKey = 'deposit_time' | 'gross_amount' | 'status' | 'created_at' | 'created_by';
+type ReconciliationView = 'reconciliation' | 'accounting';
 
 const PAGE_SIZE = 50;
 
@@ -87,6 +95,39 @@ function depositDateKey(v: string): string {
   return v.replace('T', ' ').slice(0, 10);
 }
 
+function parseAmountHint(raw: string | null): number | null {
+  if (!raw) return null;
+  const n = Number(String(raw).replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseDepositDate(v: string): Date | null {
+  const s = v.replace('T', ' ').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
+  if (!m) return null;
+  const [, y, mo, d, h = '12', mi = '0', se = '0'] = m;
+  const dt = new Date(+y, +mo - 1, +d, +h, +mi, +se);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+function isRelatedPending(
+  r: ReconciliationRecord,
+  linkOrderId: number,
+  amountHint: number | null,
+  dateHint: string | null
+): boolean {
+  if (r.status === 'Matched') return false;
+  if (r.suggested_order_id === linkOrderId) return true;
+  if (r.candidates?.some((c) => c.order_id === linkOrderId)) return true;
+  if (amountHint != null && amountsClose(r.gross_amount, amountHint, AMOUNT_TOLERANCE)) {
+    if (!dateHint) return true;
+    const deposit = parseDepositDate(r.deposit_time);
+    const anchor = parseDepositDate(dateHint);
+    if (deposit && anchor && isWithinHours(deposit, anchor, MEDIUM_MATCH_WINDOW_HOURS)) return true;
+  }
+  return false;
+}
+
 function inZone(r: ReconciliationRecord, zone: ZoneFilter): boolean {
   if (zone === 'high') return r.status === 'Pending Approval' && r.confidence === 'high';
   if (zone === 'medium') return r.status === 'Pending Approval' && r.confidence === 'medium';
@@ -94,7 +135,16 @@ function inZone(r: ReconciliationRecord, zone: ZoneFilter): boolean {
   return r.status === 'Matched';
 }
 
-export default function ReconciliationPage() {
+function ReconciliationContent() {
+  const { user, canAccess } = useAuth();
+  const [view, setView] = useState<ReconciliationView>('reconciliation');
+  const [linkOrderId, setLinkOrderId] = useState<number | null>(null);
+  const [linkAmountHint, setLinkAmountHint] = useState<number | null>(null);
+  const [linkDateHint, setLinkDateHint] = useState<string | null>(null);
+  const [linkOrderRef, setLinkOrderRef] = useState<string | null>(null);
+  const [showAllLinkRecords, setShowAllLinkRecords] = useState(false);
+  const [focusRecordId, setFocusRecordId] = useState<number | null>(null);
+  const [matchedOrderId, setMatchedOrderId] = useState<number | null>(null);
   const [records, setRecords] = useState<ReconciliationRecord[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
@@ -131,6 +181,95 @@ export default function ReconciliationPage() {
   const [page, setPage] = useState(1);
   const fileRef = useRef<HTMLInputElement>(null);
   const receiptRef = useRef<HTMLInputElement>(null);
+  const canViewAccounting = canAccess('accounting');
+  const focusMode = linkOrderId != null || focusRecordId != null || matchedOrderId != null;
+  const searchParams = useSearchParams();
+  const viewParam = searchParams.get('view');
+  const linkOrderIdParam = searchParams.get('linkOrderId');
+  const recordIdParam = searchParams.get('recordId');
+  const matchedOrderIdParam = searchParams.get('matchedOrderId');
+
+  useEffect(() => {
+    if (!user) return;
+
+    if (canViewAccounting && viewParam === 'accounting') {
+      setView('accounting');
+      setLinkOrderId(null);
+      setFocusRecordId(null);
+      setMatchedOrderId(null);
+      return;
+    }
+
+    const linkId = Number(linkOrderIdParam);
+    const recordId = Number(recordIdParam);
+    const matchedId = Number(matchedOrderIdParam);
+
+    setView('reconciliation');
+    if (Number.isFinite(linkId) && linkId > 0) {
+      setLinkOrderId(linkId);
+      setLinkAmountHint(parseAmountHint(searchParams.get('amount')));
+      setLinkDateHint(searchParams.get('date') || null);
+      setLinkOrderRef(searchParams.get('orderRef') || null);
+      setShowAllLinkRecords(false);
+      setFocusRecordId(null);
+      setMatchedOrderId(null);
+      setZoneFilter(null);
+    } else if (Number.isFinite(recordId) && recordId > 0) {
+      setFocusRecordId(recordId);
+      setLinkOrderId(null);
+      setMatchedOrderId(null);
+      setZoneFilter(null);
+    } else if (Number.isFinite(matchedId) && matchedId > 0) {
+      setMatchedOrderId(matchedId);
+      setLinkOrderId(null);
+      setFocusRecordId(null);
+      setZoneFilter(null);
+    } else {
+      setLinkOrderId(null);
+      setFocusRecordId(null);
+      setMatchedOrderId(null);
+    }
+  }, [
+    user,
+    canViewAccounting,
+    viewParam,
+    linkOrderIdParam,
+    recordIdParam,
+    matchedOrderIdParam,
+    searchParams,
+  ]);
+
+  const changeView = (nextView: ReconciliationView) => {
+    setView(nextView);
+    setLinkOrderId(null);
+    setFocusRecordId(null);
+    setMatchedOrderId(null);
+    const url = new URL(window.location.href);
+    url.search = '';
+    if (nextView === 'accounting') url.searchParams.set('view', 'accounting');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+  };
+
+  const clearFocusMode = () => {
+    setLinkOrderId(null);
+    setFocusRecordId(null);
+    setMatchedOrderId(null);
+    setLinkAmountHint(null);
+    setLinkDateHint(null);
+    setLinkOrderRef(null);
+    setShowAllLinkRecords(false);
+    setZoneFilter('high');
+    window.history.replaceState(null, '', '/reconciliation');
+  };
+
+  const returnToAccounting = () => {
+    setLinkOrderId(null);
+    setFocusRecordId(null);
+    setMatchedOrderId(null);
+    setShowAllLinkRecords(false);
+    setView('accounting');
+    window.history.replaceState(null, '', '/reconciliation?view=accounting');
+  };
 
   const load = () => {
     setLoading(true);
@@ -168,9 +307,25 @@ export default function ReconciliationPage() {
 
   const highCount = zoneCounts.high;
 
+  const relatedPending = useMemo(() => {
+    if (linkOrderId == null) return [];
+    return records.filter((r) => isRelatedPending(r, linkOrderId, linkAmountHint, linkDateHint));
+  }, [records, linkOrderId, linkAmountHint, linkDateHint]);
+
+  const linkShowingAllUnverified =
+    linkOrderId != null && (relatedPending.length === 0 || showAllLinkRecords);
+
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = records.filter((r) => {
+      if (focusRecordId != null) return r.id === focusRecordId;
+      if (matchedOrderId != null) return r.status === 'Matched' && r.order_id === matchedOrderId;
+      if (linkOrderId != null) {
+        if (relatedPending.length > 0 && !showAllLinkRecords) {
+          return isRelatedPending(r, linkOrderId, linkAmountHint, linkDateHint);
+        }
+        return r.status !== 'Matched';
+      }
       if (zoneFilter && !inZone(r, zoneFilter)) return false;
       if (methodFilter && r.payment_method !== methodFilter) return false;
       const d = depositDateKey(r.deposit_time);
@@ -210,7 +365,22 @@ export default function ReconciliationPage() {
       return as.localeCompare(bs, undefined, { numeric: true }) * dir;
     });
     return list;
-  }, [records, zoneFilter, methodFilter, dateStart, dateEnd, search, sort]);
+  }, [
+    records,
+    zoneFilter,
+    methodFilter,
+    dateStart,
+    dateEnd,
+    search,
+    sort,
+    linkOrderId,
+    linkAmountHint,
+    linkDateHint,
+    relatedPending,
+    showAllLinkRecords,
+    focusRecordId,
+    matchedOrderId,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
   const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
@@ -219,7 +389,7 @@ export default function ReconciliationPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [zoneFilter, methodFilter, dateStart, dateEnd, search, sort]);
+  }, [zoneFilter, methodFilter, dateStart, dateEnd, search, sort, linkOrderId, focusRecordId, matchedOrderId]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -320,6 +490,42 @@ export default function ReconciliationPage() {
       return;
     }
     setMessage(`Record #${id} rejected — back to Unmatched`);
+    load();
+  };
+
+  const linkToOrder = async (id: number) => {
+    if (!linkOrderId) return;
+    setBusyId(id);
+    setError('');
+    const res = await fetch(`/api/reconciliation/${id}/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: linkOrderId }),
+    });
+    const d = await res.json();
+    setBusyId(null);
+    if (!res.ok) {
+      setError(d.error || 'Link failed');
+      return;
+    }
+    setMessage(`Linked #${id} to order — payment verified`);
+    returnToAccounting();
+  };
+
+  const unlinkOne = async (id: number) => {
+    setBusyId(id);
+    setError('');
+    const res = await fetch(`/api/reconciliation/${id}/unlink`, { method: 'POST' });
+    const d = await res.json();
+    setBusyId(null);
+    if (!res.ok) {
+      setError(d.error || 'Unlink failed');
+      return;
+    }
+    setMessage(`Record #${id} unlinked`);
+    if (focusRecordId === id || matchedOrderId != null) {
+      clearFocusMode();
+    }
     load();
   };
 
@@ -549,11 +755,42 @@ export default function ReconciliationPage() {
   const actionsFor = (r: ReconciliationRecord) => {
     if (r.status === 'Matched') {
       return (
-        <span className="text-xs text-gray-400">
-          {r.approved_by ? `by ${r.approved_by}` : '—'}
-        </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {r.approved_by ? <span className="text-xs text-gray-400">by {r.approved_by}</span> : null}
+          <button
+            type="button"
+            disabled={busyId === r.id}
+            onClick={() => unlinkOne(r.id)}
+            className="text-xs px-2.5 py-1 rounded-full bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50"
+          >
+            {busyId === r.id ? '…' : BTN.unlink}
+          </button>
+        </div>
       );
     }
+
+    if (linkOrderId != null) {
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            disabled={busyId === r.id}
+            onClick={() => linkToOrder(r.id)}
+            className="text-xs px-2.5 py-1 rounded-full bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {busyId === r.id ? '…' : BTN.linkToOrder}
+          </button>
+          <button
+            type="button"
+            onClick={() => openLink(r.id)}
+            className="text-xs px-2.5 py-1 rounded-full bg-brand-50 text-brand-700 hover:bg-brand-100"
+          >
+            Manual Link
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-wrap gap-1.5">
         {(r.status === 'Pending Approval' || (r.status === 'Discrepancy' && r.suggested_invoice_id)) && (
@@ -622,12 +859,15 @@ export default function ReconciliationPage() {
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Reconciliation 對帳審核</h1>
+          <h1 className="page-title">Accounting & Reconciliation 會計及對帳</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            Suggest matches from Yedpay / bank statements — approve before marking invoices paid
+            {view === 'reconciliation'
+              ? 'Suggest matches from Yedpay / bank statements — approve before marking invoices paid'
+              : 'Review every order payment and confirm each entry against your bank statement'}
           </p>
         </div>
-        <div className="page-actions flex flex-col sm:flex-row gap-2">
+        {view === 'reconciliation' && !focusMode && (
+          <div className="page-actions flex flex-col sm:flex-row gap-2">
           <button
             onClick={exportExcel}
             className="btn border border-gray-300 text-gray-700 hover:bg-gray-50 whitespace-nowrap"
@@ -676,9 +916,92 @@ export default function ReconciliationPage() {
               }}
             />
           </div>
-        </div>
+          </div>
+        )}
       </div>
 
+      <div className="mb-6 inline-flex w-full sm:w-auto rounded-xl border border-gray-200 bg-gray-100 p-1">
+        <button
+          type="button"
+          onClick={() => changeView('reconciliation')}
+          className={`flex-1 sm:flex-none rounded-lg px-5 py-2.5 text-sm font-medium transition ${
+            view === 'reconciliation'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Reconciliation 入帳
+        </button>
+        {canViewAccounting && (
+          <button
+            type="button"
+            onClick={() => changeView('accounting')}
+            className={`flex-1 sm:flex-none rounded-lg px-5 py-2.5 text-sm font-medium transition ${
+              view === 'accounting'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Accounting 對帳
+          </button>
+        )}
+      </div>
+
+      {view === 'accounting' ? (
+        <AccountingTable />
+      ) : (
+        <>
+      {linkOrderId != null && (
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
+          <div>
+            Linking payment for order{' '}
+            <span className="font-mono font-medium">{linkOrderRef || `#${linkOrderId}`}</span>
+            {linkAmountHint != null ? ` · ${formatMoney(linkAmountHint)}` : ''}
+            {linkDateHint ? ` · ${linkDateHint}` : ''}
+            <div className="text-brand-700/80 text-xs mt-0.5">
+              {linkShowingAllUnverified
+                ? relatedPending.length === 0
+                  ? `No close matches found — showing all unverified deposits. Pick one and confirm with “${BTN.linkToOrder}”`
+                  : `Showing all unverified deposits — choose any record and confirm with “${BTN.linkToOrder}”`
+                : `Showing related pending deposits — confirm with “${BTN.linkToOrder}”`}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {relatedPending.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllLinkRecords((current) => !current)}
+                className="px-3 py-1.5 rounded-lg border border-brand-300 bg-white text-brand-800 hover:bg-brand-50 whitespace-nowrap"
+              >
+                {showAllLinkRecords ? 'Show suggested matches' : 'Choose another record'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={returnToAccounting}
+              className="px-3 py-1.5 rounded-lg border border-brand-300 bg-white text-brand-800 hover:bg-brand-50 whitespace-nowrap"
+            >
+              Cancel → Accounting
+            </button>
+          </div>
+        </div>
+      )}
+      {(focusRecordId != null || matchedOrderId != null) && (
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+          <div>
+            {focusRecordId != null
+              ? `Showing linked payment record #${focusRecordId}`
+              : `Showing matched payment(s) for order #${matchedOrderId}`}
+          </div>
+          <button
+            type="button"
+            onClick={returnToAccounting}
+            className="px-3 py-1.5 rounded-lg border border-green-300 bg-white text-green-800 hover:bg-green-50 whitespace-nowrap"
+          >
+            Back to Accounting
+          </button>
+        </div>
+      )}
       {message && (
         <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
           {message}
@@ -688,6 +1011,7 @@ export default function ReconciliationPage() {
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
       )}
 
+      {!focusMode && (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {(Object.keys(ZONE_META) as ZoneFilter[]).map((z) => {
           const meta = ZONE_META[z];
@@ -722,7 +1046,9 @@ export default function ReconciliationPage() {
           );
         })}
       </div>
+      )}
 
+      {!focusMode && (
       <FilterBar
         dateStart={dateStart}
         dateEnd={dateEnd}
@@ -749,6 +1075,7 @@ export default function ReconciliationPage() {
           </select>
         </div>
       </FilterBar>
+      )}
 
       {loading ? (
         <div className="p-12 text-center bg-white rounded-xl border border-gray-200">
@@ -768,7 +1095,7 @@ export default function ReconciliationPage() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {(zoneFilter === 'high' || zoneFilter === null) && highCount > 0 && (
+              {(zoneFilter === 'high' || zoneFilter === null) && highCount > 0 && !focusMode && (
                 <button
                   onClick={approveAllHigh}
                   disabled={batchApproving}
@@ -1018,7 +1345,17 @@ export default function ReconciliationPage() {
           />
         </div>
       )}
+        </>
+      )}
 
     </AppLayout>
+  );
+}
+
+export default function ReconciliationPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReconciliationContent />
+    </Suspense>
   );
 }

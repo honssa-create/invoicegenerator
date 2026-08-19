@@ -852,6 +852,174 @@ export async function rejectRecord(
   return await getReconciliationRecord(userId, recordId);
 }
 
+/** Link a pending/unmatched deposit to a specific order (from Accounting Link Payment). */
+export async function linkRecordToOrder(
+  userId: number,
+  recordId: number,
+  orderId: number,
+  actorName: string
+): Promise<ReconciliationRecord | null> {
+  const record = await getReconciliationRecord(userId, recordId);
+  if (!record) return null;
+  if (record.status === 'Matched') return record;
+
+  const orderRow = (await db
+    .prepare(
+      `SELECT o.id, o.po_number, o.reference_number, o.system_order_no, o.name AS customer_name,
+              i.id AS invoice_id, i.invoice_number
+       FROM orders o
+       LEFT JOIN invoices i ON i.order_id = o.id AND i.user_id = o.user_id AND i.status != 'paid'
+       WHERE o.id = ? AND o.user_id = ?
+       ORDER BY i.id DESC
+       LIMIT 1`
+    )
+    .get(orderId, userId)) as
+    | {
+        id: number;
+        po_number: string | null;
+        reference_number: string | null;
+        system_order_no: string | null;
+        customer_name: string | null;
+        invoice_id: number | null;
+        invoice_number: string | null;
+      }
+    | undefined;
+
+  if (!orderRow) return null;
+
+  const invoiceId = record.suggested_invoice_id || orderRow.invoice_id;
+  let expected: number | null = null;
+  if (invoiceId) {
+    expected = (await getInvoiceWithDetails(invoiceId, userId))?.total ?? null;
+  }
+  if (expected === null) {
+    const fieldsRow = (await db
+      .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
+      .get(orderId, userId)) as { fields_json: string } | undefined;
+    try {
+      const fields = fieldsRow?.fields_json ? JSON.parse(fieldsRow.fields_json) : {};
+      const amt = Number(String(fields.payment_amount || '').replace(/[^0-9.\-]/g, ''));
+      if (Number.isFinite(amt) && amt > 0) expected = amt;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const match: OrderMatch = {
+    order_id: orderRow.id,
+    order_no:
+      orderRow.reference_number ||
+      orderRow.po_number ||
+      orderRow.system_order_no ||
+      record.order_no ||
+      `#${orderRow.id}`,
+    invoice_id: invoiceId,
+    invoice_number: invoiceId
+      ? (invoiceId === orderRow.invoice_id
+          ? orderRow.invoice_number
+          : (await getInvoiceWithDetails(invoiceId, userId))?.invoice_number ?? null)
+      : null,
+    expected_amount: expected,
+    customer_name: orderRow.customer_name,
+  };
+
+  await commitApproval(
+    userId,
+    recordId,
+    match,
+    {
+      deposit_time: record.deposit_time,
+      gross_amount: record.gross_amount,
+      payment_method: record.payment_method,
+      transaction_fee: record.transaction_fee,
+      order_no: match.order_no,
+      remarks: record.remarks,
+      source: record.source,
+    },
+    actorName
+  );
+
+  return await getReconciliationRecord(userId, recordId);
+}
+
+/** Reverse a Matched link: clear recon match, unset payment_verified, revert invoice if paid. */
+export async function unlinkRecord(
+  userId: number,
+  recordId: number,
+  actorName: string
+): Promise<ReconciliationRecord | null> {
+  const record = await getReconciliationRecord(userId, recordId);
+  if (!record) return null;
+  if (record.status !== 'Matched') return record;
+
+  const orderId = record.order_id;
+  const invoiceId = record.invoice_id;
+
+  await db
+    .prepare(
+      `UPDATE reconciliation_records
+       SET status = 'Unmatched',
+           confidence = NULL,
+           suggested_order_id = NULL,
+           suggested_invoice_id = NULL,
+           candidate_order_ids_json = NULL,
+           order_id = NULL,
+           invoice_id = NULL,
+           order_no = COALESCE(order_no, ?),
+           matched_at = NULL,
+           approved_by = NULL,
+           approved_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    )
+    .run(record.order_no, recordId, userId);
+
+  if (invoiceId) {
+    await db
+      .prepare(
+        `UPDATE invoices SET status = 'unpaid', updated_at = datetime('now')
+         WHERE id = ? AND user_id = ? AND status = 'paid'`
+      )
+      .run(invoiceId, userId);
+    await logActivity(
+      'invoice',
+      invoiceId,
+      userId,
+      'activity',
+      actorName,
+      `Reconciliation #${recordId}: unlinked — invoice set back to unpaid`
+    );
+  }
+
+  if (orderId) {
+    const existing = (await db
+      .prepare('SELECT fields_json FROM orders WHERE id = ? AND user_id = ?')
+      .get(orderId, userId)) as { fields_json: string } | undefined;
+    if (existing) {
+      let fields: Record<string, unknown> = {};
+      try {
+        fields = existing.fields_json ? JSON.parse(existing.fields_json) : {};
+      } catch {
+        fields = {};
+      }
+      const merged = { ...fields, payment_verified: false };
+      await db
+        .prepare(`UPDATE orders SET fields_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`)
+        .run(JSON.stringify(merged), orderId, userId);
+      await logActivity(
+        'order',
+        orderId,
+        userId,
+        'activity',
+        actorName,
+        `Reconciliation #${recordId}: unlinked — payment verification cleared`
+      );
+    }
+  }
+
+  return await getReconciliationRecord(userId, recordId);
+}
+
 /** Manual link: operator picks unpaid invoice and commits approval in one step. */
 export async function manualMatchRecord(
   userId: number,

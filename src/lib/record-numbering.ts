@@ -34,11 +34,13 @@ async function bumpSequenceToLiveMax(recordType: GlobalRecordType): Promise<void
        ON CONFLICT (record_type) DO NOTHING`,
     )
     .run(recordType);
-  await db.exec(
-    `UPDATE global_record_sequences
-     SET next_serial = GREATEST(next_serial, ${LIVE_MAX_SQL[recordType]} + 1)
-     WHERE record_type = '${recordType}'`,
-  );
+  await db
+    .prepare(
+      `UPDATE global_record_sequences
+       SET next_serial = GREATEST(next_serial, (${LIVE_MAX_SQL[recordType]}) + 1)
+       WHERE record_type = ?`,
+    )
+    .run(recordType);
 }
 
 /** Atomically reserve the next office-wide number. Call inside the record insert transaction. */

@@ -75,6 +75,68 @@ export function statusesForOrderType(orderType: string): readonly string[] {
   return usesEcomOrderStatuses(orderType) ? ECOM_ORDER_STATUSES : ORDER_STATUSES;
 }
 
+/** Local calendar YYYY-MM-DD (browser / Node local TZ). */
+export function localDateYmd(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Whether an order is considered shipped / completed delivery for its type.
+ * Manufacturing: `已寄出 SENT`; Nestiee/wedding: shipped|completed; Cupmoka: Shipped|Delivered.
+ */
+export function isOrderShipped(o: { status?: string; fields?: Record<string, unknown> }): boolean {
+  const s = (o.status || '').trim();
+  const ot = typeof o.fields?.order_type === 'string' ? o.fields.order_type : '';
+  if (isCupmokaOrderType(ot)) return s === 'Shipped' || s === 'Delivered';
+  if (usesEcomOrderStatuses(ot)) return s === 'shipped' || s === 'completed';
+  return s === '已寄出 SENT' || /\bSENT\b/i.test(s);
+}
+
+/** 未寄出 — inverse of {@link isOrderShipped}. */
+export function isOrderUnshipped(o: { status?: string; fields?: Record<string, unknown> }): boolean {
+  return !isOrderShipped(o);
+}
+
+/**
+ * 緊急訂單 — unshipped with due date on or before today + `withinDays` (default 2).
+ * Includes overdue (past due) orders.
+ */
+export function isOrderUrgent(
+  o: { status?: string; fields?: Record<string, unknown> },
+  opts?: { today?: string; withinDays?: number },
+): boolean {
+  if (isOrderShipped(o)) return false;
+  const due = orderDueDate(o);
+  if (!due) return false;
+  const today = opts?.today || localDateYmd();
+  const within = opts?.withinDays ?? 2;
+  const limit = addCalendarDays(today, within);
+  return due <= limit;
+}
+
+export type OrderDashboardCounts = {
+  total: number;
+  unshipped: number;
+  urgent: number;
+};
+
+/** Counts for the orders list dashboard cards. */
+export function summarizeOrderDashboard(
+  orders: Array<{ status?: string; fields?: Record<string, unknown> }>,
+  opts?: { today?: string; withinDays?: number },
+): OrderDashboardCounts {
+  let unshipped = 0;
+  let urgent = 0;
+  for (const o of orders) {
+    if (isOrderUnshipped(o)) unshipped += 1;
+    if (isOrderUrgent(o, opts)) urgent += 1;
+  }
+  return { total: orders.length, unshipped, urgent };
+}
+
 /**
  * Calendar / list date for an order: property-bar `due_date`, falling back to
  * shipment `client_delivery_date` (客人收貨日期) — the two stay linked in the UI.

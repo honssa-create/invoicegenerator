@@ -10,10 +10,13 @@ import {
   ORDER_TYPES,
   STATUS_COLORS,
   getOrderType,
+  isOrderUnshipped,
+  isOrderUrgent,
   orderDueDate,
   orderMatchesTypeFilter,
   statusKeyForTypeFilter,
   statusesForOrderType,
+  summarizeOrderDashboard,
   type Order,
 } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -22,6 +25,7 @@ const OrdersBoard = dynamic(() => import('@/components/OrdersBoard'), { ssr: fal
 const OrdersCalendar = dynamic(() => import('@/components/OrdersCalendar'), { ssr: false });
 
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
+type DashFocus = 'all' | 'unshipped' | 'urgent';
 const PAGE_SIZE = 50;
 
 export default function OrdersPage() {
@@ -60,6 +64,7 @@ function OrdersPageContent() {
   const [view, setView] = useState<'line' | 'board' | 'calendar'>('line');
   const [boardError, setBoardError] = useState('');
   const [page, setPage] = useState(1);
+  const [dashFocus, setDashFocus] = useState<DashFocus>('all');
 
   const load = () => {
     setLoading(true);
@@ -96,6 +101,13 @@ function OrdersPageContent() {
     if (status && !statusOptions.includes(status)) setStatus('');
   }, [status, statusOptions]);
 
+  const scopedOrders = useMemo(() => {
+    if (!orderType) return orders;
+    return orders.filter((o) => orderMatchesTypeFilter(getOrderType(o), orderType));
+  }, [orders, orderType]);
+
+  const dashCounts = useMemo(() => summarizeOrderDashboard(scopedOrders), [scopedOrders]);
+
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = orders.filter((o) => {
@@ -104,6 +116,8 @@ function OrdersPageContent() {
       if (dateEnd && created && created > dateEnd) return false;
       if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
       if (status && o.status !== status) return false;
+      if (dashFocus === 'unshipped' && !isOrderUnshipped(o)) return false;
+      if (dashFocus === 'urgent' && !isOrderUrgent(o)) return false;
       if (q) {
         const hay = [o.reference_number, o.po_number, o.name, o.description, getOrderType(o)]
           .filter(Boolean)
@@ -138,16 +152,16 @@ function OrdersPageContent() {
       return dir * base || b.id - a.id;
     });
     return list;
-  }, [orders, dateStart, dateEnd, orderType, status, search, sort]);
+  }, [orders, dateStart, dateEnd, orderType, status, search, sort, dashFocus]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
   const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
-  const pageEnd = Math.min(page * PAGE_SIZE, displayed.length);
+  const pageEnd = Math.min(pageStart + PAGE_SIZE, displayed.length);
   const pageRows = displayed.slice(pageStart, pageEnd);
 
   useEffect(() => {
     setPage(1);
-  }, [dateStart, dateEnd, orderType, status, search, sort]);
+  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -176,8 +190,47 @@ function OrdersPageContent() {
     setOrderType('');
     setStatus('');
     setSearch('');
+    setDashFocus('all');
     router.replace('/orders', { scroll: false });
   };
+
+  const dashCards: Array<{
+    key: DashFocus;
+    title: string;
+    value: number;
+    subtitle: string;
+    icon: string;
+    color: string;
+    ring: string;
+  }> = [
+    {
+      key: 'unshipped',
+      title: bi('Unshipped', '未寄出訂單'),
+      value: dashCounts.unshipped,
+      subtitle: bi('Not yet sent', '尚未寄出'),
+      icon: '📦',
+      color: 'bg-amber-50 text-amber-700',
+      ring: 'ring-amber-500',
+    },
+    {
+      key: 'all',
+      title: bi('Current orders', '現有訂單'),
+      value: dashCounts.total,
+      subtitle: bi('All in scope', '目前範圍內全部'),
+      icon: '📋',
+      color: 'bg-blue-50 text-blue-700',
+      ring: 'ring-blue-500',
+    },
+    {
+      key: 'urgent',
+      title: bi('Urgent', '緊急訂單'),
+      value: dashCounts.urgent,
+      subtitle: bi('Due within 2 days', '兩天內到期'),
+      icon: '🚨',
+      color: 'bg-red-50 text-red-700',
+      ring: 'ring-red-500',
+    },
+  ];
 
   const create = async (status?: string) => {
     if (creating) return;
@@ -285,6 +338,35 @@ function OrdersPageContent() {
           {createError || boardError}
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {dashCards.map((card) => {
+          const active = dashFocus === card.key;
+          return (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => setDashFocus(card.key)}
+              className={`text-left bg-white rounded-xl border border-gray-200 p-6 transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                active ? `ring-2 ${card.ring}` : ''
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">{card.title}</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    {loading ? '—' : String(card.value)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">{card.subtitle}</p>
+                </div>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl ${card.color}`}>
+                  {card.icon}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
       <FilterBar
         dateStart={dateStart}

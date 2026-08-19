@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getDataOwnerId } from '@/lib/org-server';
-import { restockRaw, getState } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, restockRaw, getState } from '@/lib/kitchen-server';
 
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const ownerId = await getDataOwnerId(session);
+  const ownerId = await resolveKitchenOwnerUserId();
 
   try {
     const body = await request.json();

@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getDataOwnerId } from '@/lib/org-server';
-import { createPrepOrder, createPrepOrdersBatch, listPrepOrders } from '@/lib/kitchen-prep-server';
+import {
+  createPrepOrder,
+  createPrepOrdersBatch,
+  listPrepOrders,
+  resolveKitchenOwnerUserId,
+} from '@/lib/kitchen-prep-server';
 import { PREP_ORDER_TYPES, validatePrepFlavorQtys, type PrepCapacity } from '@/lib/kitchen-prep';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  return NextResponse.json({ orders: await listPrepOrders(session.userId) });
+  return NextResponse.json({ orders: await listPrepOrders() });
 }
 
 export async function POST(request: Request) {
@@ -22,8 +26,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Stewing date is required' }, { status: 400 });
     }
 
-    const ownerId = await getDataOwnerId(session);
-    const { catalog, formulas } = await loadKitchenCatalog(ownerId);
+    const kitchenOwnerId = await resolveKitchenOwnerUserId();
+    const { catalog, formulas } = await loadKitchenCatalog(kitchenOwnerId);
     const allowedCaps = new Set(catalog.capacities.map((c) => c.id));
 
     if (Array.isArray(body.lines) && body.lines.length > 0) {
@@ -45,7 +49,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'At least one valid capacity line is required' }, { status: 400 });
       }
 
-      const orders = await createPrepOrdersBatch(session.userId, {
+      const orders = await createPrepOrdersBatch(kitchenOwnerId, {
         stewing_date: body.stewing_date,
         order_type,
         linked_order_id: body.linked_order_id ?? null,
@@ -70,7 +74,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: validationErr }, { status: 400 });
     }
 
-    const order = await createPrepOrder(session.userId, {
+    const order = await createPrepOrder(kitchenOwnerId, {
       stewing_date: body.stewing_date,
       order_type,
       capacity,

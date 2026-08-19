@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultPrepStatusForCreate,
+  hkNowDateTime,
   weddingPrepStatusFromDate,
 } from './kitchen-prep';
+
+describe('hkNowDateTime', () => {
+  it('formats Asia/Hong_Kong wall time as YYYY-MM-DD HH:mm:ss', () => {
+    // 2026-08-19T08:05:09Z → 16:05:09 HKT
+    expect(hkNowDateTime(new Date('2026-08-19T08:05:09.000Z'))).toBe('2026-08-19 16:05:09');
+  });
+});
 
 describe('defaultPrepStatusForCreate', () => {
   it('sets daily and restock creates to in_prep', () => {

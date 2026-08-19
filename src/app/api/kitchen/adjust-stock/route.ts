@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getDataOwnerId } from '@/lib/org-server';
-import { adjustStock } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, adjustStock } from '@/lib/kitchen-server';
 
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -10,7 +9,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Only admin can adjust stock' }, { status: 403 });
   }
 
-  const ownerId = await getDataOwnerId(session);
+  const ownerId = await resolveKitchenOwnerUserId();
   try {
     const body = await request.json();
     const kind = body.kind as 'raw' | 'finished' | 'gift_box';

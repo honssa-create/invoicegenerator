@@ -59,7 +59,7 @@ export function adaptSql(sql: string): string {
   out = out.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
   // Append ON CONFLICT DO NOTHING only when not already present and it's INSERT OR IGNORE style —
   // handled at call sites / via insertIgnore helper. For raw adapted strings that still say OR IGNORE:
-  out = out.replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, "to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')");
+  out = out.replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, "to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')");
   out = out.replace(/\bexcluded\./gi, 'EXCLUDED.');
   out = out.replace(/\s+COLLATE\s+NOCASE\b/gi, '');
   // SQLite IFNULL → Postgres COALESCE
@@ -559,7 +559,7 @@ async function runBootDataFixes(): Promise<void> {
   `);
 
   // Purge expired trash.
-  await client().query(`DELETE FROM deleted_records WHERE expires_at < to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`);
+  await client().query(`DELETE FROM deleted_records WHERE expires_at < to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')`);
 
   // Fix legacy permission section key (hyphen → underscore).
   await client().query(`
@@ -573,6 +573,30 @@ async function runBootDataFixes(): Promise<void> {
   // Seed role_permissions for operator/accountant when empty (canonical source: permissions-server).
   const { seedRolePermissionsIfEmpty } = await import('./permissions-server');
   await seedRolePermissionsIfEmpty();
+
+  // Store wall-clock timestamps in Asia/Hong_Kong (existing DBs still had UTC column defaults).
+  const migHkt = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'timestamp_defaults_asia_hong_kong_v1'`
+  );
+  if (!migHkt.rows.length) {
+    const hktDefault = `(to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))`;
+    const alters: [string, string][] = [
+      ['kitchen_movements', 'created_at'],
+      ['kitchen_prep_orders', 'created_at'],
+      ['kitchen_prep_orders', 'updated_at'],
+      ['kitchen_settings', 'updated_at'],
+      ['kitchen_order_fulfillments', 'updated_at'],
+      ['activity_logs', 'created_at'],
+    ];
+    for (const [table, col] of alters) {
+      await client().query(
+        `ALTER TABLE ${table} ALTER COLUMN ${col} SET DEFAULT ${hktDefault}`
+      );
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('timestamp_defaults_asia_hong_kong_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 
   // Allow kitchen_prep_orders.status = inactive (one-time constraint refresh).
   const mig = await client().query<{ key: string }>(

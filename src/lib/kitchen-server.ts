@@ -81,6 +81,23 @@ const seededOwnerIds = new Set<number>();
 
 const KITCHEN_ORDER_TYPES = [NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE] as const;
 
+/** Shared kitchen data owner — prep schedule + inventory visible company-wide. */
+export async function resolveKitchenOwnerUserId(): Promise<number> {
+  const configured = Number(process.env.KITCHEN_OWNER_USER_ID || process.env.HUB_OWNER_USER_ID);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+
+  const admin = (await db
+    .prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
+    .get()) as { id: number } | undefined;
+  if (admin) return admin.id;
+
+  const anyUser = (await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()) as
+    | { id: number }
+    | undefined;
+  if (!anyUser) throw new Error('No users in database — register an account first');
+  return anyUser.id;
+}
+
 function isShippedKitchenStatus(status: string | null | undefined): boolean {
   const s = (status || '').trim();
   return s === '已寄出 SENT' || /\bSENT\b/i.test(s);
@@ -362,16 +379,16 @@ function computeDemand(
 }
 
 async function loadUnfinishedPrepRawDemand(
-  userId: number,
+  _userId: number,
   formulas: KitchenFormulas
 ): Promise<Record<string, number>> {
   const rows = (await db
     .prepare(
       `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar
        FROM kitchen_prep_orders
-       WHERE user_id = ? AND status != 'completed'`
+       WHERE status != 'completed'`
     )
-    .all(userId)) as {
+    .all()) as {
     capacity: PrepCapacity;
     order_type: PrepOrderType;
     status: PrepStatus;
@@ -557,10 +574,10 @@ async function applyDeltas(userId: number, deltas: MovementDeltas, catalog: Kitc
     await db
       .prepare(
         `INSERT INTO kitchen_order_fulfillments (user_id, order_id, need_key, fulfilled_qty, updated_at)
-         VALUES (?, ?, ?, GREATEST(0, ?), to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+         VALUES (?, ?, ?, GREATEST(0, ?), to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
          ON CONFLICT (user_id, order_id, need_key) DO UPDATE SET
            fulfilled_qty = GREATEST(0, kitchen_order_fulfillments.fulfilled_qty + ?),
-           updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
+           updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')`
       )
       .run(userId, ful.orderId, ful.needKey, ful.qty, ful.qty);
   }
@@ -575,8 +592,8 @@ async function insertMovement(
 ): Promise<number> {
   const res = await db
     .prepare(
-      `INSERT INTO kitchen_movements (user_id, action, details_json, order_id, created_by)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO kitchen_movements (user_id, action, details_json, order_id, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`
     )
     .run(userId, action, JSON.stringify(details), orderId, actorId);
   return Number(res.lastInsertRowid);
@@ -1117,15 +1134,15 @@ export async function voidMovement(
     await applyDeltas(ownerId, reversed, catalog);
     await db
       .prepare(
-        `UPDATE kitchen_movements SET voided_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), voided_by = ?
+        `UPDATE kitchen_movements SET voided_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'), voided_by = ?
          WHERE id = ?`
       )
       .run(actorId, row.id);
 
     const voidRes = await db
       .prepare(
-        `INSERT INTO kitchen_movements (user_id, action, details_json, order_id, created_by, voids_movement_id)
-         VALUES (?, 'void', ?, NULL, ?, ?)`
+        `INSERT INTO kitchen_movements (user_id, action, details_json, order_id, created_by, voids_movement_id, created_at)
+         VALUES (?, 'void', ?, NULL, ?, ?, datetime('now'))`
       )
       .run(
         ownerId,

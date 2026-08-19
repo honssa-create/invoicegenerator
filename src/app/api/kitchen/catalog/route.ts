@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getDataOwnerId } from '@/lib/org-server';
+import { resolveKitchenOwnerUserId } from '@/lib/kitchen-server';
 import { loadKitchenCatalog, saveKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import { invalidateKitchenSeedCache, getState } from '@/lib/kitchen-server';
 import type { KitchenCatalog, KitchenFormulas } from '@/lib/kitchen-catalog';
@@ -8,7 +8,7 @@ import type { KitchenCatalog, KitchenFormulas } from '@/lib/kitchen-catalog';
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const ownerId = await getDataOwnerId(session);
+  const ownerId = await resolveKitchenOwnerUserId();
   try {
     const bundle = await loadKitchenCatalog(ownerId);
     return NextResponse.json(bundle);
@@ -24,7 +24,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Only admin can update kitchen catalog' }, { status: 403 });
   }
 
-  const ownerId = await getDataOwnerId(session);
+  const ownerId = await resolveKitchenOwnerUserId();
   try {
     const body = await request.json();
     const catalog = (body.catalog ?? null) as KitchenCatalog | null;

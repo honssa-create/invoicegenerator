@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getDataOwnerId } from '@/lib/org-server';
-import { voidMovement, getState } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, voidMovement, getState } from '@/lib/kitchen-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const ownerId = await getDataOwnerId(session);
+  const ownerId = await resolveKitchenOwnerUserId();
   const movementId = Number(params.id);
   if (!movementId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 

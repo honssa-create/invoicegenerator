@@ -1,13 +1,18 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { completePrepProduction, getPrepOrder } from '@/lib/kitchen-prep-server';
+import {
+  completePrepProduction,
+  getPrepOrder,
+  resolveKitchenOwnerUserId,
+} from '@/lib/kitchen-prep-server';
 import { computePrepCalculation, type PrepCompletionSplit } from '@/lib/kitchen-prep';
+import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const existing = await getPrepOrder(params.id, session.userId);
+  const existing = await getPrepOrder(params.id);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (existing.status === 'completed') {
     return NextResponse.json({ error: 'This prep order is already completed' }, { status: 400 });
@@ -38,11 +43,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Failed to complete production' }, { status: 500 });
     }
 
-    const calculation = computePrepCalculation(order.capacity, order.order_type, {
-      osmanthus: order.qty_osmanthus,
-      red_date: order.qty_red_date,
-      rock_sugar: order.qty_rock_sugar,
-    });
+    const kitchenOwnerId = await resolveKitchenOwnerUserId();
+    const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
+    const calculation = computePrepCalculation(
+      order.capacity,
+      order.order_type,
+      {
+        osmanthus: order.qty_osmanthus,
+        red_date: order.qty_red_date,
+        rock_sugar: order.qty_rock_sugar,
+      },
+      formulas.stewFormulas
+    );
 
     return NextResponse.json({ order, calculation });
   } catch (e) {

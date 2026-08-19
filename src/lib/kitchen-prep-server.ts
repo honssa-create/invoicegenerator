@@ -11,14 +11,16 @@ import {
   isRedDateAllowed,
   validatePrepFlavorQtys,
   weddingPrepStatusFromDate,
+  hkNowDateTime,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
 import { finishedSku } from './kitchen-bom';
-import { addFinishedFromStewing } from './kitchen-server';
+import { addFinishedFromStewing, resolveKitchenOwnerUserId } from './kitchen-server';
 import { loadKitchenCatalog } from './kitchen-catalog-server';
-import { getDataOwnerId } from './org-server';
+
+export { resolveKitchenOwnerUserId };
 
 function normalizeCompletionSplits(
   input: PrepCompletionSplit[] | undefined,
@@ -107,14 +109,14 @@ function hydrate(row: PrepRow): PrepOrder {
   };
 }
 
-async function nextOrderCode(userId: number): Promise<string> {
-  const row = await db
+async function nextOrderCode(_userId?: number): Promise<string> {
+  const row = (await db
     .prepare(
       `SELECT order_code FROM kitchen_prep_orders
-       WHERE user_id = ? AND order_code LIKE 'PREP-%'
+       WHERE order_code LIKE 'PREP-%'
        ORDER BY id DESC LIMIT 1`
     )
-    .get(userId) as { order_code: string } | undefined;
+    .get()) as { order_code: string } | undefined;
   let n = 1;
   if (row?.order_code) {
     const m = /PREP-(\d+)/.exec(row.order_code);
@@ -123,20 +125,21 @@ async function nextOrderCode(userId: number): Promise<string> {
   return `PREP-${String(n).padStart(4, '0')}`;
 }
 
-export async function listPrepOrders(userId: number): Promise<PrepOrder[]> {
-  const rows = await db
+/** Company-wide prep schedule — not scoped to the logged-in user. */
+export async function listPrepOrders(): Promise<PrepOrder[]> {
+  const rows = (await db
     .prepare(
-      `SELECT * FROM kitchen_prep_orders WHERE user_id = ?
+      `SELECT * FROM kitchen_prep_orders
        ORDER BY stewing_date ASC, id ASC`
     )
-    .all(userId) as PrepRow[];
+    .all()) as PrepRow[];
   return rows.map(hydrate);
 }
 
-export async function getPrepOrder(id: number | string, userId: number): Promise<PrepOrder | null> {
-  const row = await db
-    .prepare('SELECT * FROM kitchen_prep_orders WHERE id = ? AND user_id = ?')
-    .get(id, userId) as PrepRow | undefined;
+export async function getPrepOrder(id: number | string): Promise<PrepOrder | null> {
+  const row = (await db
+    .prepare('SELECT * FROM kitchen_prep_orders WHERE id = ?')
+    .get(id)) as PrepRow | undefined;
   return row ? hydrate(row) : null;
 }
 
@@ -185,8 +188,8 @@ export async function createPrepOrder(
     .prepare(
       `INSERT INTO kitchen_prep_orders
          (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
-          qty_osmanthus, qty_red_date, qty_rock_sugar, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          qty_osmanthus, qty_red_date, qty_rock_sugar, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
@@ -201,7 +204,7 @@ export async function createPrepOrder(
       qtyRock,
       input.notes?.trim() || null
     );
-  return (await getPrepOrder(Number(res.lastInsertRowid), userId))!;
+  return (await getPrepOrder(Number(res.lastInsertRowid)))!;
 }
 
 export interface PrepCapacityLine {
@@ -269,7 +272,6 @@ export async function createPrepOrdersBatch(
 
 export async function updatePrepOrder(
   id: number | string,
-  userId: number,
   input: Partial<{
     stewing_date: string;
     order_type: PrepOrderType;
@@ -282,10 +284,11 @@ export async function updatePrepOrder(
     allowEmptyQtys: boolean;
   }>
 ): Promise<PrepOrder | null> {
-  const existing = await getPrepOrder(id, userId);
+  const existing = await getPrepOrder(id);
   if (!existing) return null;
 
-  const { formulas } = await loadKitchenCatalog(userId);
+  const kitchenOwnerId = await resolveKitchenOwnerUserId();
+  const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
   const stew = formulas.stewFormulas;
   const capacity = input.capacity ?? existing.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
@@ -305,34 +308,37 @@ export async function updatePrepOrder(
   );
   if (validationErr) throw new Error(validationErr);
 
-  await db.prepare(
-    `UPDATE kitchen_prep_orders SET
+  await db
+    .prepare(
+      `UPDATE kitchen_prep_orders SET
        stewing_date = ?, order_type = ?, capacity = ?, status = ?,
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?, notes = ?,
        updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(
-    input.stewing_date ?? existing.stewing_date,
-    input.order_type ?? existing.order_type,
-    capacity,
-    input.status ?? existing.status,
-    qtyOsmanthus,
-    qtyRed,
-    qtyRock,
-    input.notes !== undefined ? input.notes : existing.notes,
-    id,
-    userId
-  );
-  return await getPrepOrder(id, userId);
+     WHERE id = ?`
+    )
+    .run(
+      input.stewing_date ?? existing.stewing_date,
+      input.order_type ?? existing.order_type,
+      capacity,
+      input.status ?? existing.status,
+      qtyOsmanthus,
+      qtyRed,
+      qtyRock,
+      input.notes !== undefined ? input.notes : existing.notes,
+      id
+    );
+  return await getPrepOrder(id);
 }
 
-export async function deletePrepOrder(id: number | string, userId: number): Promise<boolean> {
-  return await trashKitchenPrep(userId, Number(id));
+export async function deletePrepOrder(id: number | string): Promise<boolean> {
+  const existing = await getPrepOrder(id);
+  if (!existing) return false;
+  return await trashKitchenPrep(existing.user_id, Number(id));
 }
 
 export async function completePrepProduction(
   id: number | string,
-  userId: number,
+  actorUserId: number,
   operatorName: string,
   input: {
     actual_yield: number;
@@ -340,11 +346,12 @@ export async function completePrepProduction(
     splits?: PrepCompletionSplit[];
   }
 ): Promise<PrepOrder | null> {
-  const existing = await getPrepOrder(id, userId);
+  const existing = await getPrepOrder(id);
   if (!existing) return null;
   if (existing.status === 'completed') return null;
 
-  const { formulas } = await loadKitchenCatalog(userId);
+  const kitchenOwnerId = await resolveKitchenOwnerUserId();
+  const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
   const stew = formulas.stewFormulas;
 
   const calculation = computePrepCalculation(
@@ -402,10 +409,9 @@ export async function completePrepProduction(
   );
 
   const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;
-  const ownerId = await getDataOwnerId(userId);
 
   if (stockLines.length > 0 || rawConsume.length > 0) {
-    const stockResult = await addFinishedFromStewing(ownerId, userId, {
+    const stockResult = await addFinishedFromStewing(kitchenOwnerId, actorUserId, {
       finishedDeltas: stockLines,
       rawConsume,
       prepOrderId: existing.id,
@@ -415,18 +421,20 @@ export async function completePrepProduction(
     if (stockResult.error) throw new Error(stockResult.error);
   }
 
-  await db.prepare(
-    `UPDATE kitchen_prep_orders SET
+  await db
+    .prepare(
+      `UPDATE kitchen_prep_orders SET
        status = 'completed',
        expected_yield = ?,
        actual_yield = ?,
        completion_remarks = ?,
        completion_splits_json = ?,
-       completed_at = datetime('now'),
+       completed_at = ?,
        completed_by = ?,
        updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(expectedYield, actualYield, remarks, splitsJson, operatorName, id, userId);
+     WHERE id = ?`
+    )
+    .run(expectedYield, actualYield, remarks, splitsJson, hkNowDateTime(), operatorName, id);
 
   const activityBody = buildKitchenCompletionActivityBody(
     existing.order_code,
@@ -437,24 +445,31 @@ export async function completePrepProduction(
   );
 
   if (existing.linked_order_id) {
-    await logActivity('order', existing.linked_order_id, userId, 'activity', operatorName, activityBody);
+    await logActivity(
+      'order',
+      existing.linked_order_id,
+      existing.user_id,
+      'activity',
+      operatorName,
+      activityBody
+    );
   }
 
-  return await getPrepOrder(id, userId);
+  return await getPrepOrder(id);
 }
 
-/** Find prep linked to an order (owner-scoped). */
+/** Find prep linked to an order (company-wide). */
 export async function getPrepByLinkedOrderId(
-  ownerId: number,
+  _ownerId: number,
   orderId: number
 ): Promise<PrepOrder | null> {
-  const row = await db
+  const row = (await db
     .prepare(
       `SELECT * FROM kitchen_prep_orders
-       WHERE user_id = ? AND linked_order_id = ?
+       WHERE linked_order_id = ?
        ORDER BY id ASC LIMIT 1`
     )
-    .get(ownerId, orderId) as PrepRow | undefined;
+    .get(orderId)) as PrepRow | undefined;
   return row ? hydrate(row) : null;
 }
 
@@ -512,7 +527,8 @@ export async function ensurePrepFromWeddingOrder(
   const orderCode = order.po_number?.trim() || undefined;
 
   if (!existing) {
-    const created = await createPrepOrder(ownerId, {
+    const kitchenOwnerId = await resolveKitchenOwnerUserId();
+    const created = await createPrepOrder(kitchenOwnerId, {
       stewing_date: stewingDate,
       order_type: 'wedding',
       capacity,
@@ -542,7 +558,7 @@ export async function ensurePrepFromWeddingOrder(
       ? nextStatus
       : existing.status;
 
-  const updated = await updatePrepOrder(existing.id, ownerId, {
+  const updated = await updatePrepOrder(existing.id, {
     stewing_date: stewingDate,
     order_type: 'wedding',
     capacity,

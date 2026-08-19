@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { getDataOwnerId } from '@/lib/org-server';
-import { deletePrepOrder, getPrepOrder, updatePrepOrder } from '@/lib/kitchen-prep-server';
+import {
+  deletePrepOrder,
+  getPrepOrder,
+  resolveKitchenOwnerUserId,
+  updatePrepOrder,
+} from '@/lib/kitchen-prep-server';
 import {
   PREP_ORDER_TYPES,
   PREP_STATUSES,
@@ -15,11 +19,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const order = await getPrepOrder(params.id, session.userId);
+  const order = await getPrepOrder(params.id);
   if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const ownerId = await getDataOwnerId(session);
-  const { formulas } = await loadKitchenCatalog(ownerId);
+  const kitchenOwnerId = await resolveKitchenOwnerUserId();
+  const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
   const calculation = computePrepCalculation(
     order.capacity,
     order.order_type,
@@ -40,11 +44,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
   try {
     const body = await request.json();
-    const existing = await getPrepOrder(params.id, session.userId);
+    const existing = await getPrepOrder(params.id);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const ownerId = await getDataOwnerId(session);
-    const { catalog, formulas } = await loadKitchenCatalog(ownerId);
+    const kitchenOwnerId = await resolveKitchenOwnerUserId();
+    const { catalog, formulas } = await loadKitchenCatalog(kitchenOwnerId);
     const allowedCaps = new Set(catalog.capacities.map((c) => c.id));
     const capacity = (
       body.capacity && allowedCaps.has(body.capacity) ? body.capacity : existing.capacity
@@ -61,7 +65,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return NextResponse.json({ error: validationErr }, { status: 400 });
     }
 
-    const order = await updatePrepOrder(params.id, session.userId, {
+    const order = await updatePrepOrder(params.id, {
       stewing_date: body.stewing_date,
       order_type: PREP_ORDER_TYPES.includes(body.order_type) ? body.order_type : undefined,
       capacity,
@@ -93,7 +97,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!(await deletePrepOrder(params.id, session.userId))) {
+  if (!(await deletePrepOrder(params.id))) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   return NextResponse.json({ success: true });

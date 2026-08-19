@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
   company_name TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   role TEXT NOT NULL DEFAULT 'admin',
   owner_user_id INTEGER REFERENCES users(id)
 );
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS customers (
   city TEXT,
   state TEXT,
   zip TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   tax_rate DOUBLE PRECISION DEFAULT 0,
   notes TEXT,
   terms TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   order_id INTEGER,
   last_reminder_at TEXT,
   last_due_soon_reminder_at TEXT,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS invoice_files (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
   original_name TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
@@ -96,8 +96,8 @@ CREATE TABLE IF NOT EXISTS expenses (
   notes TEXT,
   payment_status TEXT DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'pending', 'paid')),
   receipt_path TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   receipt_no TEXT,
   batch_id TEXT,
   payment_method TEXT,
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS expense_receipts (
   expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   source_url TEXT
 );
 
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS expense_options (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   value TEXT NOT NULL,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE (user_id, type, value)
 );
 
@@ -157,8 +157,8 @@ CREATE TABLE IF NOT EXISTS orders (
   shipping_address TEXT,
   notes TEXT,
   fields_json TEXT DEFAULT '{}',
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   carton_count TEXT,
   quotation_id INTEGER,
   source_platform TEXT NOT NULL DEFAULT 'manual',
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS order_files (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
   original_name TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS activity_logs (
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   kind TEXT NOT NULL DEFAULT 'comment',
   author TEXT,
   body TEXT NOT NULL,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS quotations (
@@ -199,8 +199,8 @@ CREATE TABLE IF NOT EXISTS quotations (
   tax_rate DOUBLE PRECISION DEFAULT 0,
   notes TEXT,
   terms TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   billing_address TEXT,
   shipping_address TEXT,
   email TEXT,
@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS quotation_files (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
   original_name TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS other_income (
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS other_income (
   remarks TEXT,
   receipt_path TEXT,
   verified INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS kitchen_finished (
@@ -286,7 +286,7 @@ CREATE TABLE IF NOT EXISTS kitchen_movements (
   details_json TEXT NOT NULL DEFAULT '{}',
   order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
   created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   voided_at TEXT,
   voided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   voids_movement_id INTEGER
@@ -298,7 +298,7 @@ CREATE TABLE IF NOT EXISTS kitchen_order_fulfillments (
   order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   need_key TEXT NOT NULL,
   fulfilled_qty INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE (user_id, order_id, need_key)
 );
 
@@ -315,8 +315,8 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   qty_red_date INTEGER NOT NULL DEFAULT 0,
   qty_rock_sugar INTEGER NOT NULL DEFAULT 0,
   notes TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   expected_yield INTEGER,
   actual_yield INTEGER,
   completion_remarks TEXT,
@@ -330,7 +330,7 @@ CREATE TABLE IF NOT EXISTS kitchen_settings (
   holiday_mode INTEGER NOT NULL DEFAULT 0,
   catalog_json TEXT,
   formulas_json TEXT,
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_json TEXT;
@@ -346,7 +346,7 @@ CREATE TABLE IF NOT EXISTS inbound_shipments (
   arrival_date TEXT,
   photo_path TEXT,
   notes TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 ALTER TABLE inbound_shipments ADD COLUMN IF NOT EXISTS sender_address TEXT;
@@ -360,8 +360,8 @@ CREATE TABLE IF NOT EXISTS rental_tenants (
   phone TEXT,
   email TEXT,
   notes TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'
 );
 
@@ -379,8 +379,8 @@ CREATE TABLE IF NOT EXISTS rental_units (
   due_date_day INTEGER NOT NULL DEFAULT 1,
   auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
   automation_enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   tenant_id INTEGER REFERENCES rental_tenants(id),
   utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy',
   address TEXT,
@@ -410,8 +410,8 @@ CREATE TABLE IF NOT EXISTS rental_records (
   paid_at TEXT,
   custom_invoice_note TEXT,
   custom_receipt_note TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   amount_paid DOUBLE PRECISION NOT NULL DEFAULT 0,
   water_period_from TEXT,
   water_period_to TEXT,
@@ -431,8 +431,8 @@ CREATE TABLE IF NOT EXISTS utility_meter_rounds (
   reading_date TEXT NOT NULL,
   period TEXT NOT NULL,
   notes TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS utility_meter_round_items (
@@ -443,8 +443,8 @@ CREATE TABLE IF NOT EXISTS utility_meter_round_items (
   photo_path TEXT,
   ocr_text TEXT,
   synced_record_id INTEGER REFERENCES rental_records(id) ON DELETE SET NULL,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE (round_id, meter_key)
 );
 
@@ -458,7 +458,7 @@ CREATE TABLE IF NOT EXISTS rental_payment_receipts (
   extracted_receiving_account TEXT,
   extracted_amount DOUBLE PRECISION,
   extraction_source TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS rental_activity_logs (
@@ -468,7 +468,7 @@ CREATE TABLE IF NOT EXISTS rental_activity_logs (
   rent_record_id INTEGER,
   action TEXT NOT NULL,
   note TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS rental_charge_items (
@@ -480,8 +480,8 @@ CREATE TABLE IF NOT EXISTS rental_charge_items (
   amount_due DOUBLE PRECISION NOT NULL DEFAULT 0,
   amount_allocated DOUBLE PRECISION NOT NULL DEFAULT 0,
   legacy_record_id INTEGER REFERENCES rental_records(id) ON DELETE SET NULL,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   status TEXT NOT NULL DEFAULT 'unpaid',
   tenant_id INTEGER REFERENCES rental_tenants(id),
   UNIQUE (user_id, unit_id, billing_period, charge_type)
@@ -498,8 +498,8 @@ CREATE TABLE IF NOT EXISTS rental_payments (
   reference TEXT,
   notes TEXT,
   legacy_receipt_id INTEGER,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS rental_payment_allocations (
@@ -508,7 +508,7 @@ CREATE TABLE IF NOT EXISTS rental_payment_allocations (
   payment_id INTEGER NOT NULL REFERENCES rental_payments(id) ON DELETE CASCADE,
   charge_item_id INTEGER NOT NULL REFERENCES rental_charge_items(id) ON DELETE CASCADE,
   amount DOUBLE PRECISION NOT NULL,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS rental_debit_note_seq (
@@ -522,7 +522,7 @@ CREATE TABLE IF NOT EXISTS rental_debit_note_styles (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   company_key TEXT NOT NULL,
   styles_json TEXT NOT NULL,
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   PRIMARY KEY (user_id, company_key)
 );
 
@@ -548,8 +548,8 @@ CREATE TABLE IF NOT EXISTS rental_leases (
   auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
   automation_enabled INTEGER NOT NULL DEFAULT 1,
   is_current INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 -- Circular FK: rental_units.current_lease_id → rental_leases(id)
@@ -568,7 +568,7 @@ CREATE TABLE IF NOT EXISTS rental_lease_documents (
   doc_type TEXT NOT NULL DEFAULT 'agreement',
   file_path TEXT NOT NULL,
   label TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS rental_document_templates (
@@ -580,8 +580,8 @@ CREATE TABLE IF NOT EXISTS rental_document_templates (
   footer_remark TEXT NOT NULL DEFAULT '',
   rent_invoice_note TEXT NOT NULL DEFAULT '',
   company_json TEXT,
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE (user_id, template_key)
 );
 
@@ -609,8 +609,8 @@ CREATE TABLE IF NOT EXISTS reconciliation_records (
   approved_by TEXT,
   approved_at TEXT,
   created_by TEXT,
-  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS confidence TEXT;
@@ -629,7 +629,7 @@ CREATE TABLE IF NOT EXISTS integration_tokens (
   refresh_token TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   realm_id TEXT,
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   PRIMARY KEY (user_id, provider)
 );
 
@@ -651,7 +651,7 @@ CREATE TABLE IF NOT EXISTS integration_sync_state (
 CREATE TABLE IF NOT EXISTS integration_settings (
   user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   settings_json TEXT NOT NULL DEFAULT '{}',
-  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS deleted_records (
@@ -662,13 +662,13 @@ CREATE TABLE IF NOT EXISTS deleted_records (
   label TEXT NOT NULL,
   summary TEXT,
   payload TEXT NOT NULL,
-  deleted_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  deleted_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   expires_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS app_migrations (
   key TEXT PRIMARY KEY,
-  applied_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  applied_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS role_permissions (

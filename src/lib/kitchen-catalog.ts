@@ -77,7 +77,9 @@ export function uniqueCatalogId(
   label = ''
 ): string {
   const taken = new Set(
-    [...existingIds].map((id) => String(id || '').trim()).filter(Boolean)
+    Array.from(existingIds)
+      .map((id) => String(id || '').trim())
+      .filter(Boolean)
   );
   const fromLabel = String(label || '')
     .trim()

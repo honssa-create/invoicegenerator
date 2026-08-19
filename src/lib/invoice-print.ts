@@ -35,6 +35,11 @@ HANG SENG BANK (bank code : 024)
 -`;
 }
 
+/** Thank-you block for paid-invoice receipt print. */
+export function defaultReceiptPaymentRemarks(): string {
+  return 'Thank you for your payment.';
+}
+
 function customerBillingFallback(inv: InvoiceWithDetails): string {
   return [
     inv.customer_name,
@@ -117,6 +122,17 @@ export function invoiceToFormalPreview(
     companySignName: companyAddressLines[0],
     logoSrc: '/company-logo.png',
     chopSrc: '/company-chop.png',
+  };
+}
+
+/** Map a paid invoice into the standard formal layout with receipt remarks. */
+export function invoiceToReceiptPreview(
+  inv: InvoiceWithDetails,
+  business?: InvoicePrintBusiness | null,
+): QuotationPreviewModel {
+  return {
+    ...invoiceToFormalPreview(inv, business),
+    remarks: [defaultReceiptPaymentRemarks()],
   };
 }
 

@@ -389,6 +389,14 @@ export default function InvoiceDetailPage() {
           >
             🧾 {bi('Generate PDF', '產生 PDF')}
           </Link>
+          {status === 'paid' && (
+            <Link
+              href={`/invoices/${id}/receipt`}
+              className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
+            >
+              🧾 {bi('Generate Receipt', '產生收據')}
+            </Link>
+          )}
           {!readOnly && (
             <>
               <button

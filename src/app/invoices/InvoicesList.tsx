@@ -273,6 +273,14 @@ export default function InvoicesList() {
                   <td className="px-6 py-4 text-sm space-x-3">
                     <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.view}</Link>
                     <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">{BTN.print}</Link>
+                    {inv.status === 'paid' && (
+                      <Link
+                        href={`/invoices/${inv.id}/receipt`}
+                        className="text-gray-600 hover:text-gray-800 font-medium"
+                      >
+                        {bi('Receipt', '收據')}
+                      </Link>
+                    )}
                     {!readOnly && (
                     <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button>
                     )}

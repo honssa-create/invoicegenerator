@@ -222,12 +222,9 @@ export default function DebitNoteTemplateWorkspace({ variant, readOnly }: Props)
         </>
       }
       preview={
-        <main
-          className="a4-page mx-auto shadow-lg print:shadow-none origin-top scale-[0.85] sm:scale-90 xl:scale-100"
-          style={{ padding: style.pagePadding }}
-        >
+        <div className="origin-top scale-[0.85] sm:scale-90 xl:scale-100">
           <FormalDebitNoteDocument doc={previewDoc} styleTemplate={style} />
-        </main>
+        </div>
       }
     />
   );

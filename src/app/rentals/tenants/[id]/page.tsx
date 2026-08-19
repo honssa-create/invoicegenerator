@@ -16,7 +16,6 @@ import ChargeAllocationGrid, {
 } from '@/components/ChargeAllocationGrid';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import PaymentAllocationLedger from '@/components/PaymentAllocationLedger';
-import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import { useAuth } from '@/components/AuthProvider';
 import {
   CHARGE_TYPE_LABELS,
@@ -27,14 +26,12 @@ import {
   chargeOutstanding,
   computeLeaseDisplayStatus,
   currentBillingPeriod,
-  defaultPaymentTemplateForUnits,
   formatDisplayDate,
   formatMoney,
   formatUtilityAmount,
   todayFormDate,
   RENTAL_PAYMENT_METHODS,
   RENTAL_PAYMENT_METHOD_LABELS,
-  type DebitNotePaymentTemplateId,
   type RentalChargeItem,
   type RentalChargeType,
   type RentalPayment,
@@ -116,10 +113,6 @@ export default function TenantDetailPage() {
   const [contactEditing, setContactEditing] = useState(false);
   const [paymentMode, setPaymentMode] = useState<'byPeriod' | 'byType'>('byPeriod');
   const [periodRows, setPeriodRows] = useState<TenantPeriodBreakdownRow[]>([]);
-  const [showDebitNoteModal, setShowDebitNoteModal] = useState(false);
-  const [debitNoteTemplate, setDebitNoteTemplate] = useState<DebitNotePaymentTemplateId>('label');
-  const [debitNoteRemark, setDebitNoteRemark] = useState('');
-  const [debitNoteSending, setDebitNoteSending] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -441,7 +434,7 @@ export default function TenantDetailPage() {
     );
   };
 
-  const debitNoteHref = (extra?: { paymentTemplate?: string; paymentRemark?: string }) => {
+  const debitNoteHref = () => {
     const qs = new URLSearchParams({
       tenantId: String(id),
       targetPeriod: period,
@@ -452,42 +445,7 @@ export default function TenantDetailPage() {
     if (selectedUnitIds.length && selectedUnitIds.length < units.length) {
       qs.set('unitIds', selectedUnitIds.join(','));
     }
-    if (extra?.paymentTemplate) qs.set('paymentTemplate', extra.paymentTemplate);
-    if (extra?.paymentRemark) qs.set('paymentRemark', extra.paymentRemark);
     return `/billing/debit-note?${qs}`;
-  };
-
-  const openDebitNoteModal = () => {
-    const selectedNames = units.filter((u) => selectedUnitIds.includes(u.id)).map((u) => u.unitName);
-    setDebitNoteTemplate(defaultPaymentTemplateForUnits(selectedNames));
-    setDebitNoteRemark('');
-    setShowDebitNoteModal(true);
-  };
-
-  const sendDebitNote = async () => {
-    setDebitNoteSending(true);
-    const res = await fetch('/api/debit-note/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: Number(id),
-        targetPeriod: period,
-        mode: 'grouped',
-        unitIds: selectedUnitIds.length && selectedUnitIds.length < units.length ? selectedUnitIds.join(',') : undefined,
-        fromPeriod: fromPeriod || undefined,
-        paidLookbackMonths: paidLookback,
-        paymentTemplate: debitNoteTemplate,
-        paymentRemark: debitNoteRemark || undefined,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setDebitNoteSending(false);
-    if (!res.ok) {
-      setToast(data.error || 'Failed to send debit note');
-      return;
-    }
-    setShowDebitNoteModal(false);
-    setToast(data.sent ? 'Debit note sent by email ✓' : 'Debit note logged (no email provider)');
   };
 
   return (
@@ -517,14 +475,22 @@ export default function TenantDetailPage() {
             <span className="text-xs font-medium text-gray-500">{bi('Paid lookback (months)', '已付回溯月數')}</span>
             <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} />
           </label>
-          <button
-            type="button"
-            onClick={openDebitNoteModal}
-            disabled={!selectedUnitIds.length}
-            className={`btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40`}
-          >
-            繳費通知單 Debit Note
-          </button>
+          {selectedUnitIds.length ? (
+            <Link
+              href={debitNoteHref()}
+              className="btn border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              繳費通知單 Debit Note
+            </Link>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="btn border border-gray-300 text-gray-700 opacity-40 cursor-not-allowed"
+            >
+              繳費通知單 Debit Note
+            </button>
+          )}
           {!readOnly && (
             <button onClick={openPaymentModal} className="btn bg-brand-600 text-white hover:bg-brand-700">
               + Record Payment
@@ -1114,44 +1080,6 @@ export default function TenantDetailPage() {
                 {busy ? BTN.saving : bi('Allocate', '分配')}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showDebitNoteModal && (
-        <div className="modal-overlay">
-          <div className="modal-panel sm:max-w-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-1">繳費通知單 Debit Note</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              {period} · {selectedUnitIds.length} unit{selectedUnitIds.length !== 1 ? 's' : ''} selected
-            </p>
-            <DebitNotePaymentOptions
-              templateId={debitNoteTemplate}
-              onTemplateId={setDebitNoteTemplate}
-              manualRemark={debitNoteRemark}
-              onManualRemark={setDebitNoteRemark}
-            />
-            <div className="flex flex-wrap justify-between gap-3 mt-6">
-              <Link
-                href={debitNoteHref({ paymentTemplate: debitNoteTemplate, paymentRemark: debitNoteRemark })}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
-                onClick={() => setShowDebitNoteModal(false)}
-              >
-                Preview & Print 預覽列印
-              </Link>
-              <div className="flex gap-3">
-                <button type="button" onClick={() => setShowDebitNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
-                <button
-                  type="button"
-                  onClick={() => void sendDebitNote()}
-                  disabled={debitNoteSending || readOnly}
-                  className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50"
-                >
-                  {debitNoteSending ? 'Sending…' : 'Send Debit Note 發送'}
-                </button>
-              </div>
-            </div>
-            <p className="text-xs text-gray-400 mt-3">Send to: {tenant.email || 'No email — will log only'}</p>
           </div>
         </div>
       )}

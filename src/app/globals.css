@@ -301,16 +301,13 @@
     position: static !important;
   }
 
-  /* Formal debit note — A4 page */
+  /* Formal A4 page helper (kept for any remaining screen wrappers) */
   .a4-page {
     width: 100% !important;
     max-width: none !important;
     min-height: auto !important;
     margin: 0 !important;
-    padding: 8mm !important;
     box-shadow: none !important;
-    page-break-after: always;
-    break-after: page;
   }
 
   .a4-page:last-child {

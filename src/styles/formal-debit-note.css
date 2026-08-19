@@ -250,9 +250,4 @@
   .formal-debit-note {
     font-size: 10pt !important;
   }
-
-  .dn-total-box {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
 }

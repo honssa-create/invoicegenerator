@@ -69,43 +69,75 @@ function orderTypeOf(fields: Record<string, unknown>): string {
   return typeof fields.order_type === 'string' ? fields.order_type : '';
 }
 
+/** Process-local: avoid re-running seed INSERT chatter on every kitchen request. */
+const seededOwnerIds = new Set<number>();
+
+const KITCHEN_ORDER_TYPES = [NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE] as const;
+
+function isShippedKitchenStatus(status: string | null | undefined): boolean {
+  const s = (status || '').trim();
+  return s === '已寄出 SENT' || /\bSENT\b/i.test(s);
+}
+
 export async function ensureSeed(userId: number) {
-  const insF = db.prepare('INSERT OR IGNORE INTO kitchen_finished (user_id, sku, quantity) VALUES (?, ?, ?)');
-  for (const sku of FINISHED_SKUS) {
-    await insF.run(userId, sku, 0);
+  if (seededOwnerIds.has(userId)) return;
+
+  // Batch INSERT OR IGNORE — one round-trip per table instead of N sequential inserts.
+  if (FINISHED_SKUS.length > 0) {
+    const placeholders = FINISHED_SKUS.map(() => '(?, ?, 0)').join(', ');
+    const params = FINISHED_SKUS.flatMap((sku) => [userId, sku]);
+    await db
+      .prepare(`INSERT OR IGNORE INTO kitchen_finished (user_id, sku, quantity) VALUES ${placeholders}`)
+      .run(...params);
   }
 
-  const insG = db.prepare('INSERT OR IGNORE INTO kitchen_gift_boxes (user_id, box_type, quantity) VALUES (?, ?, ?)');
-  for (const g of GIFT_BOX_TYPES) {
-    await insG.run(userId, g.id, 0);
+  if (GIFT_BOX_TYPES.length > 0) {
+    const placeholders = GIFT_BOX_TYPES.map(() => '(?, ?, 0)').join(', ');
+    const params = GIFT_BOX_TYPES.flatMap((g) => [userId, g.id]);
+    await db
+      .prepare(`INSERT OR IGNORE INTO kitchen_gift_boxes (user_id, box_type, quantity) VALUES ${placeholders}`)
+      .run(...params);
   }
 
-  const insR = db.prepare(
-    'INSERT OR IGNORE INTO kitchen_raw (user_id, name, unit, total_stock, allocated_stock) VALUES (?, ?, ?, ?, 0)'
-  );
-  for (const m of RAW_MATERIALS) {
-    await insR.run(userId, m.name, m.unit, m.seedStock);
+  if (RAW_MATERIALS.length > 0) {
+    const placeholders = RAW_MATERIALS.map(() => '(?, ?, ?, ?, 0)').join(', ');
+    const params = RAW_MATERIALS.flatMap((m) => [userId, m.name, m.unit, m.seedStock]);
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO kitchen_raw (user_id, name, unit, total_stock, allocated_stock) VALUES ${placeholders}`
+      )
+      .run(...params);
   }
 
   // Fold legacy alias rows (頂級乾燕餅→燕餅, 燕窩冰糖→冰糖) into canonical stock.
-  for (const [alias, canonical] of Object.entries(RAW_MATERIAL_ALIASES)) {
-    const aliasRow = (await db
-      .prepare('SELECT total_stock, allocated_stock FROM kitchen_raw WHERE user_id = ? AND name = ?')
-      .get(userId, alias)) as { total_stock: number; allocated_stock: number } | undefined;
-    if (!aliasRow) continue;
-    const total = Number(aliasRow.total_stock) || 0;
-    const alloc = Number(aliasRow.allocated_stock) || 0;
-    if (total !== 0 || alloc !== 0) {
-      const def = RAW_MATERIALS.find((m) => m.name === canonical);
-      await ensureRawRow(userId, canonical, def?.unit || 'g');
-      await db
-        .prepare(
-          'UPDATE kitchen_raw SET total_stock = total_stock + ?, allocated_stock = allocated_stock + ? WHERE user_id = ? AND name = ?'
-        )
-        .run(total, alloc, userId, canonical);
+  const aliasNames = Object.keys(RAW_MATERIAL_ALIASES);
+  if (aliasNames.length > 0) {
+    const ph = aliasNames.map(() => '?').join(', ');
+    const aliasRows = (await db
+      .prepare(
+        `SELECT name, total_stock, allocated_stock FROM kitchen_raw WHERE user_id = ? AND name IN (${ph})`
+      )
+      .all(userId, ...aliasNames)) as { name: string; total_stock: number; allocated_stock: number }[];
+
+    for (const aliasRow of aliasRows) {
+      const canonical = RAW_MATERIAL_ALIASES[aliasRow.name];
+      if (!canonical) continue;
+      const total = Number(aliasRow.total_stock) || 0;
+      const alloc = Number(aliasRow.allocated_stock) || 0;
+      if (total !== 0 || alloc !== 0) {
+        const def = RAW_MATERIALS.find((m) => m.name === canonical);
+        await ensureRawRow(userId, canonical, def?.unit || 'g');
+        await db
+          .prepare(
+            'UPDATE kitchen_raw SET total_stock = total_stock + ?, allocated_stock = allocated_stock + ? WHERE user_id = ? AND name = ?'
+          )
+          .run(total, alloc, userId, canonical);
+      }
+      await db.prepare('DELETE FROM kitchen_raw WHERE user_id = ? AND name = ?').run(userId, aliasRow.name);
     }
-    await db.prepare('DELETE FROM kitchen_raw WHERE user_id = ? AND name = ?').run(userId, alias);
   }
+
+  seededOwnerIds.add(userId);
 }
 
 async function ensureFinishedRow(userId: number, sku: string) {
@@ -123,15 +155,17 @@ async function ensureRawRow(userId: number, name: string, unit = 'g') {
 }
 
 async function loadStockMaps(userId: number): Promise<StockMaps> {
-  const finishedRows = (await db
-    .prepare('SELECT sku, quantity FROM kitchen_finished WHERE user_id = ?')
-    .all(userId)) as { sku: string; quantity: number }[];
-  const rawRows = (await db
-    .prepare('SELECT name, total_stock FROM kitchen_raw WHERE user_id = ?')
-    .all(userId)) as { name: string; total_stock: number }[];
-  const giftRows = (await db
-    .prepare('SELECT box_type, quantity FROM kitchen_gift_boxes WHERE user_id = ?')
-    .all(userId)) as { box_type: string; quantity: number }[];
+  const [finishedRows, rawRows, giftRows] = await Promise.all([
+    db
+      .prepare('SELECT sku, quantity FROM kitchen_finished WHERE user_id = ?')
+      .all(userId) as Promise<{ sku: string; quantity: number }[]>,
+    db
+      .prepare('SELECT name, total_stock FROM kitchen_raw WHERE user_id = ?')
+      .all(userId) as Promise<{ name: string; total_stock: number }[]>,
+    db
+      .prepare('SELECT box_type, quantity FROM kitchen_gift_boxes WHERE user_id = ?')
+      .all(userId) as Promise<{ box_type: string; quantity: number }[]>,
+  ]);
 
   const finished: Record<string, number> = {};
   for (const sku of FINISHED_SKUS) finished[sku] = 0;
@@ -231,15 +265,26 @@ function returnGiftNeeds(
 }
 
 async function loadOpenOrders(userId: number, fulfillments: Map<string, number>): Promise<KitchenOpenOrder[]> {
+  // Pre-filter Nestiee / 回禮 in SQL so we do not pull+parse every order's fields_json.
+  const typePatterns = KITCHEN_ORDER_TYPES.flatMap((t) => [`%"order_type":"${t}"%`, `%"order_type": "${t}"%`]);
   const rows = (await db
-    .prepare('SELECT id, reference_number, po_number, name, status, fields_json FROM orders WHERE user_id = ? ORDER BY id DESC')
-    .all(userId)) as OrderRow[];
+    .prepare(
+      `SELECT id, reference_number, po_number, name, status, fields_json
+       FROM orders
+       WHERE user_id = ?
+         AND (
+           ${typePatterns.map(() => 'fields_json LIKE ?').join('\n           OR ')}
+         )
+         AND COALESCE(TRIM(status), '') <> '已寄出 SENT'
+         AND (status IS NULL OR status !~* '\\ySENT\\y')
+       ORDER BY id DESC`
+    )
+    .all(userId, ...typePatterns)) as OrderRow[];
 
   const out: KitchenOpenOrder[] = [];
   for (const row of rows) {
     // Hide shipped orders from the kitchen list.
-    const status = (row.status || '').trim();
-    if (status === '已寄出 SENT' || /\bSENT\b/i.test(status)) continue;
+    if (isShippedKitchenStatus(row.status)) continue;
 
     const fields = parseFields(row.fields_json);
     const ot = orderTypeOf(fields);
@@ -383,12 +428,24 @@ async function loadMovements(userId: number): Promise<KitchenMovement[]> {
 
 export async function getState(userId: number, opts?: { isAdmin?: boolean }): Promise<KitchenState> {
   await ensureSeed(userId);
-  const stock = await loadStockMaps(userId);
-  const fulfillments = await loadFulfillments(userId);
-  const openOrders = await loadOpenOrders(userId, fulfillments);
+
+  // Fulfillments must finish before open-orders; stock/movements/prep/holiday are independent.
+  const fulfillmentsPromise = loadFulfillments(userId);
+  const independentPromise = Promise.all([
+    loadStockMaps(userId),
+    loadMovements(userId),
+    loadUnfinishedPrepRawDemand(userId),
+    getHolidayMode(userId),
+  ]);
+
+  const fulfillments = await fulfillmentsPromise;
+  const [openOrders, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
+    loadOpenOrders(userId, fulfillments),
+    independentPromise,
+  ]);
+
   const demand = computeDemand(openOrders);
-  demand.raw = await loadUnfinishedPrepRawDemand(userId);
-  const movements = await loadMovements(userId);
+  demand.raw = unfinishedRaw;
 
   const giftBoxes = GIFT_BOX_TYPES.map((g) => ({
     boxType: g.id,
@@ -419,7 +476,7 @@ export async function getState(userId: number, opts?: { isAdmin?: boolean }): Pr
     openOrders,
     movements,
     isAdmin: Boolean(opts?.isAdmin),
-    holidayMode: await getHolidayMode(userId),
+    holidayMode,
   };
 }
 

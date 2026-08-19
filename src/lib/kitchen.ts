@@ -7,6 +7,8 @@ import {
   type BomLine,
   type StockCheckLine,
 } from './kitchen-bom';
+import type { KitchenCatalog, KitchenFormulas } from './kitchen-catalog';
+import { defaultKitchenCatalog } from './kitchen-catalog';
 
 export {
   FINISHED_SKUS,
@@ -34,6 +36,27 @@ export {
   type FinishedFlavorQtys,
 } from './kitchen-bom';
 
+export type {
+  KitchenCatalog,
+  KitchenFormulas,
+  CatalogRawMaterial,
+  CatalogGiftBoxType,
+  CatalogCapacity,
+  KitchenCatalogBundle,
+} from './kitchen-catalog';
+
+export {
+  defaultKitchenCatalog,
+  defaultKitchenFormulas,
+  defaultKitchenCatalogBundle,
+  finishedSkusFromCatalog,
+  finishedSkuLabelFromCatalog,
+  activeGiftBoxTypes,
+  expandGiftBoxBomFrom,
+  giftBoxQtyKey,
+  uniqueCatalogId,
+} from './kitchen-catalog';
+
 export const GIFT_BOX_TYPES = NESTIEE_GIFT_BOX_TYPES;
 
 /** Minimum on-hand stock to keep for each gift-box kind. */
@@ -59,15 +82,12 @@ export interface RawMaterialDef {
 }
 
 /** Raw materials tracked in kitchen inventory (restock + 隨心燉 BOM).
- *  頂級乾燕餅 ≡ 燕餅；燕窩冰糖 ≡ 冰糖. */
-export const RAW_MATERIALS: RawMaterialDef[] = [
-  { name: '燕餅', unit: 'g', seedStock: 0 },
-  { name: '桂花', unit: 'g', seedStock: 0 },
-  { name: '紅棗', unit: 'g', seedStock: 0 },
-  { name: '冰糖', unit: 'g', seedStock: 0 },
-  { name: '片糖', unit: 'g', seedStock: 0 },
-  { name: '玻璃燉瓶', unit: '個', seedStock: 0 },
-];
+ *  頂級乾燕餅 ≡ 燕餅；燕窩冰糖 ≡ 冰糖. Defaults; runtime catalog may differ. */
+export const RAW_MATERIALS: RawMaterialDef[] = defaultKitchenCatalog().rawMaterials.map((m) => ({
+  name: m.name,
+  unit: m.unit,
+  seedStock: 0,
+}));
 
 /** Legacy raw names → canonical (fold stock on seed). */
 export const RAW_MATERIAL_ALIASES: Record<string, string> = {
@@ -80,6 +100,7 @@ export const KITCHEN_ACTIONS = [
   'allocate_gift_box',
   'make_return_gift',
   'restock_raw',
+  'adjust_stock',
   'complete_stew',
   'print_prep_sheet',
   'void',
@@ -91,6 +112,7 @@ export const KITCHEN_ACTION_LABELS: Record<KitchenAction, string> = {
   allocate_gift_box: '分配禮盒',
   make_return_gift: '包裝回禮',
   restock_raw: '補充原料',
+  adjust_stock: '庫存調整',
   complete_stew: '完成燉製',
   print_prep_sheet: '列印材料單',
   void: 'Void',
@@ -186,6 +208,8 @@ export interface KitchenState {
   isAdmin: boolean;
   /** Org-wide: elevate gift-box min stock (admin toggle). */
   holidayMode: boolean;
+  catalog: KitchenCatalog;
+  formulas: KitchenFormulas;
 }
 
 export function formatBomConsumption(lines: BomLine[]): string {

@@ -25,6 +25,11 @@ const STATUS_COLORS: Record<string, string> = {
   completed: 'bg-green-100 text-green-700',
 };
 
+interface CapacityOption {
+  id: string;
+  label: string;
+}
+
 interface CapacityLine {
   capacity: PrepCapacity;
   qty_osmanthus: string;
@@ -72,7 +77,7 @@ function parsePrefillForm(searchParams: URLSearchParams): FormState | null {
       }>;
       if (Array.isArray(parsed) && parsed.length > 0) {
         const withNums = parsed
-          .filter((l) => PREP_CAPACITIES.includes(l.capacity as PrepCapacity))
+          .filter((l) => Boolean(l.capacity))
           .map((l) => {
             const capacity = l.capacity as PrepCapacity;
             const o = Math.max(0, Math.round(Number(l.qty_osmanthus) || 0));
@@ -132,6 +137,9 @@ function KitchenPrepListContent() {
   const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('stewing_date');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
+    PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
+  );
 
   const load = () =>
     fetch('/api/kitchen-prep')
@@ -140,6 +148,21 @@ function KitchenPrepListContent() {
       .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    fetch('/api/kitchen/catalog')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const caps = d?.catalog?.capacities as { id: string; label: string; sortOrder?: number }[] | undefined;
+        if (!caps?.length) return;
+        setCapacityOptions(
+          [...caps]
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((c) => ({ id: c.id, label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id }))
+        );
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const prefill = parsePrefillForm(searchParams);
@@ -355,20 +378,20 @@ function KitchenPrepListContent() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-2">容量 Capacities (multi-select)</label>
                 <div className="flex flex-wrap gap-2 mb-3">
-                  {PREP_CAPACITIES.map((c) => {
-                    const selected = form.lines.some((l) => l.capacity === c);
+                  {capacityOptions.map((c) => {
+                    const selected = form.lines.some((l) => l.capacity === c.id);
                     return (
                       <button
-                        key={c}
+                        key={c.id}
                         type="button"
-                        onClick={() => toggleCapacity(c)}
+                        onClick={() => toggleCapacity(c.id)}
                         className={`px-4 py-2 rounded-lg text-sm font-semibold border-2 min-h-[44px] ${
                           selected
                             ? 'bg-brand-600 text-white border-brand-600'
                             : 'bg-white text-gray-700 border-gray-300 hover:border-brand-300'
                         }`}
                       >
-                        {PREP_CAPACITY_LABELS[c]}
+                        {c.label}
                       </button>
                     );
                   })}

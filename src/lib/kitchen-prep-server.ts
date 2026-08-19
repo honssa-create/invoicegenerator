@@ -17,6 +17,7 @@ import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
 import { finishedSku } from './kitchen-bom';
 import { addFinishedFromStewing } from './kitchen-server';
+import { loadKitchenCatalog } from './kitchen-catalog-server';
 import { getDataOwnerId } from './org-server';
 
 function normalizeCompletionSplits(
@@ -156,9 +157,11 @@ export async function createPrepOrder(
     allowEmptyQtys?: boolean;
   }
 ): Promise<PrepOrder> {
+  const { formulas } = await loadKitchenCatalog(userId);
+  const stew = formulas.stewFormulas;
   const capacity = input.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? 0);
-  const qtyRed = isRedDateAllowed(capacity) ? Math.max(0, input.qty_red_date ?? 0) : 0;
+  const qtyRed = isRedDateAllowed(capacity, stew) ? Math.max(0, input.qty_red_date ?? 0) : 0;
   const qtyRock = Math.max(0, input.qty_rock_sugar ?? 0);
 
   const validationErr = validatePrepFlavorQtys(
@@ -168,7 +171,7 @@ export async function createPrepOrder(
       red_date: qtyRed,
       rock_sugar: qtyRock,
     },
-    { allowEmpty: Boolean(input.allowEmptyQtys) }
+    { allowEmpty: Boolean(input.allowEmptyQtys), formulas: stew }
   );
   if (validationErr) throw new Error(validationErr);
 
@@ -220,6 +223,8 @@ export async function createPrepOrdersBatch(
     lines: PrepCapacityLine[];
   }
 ): Promise<PrepOrder[]> {
+  const { formulas } = await loadKitchenCatalog(userId);
+  const stew = formulas.stewFormulas;
   const baseCode = input.order_code?.trim();
 
   const prepared = input.lines.map((line) => {
@@ -228,7 +233,7 @@ export async function createPrepOrdersBatch(
       red_date: Math.max(0, line.qty_red_date ?? 0),
       rock_sugar: Math.max(0, line.qty_rock_sugar ?? 0),
     };
-    const validationErr = validatePrepFlavorQtys(line.capacity, qtys);
+    const validationErr = validatePrepFlavorQtys(line.capacity, qtys, { formulas: stew });
     if (validationErr) throw new Error(validationErr);
     return { line, qtys };
   });
@@ -280,9 +285,11 @@ export async function updatePrepOrder(
   const existing = await getPrepOrder(id, userId);
   if (!existing) return null;
 
+  const { formulas } = await loadKitchenCatalog(userId);
+  const stew = formulas.stewFormulas;
   const capacity = input.capacity ?? existing.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
-  const qtyRed = isRedDateAllowed(capacity)
+  const qtyRed = isRedDateAllowed(capacity, stew)
     ? Math.max(0, input.qty_red_date ?? existing.qty_red_date)
     : 0;
   const qtyRock = Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar);
@@ -294,7 +301,7 @@ export async function updatePrepOrder(
       red_date: qtyRed,
       rock_sugar: qtyRock,
     },
-    { allowEmpty: Boolean(input.allowEmptyQtys) }
+    { allowEmpty: Boolean(input.allowEmptyQtys), formulas: stew }
   );
   if (validationErr) throw new Error(validationErr);
 
@@ -337,11 +344,19 @@ export async function completePrepProduction(
   if (!existing) return null;
   if (existing.status === 'completed') return null;
 
-  const calculation = computePrepCalculation(existing.capacity, existing.order_type, {
-    osmanthus: existing.qty_osmanthus,
-    red_date: existing.qty_red_date,
-    rock_sugar: existing.qty_rock_sugar,
-  });
+  const { formulas } = await loadKitchenCatalog(userId);
+  const stew = formulas.stewFormulas;
+
+  const calculation = computePrepCalculation(
+    existing.capacity,
+    existing.order_type,
+    {
+      osmanthus: existing.qty_osmanthus,
+      red_date: existing.qty_red_date,
+      rock_sugar: existing.qty_rock_sugar,
+    },
+    stew
+  );
   const expectedYield = calculation.totals.bottles;
   const actualYield = Math.max(0, Math.round(input.actual_yield));
   const remarks = input.completion_remarks?.trim() || null;
@@ -382,7 +397,8 @@ export async function completePrepProduction(
   );
   const rawConsume = computeStewingRawNeeds(
     existing.capacity,
-    flavoredSplits.map((s) => ({ flavor: s.flavor, qty: s.qty }))
+    flavoredSplits.map((s) => ({ flavor: s.flavor, qty: s.qty })),
+    stew
   );
 
   const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;

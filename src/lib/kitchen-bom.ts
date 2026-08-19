@@ -97,8 +97,12 @@ export function bomLineKey(line: BomLine): string {
   return line.kind === 'finished' ? `finished:${line.sku}` : `raw:${line.name}`;
 }
 
-export function expandGiftBoxBom(boxType: string, quantity: number): BomLine[] {
-  const base = GIFT_BOX_BOMS[boxType];
+export function expandGiftBoxBom(
+  boxType: string,
+  quantity: number,
+  boms: Record<string, BomLine[]> = GIFT_BOX_BOMS
+): BomLine[] {
+  const base = boms[boxType];
   if (!base || quantity <= 0) return [];
   const q = Math.floor(quantity);
   return base.map((line) =>

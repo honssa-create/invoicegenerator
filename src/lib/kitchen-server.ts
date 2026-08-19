@@ -1,8 +1,6 @@
 import db from './db';
 import {
-  RAW_MATERIALS,
   RAW_MATERIAL_ALIASES,
-  GIFT_BOX_TYPES,
   KITCHEN_ACTION_LABELS,
   roundRawQty,
   formatRawQty,
@@ -11,9 +9,10 @@ import {
   type KitchenNeedLine,
   type KitchenMovement,
   type KitchenAction,
+  type KitchenCatalog,
+  type KitchenFormulas,
 } from './kitchen';
 import {
-  FINISHED_SKUS,
   expandGiftBoxBom,
   applyBomQtyOverrides,
   aggregateBomDemand,
@@ -24,9 +23,17 @@ import {
   bottleNeedKey,
   reverseMovementDeltas,
   wouldGoNegative,
+  type BomLine,
   type MovementDeltas,
   type StockMaps,
 } from './kitchen-bom';
+import {
+  activeGiftBoxTypes,
+  finishedSkusFromCatalog,
+  finishedSkuLabelFromCatalog,
+  type CatalogGiftBoxType,
+} from './kitchen-catalog';
+import { ensureCatalogStockRows, loadKitchenCatalog } from './kitchen-catalog-server';
 import {
   NESTIEE_ORDER_TYPE,
   WEDDING_GIFT_ORDER_TYPE,
@@ -82,32 +89,8 @@ function isShippedKitchenStatus(status: string | null | undefined): boolean {
 export async function ensureSeed(userId: number) {
   if (seededOwnerIds.has(userId)) return;
 
-  // Batch INSERT OR IGNORE — one round-trip per table instead of N sequential inserts.
-  if (FINISHED_SKUS.length > 0) {
-    const placeholders = FINISHED_SKUS.map(() => '(?, ?, 0)').join(', ');
-    const params = FINISHED_SKUS.flatMap((sku) => [userId, sku]);
-    await db
-      .prepare(`INSERT OR IGNORE INTO kitchen_finished (user_id, sku, quantity) VALUES ${placeholders}`)
-      .run(...params);
-  }
-
-  if (GIFT_BOX_TYPES.length > 0) {
-    const placeholders = GIFT_BOX_TYPES.map(() => '(?, ?, 0)').join(', ');
-    const params = GIFT_BOX_TYPES.flatMap((g) => [userId, g.id]);
-    await db
-      .prepare(`INSERT OR IGNORE INTO kitchen_gift_boxes (user_id, box_type, quantity) VALUES ${placeholders}`)
-      .run(...params);
-  }
-
-  if (RAW_MATERIALS.length > 0) {
-    const placeholders = RAW_MATERIALS.map(() => '(?, ?, ?, ?, 0)').join(', ');
-    const params = RAW_MATERIALS.flatMap((m) => [userId, m.name, m.unit, m.seedStock]);
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO kitchen_raw (user_id, name, unit, total_stock, allocated_stock) VALUES ${placeholders}`
-      )
-      .run(...params);
-  }
+  const { catalog } = await loadKitchenCatalog(userId);
+  await ensureCatalogStockRows(userId, catalog);
 
   // Fold legacy alias rows (頂級乾燕餅→燕餅, 燕窩冰糖→冰糖) into canonical stock.
   const aliasNames = Object.keys(RAW_MATERIAL_ALIASES);
@@ -125,7 +108,7 @@ export async function ensureSeed(userId: number) {
       const total = Number(aliasRow.total_stock) || 0;
       const alloc = Number(aliasRow.allocated_stock) || 0;
       if (total !== 0 || alloc !== 0) {
-        const def = RAW_MATERIALS.find((m) => m.name === canonical);
+        const def = catalog.rawMaterials.find((m) => m.name === canonical);
         await ensureRawRow(userId, canonical, def?.unit || 'g');
         await db
           .prepare(
@@ -138,6 +121,12 @@ export async function ensureSeed(userId: number) {
   }
 
   seededOwnerIds.add(userId);
+}
+
+/** Call after catalog edits so newly added SKUs/raw/boxes get stock rows. */
+export function invalidateKitchenSeedCache(userId?: number) {
+  if (userId == null) seededOwnerIds.clear();
+  else seededOwnerIds.delete(userId);
 }
 
 async function ensureFinishedRow(userId: number, sku: string) {
@@ -154,7 +143,12 @@ async function ensureRawRow(userId: number, name: string, unit = 'g') {
     .run(userId, name, unit);
 }
 
-async function loadStockMaps(userId: number): Promise<StockMaps> {
+async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<StockMaps> {
+  const skus = finishedSkusFromCatalog(catalog);
+  const skuSet = new Set(skus);
+  const rawDefs = catalog.rawMaterials;
+  const giftTypes = catalog.giftBoxTypes;
+
   const [finishedRows, rawRows, giftRows] = await Promise.all([
     db
       .prepare('SELECT sku, quantity FROM kitchen_finished WHERE user_id = ?')
@@ -168,22 +162,26 @@ async function loadStockMaps(userId: number): Promise<StockMaps> {
   ]);
 
   const finished: Record<string, number> = {};
-  for (const sku of FINISHED_SKUS) finished[sku] = 0;
+  for (const sku of skus) finished[sku] = 0;
   for (const r of finishedRows) {
-    if (FINISHED_SKUS.includes(r.sku)) finished[r.sku] = Number(r.quantity) || 0;
+    if (skuSet.has(r.sku)) finished[r.sku] = Number(r.quantity) || 0;
   }
 
   const raw: Record<string, number> = {};
-  for (const m of RAW_MATERIALS) raw[m.name] = 0;
+  for (const m of rawDefs) raw[m.name] = 0;
   for (const r of rawRows) {
-    const def = RAW_MATERIALS.find((m) => m.name === r.name);
-    const unit = def?.unit || 'g';
-    raw[r.name] = roundRawQty(Number(r.total_stock) || 0, unit);
+    const def = rawDefs.find((m) => m.name === r.name);
+    if (!def) continue;
+    raw[r.name] = roundRawQty(Number(r.total_stock) || 0, def.unit || 'g');
   }
 
   const giftBoxes: Record<string, number> = {};
-  for (const g of GIFT_BOX_TYPES) giftBoxes[g.id] = 0;
-  for (const r of giftRows) giftBoxes[r.box_type] = Number(r.quantity) || 0;
+  for (const g of giftTypes) giftBoxes[g.id] = 0;
+  for (const r of giftRows) {
+    if (giftBoxes[r.box_type] !== undefined || giftTypes.some((g) => g.id === r.box_type)) {
+      giftBoxes[r.box_type] = Number(r.quantity) || 0;
+    }
+  }
 
   return { finished, raw, giftBoxes };
 }
@@ -215,10 +213,12 @@ interface OrderRow {
 function nestieeNeeds(
   order: OrderRow,
   fields: Record<string, unknown>,
-  fulfillments: Map<string, number>
+  fulfillments: Map<string, number>,
+  giftTypes: CatalogGiftBoxType[]
 ): KitchenNeedLine[] {
   const needs: KitchenNeedLine[] = [];
-  for (const g of GIFT_BOX_TYPES) {
+  for (const g of giftTypes) {
+    if (!g.active) continue;
     const required = fieldNum(fields, g.qtyKey);
     if (required <= 0) continue;
     const needKey = giftNeedKey(g.id);
@@ -239,7 +239,8 @@ function nestieeNeeds(
 function returnGiftNeeds(
   order: OrderRow,
   fields: Record<string, unknown>,
-  fulfillments: Map<string, number>
+  fulfillments: Map<string, number>,
+  catalog: KitchenCatalog
 ): KitchenNeedLine[] {
   const capacityRaw = typeof fields.bottle_capacity === 'string' ? fields.bottle_capacity : '';
   const prepCap = mapWeddingCapacityToPrep(capacityRaw);
@@ -254,7 +255,7 @@ function returnGiftNeeds(
     const remaining = Math.max(0, required - fulfilled);
     needs.push({
       needKey,
-      label: `${finishedSkuLabel(sku)} ×${required}`,
+      label: `${finishedSkuLabelFromCatalog(sku, catalog)} ×${required}`,
       required,
       fulfilled,
       remaining,
@@ -264,7 +265,11 @@ function returnGiftNeeds(
   return needs;
 }
 
-async function loadOpenOrders(userId: number, fulfillments: Map<string, number>): Promise<KitchenOpenOrder[]> {
+async function loadOpenOrders(
+  userId: number,
+  fulfillments: Map<string, number>,
+  catalog: KitchenCatalog
+): Promise<KitchenOpenOrder[]> {
   // Pre-filter Nestiee / 回禮 in SQL so we do not pull+parse every order's fields_json.
   const typePatterns = KITCHEN_ORDER_TYPES.flatMap((t) => [`%"order_type":"${t}"%`, `%"order_type": "${t}"%`]);
   const rows = (await db
@@ -281,6 +286,7 @@ async function loadOpenOrders(userId: number, fulfillments: Map<string, number>)
     )
     .all(userId, ...typePatterns)) as OrderRow[];
 
+  const giftTypes = catalog.giftBoxTypes;
   const out: KitchenOpenOrder[] = [];
   for (const row of rows) {
     // Hide shipped orders from the kitchen list.
@@ -295,11 +301,11 @@ async function loadOpenOrders(userId: number, fulfillments: Map<string, number>)
     if (ot === NESTIEE_ORDER_TYPE) {
       type = 'nestiee';
       typeLabel = 'Nestiee';
-      needs = nestieeNeeds(row, fields, fulfillments);
+      needs = nestieeNeeds(row, fields, fulfillments, giftTypes);
     } else if (ot === WEDDING_GIFT_ORDER_TYPE) {
       type = 'return_gift';
       typeLabel = '回禮';
-      needs = returnGiftNeeds(row, fields, fulfillments);
+      needs = returnGiftNeeds(row, fields, fulfillments, catalog);
     } else {
       continue;
     }
@@ -326,7 +332,10 @@ async function loadOpenOrders(userId: number, fulfillments: Map<string, number>)
   return out;
 }
 
-function computeDemand(openOrders: KitchenOpenOrder[]): KitchenState['demand'] {
+function computeDemand(
+  openOrders: KitchenOpenOrder[],
+  giftBoxBoms: Record<string, BomLine[]>
+): KitchenState['demand'] {
   const giftBoxes: Record<string, number> = {};
   const finished: Record<string, number> = {};
   const raw: Record<string, number> = {};
@@ -337,7 +346,7 @@ function computeDemand(openOrders: KitchenOpenOrder[]): KitchenState['demand'] {
       if (n.needKey.startsWith('gift:')) {
         const boxType = n.needKey.slice(5);
         giftBoxes[boxType] = (giftBoxes[boxType] || 0) + n.remaining;
-        const bom = expandGiftBoxBom(boxType, n.remaining);
+        const bom = expandGiftBoxBom(boxType, n.remaining, giftBoxBoms);
         const agg = aggregateBomDemand(bom);
         for (const [sku, qty] of Object.entries(agg.finished)) {
           finished[sku] = (finished[sku] || 0) + qty;
@@ -352,7 +361,10 @@ function computeDemand(openOrders: KitchenOpenOrder[]): KitchenState['demand'] {
   return { giftBoxes, finished, raw };
 }
 
-async function loadUnfinishedPrepRawDemand(userId: number): Promise<Record<string, number>> {
+async function loadUnfinishedPrepRawDemand(
+  userId: number,
+  formulas: KitchenFormulas
+): Promise<Record<string, number>> {
   const rows = (await db
     .prepare(
       `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar
@@ -367,7 +379,7 @@ async function loadUnfinishedPrepRawDemand(userId: number): Promise<Record<strin
     qty_red_date: number;
     qty_rock_sugar: number;
   }[];
-  return aggregateRawNeedsFromPrepOrders(rows);
+  return aggregateRawNeedsFromPrepOrders(rows, formulas.stewFormulas);
 }
 
 async function loadMovements(userId: number): Promise<KitchenMovement[]> {
@@ -428,45 +440,48 @@ async function loadMovements(userId: number): Promise<KitchenMovement[]> {
 
 export async function getState(userId: number, opts?: { isAdmin?: boolean }): Promise<KitchenState> {
   await ensureSeed(userId);
+  const { catalog, formulas } = await loadKitchenCatalog(userId);
 
   // Fulfillments must finish before open-orders; stock/movements/prep/holiday are independent.
   const fulfillmentsPromise = loadFulfillments(userId);
   const independentPromise = Promise.all([
-    loadStockMaps(userId),
+    loadStockMaps(userId, catalog),
     loadMovements(userId),
-    loadUnfinishedPrepRawDemand(userId),
+    loadUnfinishedPrepRawDemand(userId, formulas),
     getHolidayMode(userId),
   ]);
 
   const fulfillments = await fulfillmentsPromise;
   const [openOrders, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
-    loadOpenOrders(userId, fulfillments),
+    loadOpenOrders(userId, fulfillments, catalog),
     independentPromise,
   ]);
 
-  const demand = computeDemand(openOrders);
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
   demand.raw = unfinishedRaw;
 
-  const giftBoxes = GIFT_BOX_TYPES.map((g) => ({
+  const giftBoxes = activeGiftBoxTypes(catalog).map((g) => ({
     boxType: g.id,
     label: g.label,
     quantity: stock.giftBoxes[g.id] || 0,
     needed: demand.giftBoxes[g.id] || 0,
   }));
 
-  const finished = FINISHED_SKUS.map((sku) => ({
+  const finished = finishedSkusFromCatalog(catalog).map((sku) => ({
     sku,
-    label: finishedSkuLabel(sku),
+    label: finishedSkuLabelFromCatalog(sku, catalog),
     quantity: stock.finished[sku] || 0,
     needed: demand.finished[sku] || 0,
   }));
 
-  const raw = RAW_MATERIALS.map((m) => ({
-    name: m.name,
-    unit: m.unit,
-    quantity: roundRawQty(stock.raw[m.name] || 0, m.unit),
-    needed: roundRawQty(demand.raw[m.name] || 0, m.unit),
-  }));
+  const raw = [...catalog.rawMaterials]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((m) => ({
+      name: m.name,
+      unit: m.unit,
+      quantity: roundRawQty(stock.raw[m.name] || 0, m.unit),
+      needed: roundRawQty(demand.raw[m.name] || 0, m.unit),
+    }));
 
   return {
     giftBoxes,
@@ -477,6 +492,8 @@ export async function getState(userId: number, opts?: { isAdmin?: boolean }): Pr
     movements,
     isAdmin: Boolean(opts?.isAdmin),
     holidayMode,
+    catalog,
+    formulas,
   };
 }
 
@@ -510,7 +527,7 @@ export async function setHolidayMode(
   return { state: await getState(ownerId, { isAdmin: true }) };
 }
 
-async function applyDeltas(userId: number, deltas: MovementDeltas) {
+async function applyDeltas(userId: number, deltas: MovementDeltas, catalog: KitchenCatalog) {
   for (const g of deltas.giftBoxDeltas) {
     await ensureGiftRow(userId, g.boxType);
     await db
@@ -524,7 +541,7 @@ async function applyDeltas(userId: number, deltas: MovementDeltas) {
       .run(f.delta, userId, f.sku);
   }
   for (const r of deltas.rawDeltas) {
-    const def = RAW_MATERIALS.find((m) => m.name === r.name);
+    const def = catalog.rawMaterials.find((m) => m.name === r.name);
     const unit = def?.unit || 'g';
     await ensureRawRow(userId, r.name, unit);
     const cur = (await db
@@ -565,8 +582,12 @@ async function insertMovement(
   return Number(res.lastInsertRowid);
 }
 
-function giftBoxLabel(boxType: string): string {
-  return GIFT_BOX_TYPES.find((g) => g.id === boxType)?.label || boxType;
+function giftBoxLabel(boxType: string, catalog: KitchenCatalog): string {
+  return catalog.giftBoxTypes.find((g) => g.id === boxType)?.label || boxType;
+}
+
+function skuLabel(sku: string, catalog: KitchenCatalog): string {
+  return finishedSkuLabelFromCatalog(sku, catalog) || finishedSkuLabel(sku);
 }
 
 export async function makeGiftBox(
@@ -579,18 +600,19 @@ export async function makeGiftBox(
   finished_shortfalls?: { capacity: string; qtys: { osmanthus: number; red_date: number; rock_sugar: number } }[];
 }> {
   await ensureSeed(ownerId);
+  const { catalog, formulas } = await loadKitchenCatalog(ownerId);
   const boxType = input.boxType;
-  if (!GIFT_BOX_TYPES.some((g) => g.id === boxType)) {
+  if (!catalog.giftBoxTypes.some((g) => g.id === boxType && g.active)) {
     return { error: 'Invalid gift box type' };
   }
   const qty = Math.max(1, Math.floor(Number(input.quantity) || 0));
   if (!qty) return { error: 'Quantity must be at least 1' };
 
-  const defaults = expandGiftBoxBom(boxType, qty);
+  const defaults = expandGiftBoxBom(boxType, qty, formulas.giftBoxBoms);
   const resolved = applyBomQtyOverrides(defaults, input.consumeOverrides);
   if (resolved.error) return { error: resolved.error };
   const lines = resolved.lines;
-  const stock = await loadStockMaps(ownerId);
+  const stock = await loadStockMaps(ownerId, catalog);
 
   const finishedShort: string[] = [];
   const rawShort: string[] = [];
@@ -598,7 +620,7 @@ export async function makeGiftBox(
     if (line.kind === 'finished') {
       if ((stock.finished[line.sku] || 0) < line.qty) {
         finishedShort.push(
-          `成品不足：${finishedSkuLabel(line.sku)}（需要 ${line.qty}，現有 ${stock.finished[line.sku] || 0}）`
+          `成品不足：${skuLabel(line.sku, catalog)}（需要 ${line.qty}，現有 ${stock.finished[line.sku] || 0}）`
         );
       }
     } else if ((stock.raw[line.name] || 0) < line.qty) {
@@ -626,13 +648,15 @@ export async function makeGiftBox(
     fulfillments: [],
   };
 
-  const summaryParts = [`+${qty} ${giftBoxLabel(boxType)}`];
+  const summaryParts = [`+${qty} ${giftBoxLabel(boxType, catalog)}`];
   for (const l of lines) {
-    summaryParts.push(l.kind === 'finished' ? `−${l.qty} ${finishedSkuLabel(l.sku)}` : `−${l.qty} ${l.name}`);
+    summaryParts.push(
+      l.kind === 'finished' ? `−${l.qty} ${skuLabel(l.sku, catalog)}` : `−${l.qty} ${l.name}`
+    );
   }
 
   await db.transaction(async () => {
-    await applyDeltas(ownerId, deltas);
+    await applyDeltas(ownerId, deltas, catalog);
     await insertMovement(
       ownerId,
       actorId,
@@ -652,8 +676,9 @@ export async function allocateGiftBox(
   input: { boxType: string; quantity: number; orderId: number }
 ): Promise<{ error?: string; state?: KitchenState }> {
   await ensureSeed(ownerId);
+  const { catalog } = await loadKitchenCatalog(ownerId);
   const boxType = input.boxType;
-  if (!GIFT_BOX_TYPES.some((g) => g.id === boxType)) {
+  if (!catalog.giftBoxTypes.some((g) => g.id === boxType)) {
     return { error: 'Invalid gift box type' };
   }
   const qty = Math.max(1, Math.floor(Number(input.quantity) || 0));
@@ -673,7 +698,7 @@ export async function allocateGiftBox(
   }
 
   const fulfillments = await loadFulfillments(ownerId);
-  const needs = nestieeNeeds(order, fields, fulfillments);
+  const needs = nestieeNeeds(order, fields, fulfillments, catalog.giftBoxTypes);
   const needKey = giftNeedKey(boxType);
   const line = needs.find((n) => n.needKey === needKey);
   if (!line || line.remaining <= 0) return { error: '此禮盒類型無需再分配' };
@@ -681,10 +706,10 @@ export async function allocateGiftBox(
     return { error: `超過剩餘需要（最多 ${line.remaining}）` };
   }
 
-  const stock = await loadStockMaps(ownerId);
+  const stock = await loadStockMaps(ownerId, catalog);
   if ((stock.giftBoxes[boxType] || 0) < qty) {
     return {
-      error: `禮盒庫存不足：${giftBoxLabel(boxType)}（需要 ${qty}，現有 ${stock.giftBoxes[boxType] || 0}）`,
+      error: `禮盒庫存不足：${giftBoxLabel(boxType, catalog)}（需要 ${qty}，現有 ${stock.giftBoxes[boxType] || 0}）`,
     };
   }
 
@@ -697,11 +722,11 @@ export async function allocateGiftBox(
 
   const summary = [
     `PO# ${order.po_number || orderId}`,
-    `−${giftBoxLabel(boxType)} ${qty}`,
+    `−${giftBoxLabel(boxType, catalog)} ${qty}`,
   ].join('\n');
 
   await db.transaction(async () => {
-    await applyDeltas(ownerId, deltas);
+    await applyDeltas(ownerId, deltas, catalog);
     await insertMovement(
       ownerId,
       actorId,
@@ -720,6 +745,7 @@ export async function makeReturnGift(
   input: { orderId: number; lines?: { needKey: string; qty: number }[] }
 ): Promise<{ error?: string; state?: KitchenState }> {
   await ensureSeed(ownerId);
+  const { catalog } = await loadKitchenCatalog(ownerId);
   const orderId = Number(input.orderId);
   const row = (await db
     .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
@@ -732,7 +758,7 @@ export async function makeReturnGift(
   }
 
   const fulfillments = await loadFulfillments(ownerId);
-  const needs = returnGiftNeeds(row, fields, fulfillments).filter((n) => n.remaining > 0);
+  const needs = returnGiftNeeds(row, fields, fulfillments, catalog).filter((n) => n.remaining > 0);
   if (needs.length === 0) return { error: 'No remaining bottles to fulfill' };
 
   const needByKey = new Map(needs.map((n) => [n.needKey, n]));
@@ -741,7 +767,7 @@ export async function makeReturnGift(
       ? input.lines
       : needs.map((n) => ({ needKey: n.needKey, qty: n.remaining }));
 
-  const stock = await loadStockMaps(ownerId);
+  const stock = await loadStockMaps(ownerId, catalog);
   const finishedDeltas: MovementDeltas['finishedDeltas'] = [];
   const fulRows: MovementDeltas['fulfillments'] = [];
 
@@ -751,12 +777,12 @@ export async function makeReturnGift(
     const n = needByKey.get(line.needKey);
     if (!n) return { error: `Unknown need line: ${line.needKey}` };
     if (qty > n.remaining) {
-      return { error: `${finishedSkuLabel(n.needKey.slice(7))} 超過剩餘需要（最多 ${n.remaining}）` };
+      return { error: `${skuLabel(n.needKey.slice(7), catalog)} 超過剩餘需要（最多 ${n.remaining}）` };
     }
     const sku = n.needKey.slice(7);
     if ((stock.finished[sku] || 0) < qty) {
       return {
-        error: `成品不足：${finishedSkuLabel(sku)}（需要 ${qty}，現有 ${stock.finished[sku] || 0}）`,
+        error: `成品不足：${skuLabel(sku, catalog)}（需要 ${qty}，現有 ${stock.finished[sku] || 0}）`,
       };
     }
     finishedDeltas.push({ sku, delta: -qty });
@@ -768,7 +794,7 @@ export async function makeReturnGift(
 
   const cleanSummary = [
     `PO# ${row.po_number || orderId}`,
-    ...fulRows.map((f) => `−${finishedSkuLabel(f.needKey.slice(7))} ${f.qty}`),
+    ...fulRows.map((f) => `−${skuLabel(f.needKey.slice(7), catalog)} ${f.qty}`),
   ];
 
   const deltas: MovementDeltas = {
@@ -779,7 +805,7 @@ export async function makeReturnGift(
   };
 
   await db.transaction(async () => {
-    await applyDeltas(ownerId, deltas);
+    await applyDeltas(ownerId, deltas, catalog);
     await insertMovement(
       ownerId,
       actorId,
@@ -800,7 +826,8 @@ export async function restockRaw(
   }
 ): Promise<{ error?: string; state?: KitchenState }> {
   await ensureSeed(ownerId);
-  const allowedRaw = new Set(RAW_MATERIALS.map((m) => m.name));
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  const allowedRaw = new Set(catalog.rawMaterials.map((m) => m.name));
   const rawDeltas: MovementDeltas['rawDeltas'] = [];
   const summaryParts: string[] = [];
 
@@ -808,7 +835,7 @@ export async function restockRaw(
     if (!allowedRaw.has(d.name)) return { error: `Unknown raw material: ${d.name}` };
     const qty = Number(d.qty);
     if (!Number.isFinite(qty) || qty === 0) continue;
-    const unit = RAW_MATERIALS.find((m) => m.name === d.name)?.unit || 'g';
+    const unit = catalog.rawMaterials.find((m) => m.name === d.name)?.unit || 'g';
     const rounded = roundRawQty(qty, unit);
     if (rounded === 0) continue;
     rawDeltas.push({ name: d.name, delta: rounded });
@@ -818,7 +845,7 @@ export async function restockRaw(
     return { error: 'No restock quantities provided' };
   }
 
-  const stock = await loadStockMaps(ownerId);
+  const stock = await loadStockMaps(ownerId, catalog);
   for (const r of rawDeltas) {
     if ((stock.raw[r.name] || 0) + r.delta < 0) {
       return { error: `原料庫存不足：${r.name}` };
@@ -833,11 +860,85 @@ export async function restockRaw(
   };
 
   await db.transaction(async () => {
-    await applyDeltas(ownerId, deltas);
+    await applyDeltas(ownerId, deltas, catalog);
     await insertMovement(ownerId, actorId, 'restock_raw', { summary: summaryParts.join('\n'), deltas }, null);
   });
 
   return { state: await getState(ownerId) };
+}
+
+/** Admin: set absolute stock for raw / finished / gift box. */
+export async function adjustStock(
+  ownerId: number,
+  actorId: number,
+  isAdmin: boolean,
+  input: { kind: 'raw' | 'finished' | 'gift_box'; key: string; quantity: number }
+): Promise<{ error?: string; state?: KitchenState }> {
+  if (!isAdmin) return { error: 'Only admin can adjust stock' };
+  await ensureSeed(ownerId);
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  const kind = input.kind;
+  const key = String(input.key || '').trim();
+  if (!key) return { error: 'key required' };
+
+  const stock = await loadStockMaps(ownerId, catalog);
+  const deltas: MovementDeltas = {
+    giftBoxDeltas: [],
+    finishedDeltas: [],
+    rawDeltas: [],
+    fulfillments: [],
+  };
+
+  let from = 0;
+  let to = 0;
+  let summary = '';
+
+  if (kind === 'raw') {
+    const def = catalog.rawMaterials.find((m) => m.name === key);
+    if (!def) return { error: `Unknown raw material: ${key}` };
+    const unit = def.unit || 'g';
+    from = stock.raw[key] || 0;
+    to = roundRawQty(Number(input.quantity), unit);
+    if (!Number.isFinite(Number(input.quantity)) || to < 0) return { error: 'Quantity must be ≥ 0' };
+    const delta = roundRawQty(to - from, unit);
+    if (delta === 0) return { error: 'No change' };
+    deltas.rawDeltas.push({ name: key, delta });
+    summary = `${key}: ${formatRawQty(from, unit)} → ${formatRawQty(to, unit)}`;
+  } else if (kind === 'finished') {
+    const allowed = new Set(finishedSkusFromCatalog(catalog));
+    if (!allowed.has(key)) return { error: `Unknown finished SKU: ${key}` };
+    from = stock.finished[key] || 0;
+    to = Math.floor(Number(input.quantity));
+    if (!Number.isFinite(to) || to < 0) return { error: 'Quantity must be ≥ 0' };
+    const delta = to - from;
+    if (delta === 0) return { error: 'No change' };
+    deltas.finishedDeltas.push({ sku: key, delta });
+    summary = `${skuLabel(key, catalog)}: ${from} → ${to}`;
+  } else if (kind === 'gift_box') {
+    if (!catalog.giftBoxTypes.some((g) => g.id === key)) return { error: `Unknown gift box: ${key}` };
+    from = stock.giftBoxes[key] || 0;
+    to = Math.floor(Number(input.quantity));
+    if (!Number.isFinite(to) || to < 0) return { error: 'Quantity must be ≥ 0' };
+    const delta = to - from;
+    if (delta === 0) return { error: 'No change' };
+    deltas.giftBoxDeltas.push({ boxType: key, delta });
+    summary = `${giftBoxLabel(key, catalog)}: ${from} → ${to}`;
+  } else {
+    return { error: 'Invalid kind' };
+  }
+
+  await db.transaction(async () => {
+    await applyDeltas(ownerId, deltas, catalog);
+    await insertMovement(
+      ownerId,
+      actorId,
+      'adjust_stock',
+      { summary, deltas, kind, key, from, to },
+      null
+    );
+  });
+
+  return { state: await getState(ownerId, { isAdmin: true }) };
 }
 
 /** Add finished bottles + consume raw from Kitchen Prep 完成燉製. */
@@ -854,8 +955,9 @@ export async function addFinishedFromStewing(
   }
 ): Promise<{ error?: string }> {
   await ensureSeed(ownerId);
-  const allowedSku = new Set(FINISHED_SKUS);
-  const allowedRaw = new Set(RAW_MATERIALS.map((m) => m.name));
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  const allowedSku = new Set(finishedSkusFromCatalog(catalog));
+  const allowedRaw = new Set(catalog.rawMaterials.map((m) => m.name));
   const finishedDeltas: MovementDeltas['finishedDeltas'] = [];
   const rawDeltas: MovementDeltas['rawDeltas'] = [];
   const summaryParts: string[] = [];
@@ -869,14 +971,14 @@ export async function addFinishedFromStewing(
     const qty = Math.round(Number(d.qty));
     if (!Number.isFinite(qty) || qty <= 0) continue;
     finishedDeltas.push({ sku: d.sku, delta: qty });
-    summaryParts.push(`+${qty} ${finishedSkuLabel(d.sku)}`);
+    summaryParts.push(`+${qty} ${skuLabel(d.sku, catalog)}`);
   }
 
   for (const d of input.rawConsume || []) {
     if (!allowedRaw.has(d.name)) return { error: `Unknown raw material: ${d.name}` };
     const qty = Number(d.qty);
     if (!Number.isFinite(qty) || qty <= 0) continue;
-    const unit = RAW_MATERIALS.find((m) => m.name === d.name)?.unit || 'g';
+    const unit = catalog.rawMaterials.find((m) => m.name === d.name)?.unit || 'g';
     const rounded = roundRawQty(qty, unit);
     if (rounded <= 0) continue;
     rawDeltas.push({ name: d.name, delta: -rounded });
@@ -891,10 +993,10 @@ export async function addFinishedFromStewing(
     summaryParts.push(`備註: ${input.remarks.trim()}`);
   }
 
-  const stock = await loadStockMaps(ownerId);
+  const stock = await loadStockMaps(ownerId, catalog);
   for (const r of rawDeltas) {
     if ((stock.raw[r.name] || 0) + r.delta < 0) {
-      const unit = RAW_MATERIALS.find((m) => m.name === r.name)?.unit || 'g';
+      const unit = catalog.rawMaterials.find((m) => m.name === r.name)?.unit || 'g';
       return {
         error: `原料庫存不足：${r.name}（需要 ${formatRawQty(Math.abs(r.delta), unit)}${unit === 'g' ? 'g' : unit}，現有 ${formatRawQty(stock.raw[r.name] || 0, unit)}${unit === 'g' ? 'g' : unit}）`,
       };
@@ -909,7 +1011,7 @@ export async function addFinishedFromStewing(
   };
 
   await db.transaction(async () => {
-    await applyDeltas(ownerId, deltas);
+    await applyDeltas(ownerId, deltas, catalog);
     await insertMovement(
       ownerId,
       actorId,
@@ -1000,7 +1102,8 @@ export async function voidMovement(
   if (!details.deltas) return { error: 'Movement has no reversible deltas' };
 
   const reversed = reverseMovementDeltas(details.deltas);
-  const stock = await loadStockMaps(ownerId);
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  const stock = await loadStockMaps(ownerId, catalog);
   const neg = wouldGoNegative(reversed, stock);
   if (neg) return { error: neg };
 
@@ -1011,7 +1114,7 @@ export async function voidMovement(
 
   // Also refuse fulfillment reverse below zero (applyDeltas uses GREATEST(0,…))
   await db.transaction(async () => {
-    await applyDeltas(ownerId, reversed);
+    await applyDeltas(ownerId, reversed, catalog);
     await db
       .prepare(
         `UPDATE kitchen_movements SET voided_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), voided_by = ?

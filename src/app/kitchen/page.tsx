@@ -4,11 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import KitchenAdminPanel from '@/components/KitchenAdminPanel';
 import {
-  GIFT_BOX_TYPES,
   giftBoxMinStock,
   giftBoxTopUpQty,
-  RAW_MATERIALS,
   KITCHEN_ACTIONS,
   KITCHEN_ACTION_LABELS,
   expandGiftBoxBom,
@@ -21,6 +20,7 @@ import {
   normalizeBomQty,
   SUI_XIN_YAN_BING_G,
   SUI_XIN_BING_TANG_G,
+  activeGiftBoxTypes,
   type KitchenAction,
   type KitchenState,
   type KitchenOpenOrder,
@@ -107,7 +107,7 @@ export default function KitchenPage() {
   const [completeOrder, setCompleteOrder] = useState<KitchenOpenOrder | null>(null);
 
   // 包裝禮盒
-  const [giftType, setGiftType] = useState(GIFT_BOX_TYPES[0]?.id || 'star_gold');
+  const [giftType, setGiftType] = useState('star_gold');
   const [giftQty, setGiftQty] = useState(1);
   const [giftOrderId, setGiftOrderId] = useState<number | null>(null);
   /** Packaging consume overrides (bomLineKey → input string). Reset when type/qty change. */
@@ -121,10 +121,17 @@ export default function KitchenPage() {
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
   const [historyActionFilter, setHistoryActionFilter] = useState<KitchenAction | ''>('');
 
+  const giftBoxTypes = state ? activeGiftBoxTypes(state.catalog) : [];
+  const rawMaterials = state?.catalog.rawMaterials || [];
+
   const load = () =>
     fetch('/api/kitchen/state')
       .then((r) => r.json())
-      .then((d) => setState(d.state));
+      .then((d) => {
+        setState(d.state);
+        const first = d.state?.catalog ? activeGiftBoxTypes(d.state.catalog)[0]?.id : null;
+        if (first) setGiftType((cur) => cur || first);
+      });
 
   useEffect(() => {
     load();
@@ -137,6 +144,42 @@ export default function KitchenPage() {
 
   const flash = (text: string, kind: 'success' | 'error' = 'success') => setToast({ text, kind });
 
+  const adjustStockAbs = async (
+    kind: 'raw' | 'finished' | 'gift_box',
+    key: string,
+    current: number,
+    unit?: string
+  ) => {
+    if (!state?.isAdmin || busy) return;
+    const label = unit ? `${key} (${unit})` : key;
+    const raw = window.prompt(
+      bi(`Set absolute stock for ${label} (current ${current})`, `設定 ${label} 絕對庫存（目前 ${current}）`),
+      String(current)
+    );
+    if (raw == null) return;
+    const quantity = Number(raw);
+    if (!Number.isFinite(quantity) || quantity < 0) {
+      flash(bi('Invalid quantity', '數量無效'), 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch('/api/kitchen/adjust-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, key, quantity }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        flash(data.error || 'Failed', 'error');
+        return;
+      }
+      setState(data.state);
+      flash(bi('Stock adjusted', '庫存已調整'));
+    } finally {
+      setBusy(false);
+    }
+  };
   /** Ask to create a kitchen prep order when finished bottles are short for packaging. */
   const offerPrepFromFinishedShortfalls = (
     shortfalls: unknown,
@@ -242,7 +285,10 @@ export default function KitchenPage() {
     });
   }, [state, stockMaps]);
 
-  const giftBomLines = useMemo(() => expandGiftBoxBom(giftType, giftQty), [giftType, giftQty]);
+  const giftBomLines = useMemo(
+    () => expandGiftBoxBom(giftType, giftQty, state?.formulas?.giftBoxBoms),
+    [giftType, giftQty, state?.formulas?.giftBoxBoms]
+  );
 
   useEffect(() => {
     const next: Record<string, string> = {};
@@ -696,6 +742,17 @@ export default function KitchenPage() {
         </div>
       )}
 
+      {state.isAdmin && (
+        <KitchenAdminPanel
+          state={state}
+          busy={busy}
+          onSaved={setState}
+          onError={(msg) => flash(msg, 'error')}
+          onSuccess={(msg) => flash(msg, 'success')}
+          onBusy={setBusy}
+        />
+      )}
+
       {/* Inventory */}
       {(() => {
         const lowBoxes = state.giftBoxes.filter((g) => giftBoxTopUpQty(g.quantity, giftMinStock) > 0);
@@ -725,6 +782,7 @@ export default function KitchenPage() {
                   <th className="py-2 pr-2 text-right">庫存</th>
                   <th className="py-2 pr-2 text-right">需要</th>
                   <th className="py-2 text-right">{bi('Min', '最低')}</th>
+                  {state.isAdmin && <th className="py-2 text-right">Admin</th>}
                 </tr>
               </thead>
               <tbody>
@@ -753,6 +811,18 @@ export default function KitchenPage() {
                         <span className="text-gray-400 text-xs">≥{giftMinStock}</span>
                       )}
                     </td>
+                    {state.isAdmin && (
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => adjustStockAbs('gift_box', g.boxType, g.quantity)}
+                          className="text-xs text-brand-600 hover:underline disabled:opacity-40"
+                        >
+                          設定
+                        </button>
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
@@ -770,6 +840,7 @@ export default function KitchenPage() {
                   <th className="py-2 pr-2">容量/口味</th>
                   <th className="py-2 pr-2 text-right">庫存</th>
                   <th className="py-2 text-right">需要</th>
+                  {state.isAdmin && <th className="py-2 text-right">Admin</th>}
                 </tr>
               </thead>
               <tbody>
@@ -781,6 +852,18 @@ export default function KitchenPage() {
                     <td className="py-2 pr-2">{f.label}</td>
                     <td className="py-2 pr-2 text-right font-medium">{have}</td>
                     <td className={`py-2 text-right ${shortfall(have, needed)}`}>{needed}</td>
+                    {state.isAdmin && (
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => adjustStockAbs('finished', f.sku, f.quantity)}
+                          className="text-xs text-brand-600 hover:underline disabled:opacity-40"
+                        >
+                          設定
+                        </button>
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
@@ -799,6 +882,7 @@ export default function KitchenPage() {
                   <th className="py-2 pr-2 text-right">庫存</th>
                   <th className="py-2 pr-2 text-right">需要</th>
                   <th className="py-2 text-right">可用</th>
+                  {state.isAdmin && <th className="py-2 text-right">Admin</th>}
                 </tr>
               </thead>
               <tbody>
@@ -819,6 +903,18 @@ export default function KitchenPage() {
                     <td className={`py-2 text-right font-medium ${available < 0 ? 'text-red-600' : ''}`}>
                       {formatRawQty(available < 0 ? 0 : available, r.unit)}
                     </td>
+                    {state.isAdmin && (
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => adjustStockAbs('raw', r.name, r.quantity, r.unit)}
+                          className="text-xs text-brand-600 hover:underline disabled:opacity-40"
+                        >
+                          設定
+                        </button>
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
@@ -1072,7 +1168,7 @@ export default function KitchenPage() {
                   value={giftType}
                   onChange={(e) => setGiftType(e.target.value)}
                 >
-                  {GIFT_BOX_TYPES.map((g) => (
+                  {giftBoxTypes.map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.label}
                     </option>
@@ -1122,7 +1218,7 @@ export default function KitchenPage() {
                     <div className="font-medium text-gray-700">從已包裝禮盒庫存扣除</div>
                     <div className="flex items-baseline gap-3">
                       <span className="flex-1 min-w-0">
-                        −{GIFT_BOX_TYPES.find((g) => g.id === giftType)?.label || giftType}
+                        −{giftBoxTypes.find((g) => g.id === giftType)?.label || giftType}
                       </span>
                       <span className="tabular-nums text-right w-16 shrink-0 font-medium">{giftQty}</span>
                       <span
@@ -1149,7 +1245,7 @@ export default function KitchenPage() {
                     {giftChecks.map((c) => {
                       const unit =
                         c.kind === 'raw'
-                          ? RAW_MATERIALS.find((m) => m.name === c.key)?.unit || 'g'
+                          ? rawMaterials.find((m) => m.name === c.key)?.unit || 'g'
                           : '個';
                       const lineKey =
                         c.kind === 'finished' ? `finished:${c.key}` : `raw:${c.key}`;
@@ -1295,19 +1391,19 @@ export default function KitchenPage() {
               <>
                 <h3 className="text-lg font-semibold mb-4">補充原料</h3>
                 <div className="space-y-2 mb-4">
-                  {RAW_MATERIALS.map((m) => (
+                  {rawMaterials.map((m) => (
                     <div key={m.name} className="flex items-center gap-3">
-                      <label className="w-28 text-sm shrink-0">
+                      <label className="w-28 text-sm text-gray-700 shrink-0">
                         {m.name}
                         <span className="text-gray-400 text-xs ml-1">{m.unit}</span>
                       </label>
                       <input
                         type="number"
                         step={m.unit === 'g' ? '0.001' : '1'}
-                        className={`${inputCls} flex-1`}
-                        placeholder="0"
-                        value={rawInputs[m.name] || ''}
+                        value={rawInputs[m.name] ?? ''}
                         onChange={(e) => setRawInputs((prev) => ({ ...prev, [m.name]: e.target.value }))}
+                        placeholder="±"
+                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
                   ))}

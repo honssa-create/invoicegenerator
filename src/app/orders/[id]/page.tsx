@@ -113,6 +113,7 @@ export default function OrderDetailPage() {
   const [accountUsers, setAccountUsers] = useState<AccountUser[]>([]);
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [supplierOptions, setSupplierOptions] = useState<string[]>([...DEFAULT_OPTIONS.supplier]);
+  const [nestieeGiftBoxes, setNestieeGiftBoxes] = useState(NESTIEE_GIFT_BOX_TYPES);
   /** Big Day value last persisted with derived dates (or loaded from server). */
   const bigDayPersistedRef = useRef('');
   /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
@@ -142,6 +143,34 @@ export default function OrderDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/kitchen/catalog')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.catalog?.giftBoxTypes) return;
+        const boxes = (d.catalog.giftBoxTypes as {
+          id: string;
+          label: string;
+          qtyKey: string;
+          active?: boolean;
+        }[])
+          .filter((g) => g.active !== false)
+          .map((g) => ({
+            id: g.id,
+            label: g.label,
+            qtyKey: g.qtyKey || `nestiee_gift_qty_${g.id}`,
+          }));
+        if (boxes.length) setNestieeGiftBoxes(boxes);
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refetchOrder = useCallback(() => {
     fetch(`/api/orders/${id}`)
@@ -1893,7 +1922,7 @@ export default function OrderDetailPage() {
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">所需禮盒</h3>
                   <p className="text-xs text-gray-400 mb-3">Enter how many of each gift-box type are needed for this order.</p>
                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {NESTIEE_GIFT_BOX_TYPES.map((box) => (
+                    {nestieeGiftBoxes.map((box) => (
                       <div key={box.id}>
                         {labeled(
                           box.label,

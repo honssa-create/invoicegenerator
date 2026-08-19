@@ -1,9 +1,10 @@
 /** Client-safe types, constants and formulas for Kitchen Prep (廚房備料系統). */
 
 export const PREP_CAPACITIES = ['25g', '45g', '75g', '75g_big_belly'] as const;
-export type PrepCapacity = (typeof PREP_CAPACITIES)[number];
+/** Capacity id — defaults are PREP_CAPACITIES; org catalog may add more. */
+export type PrepCapacity = string;
 
-export const PREP_CAPACITY_LABELS: Record<PrepCapacity, string> = {
+export const PREP_CAPACITY_LABELS: Record<string, string> = {
   '25g': '25g',
   '45g': '45g',
   '75g': '75g (高身樽)',
@@ -72,91 +73,159 @@ export function weddingPrepStatusFromDate(
   return defaultPrepStatusForCreate('wedding', stewingDate, opts);
 }
 
-/** Per-bottle weights (grams) for one flavor line at a given capacity. */
-export interface FlavorFormulaPerBottle {
-  birdNest: number;
-  /** Primary flavor ingredient (桂花 / 紅棗 / 冰糖 additive for this bottle type). */
-  flavorIngredient: number;
-  rockSugar: number;
-  slabSugar: number;
+/** One raw ingredient amount (per bottle) in a stew formula. */
+export interface StewIngredientLine {
+  name: string;
+  qty: number;
 }
 
 /**
- * Configuration dictionary: capacity → flavor → per-bottle formula.
- * 25g uses flavor-specific recipes; 45g shares rock/slab sugar across flavors.
+ * Per-bottle stew formula for one capacity × flavor.
+ * Prefer `lines` (variable ingredient count). Legacy slot fields are still accepted on read.
+ */
+export interface FlavorFormulaPerBottle {
+  lines?: StewIngredientLine[];
+  /** @deprecated legacy fixed slots — migrated via getFormulaLines() */
+  birdNest?: number;
+  flavorIngredient?: number;
+  rockSugar?: number;
+  slabSugar?: number;
+  birdNestIngredient?: string;
+  flavorIngredientName?: string;
+  rockSugarIngredient?: string;
+  slabSugarIngredient?: string;
+}
+
+/** Default raw-material binding for legacy slots by bottle flavor. */
+export function defaultStewSlotIngredients(flavor: PrepFlavor): {
+  birdNestIngredient: string;
+  flavorIngredientName: string;
+  rockSugarIngredient: string;
+  slabSugarIngredient: string;
+} {
+  return {
+    birdNestIngredient: '燕餅',
+    flavorIngredientName:
+      flavor === 'osmanthus' ? '桂花' : flavor === 'red_date' ? '紅棗' : '冰糖',
+    rockSugarIngredient: '冰糖',
+    slabSugarIngredient: '片糖',
+  };
+}
+
+/** Normalize any formula shape into a variable ingredient list (qty > 0 only). */
+export function getFormulaLines(
+  formula: FlavorFormulaPerBottle | null | undefined,
+  flavor: PrepFlavor = 'osmanthus'
+): StewIngredientLine[] {
+  if (!formula) return [];
+  if (Array.isArray(formula.lines)) {
+    return formula.lines
+      .map((l) => ({
+        name: String(l?.name || '').trim(),
+        qty: Math.max(0, Number(l?.qty) || 0),
+      }))
+      .filter((l) => l.name && l.qty > 0);
+  }
+
+  const d = defaultStewSlotIngredients(flavor);
+  const pick = (v: string | undefined, fallback: string) => {
+    const t = (v || '').trim();
+    return t || fallback;
+  };
+  const birdNestIngredient = pick(formula.birdNestIngredient, d.birdNestIngredient);
+  const flavorIngredientName = pick(formula.flavorIngredientName, d.flavorIngredientName);
+  const rockSugarIngredient = pick(formula.rockSugarIngredient, d.rockSugarIngredient);
+  const slabSugarIngredient = pick(formula.slabSugarIngredient, d.slabSugarIngredient);
+
+  let flavorQty = Math.max(0, Number(formula.flavorIngredient) || 0);
+  const rockQty = Math.max(0, Number(formula.rockSugar) || 0);
+  // Legacy rock_sugar duplicated 冰糖 in flavorIngredient + rockSugar.
+  if (
+    flavor === 'rock_sugar' &&
+    flavorQty > 0 &&
+    rockQty > 0 &&
+    flavorIngredientName === rockSugarIngredient
+  ) {
+    flavorQty = 0;
+  }
+
+  const acc: Record<string, number> = {};
+  const add = (name: string, qty: number) => {
+    if (!name || !(qty > 0)) return;
+    acc[name] = (acc[name] || 0) + qty;
+  };
+  add(birdNestIngredient, Math.max(0, Number(formula.birdNest) || 0));
+  add(flavorIngredientName, flavorQty);
+  add(rockSugarIngredient, rockQty);
+  add(slabSugarIngredient, Math.max(0, Number(formula.slabSugar) || 0));
+
+  return Object.entries(acc).map(([name, qty]) => ({ name, qty }));
+}
+
+export function formulaFromLines(lines: StewIngredientLine[]): FlavorFormulaPerBottle {
+  return {
+    lines: lines
+      .map((l) => ({
+        name: String(l.name || '').trim(),
+        qty: Math.max(0, Number(l.qty) || 0),
+      }))
+      .filter((l) => l.name),
+  };
+}
+
+function line(name: string, qty: number): StewIngredientLine {
+  return { name, qty };
+}
+
+/**
+ * Configuration dictionary: capacity → flavor → per-bottle formula (variable ingredient lines).
  */
 export const CAPACITY_FLAVOR_FORMULAS: Partial<
   Record<PrepCapacity, Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>>>
 > = {
   '25g': {
-    osmanthus: {
-      birdNest: 0.4,
-      flavorIngredient: 0.072,
-      rockSugar: 0,
-      slabSugar: 2.79,
-    },
-    red_date: null, // disabled for 25g
-    rock_sugar: {
-      birdNest: 0.4,
-      flavorIngredient: 1.98,
-      rockSugar: 1.98,
-      slabSugar: 0,
-    },
+    osmanthus: formulaFromLines([
+      line('燕餅', 0.4),
+      line('桂花', 0.072),
+      line('片糖', 2.79),
+    ]),
+    red_date: null,
+    rock_sugar: formulaFromLines([line('燕餅', 0.4), line('冰糖', 1.98)]),
   },
   '45g': {
-    osmanthus: {
-      birdNest: 0.8,
-      flavorIngredient: 0.13,
-      rockSugar: 0,
-      slabSugar: 5.03,
-    },
-    red_date: {
-      birdNest: 0.8,
-      flavorIngredient: 1.8,
-      rockSugar: 3.57,
-      slabSugar: 0,
-    },
-    rock_sugar: {
-      birdNest: 0.8,
-      flavorIngredient: 3.57,
-      rockSugar: 3.57,
-      slabSugar: 0,
-    },
+    osmanthus: formulaFromLines([
+      line('燕餅', 0.8),
+      line('桂花', 0.13),
+      line('片糖', 5.03),
+    ]),
+    red_date: formulaFromLines([
+      line('燕餅', 0.8),
+      line('紅棗', 1.8),
+      line('冰糖', 3.57),
+    ]),
+    rock_sugar: formulaFromLines([line('燕餅', 0.8), line('冰糖', 3.57)]),
   },
   '75g': {
-    osmanthus: {
-      birdNest: 1.7,
-      flavorIngredient: 0.191,
-      rockSugar: 0,
-      slabSugar: 7.64,
-    },
-    red_date: {
-      birdNest: 1.7,
-      flavorIngredient: 0.191,
-      rockSugar: 5.41,
-      slabSugar: 0,
-    },
-    rock_sugar: {
-      birdNest: 1.75,
-      flavorIngredient: 54.1,
-      rockSugar: 54.1,
-      slabSugar: 0,
-    },
+    osmanthus: formulaFromLines([
+      line('燕餅', 1.7),
+      line('桂花', 0.191),
+      line('片糖', 7.64),
+    ]),
+    red_date: formulaFromLines([
+      line('燕餅', 1.7),
+      line('紅棗', 0.191),
+      line('冰糖', 5.41),
+    ]),
+    rock_sugar: formulaFromLines([line('燕餅', 1.75), line('冰糖', 54.1)]),
   },
   '75g_big_belly': {
-    osmanthus: {
-      birdNest: 2.1,
-      flavorIngredient: 0.191,
-      rockSugar: 0,
-      slabSugar: 7.64,
-    },
-    red_date: null, // disabled for 75g big belly
-    rock_sugar: {
-      birdNest: 2.1,
-      flavorIngredient: 54.1,
-      rockSugar: 54.1,
-      slabSugar: 0,
-    },
+    osmanthus: formulaFromLines([
+      line('燕餅', 2.1),
+      line('桂花', 0.191),
+      line('片糖', 7.64),
+    ]),
+    red_date: null,
+    rock_sugar: formulaFromLines([line('燕餅', 2.1), line('冰糖', 54.1)]),
   },
 };
 
@@ -250,9 +319,15 @@ export interface FlavorCalcRow {
   orderQty: number;
   actualQty: number;
   weddingBuffer: number;
+  /** Total grams per raw ingredient for this flavor row (actualQty × per-bottle). */
+  ingredientGrams: Record<string, number>;
+  /** @deprecated use ingredientGrams['燕餅'] */
   birdNestGrams: number;
+  /** @deprecated use ingredientGrams for 桂花/紅棗 */
   flavorGrams: number;
+  /** @deprecated use ingredientGrams['冰糖'] */
   rockSugarGrams: number;
+  /** @deprecated use ingredientGrams['片糖'] */
   slabSugarGrams: number;
   formula: FlavorFormulaPerBottle | null;
   disabled?: boolean;
@@ -265,32 +340,45 @@ export interface PrepCalculation {
   rows: FlavorCalcRow[];
   totals: {
     bottles: number;
+    ingredientGrams: Record<string, number>;
+    /** @deprecated */
     birdNestGrams: number;
+    /** @deprecated */
     flavorGrams: number;
+    /** @deprecated */
     rockSugarGrams: number;
+    /** @deprecated */
     slabSugarGrams: number;
   };
 }
 
-export function isRedDateAllowed(capacity: PrepCapacity): boolean {
-  return capacity !== '25g' && capacity !== '75g_big_belly';
+export type StewFormulaMapLike = Partial<
+  Record<string, Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>>>
+>;
+
+export function isRedDateAllowed(
+  capacity: PrepCapacity,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+): boolean {
+  return getFlavorFormula(capacity, 'red_date', formulas) != null;
 }
 
-export function isCapacityFormulaReady(capacity: PrepCapacity): boolean {
-  const block = CAPACITY_FLAVOR_FORMULAS[capacity];
+export function isCapacityFormulaReady(
+  capacity: PrepCapacity,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+): boolean {
+  const block = formulas[capacity];
   if (!block) return false;
-  return PREP_FLAVORS.some((f) => {
-    if (f === 'red_date' && !isRedDateAllowed(capacity)) return true;
-    return block[f] != null;
-  });
+  return PREP_FLAVORS.some((f) => block[f] != null);
 }
 
 export function getFlavorFormula(
   capacity: PrepCapacity,
-  flavor: PrepFlavor
+  flavor: PrepFlavor,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): FlavorFormulaPerBottle | null {
-  if (flavor === 'red_date' && !isRedDateAllowed(capacity)) return null;
-  return CAPACITY_FLAVOR_FORMULAS[capacity]?.[flavor] ?? null;
+  const cell = formulas[capacity]?.[flavor];
+  return cell === undefined ? null : cell;
 }
 
 export function actualProductionQty(orderQty: number, orderType: PrepOrderType): number {
@@ -306,13 +394,22 @@ function calcRow(
   flavor: PrepFlavor,
   orderQty: number,
   orderType: PrepOrderType,
-  capacity: PrepCapacity
+  capacity: PrepCapacity,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): FlavorCalcRow {
-  const disabled = flavor === 'red_date' && !isRedDateAllowed(capacity);
+  const formula = getFlavorFormula(capacity, flavor, formulas);
+  const disabled = formula == null;
   const safeOrderQty = disabled ? 0 : orderQty;
   const weddingBuffer = orderType === 'wedding' && safeOrderQty > 0 ? WEDDING_BUFFER : 0;
   const actualQty = actualProductionQty(safeOrderQty, orderType);
-  const formula = getFlavorFormula(capacity, flavor);
+
+  const emptyLegacy = {
+    birdNestGrams: 0,
+    flavorGrams: 0,
+    rockSugarGrams: 0,
+    slabSugarGrams: 0,
+    ingredientGrams: {} as Record<string, number>,
+  };
 
   if (!formula || safeOrderQty <= 0) {
     return {
@@ -321,13 +418,15 @@ function calcRow(
       orderQty: safeOrderQty,
       actualQty: disabled ? 0 : actualQty,
       weddingBuffer: disabled ? 0 : weddingBuffer,
-      birdNestGrams: 0,
-      flavorGrams: 0,
-      rockSugarGrams: 0,
-      slabSugarGrams: 0,
+      ...emptyLegacy,
       formula,
       disabled,
     };
+  }
+
+  const ingredientGrams: Record<string, number> = {};
+  for (const l of getFormulaLines(formula, flavor)) {
+    ingredientGrams[l.name] = round2((ingredientGrams[l.name] || 0) + actualQty * l.qty);
   }
 
   return {
@@ -336,10 +435,16 @@ function calcRow(
     orderQty: safeOrderQty,
     actualQty,
     weddingBuffer,
-    birdNestGrams: round2(actualQty * formula.birdNest),
-    flavorGrams: round2(actualQty * formula.flavorIngredient),
-    rockSugarGrams: round2(actualQty * formula.rockSugar),
-    slabSugarGrams: round2(actualQty * formula.slabSugar),
+    ingredientGrams,
+    birdNestGrams: ingredientGrams['燕餅'] || 0,
+    flavorGrams:
+      flavor === 'osmanthus'
+        ? ingredientGrams['桂花'] || 0
+        : flavor === 'red_date'
+          ? ingredientGrams['紅棗'] || 0
+          : 0,
+    rockSugarGrams: ingredientGrams['冰糖'] || 0,
+    slabSugarGrams: ingredientGrams['片糖'] || 0,
     formula,
     disabled,
   };
@@ -348,7 +453,8 @@ function calcRow(
 export function computePrepCalculation(
   capacity: PrepCapacity,
   orderType: PrepOrderType,
-  qtys: PrepFlavorQty
+  qtys: PrepFlavorQty,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): PrepCalculation {
   const flavorMap: { flavor: PrepFlavor; qty: number }[] = [
     { flavor: 'osmanthus', qty: qtys.osmanthus },
@@ -356,60 +462,66 @@ export function computePrepCalculation(
     { flavor: 'rock_sugar', qty: qtys.rock_sugar },
   ];
 
-  const rows = flavorMap.map(({ flavor, qty }) => calcRow(flavor, qty, orderType, capacity));
+  const rows = flavorMap.map(({ flavor, qty }) => calcRow(flavor, qty, orderType, capacity, formulas));
 
   if (rows.every((r) => r.orderQty === 0)) {
     for (const flavor of PREP_FLAVORS) {
       if (!rows.find((r) => r.flavor === flavor)) {
-        rows.push(calcRow(flavor, 0, orderType, capacity));
+        rows.push(calcRow(flavor, 0, orderType, capacity, formulas));
       }
     }
   }
 
   const activeRows = rows.filter((r) => r.orderQty > 0 && !r.disabled);
+  const ingredientGrams: Record<string, number> = {};
+  for (const r of activeRows) {
+    for (const [name, qty] of Object.entries(r.ingredientGrams)) {
+      ingredientGrams[name] = round2((ingredientGrams[name] || 0) + qty);
+    }
+  }
   const totals = {
     bottles: activeRows.reduce((s, r) => s + r.actualQty, 0),
-    birdNestGrams: round2(activeRows.reduce((s, r) => s + r.birdNestGrams, 0)),
-    flavorGrams: round2(activeRows.reduce((s, r) => s + r.flavorGrams, 0)),
-    rockSugarGrams: round2(activeRows.reduce((s, r) => s + r.rockSugarGrams, 0)),
-    slabSugarGrams: round2(activeRows.reduce((s, r) => s + r.slabSugarGrams, 0)),
+    ingredientGrams,
+    birdNestGrams: ingredientGrams['燕餅'] || 0,
+    flavorGrams: round2(
+      (ingredientGrams['桂花'] || 0) + (ingredientGrams['紅棗'] || 0)
+    ),
+    rockSugarGrams: ingredientGrams['冰糖'] || 0,
+    slabSugarGrams: ingredientGrams['片糖'] || 0,
   };
 
   return {
     capacity,
     orderType,
-    formulaReady: isCapacityFormulaReady(capacity),
+    formulaReady: isCapacityFormulaReady(capacity, formulas),
     rows: rows.filter((r) => r.orderQty > 0 || !r.disabled),
     totals,
   };
 }
 
 /**
- * Raw grams consumed for 完成燉製 from actual split bottle counts × per-bottle formula.
- * 桂花/紅棗 come from flavorIngredient; 冰糖 from rockSugar only (rock_sugar flavorIngredient
- * is the same 冰糖 and must not be double-counted).
+ * Raw grams consumed for 完成燉製 from actual split bottle counts × per-bottle formula lines.
  */
 export function computeStewingRawNeeds(
   capacity: PrepCapacity,
-  splits: { flavor: PrepFlavor; qty: number }[]
+  splits: { flavor: PrepFlavor; qty: number }[],
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): { name: string; qty: number }[] {
   const acc: Record<string, number> = {};
   const add = (name: string, grams: number) => {
-    if (!(grams > 0)) return;
-    acc[name] = round2((acc[name] || 0) + grams);
+    const n = (name || '').trim();
+    if (!n || !(grams > 0)) return;
+    acc[n] = round2((acc[n] || 0) + grams);
   };
 
   for (const s of splits) {
     const qty = Math.max(0, Math.round(s.qty));
     if (!s.flavor || qty <= 0) continue;
-    const formula = getFlavorFormula(capacity, s.flavor);
+    const formula = getFlavorFormula(capacity, s.flavor, formulas);
     if (!formula) continue;
-
-    add('燕餅', round2(qty * formula.birdNest));
-    if (s.flavor === 'osmanthus') add('桂花', round2(qty * formula.flavorIngredient));
-    if (s.flavor === 'red_date') add('紅棗', round2(qty * formula.flavorIngredient));
-    add('冰糖', round2(qty * formula.rockSugar));
-    add('片糖', round2(qty * formula.slabSugar));
+    for (const l of getFormulaLines(formula, s.flavor)) {
+      add(l.name, round2(qty * l.qty));
+    }
   }
 
   return Object.keys(acc)
@@ -421,13 +533,14 @@ export function computeStewingRawNeeds(
 export function computePrepOrderRawNeeds(
   capacity: PrepCapacity,
   orderType: PrepOrderType,
-  qtys: PrepFlavorQty
+  qtys: PrepFlavorQty,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): { name: string; qty: number }[] {
-  const calc = computePrepCalculation(capacity, orderType, qtys);
+  const calc = computePrepCalculation(capacity, orderType, qtys, formulas);
   const splits = calc.rows
     .filter((r) => r.orderQty > 0 && !r.disabled)
     .map((r) => ({ flavor: r.flavor, qty: r.actualQty }));
-  return computeStewingRawNeeds(capacity, splits);
+  return computeStewingRawNeeds(capacity, splits, formulas);
 }
 
 /** Sum raw needs across unfinished prep orders (any status except completed). */
@@ -439,16 +552,22 @@ export function aggregateRawNeedsFromPrepOrders(
     qty_osmanthus: number;
     qty_red_date: number;
     qty_rock_sugar: number;
-  }>
+  }>,
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): Record<string, number> {
   const raw: Record<string, number> = {};
   for (const o of orders) {
     if (o.status === 'completed') continue;
-    const lines = computePrepOrderRawNeeds(o.capacity, o.order_type, {
-      osmanthus: o.qty_osmanthus,
-      red_date: o.qty_red_date,
-      rock_sugar: o.qty_rock_sugar,
-    });
+    const lines = computePrepOrderRawNeeds(
+      o.capacity,
+      o.order_type,
+      {
+        osmanthus: o.qty_osmanthus,
+        red_date: o.qty_red_date,
+        rock_sugar: o.qty_rock_sugar,
+      },
+      formulas
+    );
     for (const line of lines) {
       raw[line.name] = round2((raw[line.name] || 0) + line.qty);
     }
@@ -495,7 +614,7 @@ export function buildKitchenPrepCreateHref(input: {
   const params = new URLSearchParams({ create: '1' });
   if (input.orderType) params.set('order_type', input.orderType);
   const lines = input.lines
-    .filter((l) => PREP_CAPACITIES.includes(l.capacity))
+    .filter((l) => Boolean(l.capacity))
     .map((l) => ({
       capacity: l.capacity,
       qty_osmanthus: Math.max(0, Math.round(Number(l.qty_osmanthus) || 0)),
@@ -512,10 +631,12 @@ export function validateFormulaBusinessRules(
   flavor: PrepFlavor,
   formula: FlavorFormulaPerBottle
 ): string | null {
-  if ((flavor === 'red_date' || flavor === 'rock_sugar') && formula.slabSugar > 0) {
+  const lines = getFormulaLines(formula, flavor);
+  const has = (name: string) => lines.some((l) => l.name === name && l.qty > 0);
+  if ((flavor === 'red_date' || flavor === 'rock_sugar') && has('片糖')) {
     return `${PREP_FLAVOR_LABELS[flavor]} cannot include 片糖 Slab Sugar`;
   }
-  if (flavor === 'osmanthus' && formula.rockSugar > 0) {
+  if (flavor === 'osmanthus' && has('冰糖')) {
     return '桂花 Osmanthus cannot include 冰糖 Rock Sugar';
   }
   return null;
@@ -524,17 +645,19 @@ export function validateFormulaBusinessRules(
 export function validatePrepFlavorQtys(
   capacity: PrepCapacity,
   qtys: PrepFlavorQty,
-  opts?: { allowEmpty?: boolean }
+  opts?: { allowEmpty?: boolean; formulas?: StewFormulaMapLike }
 ): string | null {
-  if (qtys.red_date > 0 && !isRedDateAllowed(capacity)) {
-    return `Red Date (紅棗) is not allowed for ${PREP_CAPACITY_LABELS[capacity]}`;
+  const formulas = opts?.formulas ?? CAPACITY_FLAVOR_FORMULAS;
+  const capLabel = PREP_CAPACITY_LABELS[capacity] || capacity;
+  if (qtys.red_date > 0 && !isRedDateAllowed(capacity, formulas)) {
+    return `Red Date (紅棗) is not allowed for ${capLabel}`;
   }
   for (const flavor of PREP_FLAVORS) {
     const qty = qtys[flavor];
     if (qty <= 0) continue;
-    const formula = getFlavorFormula(capacity, flavor);
+    const formula = getFlavorFormula(capacity, flavor, formulas);
     if (!formula) {
-      return `No formula configured for ${PREP_FLAVOR_LABELS[flavor]} at ${PREP_CAPACITY_LABELS[capacity]}`;
+      return `No formula configured for ${PREP_FLAVOR_LABELS[flavor]} at ${capLabel}`;
     }
     const ruleErr = validateFormulaBusinessRules(flavor, formula);
     if (ruleErr) return ruleErr;

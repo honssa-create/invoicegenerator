@@ -24,12 +24,19 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
   const cellPad = isPrint ? 'px-4 py-4' : 'px-6 py-4';
   const tfootClass = isPrint ? 'bg-gray-100 font-bold' : 'bg-brand-50 border-t-2 border-brand-200';
 
-  const osmanthusTotal = activeRows
-    .filter((r) => r.flavor === 'osmanthus')
-    .reduce((s, r) => s + r.flavorGrams, 0);
-  const redDateTotal = activeRows
-    .filter((r) => r.flavor === 'red_date')
-    .reduce((s, r) => s + r.flavorGrams, 0);
+  const ingredientCols = (() => {
+    const names = new Set<string>();
+    for (const r of activeRows) {
+      for (const name of Object.keys(r.ingredientGrams || {})) names.add(name);
+    }
+    for (const name of Object.keys(calc.totals.ingredientGrams || {})) names.add(name);
+    // Stable preferred order, then any extras
+    const preferred = ['燕餅', '桂花', '紅棗', '冰糖', '片糖', '玻璃燉瓶'];
+    const rest = Array.from(names).filter((n) => !preferred.includes(n)).sort();
+    return [...preferred.filter((n) => names.has(n)), ...rest];
+  })();
+
+  const colSpanEmpty = 4 + Math.max(ingredientCols.length, 1);
 
   return (
     <table className={`${PREP_SUMMARY_TYPO.table} ${isPrint ? '' : 'min-w-[960px]'}`}>
@@ -39,18 +46,18 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
           <th className={`${thClass} text-left`}>Flavor 口味</th>
           <th className={`${thClass} text-right`}>Order Qty</th>
           <th className={`${thClass} text-right`}>Actual Qty 實際生產樽數</th>
-          <th className={`${thClass} text-right`}>燕餅 Bird&apos;s Nest</th>
-          <th className={`${thClass} text-right`}>桂花 Osmanthus</th>
-          <th className={`${thClass} text-right`}>紅棗 Red Date</th>
-          <th className={`${thClass} text-right`}>冰糖 Rock Sugar</th>
-          <th className={`${thClass} text-right`}>片糖 Slab Sugar</th>
+          {ingredientCols.map((name) => (
+            <th key={name} className={`${thClass} text-right`}>
+              {name}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody className={isPrint ? '' : 'divide-y divide-gray-100'}>
         {activeRows.map((r) => (
           <tr key={r.flavor} className={rowClass}>
             <td className={`${cellPad} ${PREP_SUMMARY_TYPO.capacityBadge} text-gray-700`}>
-              {PREP_CAPACITY_LABELS[capacity]}
+              {PREP_CAPACITY_LABELS[capacity] || capacity}
             </td>
             <td className={`${cellPad} ${PREP_SUMMARY_TYPO.flavorCell} text-gray-900`}>{r.label}</td>
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.qtyCell} text-gray-700`}>{r.orderQty}</td>
@@ -60,26 +67,19 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
                 <p className="text-xs text-gray-500 mt-1">{r.orderQty} + {r.weddingBuffer} buffer</p>
               )}
             </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
-              {formatGrams(r.birdNestGrams)}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
-              {r.flavor === 'osmanthus' ? formatGrams(r.flavorGrams) : '—'}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
-              {r.flavor === 'red_date' ? formatGrams(r.flavorGrams) : '—'}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-700`}>
-              {r.flavor === 'osmanthus' ? '—' : formatGrams(r.rockSugarGrams)}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-700`}>
-              {r.flavor === 'osmanthus' ? formatGrams(r.slabSugarGrams) : '—'}
-            </td>
+            {ingredientCols.map((name) => {
+              const qty = r.ingredientGrams?.[name] || 0;
+              return (
+                <td key={name} className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
+                  {qty > 0 ? formatGrams(qty) : '—'}
+                </td>
+              );
+            })}
           </tr>
         ))}
         {activeRows.length === 0 && (
           <tr>
-            <td colSpan={9} className={`${cellPad} text-center text-gray-400`}>
+            <td colSpan={colSpanEmpty} className={`${cellPad} text-center text-gray-400`}>
               Enter order quantities to see calculations.
             </td>
           </tr>
@@ -95,21 +95,11 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalQty} text-brand-800`}>
               {calc.totals.bottles} 樽
             </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-              {formatGrams(calc.totals.birdNestGrams)}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-              {formatGrams(osmanthusTotal)}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-              {formatGrams(redDateTotal)}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-              {formatGrams(calc.totals.rockSugarGrams)}
-            </td>
-            <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-              {formatGrams(calc.totals.slabSugarGrams)}
-            </td>
+            {ingredientCols.map((name) => (
+              <td key={name} className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
+                {formatGrams(calc.totals.ingredientGrams?.[name] || 0)}
+              </td>
+            ))}
           </tr>
         </tfoot>
       )}

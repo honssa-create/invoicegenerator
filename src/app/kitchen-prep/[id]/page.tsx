@@ -32,6 +32,9 @@ export default function KitchenPrepDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showComplete, setShowComplete] = useState(false);
+  const [capacityOptions, setCapacityOptions] = useState<{ id: string; label: string }[]>(
+    PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
+  );
 
   const load = () =>
     fetch(`/api/kitchen-prep/${id}`)
@@ -45,6 +48,21 @@ export default function KitchenPrepDetailPage() {
       .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, [id]);
+
+  useEffect(() => {
+    fetch('/api/kitchen/catalog')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const caps = d?.catalog?.capacities as { id: string; label: string; sortOrder?: number }[] | undefined;
+        if (!caps?.length) return;
+        setCapacityOptions(
+          [...caps]
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((c) => ({ id: c.id, label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id }))
+        );
+      })
+      .catch(() => undefined);
+  }, []);
 
   const patch = async (body: Record<string, unknown>) => {
     setSaving(true);
@@ -156,7 +174,11 @@ export default function KitchenPrepDetailPage() {
               }}
               className={input}
             >
-              {PREP_CAPACITIES.map((c) => <option key={c} value={c}>{PREP_CAPACITY_LABELS[c]}</option>)}
+              {capacityOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
             </select>
           </div>
           <div>

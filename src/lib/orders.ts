@@ -1,5 +1,6 @@
 import {
   getFlavorFormula,
+  getFormulaLines,
   isRedDateAllowed,
   type PrepCapacity,
   type PrepFlavor,
@@ -2080,12 +2081,13 @@ export function computeWeddingGiftMaterials(
     const formula = getFlavorFormula(prepCap, prep);
     if (!formula) continue;
     totalBottles += qty;
-    birdCake += qty * formula.birdNest;
-    rockSugar += qty * formula.rockSugar;
-    slabSugar += qty * formula.slabSugar;
-    if (prep === 'osmanthus') osmanthus += qty * formula.flavorIngredient;
-    if (prep === 'red_date') redDate += qty * formula.flavorIngredient;
-    // rock_sugar flavor ingredient is ice sugar — counted via rockSugar column
+    for (const l of getFormulaLines(formula, prep)) {
+      if (l.name === '燕餅') birdCake += qty * l.qty;
+      else if (l.name === '桂花') osmanthus += qty * l.qty;
+      else if (l.name === '紅棗') redDate += qty * l.qty;
+      else if (l.name === '冰糖') rockSugar += qty * l.qty;
+      else if (l.name === '片糖') slabSugar += qty * l.qty;
+    }
   }
 
   const glass25 = prepCap === '25g' ? qtyStr(totalBottles) : '';

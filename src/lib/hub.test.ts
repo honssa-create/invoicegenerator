@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWooDraftOrder, mapNestieeWooStatus, mapWooStatus } from './woocommerce';
+import { isWooDraftOrder, mapCupmokaWooStatus, mapNestieeWooStatus, mapWooStatus } from './woocommerce';
 import { extractOrderNoFromRemarks } from './reconciliation-server';
 
 describe('mapWooStatus', () => {
@@ -51,6 +51,34 @@ describe('mapNestieeWooStatus', () => {
 
   it('maps unknown Woo statuses to processing', () => {
     expect(mapNestieeWooStatus('custom-status')).toBe('processing');
+  });
+});
+
+describe('mapCupmokaWooStatus', () => {
+  it('maps pending and failed to 等待付款中', () => {
+    expect(mapCupmokaWooStatus('pending')).toBe('等待付款中');
+    expect(mapCupmokaWooStatus('failed')).toBe('等待付款中');
+  });
+
+  it('maps processing and on-hold', () => {
+    expect(mapCupmokaWooStatus('processing')).toBe('處理中');
+    expect(mapCupmokaWooStatus('on-hold')).toBe('保留');
+  });
+
+  it('maps shipped and completed/delivered', () => {
+    expect(mapCupmokaWooStatus('shipped')).toBe('Shipped');
+    expect(mapCupmokaWooStatus('wc-shipped')).toBe('Shipped');
+    expect(mapCupmokaWooStatus('completed')).toBe('Delivered');
+    expect(mapCupmokaWooStatus('delivered')).toBe('Delivered');
+  });
+
+  it('maps cancelled and refunded', () => {
+    expect(mapCupmokaWooStatus('cancelled')).toBe('取消');
+    expect(mapCupmokaWooStatus('refunded')).toBe('已退費');
+  });
+
+  it('maps unknown Woo statuses to 處理中', () => {
+    expect(mapCupmokaWooStatus('custom-status')).toBe('處理中');
   });
 });
 

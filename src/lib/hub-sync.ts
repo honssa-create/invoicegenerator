@@ -13,6 +13,7 @@ import {
   fetchWooOrders,
   getWooStoreConfigs,
   isWooDraftOrder,
+  mapCupmokaWooStatus,
   mapNestieeWooStatus,
   mapWooStatus,
   wooCustomerName,
@@ -100,7 +101,12 @@ export async function ingestWooOrders(
           original_order_id: String(order.id),
           customer_name: wooCustomerName(order),
           total_amount: Number(order.total) || 0,
-          status: platform === 'nestiee' ? mapNestieeWooStatus(order.status) : mapWooStatus(order.status),
+          status:
+            platform === 'nestiee'
+              ? mapNestieeWooStatus(order.status)
+              : platform === 'cupmoka'
+                ? mapCupmokaWooStatus(order.status)
+                : mapWooStatus(order.status),
           created_at: order.date_created.replace('T', ' ').slice(0, 19),
           customer_email: order.billing?.email || null,
           phone: order.billing?.phone || null,

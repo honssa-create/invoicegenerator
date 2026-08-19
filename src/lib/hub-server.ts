@@ -27,6 +27,10 @@ import {
   parseNestieeReceiptDateFromDeliveryOptions,
   pruneStaleOrderFields,
   WOO_PLATFORM_ORDER_TYPE,
+  parseCupmokaLinesFromWoo,
+  appendCupmokaShippingLine,
+  parseCupmokaPaymentFromWoo,
+  parseCupmokaShipmentTracking,
   type WooAddressLike,
   type WooLineItemLike,
 } from './orders';
@@ -257,6 +261,57 @@ export async function upsertHubOrder(
       }
       if (!String(fields.payment_option || '').trim() && pay.bank) {
         fields.payment_option = pay.bank;
+      }
+    }
+  }
+
+  if (input.source_platform === 'cupmoka' && input.raw_payload) {
+    const payload = input.raw_payload;
+    const rawLines = (payload.line_items as WooLineItemLike[] | undefined) || [];
+    const shippingTotal = parseWooShippingTotal(payload);
+    const cupmokaLines = appendCupmokaShippingLine(
+      parseCupmokaLinesFromWoo(rawLines),
+      shippingTotal
+    );
+    fields.cupmoka_lines = JSON.stringify(cupmokaLines);
+
+    const shipMethod = parseWooShippingMethod(payload);
+    if (shipMethod && !String(fields.shipping_method || '').trim()) {
+      fields.shipping_method = normalizeOrderShippingMethod(shipMethod);
+    }
+
+    const tracking = parseCupmokaShipmentTracking(payload);
+    if (tracking.tracking_no && !String(fields.tracking_no || '').trim()) {
+      fields.tracking_no = tracking.tracking_no;
+    }
+    if (tracking.shipping_method_hint && !String(fields.shipping_method || '').trim()) {
+      fields.shipping_method = normalizeOrderShippingMethod(tracking.shipping_method_hint);
+    }
+
+    const verified = fields.payment_verified === true || fields.payment_verified === 'true';
+    const existingPay =
+      parsePaymentAmount(fields.payment_amount) || parsePaymentAmount(fields.payment1_amount);
+    if (!verified && existingPay <= 0 && input.total_amount > 0) {
+      const amount = String(Math.round(input.total_amount * 100) / 100);
+      fields.payment_amount = amount;
+      fields.payment1_amount = amount;
+    }
+
+    if (!verified) {
+      const pay = parseCupmokaPaymentFromWoo(payload);
+      const hasMethod = String(fields.payment_method_detail || '').trim();
+      if (!hasMethod && pay.method) {
+        fields.payment_method_detail = pay.method;
+        if (pay.note) fields.payment_method_note = pay.note;
+      }
+      if (!String(fields.payment_bank || '').trim() && pay.bank) {
+        fields.payment_bank = pay.bank;
+      }
+      const hasPayDate =
+        String(fields.payment_date || '').trim() || String(fields.payment1_date || '').trim();
+      if (!hasPayDate && pay.datePaid) {
+        fields.payment_date = pay.datePaid;
+        fields.payment1_date = pay.datePaid;
       }
     }
   }

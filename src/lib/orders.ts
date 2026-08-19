@@ -51,12 +51,26 @@ export const ECOM_ORDER_STATUSES = [
 
 export type EcomOrderStatus = (typeof ECOM_ORDER_STATUSES)[number];
 
+/** Cupmoka Woo / Hub order statuses (store admin labels). */
+export const CUPMOKA_ORDER_STATUSES = [
+  '等待付款中',
+  '處理中',
+  '保留',
+  'Shipped',
+  'Delivered',
+  '取消',
+  '已退費',
+] as const;
+
+export type CupmokaOrderStatus = (typeof CUPMOKA_ORDER_STATUSES)[number];
+
 export function usesEcomOrderStatuses(orderType: string): boolean {
   return isNestieeOrderType(orderType) || isWeddingGiftOrderType(orderType);
 }
 
-/** Status options for the given order type (manufacturing vs ecommerce). */
+/** Status options for the given order type (manufacturing vs ecommerce vs Cupmoka). */
 export function statusesForOrderType(orderType: string): readonly string[] {
+  if (isCupmokaOrderType(orderType)) return CUPMOKA_ORDER_STATUSES;
   return usesEcomOrderStatuses(orderType) ? ECOM_ORDER_STATUSES : ORDER_STATUSES;
 }
 
@@ -179,6 +193,13 @@ export const STATUS_DOT_COLORS: Record<string, string> = {
   'processing': '#D97706',
   'shipped': '#6366F1',
   'completed': '#16A34A',
+  '等待付款中': '#3B82F6',
+  '處理中': '#D97706',
+  '保留': '#9CA3AF',
+  'Shipped': '#6366F1',
+  'Delivered': '#16A34A',
+  '取消': '#6B7280',
+  '已退費': '#E04B8A',
 };
 
 export const STATUS_COLORS: Record<string, string> = {
@@ -202,6 +223,13 @@ export const STATUS_COLORS: Record<string, string> = {
   'processing': 'bg-[#FEF3C7] text-[#B45309]',
   'shipped': 'bg-[#E0E7FF] text-[#4338CA]',
   'completed': 'bg-[#DCFCE7] text-[#15803D]',
+  '等待付款中': 'bg-[#DBEAFE] text-[#1D4ED8]',
+  '處理中': 'bg-[#FEF3C7] text-[#B45309]',
+  '保留': 'bg-[#F3F4F6] text-[#6B7280]',
+  'Shipped': 'bg-[#E0E7FF] text-[#4338CA]',
+  'Delivered': 'bg-[#DCFCE7] text-[#15803D]',
+  '取消': 'bg-[#E5E7EB] text-[#4B5563]',
+  '已退費': 'bg-[#FCE8F1] text-[#B8306A]',
 };
 
 export const STATUS_COLUMN_BG: Record<string, string> = {
@@ -225,6 +253,13 @@ export const STATUS_COLUMN_BG: Record<string, string> = {
   'processing': 'bg-[#FDE68A]',
   'shipped': 'bg-[#C7D2FE]',
   'completed': 'bg-[#BBF7D0]',
+  '等待付款中': 'bg-[#DBEAFE]',
+  '處理中': 'bg-[#FDE68A]',
+  '保留': 'bg-[#E8EAED]',
+  'Shipped': 'bg-[#C7D2FE]',
+  'Delivered': 'bg-[#BBF7D0]',
+  '取消': 'bg-[#E5E7EB]',
+  '已退費': 'bg-[#F9D6E7]',
 };
 
 export const STATUS_COLUMN_ACCENT: Record<string, string> = {
@@ -248,6 +283,13 @@ export const STATUS_COLUMN_ACCENT: Record<string, string> = {
   'processing': 'border-t-[#D97706]',
   'shipped': 'border-t-[#6366F1]',
   'completed': 'border-t-[#16A34A]',
+  '等待付款中': 'border-t-[#3B82F6]',
+  '處理中': 'border-t-[#D97706]',
+  '保留': 'border-t-[#9CA3AF]',
+  'Shipped': 'border-t-[#6366F1]',
+  'Delivered': 'border-t-[#16A34A]',
+  '取消': 'border-t-[#6B7280]',
+  '已退費': 'border-t-[#E04B8A]',
 };
 
 /** Shipment Detail / Woo normalize options for 寄出方式. */
@@ -840,6 +882,11 @@ export function isNestieeOrderType(t: string): boolean {
   return t === NESTIEE_ORDER_TYPE;
 }
 
+export const CUPMOKA_ORDER_TYPE = 'Cupmoka' as const;
+export function isCupmokaOrderType(t: string): boolean {
+  return t === CUPMOKA_ORDER_TYPE;
+}
+
 /** Manual “所需禮盒” qty inputs on Nestiee Order Detail (not from Woo). */
 export const NESTIEE_GIFT_BOX_TYPES: { id: string; label: string; qtyKey: string }[] = [
   { id: 'star_gold', label: '星空金', qtyKey: 'nestiee_gift_qty_star_gold' },
@@ -1027,6 +1074,7 @@ export type WooLineItemLike = {
   price?: number | string | null;
   total?: number | string | null;
   meta_data?: WooMetaDatum[] | null;
+  image?: { src?: string | null; id?: string | number | null } | null;
 };
 
 function nestieeNum(value: unknown): number {
@@ -1044,15 +1092,16 @@ export function stripHtml(text: string): string {
 /** Join non-empty Woo address parts into a multiline string. */
 export function formatWooAddress(addr: WooAddressLike | null | undefined): string {
   if (!addr) return '';
-  const name = [addr.first_name, addr.last_name].filter(Boolean).join(' ').trim();
+  const part = (v: unknown) => String(v ?? '').replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim();
+  const name = [part(addr.first_name), part(addr.last_name)].filter(Boolean).join(' ').trim();
   const lines = [
     name,
-    String(addr.company || '').trim(),
-    String(addr.address_1 || '').trim(),
-    String(addr.address_2 || '').trim(),
-    [addr.city, addr.state, addr.postcode].filter(Boolean).join(', ').trim(),
-    String(addr.country || '').trim(),
-    addr.phone ? `Tel: ${String(addr.phone).trim()}` : '',
+    part(addr.company),
+    part(addr.address_1),
+    part(addr.address_2),
+    [part(addr.city), part(addr.state), part(addr.postcode)].filter(Boolean).join(', ').trim(),
+    part(addr.country),
+    part(addr.phone) ? `Tel: ${part(addr.phone)}` : '',
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -1406,6 +1455,189 @@ export function appendNestieeShippingLine(
       line_total: amount,
     },
   ];
+}
+
+/** Synthetic Cupmoka line name for Woo shipping fees. */
+export const CUPMOKA_SHIPPING_LINE_NAME = 'Shipping';
+
+export interface CupmokaLineOption {
+  label: string;
+  value: string;
+  price: number;
+}
+
+/** Normalized Woo line item stored on Cupmoka orders as `fields.cupmoka_lines` JSON. */
+export interface CupmokaLineItem {
+  name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  image?: string;
+  options?: CupmokaLineOption[];
+}
+
+function parseCupmokaOptionsFromMeta(meta: WooMetaDatum[] | null | undefined): CupmokaLineOption[] {
+  if (!Array.isArray(meta)) return [];
+  const out: CupmokaLineOption[] = [];
+  for (const m of meta) {
+    const key = String(m?.key ?? '').trim();
+    const displayKey = String(m?.display_key ?? '').trim();
+    const label = displayKey || key;
+    if (!label || label.startsWith('_')) continue;
+    const rawVal = m?.display_value ?? m?.value;
+    const value = stripHtml(String(rawVal ?? '')).trim();
+    if (!value) continue;
+    out.push({ label, value, price: 0 });
+  }
+  return out;
+}
+
+function parseCupmokaOptionsStored(raw: unknown): CupmokaLineOption[] | undefined {
+  if (!Array.isArray(raw) || !raw.length) return undefined;
+  const out: CupmokaLineOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const label = String(e.label ?? '').trim();
+    const value = String(e.value ?? '').trim();
+    if (!label && !value) continue;
+    out.push({
+      label: label || 'Option',
+      value,
+      price: Math.round(nestieeNum(e.price) * 100) / 100,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+/** Normalize WooCommerce `line_items` into Cupmoka product rows. */
+export function parseCupmokaLinesFromWoo(lineItems: WooLineItemLike[] | null | undefined): CupmokaLineItem[] {
+  if (!Array.isArray(lineItems) || !lineItems.length) return [];
+  const out: CupmokaLineItem[] = [];
+  for (const li of lineItems) {
+    const name = String(li?.name ?? '').trim();
+    if (!name) continue;
+    const quantity = nestieeNum(li.quantity);
+    const unit_price = Math.round(nestieeNum(li.price) * 100) / 100;
+    const rawTotal = nestieeNum(li.total);
+    const line_total =
+      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const row: CupmokaLineItem = { name, quantity, unit_price, line_total };
+    const image = String(li?.image?.src ?? '').trim();
+    if (image) row.image = image;
+    const options = parseCupmokaOptionsFromMeta(li.meta_data);
+    if (options.length) row.options = options;
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Strip any existing Shipping rows, then append one when shippingTotal > 0.
+ */
+export function appendCupmokaShippingLine(
+  lines: CupmokaLineItem[],
+  shippingTotal: number
+): CupmokaLineItem[] {
+  const withoutShipping = lines.filter(
+    (line) => line.name.trim().toLowerCase() !== CUPMOKA_SHIPPING_LINE_NAME.toLowerCase()
+  );
+  const amount = Math.round(Math.max(0, shippingTotal) * 100) / 100;
+  if (amount <= 0) return withoutShipping;
+  return [
+    ...withoutShipping,
+    {
+      name: CUPMOKA_SHIPPING_LINE_NAME,
+      quantity: 1,
+      unit_price: amount,
+      line_total: amount,
+    },
+  ];
+}
+
+/** Read `fields.cupmoka_lines` (JSON string or already-parsed array). */
+export function getCupmokaLines(
+  fields: Record<string, string | boolean | unknown>
+): CupmokaLineItem[] {
+  const raw = fields.cupmoka_lines;
+  if (raw == null || raw === false || raw === '') return [];
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const out: CupmokaLineItem[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const name = String(r.name ?? '').trim();
+    if (!name) continue;
+    const quantity = nestieeNum(r.quantity);
+    const unit_price = Math.round(nestieeNum(r.unit_price ?? r.price) * 100) / 100;
+    const rawTotal = nestieeNum(r.line_total ?? r.total);
+    const line_total =
+      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const item: CupmokaLineItem = { name, quantity, unit_price, line_total };
+    const image = String(r.image ?? '').trim();
+    if (image) item.image = image;
+    const options = parseCupmokaOptionsStored(r.options);
+    if (options) item.options = options;
+    out.push(item);
+  }
+  return out;
+}
+
+/** Extract Cupmoka payment bank/method from a Woo order payload. */
+export function parseCupmokaPaymentFromWoo(payload: Record<string, unknown> | null | undefined): {
+  bank: string;
+  method: OrderPaymentMethod | '';
+  note: string;
+  datePaid: string;
+} {
+  const title = String(payload?.payment_method_title ?? '').trim();
+  const methodId = String(payload?.payment_method ?? '').trim();
+  const label = title || methodId;
+  const primary = normalizeOrderPaymentMethod(label);
+  const datePaid =
+    normalizeOrderDueDate(String(payload?.date_paid ?? '').slice(0, 10)) ||
+    normalizeOrderDueDate(String(payload?.date_paid ?? '')) ||
+    '';
+  return {
+    bank: label,
+    method: primary.method,
+    note: primary.note,
+    datePaid,
+  };
+}
+
+type WooShipmentTrackingItem = {
+  tracking_provider?: string | null;
+  custom_tracking_provider?: string | null;
+  tracking_number?: string | null;
+};
+
+/** Read Woo `_wc_shipment_tracking_items` for Cupmoka. */
+export function parseCupmokaShipmentTracking(
+  payload: Record<string, unknown> | null | undefined
+): { tracking_no: string; shipping_method_hint: string } {
+  if (!payload) return { tracking_no: '', shipping_method_hint: '' };
+  const meta = Array.isArray(payload.meta_data) ? (payload.meta_data as WooMetaDatum[]) : [];
+  const row = meta.find((m) => String(m?.key || '') === '_wc_shipment_tracking_items');
+  const items = Array.isArray(row?.value) ? (row!.value as WooShipmentTrackingItem[]) : [];
+  const first = items[0];
+  if (!first || typeof first !== 'object') return { tracking_no: '', shipping_method_hint: '' };
+  const tracking_no = String(first.tracking_number ?? '').trim();
+  const provider = String(first.tracking_provider || first.custom_tracking_provider || '').trim();
+  let shipping_method_hint = '';
+  if (/sf/i.test(provider) || /順豐/.test(provider)) {
+    shipping_method_hint = /sf[\s_-]*express/i.test(provider) ? 'SF 順豐' : '順豐';
+  }
+  return { tracking_no, shipping_method_hint };
 }
 
 /** Synthetic Honour line style for Woo shipping fees — see export near HonourLineItem. */

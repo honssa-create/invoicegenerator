@@ -204,6 +204,33 @@ export function mapNestieeWooStatus(status: string): string {
   }
 }
 
+/** Cupmoka Woo statuses → Cupmoka Hub status labels. */
+export function mapCupmokaWooStatus(status: string): string {
+  const normalized = String(status || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'pending':
+    case 'failed':
+      return '等待付款中';
+    case 'processing':
+      return '處理中';
+    case 'on-hold':
+      return '保留';
+    case 'shipped':
+    case 'wc-shipped':
+      return 'Shipped';
+    case 'delivered':
+    case 'wc-delivered':
+    case 'completed':
+      return 'Delivered';
+    case 'cancelled':
+      return '取消';
+    case 'refunded':
+      return '已退費';
+    default:
+      return '處理中';
+  }
+}
+
 /** Manufacturing Woo drafts (honour/cupmoka) must not enter the Order Hub. Nestiee imports drafts. */
 export function isWooDraftOrder(status: string | null | undefined): boolean {
   const normalized = String(status || '').trim().toLowerCase();

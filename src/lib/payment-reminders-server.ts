@@ -1,5 +1,5 @@
 import db from '@/lib/db';
-import { getInvoiceWithDetails, markSentInvoicesOverdue } from '@/lib/invoices';
+import { invoiceTotalsByIds, markSentInvoicesOverdue } from '@/lib/invoices';
 import {
   DUE_SOON_DAYS,
   defaultReminderBody,
@@ -55,9 +55,12 @@ function userFilter(userId: number | null, params: (number | string)[]): string 
   return ' AND i.user_id = ?';
 }
 
-async function toCandidate(row: ReminderRow, type: ReminderType, daysOffset: number): Promise<ReminderCandidate> {
-  const details = await getInvoiceWithDetails(row.id, row.user_id);
-  const total = details?.total ?? 0;
+function toCandidate(
+  row: ReminderRow,
+  type: ReminderType,
+  daysOffset: number,
+  total: number
+): ReminderCandidate {
   const to = preferEmail(row.invoice_email, row.order_email, row.customer_email);
   const { order_fields_json, ...rest } = row;
   return {
@@ -89,7 +92,7 @@ export async function listReminderCandidates(
   const dueSoonDays = DUE_SOON_DAYS;
   const wantOverdue = types.includes('overdue');
   const wantDueSoon = types.includes('due_soon');
-  const candidates: ReminderCandidate[] = [];
+  const pending: { row: ReminderRow; type: ReminderType; daysOffset: number }[] = [];
 
   await markSentInvoicesOverdue(userId);
 
@@ -112,9 +115,9 @@ export async function listReminderCandidates(
         AND (i.last_reminder_at IS NULL OR (CURRENT_DATE - i.last_reminder_at::date) >= ?)
         ${userFilter(userId, params)}
       ORDER BY i.due_date ASC`;
-    const rows = await db.prepare(query).all(...params) as Array<ReminderRow & { days_past_due: number }>;
+    const rows = (await db.prepare(query).all(...params)) as Array<ReminderRow & { days_past_due: number }>;
     for (const row of rows) {
-      candidates.push(await toCandidate(row, 'overdue', Math.max(0, Number(row.days_past_due) || 0)));
+      pending.push({ row, type: 'overdue', daysOffset: Math.max(0, Number(row.days_past_due) || 0) });
     }
   }
 
@@ -138,11 +141,27 @@ export async function listReminderCandidates(
         AND i.last_due_soon_reminder_at IS NULL
         ${userFilter(userId, params)}
       ORDER BY i.due_date ASC`;
-    const rows = await db.prepare(query).all(...params) as Array<ReminderRow & { days_until_due: number }>;
+    const rows = (await db.prepare(query).all(...params)) as Array<ReminderRow & { days_until_due: number }>;
     for (const row of rows) {
-      candidates.push(await toCandidate(row, 'due_soon', Math.max(0, Number(row.days_until_due) || 0)));
+      pending.push({ row, type: 'due_soon', daysOffset: Math.max(0, Number(row.days_until_due) || 0) });
     }
   }
+
+  const byUser = new Map<number, number[]>();
+  for (const p of pending) {
+    const list = byUser.get(p.row.user_id) || [];
+    list.push(p.row.id);
+    byUser.set(p.row.user_id, list);
+  }
+  const totalsByInvoice = new Map<number, number>();
+  for (const [uid, ids] of Array.from(byUser.entries())) {
+    const map = await invoiceTotalsByIds(uid, ids);
+    for (const [id, total] of Array.from(map.entries())) totalsByInvoice.set(id, total);
+  }
+
+  const candidates = pending.map(({ row, type, daysOffset }) =>
+    toCandidate(row, type, daysOffset, totalsByInvoice.get(row.id) ?? 0)
+  );
 
   candidates.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'overdue' ? -1 : 1;

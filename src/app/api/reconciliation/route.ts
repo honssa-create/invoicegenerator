@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
-import { listMatchCandidates, listReconciliationRecords } from '@/lib/reconciliation-server';
+import { listReconciliationRecords } from '@/lib/reconciliation-server';
 import { yedpayConfigured } from '@/lib/yedpay';
 
 export async function GET(request: Request) {
@@ -9,8 +9,6 @@ export async function GET(request: Request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const ownerId = await getDataOwnerId(session);
-  const url = new URL(request.url);
-  const candidateSearch = url.searchParams.get('q') || undefined;
   const records = await listReconciliationRecords(ownerId);
 
   const pendingHigh = records.filter((r) => r.status === 'Pending Approval' && r.confidence === 'high');
@@ -32,7 +30,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     records,
     summary,
-    candidates: await listMatchCandidates(ownerId, candidateSearch),
     yedpayConfigured: await yedpayConfigured(ownerId),
   });
 }

@@ -16,12 +16,11 @@ export async function GET(request: Request) {
 
   const entries: LedgerEntry[] = [];
 
-  // Product Sales — order payments for the selected month only.
-  for (const o of await listOrdersSummary(ownerId)) {
+  // Product Sales — month filtered in SQL (lean payment fields only).
+  for (const o of await listOrdersSummary(ownerId, { paymentMonth: month })) {
     const amt = Number(o.fields.payment_amount);
     if (!Number.isFinite(amt) || amt === 0) continue;
     const date = (o.fields.payment_date as string) || o.created_at.slice(0, 10);
-    if ((date || '').slice(0, 7) !== month) continue;
     entries.push({
       key: `order-${o.id}`,
       kind: 'product',
@@ -37,15 +36,25 @@ export async function GET(request: Request) {
   }
 
   // Other Income — manual entries for the selected month.
-  const rows = await db.prepare(
-    `SELECT * FROM other_income
+  const rows = (await db
+    .prepare(
+      `SELECT * FROM other_income
      WHERE user_id = ?
        AND (
          (txn_date IS NOT NULL AND txn_date LIKE ?)
          OR (txn_date IS NULL AND CAST(created_at AS text) LIKE ?)
        )`
-  ).all(ownerId, `${month}%`, `${month}%`) as {
-    id: number; category: string | null; txn_date: string | null; amount: number; account: string | null; remarks: string | null; receipt_path: string | null; verified: number; created_at: string;
+    )
+    .all(ownerId, `${month}%`, `${month}%`)) as {
+    id: number;
+    category: string | null;
+    txn_date: string | null;
+    amount: number;
+    account: string | null;
+    remarks: string | null;
+    receipt_path: string | null;
+    verified: number;
+    created_at: string;
   }[];
   for (const r of rows) {
     entries.push({

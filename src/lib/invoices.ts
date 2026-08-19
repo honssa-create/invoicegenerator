@@ -173,6 +173,61 @@ export async function sumInvoiceTotals(
   return invoices.reduce((sum, inv) => sum + inv.total, 0);
 }
 
+/** Batch-compute invoice totals for many ids (one items query). */
+export async function invoiceTotalsByIds(
+  userId: number,
+  invoiceIds: number[],
+): Promise<Map<number, number>> {
+  const ids = Array.from(
+    new Set(invoiceIds.map(Number).filter((id) => Number.isFinite(id) && id > 0))
+  );
+  const out = new Map<number, number>();
+  if (!ids.length) return out;
+
+  const placeholders = ids.map(() => '?').join(',');
+  const headers = (await db
+    .prepare(
+      `SELECT id, tax_rate, discount_type, discount_value, shipping_amount
+       FROM invoices WHERE user_id = ? AND id IN (${placeholders})`
+    )
+    .all(userId, ...ids)) as Array<{
+    id: number;
+    tax_rate: number;
+    discount_type: string;
+    discount_value: number;
+    shipping_amount: number;
+  }>;
+
+  if (!headers.length) return out;
+
+  const foundIds = headers.map((h) => h.id);
+  const itemPlaceholders = foundIds.map(() => '?').join(',');
+  const itemRows = (await db
+    .prepare(
+      `SELECT invoice_id, quantity, unit_price FROM invoice_items WHERE invoice_id IN (${itemPlaceholders})`
+    )
+    .all(...foundIds)) as Array<{ invoice_id: number; quantity: number; unit_price: number }>;
+
+  const itemsByInvoice = new Map<number, { quantity: number; unit_price: number }[]>();
+  for (const item of itemRows) {
+    const list = itemsByInvoice.get(item.invoice_id) || [];
+    list.push({ quantity: Number(item.quantity) || 0, unit_price: Number(item.unit_price) || 0 });
+    itemsByInvoice.set(item.invoice_id, list);
+  }
+
+  for (const invoice of headers) {
+    const items = itemsByInvoice.get(invoice.id) || [];
+    const { total } = calculateInvoiceTotals(items, {
+      taxRate: invoice.tax_rate,
+      discountType: invoice.discount_type,
+      discountValue: invoice.discount_value,
+      shippingAmount: invoice.shipping_amount,
+    });
+    out.set(invoice.id, total);
+  }
+  return out;
+}
+
 /** Dropdown options for linking invoices to orders. */
 export async function listInvoiceOptions(
   userId: number,

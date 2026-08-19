@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { orderPaymentReceiptUrl } from '@/lib/image-url';
@@ -22,11 +22,14 @@ interface Entry {
   verified: boolean;
 }
 
+const PAGE_SIZE = 50;
+
 export default function AccountingPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [onlyPending, setOnlyPending] = useState(false);
+  const [page, setPage] = useState(1);
 
   const load = () => {
     setLoading(true);
@@ -44,7 +47,16 @@ export default function AccountingPage() {
     });
   };
 
-  const shown = onlyPending ? entries.filter((e) => !e.verified) : entries;
+  const shown = useMemo(
+    () => (onlyPending ? entries.filter((e) => !e.verified) : entries),
+    [entries, onlyPending]
+  );
+  useEffect(() => {
+    setPage(1);
+  }, [onlyPending]);
+
+  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const pageRows = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const verifiedCount = entries.filter((e) => e.verified).length;
 
   return (
@@ -72,6 +84,7 @@ export default function AccountingPage() {
         ) : shown.length === 0 ? (
           <div className="p-12 text-center text-gray-500">{MSG.noPaymentEntriesYet}</div>
         ) : (
+          <>
           <table className="w-full min-w-[1000px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
@@ -88,12 +101,18 @@ export default function AccountingPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {shown.map((e) => (
+              {pageRows.map((e) => (
                 <tr key={e.order_id} className={`hover:bg-gray-50 ${e.verified ? 'bg-green-50/30' : ''}`}>
                   <td className="px-4 py-3">
                     {e.has_receipt ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={orderPaymentReceiptUrl(e.order_id, e.payment_receipt_path) || ''} alt="receipt" onClick={() => setLightbox(orderPaymentReceiptUrl(e.order_id, e.payment_receipt_path) || '')} className="h-11 w-11 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      <img
+                        src={orderPaymentReceiptUrl(e.order_id, e.payment_receipt_path) || ''}
+                        alt="receipt"
+                        loading="lazy"
+                        onClick={() => setLightbox(orderPaymentReceiptUrl(e.order_id, e.payment_receipt_path) || '')}
+                        className="h-11 w-11 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
+                      />
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3">
@@ -117,6 +136,32 @@ export default function AccountingPage() {
               ))}
             </tbody>
           </table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm text-gray-600">
+              <span>
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, shown.length)} of {shown.length}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 disabled:opacity-40"
+                >
+                  ← Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 disabled:opacity-40"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
 

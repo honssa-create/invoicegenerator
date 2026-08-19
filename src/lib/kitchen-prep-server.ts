@@ -602,14 +602,41 @@ export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
   }
 
   // Catch-up: open 回禮 orders missing a linked prep.
+  const weddingType = '燕窩回禮燉製';
+  const typePatterns = [`%"order_type":"${weddingType}"%`, `%"order_type": "${weddingType}"%`];
   const orderRows = (await (userId == null
-    ? db.prepare(`SELECT id, user_id, status, fields_json FROM orders`).all()
-    : db.prepare(`SELECT id, user_id, status, fields_json FROM orders WHERE user_id = ?`).all(userId))) as {
+    ? db
+        .prepare(
+          `SELECT id, user_id, status, fields_json FROM orders
+           WHERE (${typePatterns.map(() => 'fields_json LIKE ?').join(' OR ')})`
+        )
+        .all(...typePatterns)
+    : db
+        .prepare(
+          `SELECT id, user_id, status, fields_json FROM orders
+           WHERE user_id = ?
+             AND (${typePatterns.map(() => 'fields_json LIKE ?').join(' OR ')})`
+        )
+        .all(userId, ...typePatterns))) as {
     id: number;
     user_id: number;
     status: string | null;
     fields_json: string;
   }[];
+
+  // Existing preps for these orders (one query).
+  const orderIds = orderRows.map((o) => o.id);
+  const existingPrepIds = new Set<number>();
+  if (orderIds.length) {
+    const ph = orderIds.map(() => '?').join(',');
+    const existing = (await db
+      .prepare(
+        `SELECT linked_order_id FROM kitchen_prep_orders
+         WHERE linked_order_id IN (${ph})`
+      )
+      .all(...orderIds)) as { linked_order_id: number }[];
+    for (const r of existing) existingPrepIds.add(Number(r.linked_order_id));
+  }
 
   let processed = inactiveRows.length;
   for (const o of orderRows) {
@@ -618,14 +645,14 @@ export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
     const fields = parseOrderFields(o.fields_json);
     if (!isWeddingGiftOrderType(fields.order_type || '')) continue;
     processed += 1;
-    const existing = await getPrepByLinkedOrderId(o.user_id, o.id);
-    if (existing) {
+    if (existingPrepIds.has(o.id)) {
       skipped += 1;
       continue;
     }
     const prep = await ensurePrepFromWeddingOrder(o.user_id, o.id);
     if (prep) {
       created += 1;
+      existingPrepIds.add(o.id);
       await logActivity(
         'order',
         o.id,

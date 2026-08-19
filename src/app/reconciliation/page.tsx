@@ -132,18 +132,24 @@ export default function ReconciliationPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const receiptRef = useRef<HTMLInputElement>(null);
 
-  const load = (q?: string) => {
+  const load = () => {
     setLoading(true);
-    const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
-    fetch(`/api/reconciliation${qs}`)
+    fetch('/api/reconciliation')
       .then((r) => r.json())
       .then((d) => {
         setRecords(d.records || []);
         setSummary(d.summary || null);
-        setCandidates(d.candidates || []);
         setYedpayConfigured(Boolean(d.yedpayConfigured));
       })
       .finally(() => setLoading(false));
+  };
+
+  const loadCandidates = (q?: string) => {
+    const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+    fetch(`/api/reconciliation/candidates${qs}`)
+      .then((r) => r.json())
+      .then((d) => setCandidates(d.candidates || []))
+      .catch(() => setCandidates([]));
   };
 
   useEffect(() => {
@@ -336,7 +342,7 @@ export default function ReconciliationPage() {
     setLinkRecordId(id);
     setSelectedInvoiceId('');
     setCandidateSearch('');
-    load();
+    loadCandidates();
   };
 
   const submitManualLink = async () => {

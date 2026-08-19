@@ -448,24 +448,37 @@ async function syncGlobalRecordSequences(): Promise<void> {
 async function runBootDataFixes(): Promise<void> {
   await migrateUnifiedRecordNumberingOnce();
   await migrateOrderStatusesV2Once();
-  await syncGlobalRecordSequences();
 
-  // Advance expense_report_sequence from max batch_id (same semantics as SQLite boot).
-  await client().query(`
-    INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
-    ON CONFLICT (id) DO NOTHING
-  `);
-  const maxRow = await client().query<{ m: string | null }>(`
-    SELECT MAX(CAST(SUBSTR(batch_id, 5) AS INTEGER)) AS m
-    FROM expenses
-    WHERE batch_id IS NOT NULL AND batch_id LIKE 'EXP-%' AND LENGTH(batch_id) >= 5
-  `);
-  const maxSerial = Number(maxRow.rows[0]?.m || 0);
-  if (maxSerial > 0) {
+  // Sequence MAX scans once per DB (not every process cold start).
+  const migSeq = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'boot_sequence_sync_once_v1'`
+  );
+  if (!migSeq.rows.length) {
+    await syncGlobalRecordSequences();
+    await client().query(`
+      INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    const maxRow = await client().query<{ m: string | null }>(`
+      SELECT MAX(CAST(SUBSTR(batch_id, 5) AS INTEGER)) AS m
+      FROM expenses
+      WHERE batch_id IS NOT NULL AND batch_id LIKE 'EXP-%' AND LENGTH(batch_id) >= 5
+    `);
+    const maxSerial = Number(maxRow.rows[0]?.m || 0);
+    if (maxSerial > 0) {
+      await client().query(
+        `UPDATE expense_report_sequence SET next_serial = GREATEST(next_serial, $1) WHERE id = 1`,
+        [maxSerial + 1]
+      );
+    }
     await client().query(
-      `UPDATE expense_report_sequence SET next_serial = GREATEST(next_serial, $1) WHERE id = 1`,
-      [maxSerial + 1]
+      `INSERT INTO app_migrations (key) VALUES ('boot_sequence_sync_once_v1') ON CONFLICT DO NOTHING`
     );
+  } else {
+    await client().query(`
+      INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
+      ON CONFLICT (id) DO NOTHING
+    `);
   }
 
   // Normalize utility billing mode labels (idempotent).

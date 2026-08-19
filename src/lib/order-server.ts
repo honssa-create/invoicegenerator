@@ -130,27 +130,169 @@ const LIST_FIELD_KEYS = [
   'payment_receipt_path', 'payment_verified',
 ] as const;
 
-function pickListFields(fields: Record<string, string | boolean>): Record<string, string | boolean> {
-  const out: Record<string, string | boolean> = {};
-  for (const key of LIST_FIELD_KEYS) {
-    if (fields[key] !== undefined) out[key] = fields[key];
-  }
-  return out;
+type ListFieldKey = (typeof LIST_FIELD_KEYS)[number];
+
+/** Postgres jsonb → text for list keys (avoids shipping/parsing honour_lines / nestiee blobs). */
+const LIST_FIELD_SQL = LIST_FIELD_KEYS.map(
+  (k) => `j.fj->>'${k}' AS f_${k}`
+).join(',\n       ');
+
+interface LeanOrderRow {
+  id: number;
+  user_id: number;
+  reference_number: string;
+  po_number: string | null;
+  name: string | null;
+  description: string | null;
+  status: string | null;
+  delivery_date: string | null;
+  customer_email: string | null;
+  phone: string | null;
+  shipping_address: string | null;
+  notes: string | null;
+  carton_count: string | null;
+  quotation_id: number | null;
+  total_amount: number | null;
+  created_at: string;
+  updated_at: string;
+  f_order_type: string | null;
+  f_due_date: string | null;
+  f_client_delivery_date: string | null;
+  f_payment_amount: string | null;
+  f_payment1_amount: string | null;
+  f_payment2_amount: string | null;
+  f_payment3_amount: string | null;
+  f_payment_date: string | null;
+  f_payment_bank: string | null;
+  f_payment_method_detail: string | null;
+  f_payment_reference: string | null;
+  f_payment_receipt_path: string | null;
+  f_payment_verified: string | null;
 }
 
-/**
- * Lean list for table/board/accounting/cashflow: no files/activities and slim fields_json.
- */
-export async function listOrdersSummary(userId: number): Promise<Order[]> {
-  const orders = await listOrders(userId);
-  return orders.map((o) => ({
-    ...o,
-    fields: pickListFields(o.fields || {}),
+function leanRowToOrder(row: LeanOrderRow): Order {
+  const fields: Record<string, string | boolean> = {};
+  const set = (key: ListFieldKey, raw: string | null) => {
+    if (raw == null || raw === '') return;
+    if (key === 'payment_verified') {
+      fields[key] = raw === 'true' || raw === '1';
+      return;
+    }
+    fields[key] = raw;
+  };
+  set('order_type', row.f_order_type);
+  set('due_date', row.f_due_date);
+  set('client_delivery_date', row.f_client_delivery_date);
+  set('payment_amount', row.f_payment_amount);
+  set('payment1_amount', row.f_payment1_amount);
+  set('payment2_amount', row.f_payment2_amount);
+  set('payment3_amount', row.f_payment3_amount);
+  set('payment_date', row.f_payment_date);
+  set('payment_bank', row.f_payment_bank);
+  set('payment_method_detail', row.f_payment_method_detail);
+  set('payment_reference', row.f_payment_reference);
+  set('payment_receipt_path', row.f_payment_receipt_path);
+  if (row.f_payment_verified != null && row.f_payment_verified !== '') {
+    set('payment_verified', row.f_payment_verified);
+  }
+
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    reference_number: row.reference_number,
+    po_number: row.po_number || '',
+    name: row.name || '',
+    description: row.description || '',
+    status: row.status || 'OPEN',
+    delivery_date: orderDueDate({ fields }) || row.delivery_date || '',
+    customer_email: row.customer_email || '',
+    phone: row.phone || '',
+    shipping_address: row.shipping_address || '',
+    notes: row.notes || '',
+    carton_count: row.carton_count || '',
+    quotation_id: row.quotation_id || null,
+    total_amount: row.total_amount != null ? Number(row.total_amount) : null,
+    fields,
     files: [],
     activities: [],
     linked_invoice: null,
     linked_quotation: null,
-  }));
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+export type ListOrdersSummaryOpts = {
+  /** YYYY-MM — only orders whose payment_date (or created_at fallback) falls in this month. */
+  paymentMonth?: string;
+  /** Only orders that have any primary payment field set (accounting ledger). */
+  withPaymentFields?: boolean;
+};
+
+/**
+ * Lean list for table/board/accounting/cashflow: core columns + list field keys via jsonb,
+ * without parsing full fields_json blobs in Node.
+ */
+export async function listOrdersSummary(
+  userId: number,
+  opts: ListOrdersSummaryOpts = {}
+): Promise<Order[]> {
+  const params: (string | number)[] = [userId];
+  let whereExtra = '';
+
+  if (opts.paymentMonth && /^\d{4}-\d{2}$/.test(opts.paymentMonth)) {
+    whereExtra += ` AND (
+      (NULLIF(j.fj->>'payment_date', '') IS NOT NULL AND (j.fj->>'payment_date') LIKE ?)
+      OR (
+        (j.fj->>'payment_date' IS NULL OR j.fj->>'payment_date' = '')
+        AND o.created_at LIKE ?
+      )
+    )`;
+    params.push(`${opts.paymentMonth}%`, `${opts.paymentMonth}%`);
+  }
+
+  if (opts.withPaymentFields) {
+    whereExtra += ` AND (
+      NULLIF(j.fj->>'payment_amount', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment_date', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment_bank', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment_method_detail', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment_reference', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment_receipt_path', '') IS NOT NULL
+    )`;
+  }
+
+  const rows = (await db
+    .prepare(
+      `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
+              o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
+              o.quotation_id, o.total_amount, o.created_at, o.updated_at,
+              ${LIST_FIELD_SQL}
+       FROM orders o
+       LEFT JOIN LATERAL (
+         SELECT CASE
+           WHEN o.fields_json IS NULL OR btrim(o.fields_json) = '' THEN '{}'::jsonb
+           ELSE o.fields_json::jsonb
+         END AS fj
+       ) AS j ON true
+       WHERE o.user_id = ?${whereExtra}
+       ORDER BY o.updated_at DESC, o.id DESC`
+    )
+    .all(...params)) as LeanOrderRow[];
+
+  return rows.map(leanRowToOrder);
+}
+
+/** Dropdown options for linking orders to invoices (id + labels only). */
+export async function listOrderOptions(
+  userId: number
+): Promise<{ id: number; reference_number: string; po_number: string; name: string }[]> {
+  return (await db
+    .prepare(
+      `SELECT id, reference_number, COALESCE(po_number, '') AS po_number, COALESCE(name, '') AS name
+       FROM orders WHERE user_id = ? ORDER BY updated_at DESC, id DESC`
+    )
+    .all(userId)) as { id: number; reference_number: string; po_number: string; name: string }[];
 }
 
 export async function logActivity(

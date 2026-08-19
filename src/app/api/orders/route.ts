@@ -14,6 +14,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const ownerId = await getDataOwnerId(session);
+  const fields = new URL(request.url).searchParams.get('fields');
+  if (fields === 'options') {
+    const { listOrderOptions } = await import('@/lib/order-server');
+    return NextResponse.json({ orders: await listOrderOptions(ownerId) });
+  }
   return NextResponse.json({ orders: await listOrdersSummary(ownerId) });
 }
 

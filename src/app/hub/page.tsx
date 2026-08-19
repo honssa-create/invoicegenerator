@@ -78,6 +78,8 @@ function OrderHubContent() {
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   const load = () => {
     setLoading(true);
@@ -114,6 +116,13 @@ function OrderHubContent() {
     }
     return rows;
   }, [data, platformFilter, dateStart, dateEnd, search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [platformFilter, dateStart, dateEnd, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const importBody = () => JSON.stringify({ date_from: importDateFrom, date_to: importDateTo });
 
@@ -461,6 +470,7 @@ function OrderHubContent() {
             No orders yet. Connect integrations in Settings, then click Import on each platform card above.
           </div>
         ) : (
+          <>
           <table className="w-full min-w-[1100px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
@@ -475,7 +485,7 @@ function OrderHubContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtered.map((r) => (
+              {pageRows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <Link href={`/orders/${r.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium">
@@ -515,6 +525,32 @@ function OrderHubContent() {
               ))}
             </tbody>
           </table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm text-gray-600">
+              <span>
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 disabled:opacity-40"
+                >
+                  ← Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 disabled:opacity-40"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
     </AppLayout>

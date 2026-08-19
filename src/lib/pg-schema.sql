@@ -678,13 +678,19 @@ CREATE INDEX IF NOT EXISTS idx_customers_user ON customers(user_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_user ON invoices(user_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_user_paid ON expenses(user_id, paid_date DESC);
+CREATE INDEX IF NOT EXISTS idx_expenses_user_created_by ON expenses(user_id, created_by_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_quotation ON orders(quotation_id) WHERE quotation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_order_files_order ON order_files(order_id);
 
 CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type, entity_id);
 
 CREATE INDEX IF NOT EXISTS idx_invoice_files_invoice ON invoice_files(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_order_id ON invoices(order_id) WHERE order_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_invoices_user_status ON invoices(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_invoices_user_status_due ON invoices(user_id, status, due_date);
 
 CREATE INDEX IF NOT EXISTS idx_quotations_user ON quotations(user_id);
 CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
@@ -728,6 +734,7 @@ CREATE INDEX IF NOT EXISTS idx_rental_lease_docs_lease ON rental_lease_documents
 
 CREATE INDEX IF NOT EXISTS idx_reconciliation_user ON reconciliation_records(user_id);
 CREATE INDEX IF NOT EXISTS idx_reconciliation_status ON reconciliation_records(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_reconciliation_deposit ON reconciliation_records(user_id, deposit_time DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reconciliation_external ON reconciliation_records(user_id, external_id)
   WHERE external_id IS NOT NULL;
 

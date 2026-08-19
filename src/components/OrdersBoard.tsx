@@ -25,6 +25,8 @@ type Props = {
   creatingStatus?: string | null;
 };
 
+const COLUMN_CARD_CAP = 40;
+
 function cardTitle(o: Order): string {
   const po = o.po_number?.trim();
   const name = o.name?.trim();
@@ -229,6 +231,7 @@ export default function OrdersBoard({
   const [busyId, setBusyId] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [menuStatus, setMenuStatus] = useState<string | null>(null);
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(() => new Set());
 
   const fallbackStatus = statuses[0] || 'OPEN';
 
@@ -275,6 +278,11 @@ export default function OrdersBoard({
       <div className="flex gap-3 min-w-min items-start">
         {statuses.map((status) => {
           const columnOrders = byStatus.get(status) || [];
+          const expanded = expandedColumns.has(status);
+          const visibleOrders =
+            expanded || columnOrders.length <= COLUMN_CARD_CAP
+              ? columnOrders
+              : columnOrders.slice(0, COLUMN_CARD_CAP);
           const isOver = dropStatus === status && draggingId != null;
           const isCollapsed = collapsed.has(status);
           const dropHandlers = {
@@ -400,7 +408,7 @@ export default function OrdersBoard({
                 </div>
               </header>
               <div className="px-2.5 pb-2 space-y-2.5 min-h-[80px] max-h-[calc(100vh-18rem)] overflow-y-auto">
-                {columnOrders.map((o) => (
+                {visibleOrders.map((o) => (
                   <OrderCard
                     key={o.id}
                     order={o}
@@ -412,6 +420,21 @@ export default function OrdersBoard({
                     }}
                   />
                 ))}
+                {columnOrders.length > COLUMN_CARD_CAP && !expanded && (
+                  <button
+                    type="button"
+                    className="w-full text-xs text-brand-600 hover:text-brand-700 py-2"
+                    onClick={() =>
+                      setExpandedColumns((prev) => {
+                        const next = new Set(prev);
+                        next.add(status);
+                        return next;
+                      })
+                    }
+                  >
+                    {bi(`Show ${columnOrders.length - COLUMN_CARD_CAP} more`, `再顯示 ${columnOrders.length - COLUMN_CARD_CAP} 張`)}
+                  </button>
+                )}
               </div>
               <div className="px-2.5 pb-3 pt-1">
                 <button

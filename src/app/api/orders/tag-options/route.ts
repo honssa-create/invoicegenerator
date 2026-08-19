@@ -12,18 +12,24 @@ export async function GET(request: Request) {
   }
 
   const ownerId = await getDataOwnerId(session);
+  // Pull only the tags key when present — avoid shipping full fields_json blobs.
   const rows = (await db
-    .prepare('SELECT fields_json FROM orders WHERE user_id = ?')
-    .all(ownerId)) as Array<{ fields_json: string | null }>;
+    .prepare(
+      `SELECT CASE
+         WHEN fields_json IS NULL OR btrim(fields_json) = '' THEN NULL
+         ELSE fields_json::jsonb->'tags'
+       END AS tags
+       FROM orders
+       WHERE user_id = ?
+         AND fields_json IS NOT NULL
+         AND btrim(fields_json) <> ''
+         AND fields_json::jsonb ? 'tags'`
+    )
+    .all(ownerId)) as Array<{ tags: unknown }>;
 
   const tags = new Set<string>();
   for (const row of rows) {
-    let fields: Record<string, unknown> = {};
-    try {
-      fields = row.fields_json ? JSON.parse(row.fields_json) : {};
-    } catch {
-      fields = {};
-    }
+    const fields = { tags: row.tags };
     for (const t of parseOrderTags(fields)) tags.add(t);
   }
 

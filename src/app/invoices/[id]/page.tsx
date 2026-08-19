@@ -20,7 +20,7 @@ import type {
   InvoiceWithDetails,
   LinkedOrderSummary,
 } from '@/lib/types';
-import { orderTitle, type Order } from '@/lib/orders';
+import { orderTitle } from '@/lib/orders';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface LineItem {
@@ -60,7 +60,9 @@ export default function InvoiceDetailPage() {
   const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<
+    { id: number; reference_number: string; po_number?: string; name?: string }[]
+  >([]);
   const [linkedOrder, setLinkedOrder] = useState<LinkedOrderSummary | null>(null);
   const [customerId, setCustomerId] = useState('');
   const [email, setEmail] = useState('');
@@ -147,7 +149,7 @@ export default function InvoiceDetailPage() {
     fetch('/api/customers')
       .then((r) => r.json())
       .then((d) => setCustomers(d.customers || []));
-    fetch('/api/orders')
+    fetch('/api/orders?fields=options')
       .then((r) => r.json())
       .then((d) => setOrders(d.orders || []))
       .catch(() => {});

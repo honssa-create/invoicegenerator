@@ -1,5 +1,5 @@
 import db from './db';
-import { getInvoiceWithDetails } from './invoices';
+import { getInvoiceWithDetails, invoiceTotalsByIds } from './invoices';
 import { logActivity } from './activity';
 import {
   extractOrderNoFromYedpay,
@@ -165,9 +165,13 @@ export async function listReconciliationRecords(userId: number): Promise<Reconci
     .all(userId) as Record<string, unknown>[];
 
   const records = rows.map(rowToRecord);
+  const suggestedIds = records
+    .map((r) => r.suggested_invoice_id)
+    .filter((id): id is number => typeof id === 'number' && id > 0);
+  const totals = await invoiceTotalsByIds(userId, suggestedIds);
   for (const r of records) {
     if (r.suggested_invoice_id) {
-      r.suggested_amount = (await getInvoiceWithDetails(r.suggested_invoice_id, userId))?.total ?? null;
+      r.suggested_amount = totals.get(r.suggested_invoice_id) ?? null;
     }
   }
   return records;
@@ -889,18 +893,21 @@ export async function listMatchCandidates(
     invoice_status: string;
   }[];
 
-  const mapped = await Promise.all(
-    rows.map(async (r) => ({
-      order_id: r.order_id || 0,
-      order_no: r.reference_number || r.order_no || r.system_order_no || '',
-      invoice_id: r.invoice_id,
-      invoice_number: r.invoice_number,
-      invoice_total: (await getInvoiceWithDetails(r.invoice_id, userId))?.total ?? null,
-      invoice_status: r.invoice_status,
-      customer_name: r.customer_name,
-      phone: r.phone,
-    }))
+  const totals = await invoiceTotalsByIds(
+    userId,
+    rows.map((r) => r.invoice_id)
   );
+
+  const mapped = rows.map((r) => ({
+    order_id: r.order_id || 0,
+    order_no: r.reference_number || r.order_no || r.system_order_no || '',
+    invoice_id: r.invoice_id,
+    invoice_number: r.invoice_number,
+    invoice_total: totals.get(r.invoice_id) ?? null,
+    invoice_status: r.invoice_status,
+    customer_name: r.customer_name,
+    phone: r.phone,
+  }));
 
   if (!q) return mapped;
 

@@ -1,6 +1,10 @@
 import db from './db';
 import { hkNowDateTime } from './kitchen-prep';
+import { saveReceipt } from './receipt';
 import type { StockItem } from './stocks';
+
+const ICON_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+const MAX_ICON_BYTES = 10 * 1024 * 1024;
 
 interface StockRow {
   id: number;
@@ -8,6 +12,7 @@ interface StockRow {
   name: string;
   current_qty: number;
   safety_qty: number;
+  icon_path: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -19,15 +24,18 @@ function mapRow(row: StockRow): StockItem {
     name: row.name,
     current_qty: Number(row.current_qty) || 0,
     safety_qty: Number(row.safety_qty) || 0,
+    icon_path: row.icon_path || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
+const ITEM_SELECT = `id, category, name, current_qty, safety_qty, icon_path, created_at, updated_at`;
+
 export async function listStockItems(ownerId: number): Promise<StockItem[]> {
   const rows = (await db
     .prepare(
-      `SELECT id, category, name, current_qty, safety_qty, created_at, updated_at
+      `SELECT ${ITEM_SELECT}
        FROM stock_items
        WHERE user_id = ?
        ORDER BY category ASC, name ASC`
@@ -39,7 +47,7 @@ export async function listStockItems(ownerId: number): Promise<StockItem[]> {
 export async function getStockItem(ownerId: number, id: number): Promise<StockItem | null> {
   const row = (await db
     .prepare(
-      `SELECT id, category, name, current_qty, safety_qty, created_at, updated_at
+      `SELECT ${ITEM_SELECT}
        FROM stock_items WHERE user_id = ? AND id = ?`
     )
     .get(ownerId, id)) as StockRow | undefined;
@@ -56,9 +64,24 @@ function normalizeQty(value: unknown, fallback = 0): number {
   return n;
 }
 
+export async function saveStockIconFile(file: File): Promise<{ error?: string; path?: string }> {
+  if (!ICON_MIMES.has(file.type)) return { error: 'Upload a PNG, JPG or WEBP image' };
+  if (file.size > MAX_ICON_BYTES) return { error: 'Image too large (max 10 MB)' };
+  if (file.size <= 0) return { error: 'Empty files are not allowed' };
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const path = await saveReceipt(buffer, file.type, file.name || 'stock-icon');
+  return { path };
+}
+
 export async function createStockItem(
   ownerId: number,
-  input: { category: string; name: string; current_qty?: number; safety_qty?: number }
+  input: {
+    category: string;
+    name: string;
+    current_qty?: number;
+    safety_qty?: number;
+    icon_path?: string | null;
+  }
 ): Promise<{ error?: string; item?: StockItem }> {
   const category = normalizeText(input.category);
   const name = normalizeText(input.name);
@@ -67,15 +90,16 @@ export async function createStockItem(
 
   const current_qty = Math.max(0, normalizeQty(input.current_qty, 0));
   const safety_qty = Math.max(0, normalizeQty(input.safety_qty, 0));
+  const icon_path = input.icon_path ? String(input.icon_path) : null;
   const now = hkNowDateTime();
 
   try {
     const result = await db
       .prepare(
-        `INSERT INTO stock_items (user_id, category, name, current_qty, safety_qty, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO stock_items (user_id, category, name, current_qty, safety_qty, icon_path, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(ownerId, category, name, current_qty, safety_qty, now, now);
+      .run(ownerId, category, name, current_qty, safety_qty, icon_path, now, now);
 
     const id = Number(result.lastInsertRowid);
     const item = await getStockItem(ownerId, id);
@@ -98,6 +122,8 @@ export async function updateStockItem(
     name?: string;
     current_qty?: number;
     safety_qty?: number;
+    icon_path?: string | null;
+    clear_icon?: boolean;
   }
 ): Promise<{ error?: string; item?: StockItem }> {
   const existing = await getStockItem(ownerId, id);
@@ -118,15 +144,19 @@ export async function updateStockItem(
       ? Math.max(0, normalizeQty(patch.safety_qty, existing.safety_qty))
       : existing.safety_qty;
 
+  let icon_path = existing.icon_path;
+  if (patch.clear_icon) icon_path = null;
+  else if (patch.icon_path !== undefined) icon_path = patch.icon_path;
+
   try {
     await db
       .prepare(
         `UPDATE stock_items
-         SET category = ?, name = ?, current_qty = ?, safety_qty = ?,
+         SET category = ?, name = ?, current_qty = ?, safety_qty = ?, icon_path = ?,
              updated_at = ?
          WHERE user_id = ? AND id = ?`
       )
-      .run(category, name, current_qty, safety_qty, hkNowDateTime(), ownerId, id);
+      .run(category, name, current_qty, safety_qty, icon_path, hkNowDateTime(), ownerId, id);
 
     const item = await getStockItem(ownerId, id);
     if (!item) return { error: 'Item not found' };

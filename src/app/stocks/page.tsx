@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { compressImage } from '@/lib/imageCompression';
 import {
   formatStockQty,
   isBelowSafety,
+  stockIconUrl,
   type StockItem,
 } from '@/lib/stocks';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -32,9 +34,14 @@ export default function StocksPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<ItemForm>(EMPTY_FORM);
+  const [addIcon, setAddIcon] = useState<File | null>(null);
+  const [addIconPreview, setAddIconPreview] = useState('');
 
   const [editItem, setEditItem] = useState<StockItem | null>(null);
   const [editForm, setEditForm] = useState<ItemForm>(EMPTY_FORM);
+  const [editIcon, setEditIcon] = useState<File | null>(null);
+  const [editIconPreview, setEditIconPreview] = useState('');
+  const [clearIcon, setClearIcon] = useState(false);
 
   const [stockUpItem, setStockUpItem] = useState<StockItem | null>(null);
   const [stockUpQty, setStockUpQty] = useState('');
@@ -75,20 +82,50 @@ export default function StocksPage() {
     });
   };
 
+  const pickIcon = async (
+    file: File | undefined,
+    setFile: (f: File | null) => void,
+    setPreview: (updater: (prev: string) => string) => void
+  ) => {
+    if (!file) return;
+    try {
+      const c = await compressImage(file, {
+        maxDim: 512,
+        targetBytes: 80 * 1024,
+        mimeType: 'image/jpeg',
+        quality: 0.8,
+      });
+      setFile(c.file);
+      setPreview((prev) => {
+        if (prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(c.file);
+      });
+    } catch {
+      setError(bi('Failed to read photo', '無法讀取相片'));
+    }
+  };
+
+  const resetAddForm = () => {
+    setAddForm(EMPTY_FORM);
+    setAddIcon(null);
+    setAddIconPreview((prev) => {
+      if (prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return '';
+    });
+  };
+
   const handleAdd = async () => {
     setError('');
     setSaving(true);
     try {
-      const res = await fetch('/api/stocks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category: addForm.category,
-          name: addForm.name,
-          current_qty: Number(addForm.current_qty) || 0,
-          safety_qty: Number(addForm.safety_qty) || 0,
-        }),
-      });
+      const body = new FormData();
+      body.set('category', addForm.category);
+      body.set('name', addForm.name);
+      body.set('current_qty', String(Number(addForm.current_qty) || 0));
+      body.set('safety_qty', String(Number(addForm.safety_qty) || 0));
+      if (addIcon) body.set('icon', addIcon);
+
+      const res = await fetch('/api/stocks', { method: 'POST', body });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || bi('Failed to add item', '新增失敗'));
@@ -96,7 +133,7 @@ export default function StocksPage() {
       }
       upsertLocal(data.item);
       setShowAdd(false);
-      setAddForm(EMPTY_FORM);
+      resetAddForm();
     } catch {
       setError(bi('Failed to add item', '新增失敗'));
     } finally {
@@ -113,6 +150,12 @@ export default function StocksPage() {
       current_qty: String(item.current_qty),
       safety_qty: String(item.safety_qty),
     });
+    setEditIcon(null);
+    setEditIconPreview((prev) => {
+      if (prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return stockIconUrl(item) || '';
+    });
+    setClearIcon(false);
   };
 
   const handleEdit = async () => {
@@ -120,16 +163,15 @@ export default function StocksPage() {
     setError('');
     setSaving(true);
     try {
-      const res = await fetch(`/api/stocks/${editItem.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category: editForm.category,
-          name: editForm.name,
-          current_qty: Number(editForm.current_qty) || 0,
-          safety_qty: Number(editForm.safety_qty) || 0,
-        }),
-      });
+      const body = new FormData();
+      body.set('category', editForm.category);
+      body.set('name', editForm.name);
+      body.set('current_qty', String(Number(editForm.current_qty) || 0));
+      body.set('safety_qty', String(Number(editForm.safety_qty) || 0));
+      if (clearIcon && !editIcon) body.set('clear_icon', '1');
+      if (editIcon) body.set('icon', editIcon);
+
+      const res = await fetch(`/api/stocks/${editItem.id}`, { method: 'PATCH', body });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || bi('Failed to update item', '更新失敗'));
@@ -245,6 +287,41 @@ export default function StocksPage() {
     </div>
   );
 
+  const iconPicker = (
+    preview: string,
+    onPick: (file: File | undefined) => void,
+    onClear?: () => void
+  ) => (
+    <div className="mt-4">
+      <span className="text-sm text-gray-600">{bi('Photo icon', '相片圖示')}</span>
+      <div className="mt-1 flex items-center gap-3">
+        {preview ? (
+          <img src={preview} alt="" className="h-14 w-14 rounded-lg object-cover border border-gray-200" />
+        ) : (
+          <div className="h-14 w-14 rounded-lg border border-dashed border-gray-300 bg-gray-50" />
+        )}
+        <label className="btn border border-gray-300 text-gray-700 cursor-pointer">
+          {bi('Choose photo', '選擇相片')}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              onPick(file);
+            }}
+          />
+        </label>
+        {onClear && preview && (
+          <button type="button" className="text-sm text-gray-500 hover:text-red-600" onClick={onClear}>
+            {bi('Remove', '移除')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <AppLayout>
       <div className="page-header">
@@ -260,7 +337,7 @@ export default function StocksPage() {
               type="button"
               onClick={() => {
                 setError('');
-                setAddForm(EMPTY_FORM);
+                resetAddForm();
                 setShowAdd(true);
               }}
               className="btn bg-brand-600 text-white hover:bg-brand-700"
@@ -281,6 +358,17 @@ export default function StocksPage() {
         <div className="mb-6 bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="font-semibold text-gray-900 mb-4">{bi('Add item', '新增項目')}</h2>
           {formFields(addForm, setAddForm)}
+          {iconPicker(
+            addIconPreview,
+            (file) => void pickIcon(file, setAddIcon, setAddIconPreview),
+            () => {
+              setAddIcon(null);
+              setAddIconPreview((prev) => {
+                if (prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                return '';
+              });
+            }
+          )}
           <div className="mt-4 flex gap-2 justify-end">
             <button
               type="button"
@@ -330,7 +418,20 @@ export default function StocksPage() {
               {sorted.map((item) => (
                 <tr key={item.id} className="hover:bg-brand-50/50">
                   <td className="px-4 py-3 text-gray-700">{item.category}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {stockIconUrl(item) ? (
+                        <img
+                          src={stockIconUrl(item)!}
+                          alt=""
+                          className="h-9 w-9 rounded-md object-cover border border-gray-200 shrink-0"
+                        />
+                      ) : (
+                        <div className="h-9 w-9 rounded-md bg-gray-100 border border-gray-200 shrink-0" />
+                      )}
+                      <span className="truncate">{item.name}</span>
+                    </div>
+                  </td>
                   <td
                     className={`px-4 py-3 text-right font-semibold tabular-nums ${
                       isBelowSafety(item) ? 'text-red-600' : 'text-gray-900'
@@ -385,6 +486,21 @@ export default function StocksPage() {
               {bi('Edit item', '編輯項目')} — {editItem.name}
             </h2>
             {formFields(editForm, setEditForm)}
+            {iconPicker(
+              !clearIcon ? editIconPreview : '',
+              (file) => {
+                setClearIcon(false);
+                void pickIcon(file, setEditIcon, setEditIconPreview);
+              },
+              () => {
+                setEditIcon(null);
+                setClearIcon(true);
+                setEditIconPreview((prev) => {
+                  if (prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                  return '';
+                });
+              }
+            )}
             <div className="mt-4 flex gap-2 justify-end">
               <button
                 type="button"

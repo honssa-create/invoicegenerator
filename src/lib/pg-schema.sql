@@ -340,10 +340,13 @@ CREATE TABLE IF NOT EXISTS stock_items (
   name TEXT NOT NULL,
   current_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
   safety_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+  icon_path TEXT,
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE (user_id, category, name)
 );
+
+ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
 ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_json TEXT;
 ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS formulas_json TEXT;

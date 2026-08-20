@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { resolveDataOwnerId } from '@/lib/org-server';
-import { createStockItem, listStockItems } from '@/lib/stocks-server';
+import { createStockItem, listStockItems, saveStockIconFile } from '@/lib/stocks-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -20,13 +20,43 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await request.json();
+    const contentType = request.headers.get('content-type') || '';
+    let category = '';
+    let name = '';
+    let current_qty: number | undefined;
+    let safety_qty: number | undefined;
+    let iconFile: File | null = null;
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await request.formData();
+      category = String(form.get('category') || '');
+      name = String(form.get('name') || '');
+      if (form.has('current_qty')) current_qty = Number(form.get('current_qty'));
+      if (form.has('safety_qty')) safety_qty = Number(form.get('safety_qty'));
+      const file = form.get('icon');
+      if (file instanceof File && file.size > 0) iconFile = file;
+    } else {
+      const body = await request.json();
+      category = body.category;
+      name = body.name;
+      current_qty = body.current_qty;
+      safety_qty = body.safety_qty;
+    }
+
+    let icon_path: string | null = null;
+    if (iconFile) {
+      const saved = await saveStockIconFile(iconFile);
+      if (saved.error) return NextResponse.json({ error: saved.error }, { status: 400 });
+      icon_path = saved.path || null;
+    }
+
     const ownerId = await resolveDataOwnerId(session);
     const result = await createStockItem(ownerId, {
-      category: body.category,
-      name: body.name,
-      current_qty: body.current_qty,
-      safety_qty: body.safety_qty,
+      category,
+      name,
+      current_qty,
+      safety_qty,
+      icon_path,
     });
     if (result.error) return NextResponse.json({ error: result.error }, { status: 400 });
     return NextResponse.json({ item: result.item });

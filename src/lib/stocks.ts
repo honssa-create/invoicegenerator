@@ -6,8 +6,15 @@ export interface StockItem {
   name: string;
   current_qty: number;
   safety_qty: number;
+  icon_path: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export function stockIconUrl(item: Pick<StockItem, 'id' | 'icon_path' | 'updated_at'>): string | null {
+  if (!item.icon_path) return null;
+  const v = encodeURIComponent(item.updated_at || String(item.id));
+  return `/api/stocks/${item.id}/icon?v=${v}`;
 }
 
 export function isBelowSafety(item: Pick<StockItem, 'current_qty' | 'safety_qty'>): boolean {

@@ -1,4 +1,5 @@
 import db from './db';
+import { deleteReplacedStoredFile, deleteStoredFile } from './stored-file-cleanup';
 import { hkNowDateTime } from './kitchen-prep';
 import { saveReceipt } from './receipt';
 import type { StockItem } from './stocks';
@@ -158,6 +159,10 @@ export async function updateStockItem(
       )
       .run(category, name, current_qty, safety_qty, icon_path, hkNowDateTime(), ownerId, id);
 
+    if (icon_path !== existing.icon_path) {
+      await deleteReplacedStoredFile(existing.icon_path, icon_path);
+    }
+
     const item = await getStockItem(ownerId, id);
     if (!item) return { error: 'Item not found' };
     return { item };
@@ -174,10 +179,15 @@ export async function deleteStockItem(
   ownerId: number,
   id: number
 ): Promise<{ error?: string }> {
+  const existing = await getStockItem(ownerId, id);
+  if (!existing) return { error: 'Item not found' };
+
   const result = await db
     .prepare('DELETE FROM stock_items WHERE user_id = ? AND id = ?')
     .run(ownerId, id);
   if (!result.changes) return { error: 'Item not found' };
+
+  await deleteStoredFile(existing.icon_path);
   return {};
 }
 

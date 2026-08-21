@@ -5,6 +5,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { compressImage } from '@/lib/imageCompression';
+import { formReceiptPreviewUrl, utilityMeterPhotoUrl } from '@/lib/image-url';
 import {
   UTILITY_METER_DEFINITIONS,
   periodFromReadingDate,
@@ -55,7 +56,11 @@ function draftsFromRound(round: UtilityMeterRound): DraftItem[] {
       reading_value: item?.reading_value != null ? String(item.reading_value) : '',
       photo_path: item?.photo_path || null,
       ocr_text: item?.ocr_text || null,
-      previewUrl: item?.id ? `/api/rentals/meters/files/${item.id}` : null,
+      previewUrl: item?.photo_path
+        ? item.id > 0
+          ? utilityMeterPhotoUrl(item.id, item.photo_path)
+          : formReceiptPreviewUrl(item.photo_path)
+        : null,
       itemId: item?.id || 0,
       synced_record_id: item?.synced_record_id ?? null,
       scanning: false,
@@ -128,9 +133,10 @@ export default function UtilityMeterReadingsPage() {
   const onPhoto = async (key: UtilityMeterKey, file: File | null) => {
     if (!file || readOnly) return;
     updateDraft(key, { scanning: true });
+    let localPreviewUrl: string | null = null;
     try {
       const compressed = await compressImage(file, { maxDim: 1600, quality: 0.65, targetBytes: 300 * 1024 });
-      const previewUrl = URL.createObjectURL(compressed.file);
+      localPreviewUrl = URL.createObjectURL(compressed.file);
       const kind = UTILITY_METER_DEFINITIONS.find((d) => d.key === key)?.kind || 'electricity';
       const fd = new FormData();
       fd.append('photo', compressed.file);
@@ -139,22 +145,44 @@ export default function UtilityMeterReadingsPage() {
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || bi('OCR failed', '辨識失敗'));
-        updateDraft(key, { scanning: false, previewUrl });
+        setDrafts((list) =>
+          list.map((d) =>
+            d.meter_key === key
+              ? { ...d, scanning: false, previewUrl: localPreviewUrl || d.previewUrl }
+              : d,
+          ),
+        );
         return;
       }
-      updateDraft(key, {
-        scanning: false,
-        previewUrl,
-        photo_path: data.photo_path || null,
-        ocr_text: data.ocr_text || null,
-        reading_value:
-          data.reading != null && Number.isFinite(Number(data.reading))
-            ? String(data.reading)
-            : '',
-      });
+      const photoPath = typeof data.photo_path === 'string' ? data.photo_path.trim() : '';
+      setDrafts((list) =>
+        list.map((d) => {
+          if (d.meter_key !== key) return d;
+          const readingFromOcr =
+            data.reading != null && Number.isFinite(Number(data.reading))
+              ? String(data.reading)
+              : null;
+          return {
+            ...d,
+            scanning: false,
+            previewUrl: photoPath
+              ? formReceiptPreviewUrl(photoPath, localPreviewUrl)
+              : localPreviewUrl,
+            photo_path: photoPath || null,
+            ocr_text: typeof data.ocr_text === 'string' ? data.ocr_text : null,
+            reading_value: readingFromOcr ?? d.reading_value,
+          };
+        }),
+      );
     } catch {
       setError(bi('OCR failed', '辨識失敗'));
-      updateDraft(key, { scanning: false });
+      setDrafts((list) =>
+        list.map((d) =>
+          d.meter_key === key
+            ? { ...d, scanning: false, previewUrl: localPreviewUrl || d.previewUrl }
+            : d,
+        ),
+      );
     }
   };
 
@@ -278,13 +306,15 @@ export default function UtilityMeterReadingsPage() {
                           {item?.photo_path && item.id > 0 ? (
                             <button
                               type="button"
-                              onClick={() => setLightbox(`/api/rentals/meters/files/${item.id}`)}
+                              onClick={() =>
+                                setLightbox(utilityMeterPhotoUrl(item.id, item.photo_path) || '')
+                              }
                               className="block mb-1 rounded border border-gray-200 overflow-hidden cursor-zoom-in hover:ring-2 hover:ring-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
                               title={bi('Click to enlarge', '點擊放大')}
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
-                                src={`/api/rentals/meters/files/${item.id}`}
+                                src={utilityMeterPhotoUrl(item.id, item.photo_path) || ''}
                                 alt=""
                                 className="w-20 h-14 object-cover"
                               />

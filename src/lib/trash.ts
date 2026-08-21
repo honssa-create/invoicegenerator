@@ -2,6 +2,10 @@ import db from './db';
 import type { SessionPayload } from './auth';
 import { getDataOwnerId } from './org-server';
 import {
+  deleteStoredFiles,
+  extractStoredPathsFromTrashPayload,
+} from './stored-file-cleanup';
+import {
   DOCUMENT_NUMBER_RE,
   ORDER_REFERENCE_RE,
   allocateGlobalRecordNumber,
@@ -78,7 +82,21 @@ async function insertTrash(
 }
 
 export async function purgeExpiredTrash(): Promise<number> {
-  const res = await db.prepare('DELETE FROM deleted_records WHERE expires_at < ?').run(utcNowSql());
+  const now = utcNowSql();
+  const expired = (await db
+    .prepare('SELECT entity_type, payload FROM deleted_records WHERE expires_at < ?')
+    .all(now)) as { entity_type: TrashEntityType; payload: string }[];
+
+  for (const row of expired) {
+    try {
+      const payload = JSON.parse(row.payload) as unknown;
+      await deleteStoredFiles(extractStoredPathsFromTrashPayload(row.entity_type, payload));
+    } catch {
+      // Ignore malformed trash payloads; row will still be purged.
+    }
+  }
+
+  const res = await db.prepare('DELETE FROM deleted_records WHERE expires_at < ?').run(now);
   return res.changes;
 }
 

@@ -124,3 +124,36 @@ export async function uploadBufferToR2(
   );
   return publicObjectUrl(key);
 }
+
+export interface R2ListedObject {
+  key: string;
+  lastModified: Date;
+  size: number;
+}
+
+/** List objects under a prefix in the configured R2 bucket. */
+export async function listR2Objects(prefix: string): Promise<R2ListedObject[]> {
+  if (!isR2Configured()) return [];
+  const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+  const listed: R2ListedObject[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const res = await getR2Client().send(
+      new ListObjectsV2Command({
+        Bucket: requireEnv('R2_BUCKET_NAME'),
+        Prefix: prefix.replace(/^\//, ''),
+        ContinuationToken: continuationToken,
+      }),
+    );
+    for (const obj of res.Contents || []) {
+      if (!obj.Key || !obj.LastModified) continue;
+      listed.push({
+        key: obj.Key,
+        lastModified: obj.LastModified,
+        size: obj.Size || 0,
+      });
+    }
+    continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return listed;
+}

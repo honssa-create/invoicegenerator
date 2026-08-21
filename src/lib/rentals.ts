@@ -1408,6 +1408,26 @@ export function buildDebitNotePaymentInstructionsText(
   return lines.join('\n');
 }
 
+/** Split payment instructions into blocks separated by standalone "-" lines (cheque / bank / intro). */
+export function splitDebitNotePaymentBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  let current: string[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '-') {
+      if (current.some((l) => l.trim())) {
+        blocks.push(current.join('\n').replace(/\n+$/, ''));
+      }
+      current = [];
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.some((l) => l.trim())) {
+    blocks.push(current.join('\n').replace(/\n+$/, ''));
+  }
+  return blocks.length ? blocks : [text.trim()];
+}
+
 export interface FormalDebitNoteLine {
   unitName: string;
   description: string;

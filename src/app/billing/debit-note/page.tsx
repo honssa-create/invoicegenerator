@@ -234,11 +234,11 @@ function DebitNoteContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 print:bg-white">
+    <div className="debit-note-print-root min-h-screen bg-gray-100 print:bg-white">
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex flex-wrap items-center justify-between gap-3">
         <Link
           href={unitId ? `/rentals/${unitId}` : `/rentals/tenants/${tenantId}`}
-          className="text-sm text-brand-600 hover:text-brand-700 font-medium"
+          className="text-sm text-brand-600 hover:text-brand-700 font-medium print:hidden"
         >
           ← {BTN.back}
         </Link>
@@ -277,7 +277,7 @@ function DebitNoteContent() {
           <button
             type="button"
             onClick={() => window.print()}
-            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
+            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 print:hidden"
           >
             {BTN.printPdf}
           </button>

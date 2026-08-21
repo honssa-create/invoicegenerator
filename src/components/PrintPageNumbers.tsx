@@ -5,6 +5,7 @@ import {
   countPrintPages,
   formatPrintPageLabel,
   PRINT_PAGE_HEIGHT_MM,
+  usablePrintPageHeightPx,
 } from '@/lib/print-page-numbers';
 
 function pageHeightPx(root: HTMLElement): number {
@@ -21,8 +22,10 @@ function pageHeightPx(root: HTMLElement): number {
 export function useA4PrintPageCount(
   pageRef: { current: HTMLElement | null },
   bodyRef: { current: HTMLElement | null },
+  options?: { footerReserveMm?: number },
 ) {
   const [total, setTotal] = useState(1);
+  const footerReserveMm = options?.footerReserveMm ?? 0;
 
   useLayoutEffect(() => {
     const page = pageRef.current;
@@ -36,7 +39,11 @@ export function useA4PrintPageCount(
         (parseFloat(cs.paddingBottom) || 0) +
         (parseFloat(cs.borderTopWidth) || 0) +
         (parseFloat(cs.borderBottomWidth) || 0);
-      const next = countPrintPages(body.offsetHeight + extraY, pageHeightPx(page));
+      const fullPagePx = pageHeightPx(page);
+      const usablePagePx = footerReserveMm > 0
+        ? usablePrintPageHeightPx(fullPagePx, footerReserveMm)
+        : fullPagePx;
+      const next = countPrintPages(body.offsetHeight + extraY, usablePagePx);
       setTotal((prev) => (prev === next ? prev : next));
     };
 
@@ -48,13 +55,24 @@ export function useA4PrintPageCount(
       ro.disconnect();
       window.removeEventListener('beforeprint', measure);
     };
-  }, [pageRef, bodyRef]);
+  }, [pageRef, bodyRef, footerReserveMm]);
 
   return total;
 }
 
-export default function PrintPageNumbers({ total }: { total: number }) {
+export default function PrintPageNumbers({
+  total,
+  footerReserveMm = 0,
+}: {
+  total: number;
+  /** Match content page-count reserve so labels sit above the footer band. */
+  footerReserveMm?: number;
+}) {
   const pages = Math.max(1, total);
+  const slotHeight =
+    footerReserveMm > 0
+      ? `calc(${PRINT_PAGE_HEIGHT_MM}mm - ${footerReserveMm}mm)`
+      : `${PRINT_PAGE_HEIGHT_MM}mm`;
   return (
     <>
       {Array.from({ length: pages }, (_, i) => (
@@ -62,7 +80,10 @@ export default function PrintPageNumbers({ total }: { total: number }) {
           key={i}
           className="quo-page-number"
           aria-label={formatPrintPageLabel(i + 1, pages)}
-          style={{ top: `calc(${i} * ${PRINT_PAGE_HEIGHT_MM}mm)` }}
+          style={{
+            top: `calc(${i} * ${PRINT_PAGE_HEIGHT_MM}mm)`,
+            height: slotHeight,
+          }}
         >
           {formatPrintPageLabel(i + 1, pages)}
         </div>

@@ -7,8 +7,8 @@ import {
   debitNoteStyleToCssVars,
   type DebitNoteStyleTemplate,
 } from '@/lib/debit-note-style';
-import { formatDebitNoteCompanyMeta, formatTenantDisplayName, type FormalDebitNote } from '@/lib/rentals';
-import { PRINT_PAGE_HEIGHT_MM } from '@/lib/print-page-numbers';
+import { formatDebitNoteCompanyMeta, formatTenantDisplayName, splitDebitNotePaymentBlocks, type FormalDebitNote } from '@/lib/rentals';
+import { PRINT_PAGE_FOOTER_RESERVE_MM, PRINT_PAGE_HEIGHT_MM } from '@/lib/print-page-numbers';
 import PrintPageNumbers, { useA4PrintPageCount } from '@/components/PrintPageNumbers';
 
 interface Props {
@@ -32,7 +32,10 @@ export default function FormalDebitNoteDocument({
   const styleVars = debitNoteStyleToCssVars(styleTemplate);
   const pageRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const pageCount = useA4PrintPageCount(pageRef, bodyRef);
+  const pageCount = useA4PrintPageCount(pageRef, bodyRef, {
+    footerReserveMm: PRINT_PAGE_FOOTER_RESERVE_MM,
+  });
+  const paymentBlocks = splitDebitNotePaymentBlocks(doc.paymentInstructionsText);
 
   return (
     <div
@@ -54,11 +57,10 @@ export default function FormalDebitNoteDocument({
           position: absolute;
           left: 0;
           right: 0;
-          height: 297mm;
           display: flex;
           align-items: flex-end;
           justify-content: flex-end;
-          padding: 0 52px 24px 0;
+          padding: 0 52px 8px 0;
           font-size: 11px;
           line-height: 1;
           color: #666666;
@@ -78,6 +80,18 @@ export default function FormalDebitNoteDocument({
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
+          .dn-preview-page .dn-print-keep,
+          .dn-preview-page .dn-meta {
+            break-inside: avoid-page;
+            page-break-inside: avoid;
+          }
+          .dn-preview-page a[href]::after {
+            content: none !important;
+          }
+          .dn-preview-page a[href] {
+            color: inherit !important;
+            text-decoration: none !important;
+          }
         }
       `}</style>
 
@@ -91,7 +105,7 @@ export default function FormalDebitNoteDocument({
         </header>
 
         <div className="dn-meta">
-          <div>
+          <div className="dn-meta-left">
             <p>
               <span className="dn-label">致 (To):</span>{' '}
               <span className="dn-value-strong">{formatTenantDisplayName(doc.tenant)}</span>
@@ -182,7 +196,7 @@ export default function FormalDebitNoteDocument({
           </section>
         )}
 
-        <div className="dn-total-box">
+        <div className="dn-total-box dn-print-keep">
           <table>
             <tbody>
               <tr>
@@ -205,12 +219,16 @@ export default function FormalDebitNoteDocument({
 
         <footer className="dn-footer">
           <h3 className="dn-footer-title">付款指示與備註 Payment Instructions & Remarks</h3>
-          <pre className="dn-footer-instructions">{doc.paymentInstructionsText}</pre>
-          {doc.footerRemark && <p className="dn-footer-remark">{doc.footerRemark}</p>}
+          {paymentBlocks.map((block, i) => (
+            <pre key={i} className="dn-footer-instructions dn-print-keep">
+              {block}
+            </pre>
+          ))}
+          {doc.footerRemark && <p className="dn-footer-remark dn-print-keep">{doc.footerRemark}</p>}
         </footer>
       </div>
 
-      <PrintPageNumbers total={pageCount} />
+      <PrintPageNumbers total={pageCount} footerReserveMm={PRINT_PAGE_FOOTER_RESERVE_MM} />
     </div>
   );
 }

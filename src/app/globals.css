@@ -109,7 +109,16 @@
     display: none !important;
   }
 
-  /* Scoped expense print styles only */
+  .debit-note-print-root .no-print,
+  .debit-note-print-root .print\\:hidden {
+    display: none !important;
+  }
+
+  .debit-note-print-root a[href]::after {
+    content: none !important;
+  }
+
+  /* Expense print styles only */
   .expense-print-root {
     min-height: 0 !important;
     padding: 0 !important;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countPrintPages, formatPrintPageLabel } from './print-page-numbers';
+import { countPrintPages, formatPrintPageLabel, usablePrintPageHeightPx } from './print-page-numbers';
 
 describe('formatPrintPageLabel', () => {
   it('uses Page X of Y', () => {
@@ -23,5 +23,12 @@ describe('countPrintPages', () => {
   it('treats an exact page height as one sheet', () => {
     expect(countPrintPages(1123, 1123)).toBe(1);
     expect(countPrintPages(2246, 1123)).toBe(2);
+  });
+});
+
+describe('usablePrintPageHeightPx', () => {
+  it('subtracts footer reserve from full page height', () => {
+    expect(usablePrintPageHeightPx(1123, 14)).toBe(1070);
+    expect(usablePrintPageHeightPx(1123, 0)).toBe(1123);
   });
 });

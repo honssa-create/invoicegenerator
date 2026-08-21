@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import type { Customer } from '@/lib/types';
+import { ORDER_TYPES } from '@/lib/orders';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
-const EMPTY_FORM = { name: '', email: '', phone: '', address: '', city: '', state: '', zip: '' };
+const EMPTY_FORM = { name: '', company_name: '', email: '', phone: '', address: '', ordered: '' };
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -34,12 +35,11 @@ export default function CustomersPage() {
   const openEdit = (customer: Customer) => {
     setForm({
       name: customer.name,
+      company_name: customer.company_name || '',
       email: customer.email || '',
       phone: customer.phone || '',
       address: customer.address || '',
-      city: customer.city || '',
-      state: customer.state || '',
-      zip: customer.zip || '',
+      ordered: customer.ordered || '',
     });
     setEditingId(customer.id);
     setShowForm(true);
@@ -109,6 +109,12 @@ export default function CustomersPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
               <input
+                placeholder="公司名"
+                value={form.company_name}
+                onChange={(e) => setForm({ ...form, company_name: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+              <input
                 placeholder={bi('Email', '電郵')}
                 type="email"
                 value={form.email}
@@ -121,31 +127,35 @@ export default function CustomersPage() {
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
-              <input
+              <textarea
                 placeholder={bi('Address', '地址')}
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
+                rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
               />
-              <div className="grid grid-cols-3 gap-3">
-                <input
-                  placeholder={bi('City', '城市')}
-                  value={form.city}
-                  onChange={(e) => setForm({ ...form, city: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
-                />
-                <input
-                  placeholder={bi('State', '州/省')}
-                  value={form.state}
-                  onChange={(e) => setForm({ ...form, state: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
-                />
-                <input
-                  placeholder="ZIP"
-                  value={form.zip}
-                  onChange={(e) => setForm({ ...form, zip: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
-                />
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">{bi('Order type', '訂單類型')}</label>
+                {editingId ? (
+                  <input
+                    value={form.ordered}
+                    readOnly
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-600 outline-none"
+                  />
+                ) : (
+                  <select
+                    value={form.ordered}
+                    onChange={(e) => setForm({ ...form, ordered: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+                  >
+                    <option value="">{bi('Select order type', '選擇訂單類型')}</option>
+                    {ORDER_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700">
@@ -175,13 +185,15 @@ export default function CustomersPage() {
           </div>
         ) : (
           <div className="table-scroll">
-          <table className="w-full min-w-[640px]">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3">{bi('Name', '名稱')}</th>
+                <th className="px-6 py-3">公司名</th>
                 <th className="px-6 py-3">{bi('Email', '電郵')}</th>
                 <th className="px-6 py-3">{bi('Phone', '電話')}</th>
-                <th className="px-6 py-3">{bi('Location', '地區')}</th>
+                <th className="px-6 py-3">{bi('Address', '地址')}</th>
+                <th className="px-6 py-3">{bi('Ordered', '訂單類型')}</th>
                 <th className="px-6 py-3">{bi('Actions', '操作')}</th>
               </tr>
             </thead>
@@ -189,11 +201,13 @@ export default function CustomersPage() {
               {customers.map((c) => (
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{c.name}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{c.company_name || '—'}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{c.email || '—'}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{c.phone || '—'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {[c.city, c.state].filter(Boolean).join(', ') || '—'}
+                  <td className="px-6 py-4 text-sm text-gray-600 max-w-[200px] truncate" title={c.address || ''}>
+                    {c.address || '—'}
                   </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{c.ordered || '—'}</td>
                   <td className="px-6 py-4 text-sm space-x-3">
                     <button onClick={() => openEdit(c)} className="text-brand-600 hover:text-brand-700 font-medium">
                       {BTN.edit}

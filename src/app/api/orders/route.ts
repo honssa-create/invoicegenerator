@@ -7,6 +7,7 @@ import { getDataOwnerId } from '@/lib/org-server';
 import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
+import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -76,7 +77,11 @@ export async function POST(request: Request) {
         // Order still created; prep can be caught up by cron.
       }
     }
-    return NextResponse.json({ order: await getOrder(id, ownerId) }, { status: 201 });
+    const order = await getOrder(id, ownerId);
+    if (order?.name?.trim()) {
+      await trySyncCustomerFromOrderRecord(ownerId, order);
+    }
+    return NextResponse.json({ order }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }

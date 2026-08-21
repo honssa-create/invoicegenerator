@@ -244,6 +244,13 @@ export function wooCustomerName(order: WooOrder): string {
   return name || `WooCommerce #${order.number}`;
 }
 
+export function wooCompanyName(order: WooOrder): string | null {
+  const billing = order.billing?.company?.trim();
+  if (billing) return billing;
+  const shipping = order.shipping?.company?.trim();
+  return shipping || null;
+}
+
 export function wooShippingAddress(order: WooOrder): string | null {
   const formatted = formatWooAddress(order.shipping);
   return formatted || null;

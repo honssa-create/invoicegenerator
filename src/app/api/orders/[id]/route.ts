@@ -9,6 +9,10 @@ import { trashOrder } from '@/lib/trash';
 import { isWeddingGiftOrderType, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
+import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
+
+const CLIENT_SYNC_CORE_KEYS = ['name', 'phone', 'customer_email', 'shipping_address'] as const;
+const CLIENT_SYNC_FIELD_KEYS = ['company_name', 'order_type'] as const;
 
 const CORE_COLUMNS = [
   'po_number',
@@ -216,7 +220,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       }
     }
 
-    return NextResponse.json({ order: await getOrder(params.id, ownerId) });
+    const clientSyncRequested =
+      CLIENT_SYNC_CORE_KEYS.some((k) => k in core) ||
+      CLIENT_SYNC_FIELD_KEYS.some((k) => k in fields);
+    const order = await getOrder(params.id, ownerId);
+    if (clientSyncRequested && order?.name?.trim()) {
+      await trySyncCustomerFromOrderRecord(ownerId, order);
+    }
+
+    return NextResponse.json({ order: order ?? (await getOrder(params.id, ownerId)) });
   } catch {
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
   }

@@ -335,9 +335,7 @@ export default function InvoiceDetailPage() {
     const c = customers.find((x) => String(x.id) === nextId);
     if (!c) return;
     if (!email.trim() && c.email) setEmail(c.email);
-    const composed = [c.name, c.address, [c.city, c.state, c.zip].filter(Boolean).join(', '), c.phone]
-      .filter(Boolean)
-      .join('\n');
+    const composed = [c.name, c.address, c.phone].filter(Boolean).join('\n');
     if (!billingAddress.trim() && composed) setBillingAddress(composed);
     if (!shippingAddress.trim() && composed) setShippingAddress(composed);
   };

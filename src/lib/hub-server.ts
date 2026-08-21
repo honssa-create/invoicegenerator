@@ -34,6 +34,8 @@ import {
   type WooAddressLike,
   type WooLineItemLike,
 } from './orders';
+import { getOrder } from './order-server';
+import { trySyncCustomerFromOrderRecord } from './customer-server';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -49,6 +51,7 @@ export interface HubOrderUpsertInput {
   description?: string | null;
   notes?: string | null;
   external_po_number?: string | null;
+  company_name?: string | null;
   raw_payload?: Record<string, unknown>;
 }
 
@@ -113,6 +116,11 @@ async function findOrCreateCustomer(
     .prepare('INSERT INTO customers (user_id, name, email) VALUES (?, ?, ?)')
     .run(userId, name.trim() || 'Unknown Customer', trimmedEmail);
   return Number(result.lastInsertRowid);
+}
+
+async function syncCustomerAfterHubOrder(userId: number, orderId: number): Promise<void> {
+  const order = await getOrder(orderId, userId);
+  if (order) await trySyncCustomerFromOrderRecord(userId, order);
 }
 
 /** Upsert external order — never deletes local rows. */
@@ -328,6 +336,9 @@ export async function upsertHubOrder(
   if (billingAddress) fields.billing_address = billingAddress;
   if (!shippingAddress && billingAddress) shippingAddress = billingAddress;
 
+  const companyName = input.company_name?.trim();
+  if (companyName) fields.company_name = companyName;
+
   const notesToWrite =
     importedNotes && !(existing?.notes || '').trim() ? importedNotes : null;
 
@@ -360,6 +371,7 @@ export async function upsertHubOrder(
       existing.id,
       userId
     );
+    await syncCustomerAfterHubOrder(userId, existing.id);
     return {
       id: existing.id,
       inserted: false,
@@ -398,8 +410,11 @@ export async function upsertHubOrder(
       );
   });
 
+  const orderId = Number(result.lastInsertRowid);
+  await syncCustomerAfterHubOrder(userId, orderId);
+
   return {
-    id: Number(result.lastInsertRowid),
+    id: orderId,
     inserted: true,
     system_order_no: systemOrderNo,
   };

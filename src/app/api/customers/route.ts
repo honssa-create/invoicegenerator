@@ -10,9 +10,17 @@ export async function GET(request: Request) {
   }
 
   const ownerId = await getDataOwnerId(session);
-  const customers = await db
-    .prepare('SELECT * FROM customers WHERE user_id = ? ORDER BY name')
-    .all(ownerId);
+  const ordered = new URL(request.url).searchParams.get('ordered')?.trim() ?? null;
+
+  const customers = ordered
+    ? await db
+        .prepare(
+          `SELECT * FROM customers
+           WHERE user_id = ? AND COALESCE(trim(ordered), '') = ?
+           ORDER BY name`
+        )
+        .all(ownerId, ordered)
+    : await db.prepare('SELECT * FROM customers WHERE user_id = ? ORDER BY name').all(ownerId);
 
   return NextResponse.json({ customers });
 }
@@ -24,7 +32,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { name, email, phone, address, city, state, zip } = await request.json();
+    const { name, company_name, email, phone, address, ordered } = await request.json();
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
@@ -33,18 +41,17 @@ export async function POST(request: Request) {
     const ownerId = await getDataOwnerId(session);
     const result = await db
       .prepare(
-        `INSERT INTO customers (user_id, name, email, phone, address, city, state, zip)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO customers (user_id, name, company_name, email, phone, address, ordered)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         ownerId,
         name.trim(),
+        company_name?.trim() || null,
         email?.trim() || null,
         phone?.trim() || null,
         address?.trim() || null,
-        city?.trim() || null,
-        state?.trim() || null,
-        zip?.trim() || null
+        ordered?.trim() || null
       );
 
     const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);

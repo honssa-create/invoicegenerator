@@ -41,9 +41,6 @@ function minimalInvoice(overrides: Partial<InvoiceWithDetails> = {}): InvoiceWit
     customer_name: 'Acme',
     customer_email: null,
     customer_address: null,
-    customer_city: null,
-    customer_state: null,
-    customer_zip: null,
     items: [
       {
         id: 1,

@@ -48,9 +48,6 @@ export interface QuotationWithDetails {
   customer_name: string | null;
   customer_email: string | null;
   customer_address: string | null;
-  customer_city: string | null;
-  customer_state: string | null;
-  customer_zip: string | null;
   items: QuotationItem[];
   files: QuotationFile[];
   subtotal: number;

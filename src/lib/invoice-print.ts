@@ -41,14 +41,7 @@ export function defaultReceiptPaymentRemarks(): string {
 }
 
 function customerBillingFallback(inv: InvoiceWithDetails): string {
-  return [
-    inv.customer_name,
-    inv.customer_address,
-    [inv.customer_city, inv.customer_state, inv.customer_zip].filter(Boolean).join(', '),
-    inv.customer_email,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  return [inv.customer_name, inv.customer_address, inv.customer_email].filter(Boolean).join('\n');
 }
 
 function invoiceLineItems(inv: InvoiceWithDetails, money: (n: number) => string) {

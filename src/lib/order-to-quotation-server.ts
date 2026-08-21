@@ -1,4 +1,5 @@
 import db from './db';
+import { findOrCreateCustomerByFingerprint, orderToCustomerSyncInput } from './customer-server';
 import { getOrder } from './order-server';
 import { generateQuoteNumber, getQuotationWithDetails } from './quotation-server';
 import { logActivity } from './activity';
@@ -13,46 +14,9 @@ import type { Order } from './orders';
 import { orderDueDate, resolveOrderAddressesForQuotation } from './orders';
 
 async function findOrCreateCustomerFromOrder(userId: number, order: Order): Promise<number> {
-  const name = order.name?.trim() || 'Unknown Customer';
-  const email = order.customer_email?.trim() || null;
-  const phone = order.phone?.trim() || null;
-  const { billingAddress } = resolveOrderAddressesForQuotation(order);
-  const address = billingAddress;
-
-  let customerId: number | undefined;
-
-  if (email) {
-    const byEmail = await db
-      .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(email) = LOWER(?)')
-      .get(userId, email) as { id: number } | undefined;
-    customerId = byEmail?.id;
-  }
-
-  if (!customerId && name) {
-    const byName = await db
-      .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(name) = LOWER(?)')
-      .get(userId, name) as { id: number } | undefined;
-    customerId = byName?.id;
-  }
-
-  if (customerId) {
-    await db.prepare(
-      `UPDATE customers SET
-         phone = COALESCE(?, phone),
-         address = COALESCE(?, address),
-         email = COALESCE(?, email)
-       WHERE id = ? AND user_id = ?`
-    ).run(phone, address, email, customerId, userId);
-    return customerId;
-  }
-
-  const result = await db
-    .prepare(
-      `INSERT INTO customers (user_id, name, email, phone, address)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(userId, name, email, phone, address);
-  return Number(result.lastInsertRowid);
+  const input = orderToCustomerSyncInput(order);
+  if (!input.name.trim()) input.name = 'Unknown Customer';
+  return findOrCreateCustomerByFingerprint(userId, input);
 }
 
 export async function convertOrderToQuotation(

@@ -38,23 +38,22 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   }
 
   try {
-    const { name, email, phone, address, city, state, zip } = await request.json();
+    const { name, company_name, email, phone, address, ordered } = await request.json();
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
     }
 
     await db.prepare(
-      `UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, city = ?, state = ?, zip = ?
+      `UPDATE customers SET name = ?, company_name = ?, email = ?, phone = ?, address = ?, ordered = ?
        WHERE id = ? AND user_id = ?`
     ).run(
       name.trim(),
+      company_name?.trim() || null,
       email?.trim() || null,
       phone?.trim() || null,
       address?.trim() || null,
-      city?.trim() || null,
-      state?.trim() || null,
-      zip?.trim() || null,
+      ordered?.trim() || null,
       params.id,
       ownerId
     );

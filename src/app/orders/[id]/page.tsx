@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import CustomerSelect from '@/components/CustomerSelect';
 import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
 import OrderPropertyBar, { type AccountUser } from '@/components/OrderPropertyBar';
 import MultiChoiceSelect from '@/components/MultiChoiceSelect';
@@ -77,6 +78,7 @@ import {
   type CupmokaLineItem,
   type Order,
 } from '@/lib/orders';
+import type { Customer } from '@/lib/types';
 import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
@@ -587,6 +589,43 @@ export default function OrderDetailPage() {
   // Helpers for the structured section boxes (values stored in fields_json).
   const softInput = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-colors';
   const fVal = (k: string) => (order.fields[k] as string) ?? '';
+
+  const applyCustomerFromList = (c: Customer) => {
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            name: c.name,
+            phone: c.phone || '',
+            customer_email: c.email || '',
+            shipping_address: c.address || '',
+            fields: {
+              ...prev.fields,
+              company_name: c.company_name || '',
+              ...(c.ordered ? { order_type: c.ordered } : {}),
+            },
+          }
+        : prev
+    );
+    patch({
+      core: {
+        name: c.name,
+        phone: c.phone || null,
+        customer_email: c.email || null,
+        shipping_address: c.address || null,
+      },
+      fields: {
+        company_name: c.company_name || '',
+        ...(c.ordered ? { order_type: c.ordered } : {}),
+      },
+    });
+  };
+
+  const addNewCustomerName = (name: string) => {
+    setCoreLocal('name', name);
+    patch({ core: { name } });
+  };
+
   /** Clamp typed quantity to ≥ 0 (empty stays empty). */
   const nonNeg = (value: string): string => {
     if (value.trim() === '') return '';
@@ -1167,7 +1206,22 @@ export default function OrderDetailPage() {
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-900 mb-1">Name 客戶</label>
-                <input value={order.name} onChange={(e) => setCoreLocal('name', e.target.value)} onBlur={(e) => patch({ core: { name: e.target.value } })} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+                <CustomerSelect
+                  value={order.name}
+                  orderType={fVal('order_type')}
+                  onSelect={applyCustomerFromList}
+                  onAddNew={addNewCustomerName}
+                  placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-900 mb-1">公司名</label>
+                <input
+                  value={fVal('company_name')}
+                  onChange={(e) => setFieldLocal('company_name', e.target.value)}
+                  onBlur={(e) => patch({ fields: { company_name: e.target.value } })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-900 mb-1">電話 Phone</label>

@@ -2,12 +2,11 @@ export interface Customer {
   id: number;
   user_id: number;
   name: string;
+  company_name: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
+  ordered: string | null;
   created_at: string;
 }
 
@@ -75,9 +74,6 @@ export interface InvoiceWithDetails extends Invoice {
   customer_name: string;
   customer_email: string | null;
   customer_address: string | null;
-  customer_city: string | null;
-  customer_state: string | null;
-  customer_zip: string | null;
   items: InvoiceItem[];
   files: InvoiceFile[];
   subtotal: number;

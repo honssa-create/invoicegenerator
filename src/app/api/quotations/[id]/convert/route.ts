@@ -7,6 +7,8 @@ import { createInvoiceFromQuotation } from '@/lib/quotation-to-invoice-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
+import { getOrder } from '@/lib/order-server';
+import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -79,14 +81,16 @@ export async function POST(request: Request, { params }: { params: { id: string 
           null,
           q.customer_email || null,
           null,
-          q.shipping_address?.trim() ||
-            [q.customer_address, q.customer_city, q.customer_state, q.customer_zip].filter(Boolean).join(', ') ||
-            null,
+          q.shipping_address?.trim() || q.customer_address?.trim() || null,
           itemsSummary || null,
           q.id
         );
       return { orderId: result.lastInsertRowid as number, referenceNumber };
     });
+    const order = await getOrder(orderId, ownerId);
+    if (order && q.customer_name?.trim()) {
+      await trySyncCustomerFromOrderRecord(ownerId, order, q.customer_name.trim());
+    }
     await db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
     await logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to order ${referenceNumber}`);
     await logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);

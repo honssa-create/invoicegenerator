@@ -12,9 +12,7 @@ export interface QuotationPrintBusiness {
 }
 
 function customerBillingFallback(q: QuotationWithDetails): string {
-  return [q.customer_name, q.customer_address, [q.customer_city, q.customer_state, q.customer_zip].filter(Boolean).join(', '), q.customer_email]
-    .filter(Boolean)
-    .join('\n');
+  return [q.customer_name, q.customer_address, q.customer_email].filter(Boolean).join('\n');
 }
 
 function remarksFromQuote(q: QuotationWithDetails): string[] {

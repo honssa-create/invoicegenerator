@@ -6,6 +6,8 @@ import { getInvoiceWithDetails } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
+import { getOrder } from '@/lib/order-server';
+import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 
 /** Convert an invoice into a new order (mirrors quotation → order). */
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -57,9 +59,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         null,
         inv.email || inv.customer_email || null,
         null,
-        inv.shipping_address?.trim() ||
-          [inv.customer_address, inv.customer_city, inv.customer_state, inv.customer_zip].filter(Boolean).join(', ') ||
-          null,
+        inv.shipping_address?.trim() || inv.customer_address?.trim() || null,
         itemsSummary || null,
       );
     const oid = result.lastInsertRowid as number;
@@ -73,6 +73,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     return { orderId: oid, referenceNumber };
   });
+
+  const order = await getOrder(orderId, ownerId);
+  if (order && inv.customer_name?.trim()) {
+    await trySyncCustomerFromOrderRecord(ownerId, order, inv.customer_name.trim());
+  }
 
   await logActivity('invoice', params.id, session.userId, 'activity', session.name, `converted to order ${referenceNumber}`);
   await logActivity('order', orderId, session.userId, 'activity', session.name, `created from invoice ${inv.invoice_number}`);

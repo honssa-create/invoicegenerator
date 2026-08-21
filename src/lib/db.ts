@@ -739,6 +739,32 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('rental_charge_items_upsert_unique_v1') ON CONFLICT DO NOTHING`
     );
   }
+
+  const migCustomersSchema = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'customers_simplified_schema_v1'`
+  );
+
+  // Idempotent every boot — columns must exist before API queries / filtered index.
+  await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name TEXT`);
+  await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ordered TEXT`);
+  await client().query(
+    `CREATE INDEX IF NOT EXISTS idx_customers_user_ordered ON customers(user_id, ordered)`
+  );
+
+  if (!migCustomersSchema.rows.length) {
+    await client().query(`
+      UPDATE customers SET address = trim(both from concat_ws(', ',
+        nullif(trim(address), ''), nullif(trim(city), ''),
+        nullif(trim(state), ''), nullif(trim(zip), '')))
+      WHERE city IS NOT NULL OR state IS NOT NULL OR zip IS NOT NULL
+    `);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS city`);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS state`);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS zip`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('customers_simplified_schema_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

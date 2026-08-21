@@ -3,6 +3,10 @@
 import db from './db';
 import {
   defaultKitchenCatalogBundle,
+  mergeBirdNestCatalogRawMaterials,
+  mergeGlassBottleCatalogRawMaterials,
+  mergeReserveRawMaterials,
+  mergeSuiXinGiftBoxBoms,
   normalizeCatalogBundle,
   validateKitchenCatalogBundle,
   finishedSkusFromCatalog,
@@ -41,13 +45,61 @@ export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalog
   const hasCatalog = Boolean(row?.catalog_json);
   const hasFormulas = Boolean(row?.formulas_json);
 
-  const catalog = hasCatalog
+  let catalog = hasCatalog
     ? normalizeCatalogBundle(parseJson(row!.catalog_json, defaults.catalog), null, defaults).catalog
     : defaults.catalog;
-  const formulas = hasFormulas
+  let formulas = hasFormulas
     ? normalizeCatalogBundle(null, parseJson(row!.formulas_json, defaults.formulas), defaults)
         .formulas
     : defaults.formulas;
+
+  const catalogWithBirdNest = mergeBirdNestCatalogRawMaterials(catalog);
+  if (catalogWithBirdNest !== catalog) {
+    catalog = catalogWithBirdNest;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET catalog_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(catalog), userId);
+  }
+
+  const catalogWithGlass = mergeGlassBottleCatalogRawMaterials(catalog);
+  if (catalogWithGlass !== catalog) {
+    catalog = catalogWithGlass;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET catalog_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(catalog), userId);
+  }
+
+  const catalogWithReserve = mergeReserveRawMaterials(catalog);
+  if (catalogWithReserve !== catalog) {
+    catalog = catalogWithReserve;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET catalog_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(catalog), userId);
+  }
+
+  let formulasMerged = mergeSuiXinGiftBoxBoms(formulas);
+  if (JSON.stringify(formulasMerged) !== JSON.stringify(formulas)) {
+    formulas = formulasMerged;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET formulas_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(formulas), userId);
+  }
 
   if (!hasCatalog || !hasFormulas) {
     await db
@@ -81,6 +133,7 @@ export async function saveKitchenCatalog(
     patch.formulas ?? current.formulas,
     current
   );
+  next.formulas = mergeSuiXinGiftBoxBoms(next.formulas);
 
   const err = validateKitchenCatalogBundle(next.catalog, next.formulas);
   if (err) return { error: err };

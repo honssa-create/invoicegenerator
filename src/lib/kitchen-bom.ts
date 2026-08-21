@@ -1,6 +1,14 @@
 /** Gift-box bill of materials and stock-delta helpers (client-safe). */
 
 import type { PrepCapacity, PrepFlavor } from './kitchen-prep';
+import {
+  isGlassBottleFormulaIngredient,
+  defaultGiftBoxGlassBottleStockName,
+  resolveRawStockName,
+  bomRawDisplayLabel,
+} from './kitchen-prep';
+
+export { resolveRawStockName, bomRawDisplayLabel, isGlassBottleFormulaIngredient, LEGACY_GLASS_BOTTLE_NAME } from './kitchen-prep';
 
 export type KitchenFlavor = PrepFlavor;
 export type KitchenCapacity = PrepCapacity;
@@ -63,12 +71,18 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-function suiXinRawBom(portions: number, stewBottles = 0): BomLine[] {
+function suiXinStewBottles(portions: number): number {
+  if (portions <= 0) return 0;
+  return Math.max(2, Math.round((portions / 7) * 2));
+}
+
+function suiXinRawBom(portions: number): BomLine[] {
   const lines: BomLine[] = [];
+  const stewBottles = suiXinStewBottles(portions);
   if (stewBottles > 0) {
-    lines.push({ kind: 'raw', name: '玻璃燉瓶', qty: stewBottles });
+    lines.push({ kind: 'raw', name: defaultGiftBoxGlassBottleStockName(), qty: stewBottles });
   }
-  lines.push({ kind: 'raw', name: '燕餅', qty: round3(portions * SUI_XIN_YAN_BING_G) });
+  lines.push({ kind: 'raw', name: '大燕餅', qty: round3(portions * SUI_XIN_YAN_BING_G) });
   lines.push({ kind: 'raw', name: '冰糖', qty: round3(portions * SUI_XIN_BING_TANG_G) });
   return lines;
 }
@@ -87,8 +101,8 @@ export const GIFT_BOX_BOMS: Record<string, BomLine[]> = {
     { kind: 'finished', sku: finishedSku('75g', 'rock_sugar'), qty: 2 },
     { kind: 'finished', sku: finishedSku('75g', 'red_date'), qty: 3 },
   ],
-  // 隨心燉 portions × grams (燕餅 1.7g / 冰糖 0.6g per portion)
-  sui_xin_7: suiXinRawBom(7, 2),
+  // 隨心燉 portions × grams (燕餅 1.7g / 冰糖 0.6g per portion) + 玻璃燉瓶
+  sui_xin_7: suiXinRawBom(7),
   sui_xin_14: suiXinRawBom(14),
   sui_xin_18: suiXinRawBom(18),
 };
@@ -111,7 +125,7 @@ export function expandGiftBoxBom(
       : {
           kind: 'raw' as const,
           name: line.name,
-          qty: line.name === '玻璃燉瓶' ? line.qty * q : round3(line.qty * q),
+          qty: isGlassBottleFormulaIngredient(line.name) ? line.qty * q : round3(line.qty * q),
         }
   );
 }
@@ -145,7 +159,7 @@ export function finishedShortfallsByCapacity(
 /** Normalize a consume qty for packaging (finished / bottles = int; gram raw = 3dp). */
 export function normalizeBomQty(line: BomLine, qty: number): number {
   if (!Number.isFinite(qty) || qty < 0) return line.qty;
-  if (line.kind === 'finished' || line.name === '玻璃燉瓶') return Math.floor(qty);
+  if (line.kind === 'finished' || isGlassBottleFormulaIngredient(line.name)) return Math.floor(qty);
   return round3(qty);
 }
 
@@ -209,11 +223,12 @@ export function checkBomAgainstStock(lines: BomLine[], stock: StockMaps): StockC
         enough: have >= line.qty,
       };
     }
-    const have = stock.raw[line.name] ?? 0;
+    const stockName = resolveRawStockName(line.name);
+    const have = stock.raw[stockName] ?? 0;
     return {
       kind: 'raw' as const,
       key: line.name,
-      label: line.name,
+      label: bomRawDisplayLabel(line.name),
       need: line.qty,
       have,
       enough: have >= line.qty,

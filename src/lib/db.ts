@@ -691,6 +691,10 @@ async function runBootDataFixes(): Promise<void> {
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_red_date INTEGER`);
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_rock_sugar INTEGER`);
 
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_osmanthus TEXT DEFAULT 'large'`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_red_date TEXT DEFAULT 'large'`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_rock_sugar TEXT DEFAULT 'large'`);
+
   // Extra manual payment methods: 現金 / 支票 / 銀行轉帳.
   const migReconMethods = await client().query<{ key: string }>(
     `SELECT key FROM app_migrations WHERE key = 'reconciliation_payment_methods_v2'`

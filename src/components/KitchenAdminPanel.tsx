@@ -9,6 +9,9 @@ import {
   giftBoxQtyKey,
   uniqueCatalogId,
   finishedSkusFromCatalog,
+  giftBoxBomRawSelectOptions,
+  isReserveRawMaterial,
+  type CatalogRawMaterial,
 } from '@/lib/kitchen';
 import { FINISHED_FLAVORS } from '@/lib/kitchen-bom';
 import type { FlavorFormulaPerBottle, PrepFlavor, StewIngredientLine } from '@/lib/kitchen-prep';
@@ -16,6 +19,7 @@ import {
   PREP_FLAVOR_LABELS,
   formulaFromLines,
   getFormulaLines,
+  defaultGiftBoxGlassBottleStockName,
 } from '@/lib/kitchen-prep';
 import { bi } from '@/lib/ui-labels';
 
@@ -77,6 +81,58 @@ export default function KitchenAdminPanel({
 
   const skus = finishedSkusFromCatalog(catalog);
   const rawNames = catalog.rawMaterials.map((m) => m.name);
+  const giftBoxRawOptions = (currentName: string) => giftBoxBomRawSelectOptions(catalog, currentName);
+  const rawMaterialRows = catalog.rawMaterials.map((material, index) => ({ material, index }));
+  const regularRawRows = rawMaterialRows.filter(({ material }) => !isReserveRawMaterial(material.name));
+  const reserveRawRows = rawMaterialRows.filter(({ material }) => isReserveRawMaterial(material.name));
+
+  const updateRawMaterial = (index: number, patch: Partial<CatalogRawMaterial>) => {
+    const next = [...catalog.rawMaterials];
+    next[index] = { ...next[index], ...patch };
+    setCatalog({ ...catalog, rawMaterials: next });
+  };
+
+  const removeRawMaterial = (index: number) => {
+    setCatalog({
+      ...catalog,
+      rawMaterials: catalog.rawMaterials.filter((_, j) => j !== index),
+    });
+  };
+
+  const rawTableHead = (
+    <thead>
+      <tr className="text-left text-[10px] text-gray-400 uppercase">
+        <th className="pb-1 pr-1 font-medium">名稱</th>
+        <th className="pb-1 pr-1 font-medium w-14">單位</th>
+        <th className="pb-1 w-8" />
+      </tr>
+    </thead>
+  );
+
+  const renderRawMaterialRow = ({ material: m, index: i }: { material: CatalogRawMaterial; index: number }) => (
+    <tr key={i}>
+      <td className="pr-1 py-0.5">
+        <input
+          className={`${inp} w-full min-w-[5rem] max-w-[8rem]`}
+          value={m.name}
+          onChange={(e) => updateRawMaterial(i, { name: e.target.value })}
+          placeholder="名稱"
+        />
+      </td>
+      <td className="pr-1 py-0.5">
+        <input
+          className={`${inp} w-12`}
+          value={m.unit}
+          onChange={(e) => updateRawMaterial(i, { unit: e.target.value })}
+        />
+      </td>
+      <td className="py-0.5">
+        <button type="button" className={btnDel} onClick={() => removeRawMaterial(i)}>
+          ×
+        </button>
+      </td>
+    </tr>
+  );
 
   return (
     <div className="mb-4 rounded-lg border border-gray-200 bg-white text-xs">
@@ -116,74 +172,60 @@ export default function KitchenAdminPanel({
           </div>
 
           {tab === 'raw' && (
-            <div>
-              <table className="w-full max-w-xl border-collapse">
-                <thead>
-                  <tr className="text-left text-[10px] text-gray-400 uppercase">
-                    <th className="pb-1 pr-1 font-medium">名稱</th>
-                    <th className="pb-1 pr-1 font-medium w-14">單位</th>
-                    <th className="pb-1 w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {catalog.rawMaterials.map((m, i) => (
-                    <tr key={i}>
-                      <td className="pr-1 py-0.5">
-                        <input
-                          className={`${inp} w-full min-w-[5rem] max-w-[8rem]`}
-                          value={m.name}
-                          onChange={(e) => {
-                            const next = [...catalog.rawMaterials];
-                            next[i] = { ...m, name: e.target.value };
-                            setCatalog({ ...catalog, rawMaterials: next });
-                          }}
-                          placeholder="名稱"
-                        />
-                      </td>
-                      <td className="pr-1 py-0.5">
-                        <input
-                          className={`${inp} w-12`}
-                          value={m.unit}
-                          onChange={(e) => {
-                            const next = [...catalog.rawMaterials];
-                            next[i] = { ...m, unit: e.target.value };
-                            setCatalog({ ...catalog, rawMaterials: next });
-                          }}
-                        />
-                      </td>
-                      <td className="py-0.5">
-                        <button
-                          type="button"
-                          className={btnDel}
-                          onClick={() =>
-                            setCatalog({
-                              ...catalog,
-                              rawMaterials: catalog.rawMaterials.filter((_, j) => j !== i),
-                            })
-                          }
-                        >
-                          ×
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <button
-                type="button"
-                className={`${btnLink} mt-1`}
-                onClick={() =>
-                  setCatalog({
-                    ...catalog,
-                    rawMaterials: [
-                      ...catalog.rawMaterials,
-                      { name: '', unit: 'g', sortOrder: catalog.rawMaterials.length },
-                    ],
-                  })
-                }
-              >
-                + 新增原料
-              </button>
+            <div className="space-y-4 max-w-xl">
+              <div>
+                <h3 className={sectionTitle}>{bi('Ingredients', '原料')}</h3>
+                <table className="w-full border-collapse">
+                  {rawTableHead}
+                  <tbody>{regularRawRows.map(renderRawMaterialRow)}</tbody>
+                </table>
+                <button
+                  type="button"
+                  className={`${btnLink} mt-1`}
+                  onClick={() => {
+                    const regular = catalog.rawMaterials.filter((m) => !isReserveRawMaterial(m.name));
+                    const reserve = catalog.rawMaterials.filter((m) => isReserveRawMaterial(m.name));
+                    setCatalog({
+                      ...catalog,
+                      rawMaterials: [
+                        ...regular,
+                        { name: '', unit: 'g', sortOrder: regular.length },
+                        ...reserve,
+                      ],
+                    });
+                  }}
+                >
+                  + 新增原料
+                </button>
+              </div>
+
+              <div>
+                <div className="border-t-2 border-black mb-2" aria-hidden />
+                <h3 className={sectionTitle}>{bi('Reserve stock', '備用')}</h3>
+                <table className="w-full border-collapse">
+                  {rawTableHead}
+                  <tbody>{reserveRawRows.map(renderRawMaterialRow)}</tbody>
+                </table>
+                <button
+                  type="button"
+                  className={`${btnLink} mt-1`}
+                  onClick={() => {
+                    const regular = catalog.rawMaterials.filter((m) => !isReserveRawMaterial(m.name));
+                    const reserve = catalog.rawMaterials.filter((m) => isReserveRawMaterial(m.name));
+                    const nextSort = reserve.reduce((max, m) => Math.max(max, m.sortOrder ?? 0), 99) + 1;
+                    setCatalog({
+                      ...catalog,
+                      rawMaterials: [
+                        ...regular,
+                        ...reserve,
+                        { name: '備用', unit: 'g', sortOrder: nextSort },
+                      ],
+                    });
+                  }}
+                >
+                  + 新增原料
+                </button>
+              </div>
             </div>
           )}
 
@@ -325,11 +367,20 @@ export default function KitchenAdminPanel({
             <div className="space-y-2 max-h-[min(28rem,60vh)] overflow-y-auto">
               {catalog.giftBoxTypes.map((g) => {
                 const lines = formulas.giftBoxBoms[g.id] || [];
+                const isSuiXin = g.id.startsWith('sui_xin_');
                 return (
                   <div key={g.id} className="border border-gray-100 rounded p-1.5">
                     <div className="font-medium text-[11px] text-gray-700 mb-1 truncate">
                       {g.label || g.id}
                     </div>
+                    {isSuiXin && (
+                      <p className="text-[10px] text-gray-500 mb-1">
+                        {bi(
+                          '「原」玻璃燉瓶行可選容量；製作禮盒時會扣減所選瓶型庫存。',
+                          'Raw glass-jar line sets which bottle size is consumed when making this box.'
+                        )}
+                      </p>
+                    )}
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="text-[10px] text-gray-400">
@@ -389,7 +440,7 @@ export default function KitchenAdminPanel({
                                 </select>
                               ) : (
                                 <select
-                                  className={`${sel} w-full max-w-[8rem]`}
+                                  className={`${sel} w-full max-w-[14rem]`}
                                   value={line.name}
                                   onChange={(e) => {
                                     const nextLines = [...lines];
@@ -400,7 +451,7 @@ export default function KitchenAdminPanel({
                                     });
                                   }}
                                 >
-                                  {rawNames.map((n) => (
+                                  {giftBoxRawOptions(line.name).map((n) => (
                                     <option key={n} value={n}>
                                       {n}
                                     </option>
@@ -452,10 +503,11 @@ export default function KitchenAdminPanel({
                       type="button"
                       className={btnLink}
                       onClick={() => {
-                        const add: BomLine =
-                          skus.length > 0
+                        const add: BomLine = isSuiXin
+                          ? { kind: 'raw', name: defaultGiftBoxGlassBottleStockName(), qty: 1 }
+                          : skus.length > 0
                             ? { kind: 'finished', sku: skus[0], qty: 1 }
-                            : { kind: 'raw', name: rawNames[0] || '', qty: 1 };
+                            : { kind: 'raw', name: giftBoxRawOptions('')[0] || '', qty: 1 };
                         setFormulas({
                           ...formulas,
                           giftBoxBoms: {

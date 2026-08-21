@@ -11,6 +11,7 @@ import {
   PREP_STATUSES,
   computePrepCalculationForOrder,
   validatePrepFlavorQtys,
+  type BirdNestType,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
@@ -56,6 +57,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return NextResponse.json({ error: validationErr }, { status: 400 });
     }
 
+    const parseBirdNestField = (v: unknown, fallback: BirdNestType): BirdNestType =>
+      v === 'small' || v === 'large' ? v : fallback;
+
     const order = await updatePrepOrder(params.id, {
       stewing_date: body.stewing_date,
       order_type: PREP_ORDER_TYPES.includes(body.order_type) ? body.order_type : undefined,
@@ -70,6 +74,18 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         body.actual_qty_red_date !== undefined ? Number(body.actual_qty_red_date) : undefined,
       actual_qty_rock_sugar:
         body.actual_qty_rock_sugar !== undefined ? Number(body.actual_qty_rock_sugar) : undefined,
+      bird_nest_osmanthus:
+        body.bird_nest_osmanthus !== undefined
+          ? parseBirdNestField(body.bird_nest_osmanthus, existing.bird_nest_osmanthus)
+          : undefined,
+      bird_nest_red_date:
+        body.bird_nest_red_date !== undefined
+          ? parseBirdNestField(body.bird_nest_red_date, existing.bird_nest_red_date)
+          : undefined,
+      bird_nest_rock_sugar:
+        body.bird_nest_rock_sugar !== undefined
+          ? parseBirdNestField(body.bird_nest_rock_sugar, existing.bird_nest_rock_sugar)
+          : undefined,
       notes: body.notes,
     });
 

@@ -32,19 +32,29 @@ describe('expandGiftBoxBom', () => {
     ]);
   });
 
-  it('expands 隨心燉 7 using 1.7g 燕餅 and 0.6g 冰糖 per portion', () => {
+  it('expands 隨心燉 7 using glass jar, 大燕餅 and 冰糖 per portion', () => {
     const lines = expandGiftBoxBom('sui_xin_7', 1);
     expect(lines).toEqual([
-      { kind: 'raw', name: '玻璃燉瓶', qty: 2 },
-      { kind: 'raw', name: '燕餅', qty: 11.9 },
+      { kind: 'raw', name: '75g玻璃燉瓶(大肚)', qty: 2 },
+      { kind: 'raw', name: '大燕餅', qty: 11.9 },
       { kind: 'raw', name: '冰糖', qty: 4.2 },
     ]);
+  });
+
+  it('includes glass jar in all 隨心燉 pack sizes', () => {
+    expect(
+      expandGiftBoxBom('sui_xin_14', 1).some((l) => l.kind === 'raw' && l.name === '75g玻璃燉瓶(大肚)')
+    ).toBe(true);
+    expect(
+      expandGiftBoxBom('sui_xin_18', 1).some((l) => l.kind === 'raw' && l.name === '75g玻璃燉瓶(大肚)')
+    ).toBe(true);
   });
 
   it('scales 隨心燉 14 portions × qty', () => {
     const lines = expandGiftBoxBom('sui_xin_14', 2);
     expect(lines).toEqual([
-      { kind: 'raw', name: '燕餅', qty: 47.6 },
+      { kind: 'raw', name: '75g玻璃燉瓶(大肚)', qty: 8 },
+      { kind: 'raw', name: '大燕餅', qty: 47.6 },
       { kind: 'raw', name: '冰糖', qty: 16.8 },
     ]);
   });
@@ -52,21 +62,46 @@ describe('expandGiftBoxBom', () => {
   it('applies packaging qty overrides for batch variance', () => {
     const defaults = expandGiftBoxBom('sui_xin_7', 1);
     const { lines, error } = applyBomQtyOverrides(defaults, {
-      [bomLineKey({ kind: 'raw', name: '燕餅', qty: 0 })]: 12.1,
+      [bomLineKey({ kind: 'raw', name: '大燕餅', qty: 0 })]: 12.1,
       [bomLineKey({ kind: 'raw', name: '冰糖', qty: 0 })]: 4.0,
     });
     expect(error).toBeUndefined();
     expect(lines).toEqual([
-      { kind: 'raw', name: '玻璃燉瓶', qty: 2 },
-      { kind: 'raw', name: '燕餅', qty: 12.1 },
+      { kind: 'raw', name: '75g玻璃燉瓶(大肚)', qty: 2 },
+      { kind: 'raw', name: '大燕餅', qty: 12.1 },
       { kind: 'raw', name: '冰糖', qty: 4 },
     ]);
   });
 
+  it('consumes admin-selected jar size from BOM', () => {
+    const customBom = {
+      sui_xin_7: [
+        { kind: 'raw' as const, name: '45g玻璃燉瓶', qty: 2 },
+        { kind: 'raw' as const, name: '大燕餅', qty: 11.9 },
+        { kind: 'raw' as const, name: '冰糖', qty: 4.2 },
+      ],
+    };
+    const checks = checkBomAgainstStock(expandGiftBoxBom('sui_xin_7', 1, customBom), {
+      finished: {},
+      raw: { '45g玻璃燉瓶': 5, 大燕餅: 20, 冰糖: 10 },
+      giftBoxes: {},
+    });
+    expect(checks.find((c) => c.label === '45g玻璃燉瓶')?.enough).toBe(true);
+  });
+
   it('rejects negative packaging overrides', () => {
     const defaults = expandGiftBoxBom('sui_xin_7', 1);
-    const { error } = applyBomQtyOverrides(defaults, { 'raw:燕餅': -1 });
+    const { error } = applyBomQtyOverrides(defaults, { 'raw:大燕餅': -1 });
     expect(error).toMatch(/無效/);
+  });
+
+  it('resolves legacy 玻璃燉瓶 to 75g大肚 stock with variant label', () => {
+    const checks = checkBomAgainstStock(
+      [{ kind: 'raw', name: '玻璃燉瓶', qty: 2 }],
+      { finished: {}, raw: { '75g玻璃燉瓶(大肚)': 5 }, giftBoxes: {} }
+    );
+    expect(checks[0].label).toBe('75g玻璃燉瓶(大肚)');
+    expect(checks[0].enough).toBe(true);
   });
 
   it('returns empty for unknown type or zero qty', () => {
@@ -85,7 +120,7 @@ describe('stock sufficiency', () => {
       [finishedSku('75g_big_belly', 'osmanthus')]: 5,
       [finishedSku('75g', 'rock_sugar')]: 10,
     },
-    raw: { 玻璃燉瓶: 2, 燕餅: 20, 冰糖: 20 },
+    raw: { '75g玻璃燉瓶(大肚)': 8, 大燕餅: 20, 冰糖: 20 },
     giftBoxes: { star_gold: 0 },
   };
 

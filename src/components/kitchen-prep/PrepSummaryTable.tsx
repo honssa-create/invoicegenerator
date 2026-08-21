@@ -1,7 +1,9 @@
 import {
   PREP_CAPACITY_LABELS,
   PREP_SUMMARY_TYPO,
-  formatGrams,
+  BIRD_NEST_TYPE_LABELS,
+  formatPrepIngredientQty,
+  STEW_GLASS_BOTTLE_STOCK_NAMES,
   type PrepCalculation,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
@@ -31,7 +33,15 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
     }
     for (const name of Object.keys(calc.totals.ingredientGrams || {})) names.add(name);
     // Stable preferred order, then any extras
-    const preferred = ['燕餅', '桂花', '紅棗', '冰糖', '片糖', '玻璃燉瓶'];
+    const preferred = [
+      '大燕餅',
+      '細燕餅',
+      '桂花',
+      '紅棗',
+      '冰糖',
+      '片糖',
+      ...Object.values(STEW_GLASS_BOTTLE_STOCK_NAMES),
+    ];
     const rest = Array.from(names).filter((n) => !preferred.includes(n)).sort();
     return [...preferred.filter((n) => names.has(n)), ...rest];
   })();
@@ -59,7 +69,14 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
             <td className={`${cellPad} ${PREP_SUMMARY_TYPO.capacityBadge} text-gray-700`}>
               {PREP_CAPACITY_LABELS[capacity] || capacity}
             </td>
-            <td className={`${cellPad} ${PREP_SUMMARY_TYPO.flavorCell} text-gray-900`}>{r.label}</td>
+            <td className={`${cellPad} ${PREP_SUMMARY_TYPO.flavorCell} text-gray-900`}>
+              {r.label}
+              {r.birdNestType && (
+                <span className="block text-xs font-normal text-gray-500 mt-0.5">
+                  {BIRD_NEST_TYPE_LABELS[r.birdNestType]}
+                </span>
+              )}
+            </td>
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.qtyCell} text-gray-700`}>{r.orderQty}</td>
             <td className={`${cellPad} text-right`}>
               <span className={`${PREP_SUMMARY_TYPO.actualQtyCell} text-brand-700`}>{r.actualQty}</span>
@@ -71,7 +88,7 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
               const qty = r.ingredientGrams?.[name] || 0;
               return (
                 <td key={name} className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.gramCell} text-gray-900`}>
-                  {qty > 0 ? formatGrams(qty) : '—'}
+                  {qty > 0 ? formatPrepIngredientQty(name, qty) : '—'}
                 </td>
               );
             })}
@@ -97,7 +114,7 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
             </td>
             {ingredientCols.map((name) => (
               <td key={name} className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.totalGram} text-brand-800`}>
-                {formatGrams(calc.totals.ingredientGrams?.[name] || 0)}
+                {formatPrepIngredientQty(name, calc.totals.ingredientGrams?.[name] || 0)}
               </td>
             ))}
           </tr>

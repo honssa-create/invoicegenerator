@@ -39,8 +39,15 @@ import {
   WEDDING_GIFT_ORDER_TYPE,
   mapWeddingCapacityToPrep,
 } from './orders';
-import type { PrepFlavor } from './kitchen-prep';
-import { aggregateRawNeedsFromPrepOrders, type PrepCapacity, type PrepOrderType, type PrepStatus } from './kitchen-prep';
+import {
+  aggregateRawNeedsFromPrepOrders,
+  bomRawDisplayLabel,
+  resolveRawStockName,
+  type PrepCapacity,
+  type PrepFlavor,
+  type PrepOrderType,
+  type PrepStatus,
+} from './kitchen-prep';
 
 // Re-export PrepFlavor mapping used for 回禮 bottles
 const WEDDING_FLAVOR_KEYS: { prep: PrepFlavor; actualKey: string; clientKey: string }[] = [
@@ -385,7 +392,8 @@ async function loadUnfinishedPrepRawDemand(
   const rows = (await db
     .prepare(
       `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar,
-              actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar
+              actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
+              bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar
        FROM kitchen_prep_orders
        WHERE status != 'completed'`
     )
@@ -399,6 +407,9 @@ async function loadUnfinishedPrepRawDemand(
     actual_qty_osmanthus: number | null;
     actual_qty_red_date: number | null;
     actual_qty_rock_sugar: number | null;
+    bird_nest_osmanthus: string | null;
+    bird_nest_red_date: string | null;
+    bird_nest_rock_sugar: string | null;
   }[];
   return aggregateRawNeedsFromPrepOrders(rows, formulas.stewFormulas);
 }
@@ -644,8 +655,13 @@ export async function makeGiftBox(
           `成品不足：${skuLabel(line.sku, catalog)}（需要 ${line.qty}，現有 ${stock.finished[line.sku] || 0}）`
         );
       }
-    } else if ((stock.raw[line.name] || 0) < line.qty) {
-      rawShort.push(`原料不足：${line.name}（需要 ${line.qty}，現有 ${stock.raw[line.name] || 0}）`);
+    } else {
+      const stockName = resolveRawStockName(line.name);
+      if ((stock.raw[stockName] || 0) < line.qty) {
+        rawShort.push(
+          `原料不足：${bomRawDisplayLabel(line.name)}（需要 ${line.qty}，現有 ${stock.raw[stockName] || 0}）`
+        );
+      }
     }
   }
 
@@ -665,14 +681,16 @@ export async function makeGiftBox(
       .map((l) => ({ sku: l.sku, delta: -l.qty })),
     rawDeltas: lines
       .filter((l): l is { kind: 'raw'; name: string; qty: number } => l.kind === 'raw')
-      .map((l) => ({ name: l.name, delta: -l.qty })),
+      .map((l) => ({ name: resolveRawStockName(l.name), delta: -l.qty })),
     fulfillments: [],
   };
 
   const summaryParts = [`+${qty} ${giftBoxLabel(boxType, catalog)}`];
   for (const l of lines) {
     summaryParts.push(
-      l.kind === 'finished' ? `−${l.qty} ${skuLabel(l.sku, catalog)}` : `−${l.qty} ${l.name}`
+      l.kind === 'finished'
+        ? `−${l.qty} ${skuLabel(l.sku, catalog)}`
+        : `−${l.qty} ${bomRawDisplayLabel(l.name)}`
     );
   }
 

@@ -21,16 +21,28 @@ import {
   SUI_XIN_YAN_BING_G,
   SUI_XIN_BING_TANG_G,
   activeGiftBoxTypes,
+  isReserveRawMaterial,
   type KitchenAction,
   type KitchenState,
   type KitchenOpenOrder,
   type KitchenNeedLine,
 } from '@/lib/kitchen';
+import { resolveRawStockName, defaultGiftBoxGlassBottleStockName } from '@/lib/kitchen-prep';
 import { type StockMaps } from '@/lib/kitchen-bom';
 import { buildKitchenPrepCreateHref, type PrepCapacity } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type Modal = 'gift' | 'return' | 'restock' | null;
+
+type AdjustStockMode = 'set' | 'add';
+
+type AdjustStockTarget = {
+  kind: 'raw' | 'finished' | 'gift_box';
+  key: string;
+  label: string;
+  current: number;
+  unit?: string;
+};
 
 function tickKey(orderId: number, needKey: string) {
   return `${orderId}::${needKey}`;
@@ -121,6 +133,11 @@ export default function KitchenPage() {
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
   const [historyActionFilter, setHistoryActionFilter] = useState<KitchenAction | ''>('');
 
+  // Admin stock adjustment
+  const [adjustStock, setAdjustStock] = useState<AdjustStockTarget | null>(null);
+  const [adjustStockMode, setAdjustStockMode] = useState<AdjustStockMode>('set');
+  const [adjustStockInput, setAdjustStockInput] = useState('');
+
   const giftBoxTypes = state ? activeGiftBoxTypes(state.catalog) : [];
   const rawMaterials = state?.catalog.rawMaterials || [];
 
@@ -144,22 +161,39 @@ export default function KitchenPage() {
 
   const flash = (text: string, kind: 'success' | 'error' = 'success') => setToast({ text, kind });
 
-  const adjustStockAbs = async (
-    kind: 'raw' | 'finished' | 'gift_box',
-    key: string,
-    current: number,
-    unit?: string
-  ) => {
+  const openAdjustStock = (target: AdjustStockTarget) => {
     if (!state?.isAdmin || busy) return;
-    const label = unit ? `${key} (${unit})` : key;
-    const raw = window.prompt(
-      bi(`Set absolute stock for ${label} (current ${current})`, `設定 ${label} 絕對庫存（目前 ${current}）`),
-      String(current)
-    );
-    if (raw == null) return;
-    const quantity = Number(raw);
-    if (!Number.isFinite(quantity) || quantity < 0) {
+    setAdjustStock(target);
+    setAdjustStockMode('set');
+    setAdjustStockInput(String(target.current));
+  };
+
+  const closeAdjustStock = () => {
+    setAdjustStock(null);
+    setAdjustStockInput('');
+  };
+
+  const adjustStockPreview = useMemo(() => {
+    if (!adjustStock || adjustStockInput.trim() === '') return null;
+    const parsed = Number(adjustStockInput);
+    if (!Number.isFinite(parsed)) return null;
+    const next =
+      adjustStockMode === 'set' ? parsed : adjustStock.current + parsed;
+    if (!Number.isFinite(next)) return null;
+    return next;
+  }, [adjustStock, adjustStockMode, adjustStockInput]);
+
+  const submitAdjustStock = async () => {
+    if (!adjustStock || !state?.isAdmin || busy) return;
+    const parsed = Number(adjustStockInput);
+    if (adjustStockInput.trim() === '' || !Number.isFinite(parsed)) {
       flash(bi('Invalid quantity', '數量無效'), 'error');
+      return;
+    }
+    const quantity =
+      adjustStockMode === 'set' ? parsed : adjustStock.current + parsed;
+    if (quantity < 0) {
+      flash(bi('Quantity cannot be negative', '數量不可為負'), 'error');
       return;
     }
     setBusy(true);
@@ -167,7 +201,11 @@ export default function KitchenPage() {
       const res = await fetch('/api/kitchen/adjust-stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, key, quantity }),
+        body: JSON.stringify({
+          kind: adjustStock.kind,
+          key: adjustStock.key,
+          quantity,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -175,6 +213,7 @@ export default function KitchenPage() {
         return;
       }
       setState(data.state);
+      closeAdjustStock();
       flash(bi('Stock adjusted', '庫存已調整'));
     } finally {
       setBusy(false);
@@ -816,7 +855,14 @@ export default function KitchenPage() {
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => adjustStockAbs('gift_box', g.boxType, g.quantity)}
+                          onClick={() =>
+                            openAdjustStock({
+                              kind: 'gift_box',
+                              key: g.boxType,
+                              label: g.label,
+                              current: g.quantity,
+                            })
+                          }
                           className="text-xs text-brand-600 hover:underline disabled:opacity-40"
                         >
                           設定
@@ -857,7 +903,14 @@ export default function KitchenPage() {
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => adjustStockAbs('finished', f.sku, f.quantity)}
+                          onClick={() =>
+                            openAdjustStock({
+                              kind: 'finished',
+                              key: f.sku,
+                              label: f.label,
+                              current: f.quantity,
+                            })
+                          }
                           className="text-xs text-brand-600 hover:underline disabled:opacity-40"
                         >
                           設定
@@ -886,7 +939,7 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {state.raw.map((r) => {
+                {state.raw.filter((r) => !isReserveRawMaterial(r.name) && r.name !== '燕餅' && r.name !== '玻璃燉瓶').map((r) => {
                   const have = availableStockMaps.raw[r.name] ?? r.quantity;
                   const needed = r.needed;
                   const available = have - needed;
@@ -908,7 +961,57 @@ export default function KitchenPage() {
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => adjustStockAbs('raw', r.name, r.quantity, r.unit)}
+                          onClick={() =>
+                            openAdjustStock({
+                              kind: 'raw',
+                              key: r.name,
+                              label: r.name,
+                              current: r.quantity,
+                              unit: r.unit,
+                            })
+                          }
+                          className="text-xs text-brand-600 hover:underline disabled:opacity-40"
+                        >
+                          設定
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                  );
+                })}
+                {state.raw.some((r) => isReserveRawMaterial(r.name)) && (
+                  <tr aria-hidden>
+                    <td colSpan={state.isAdmin ? 5 : 4} className="p-0 h-0 border-t-2 border-black" />
+                  </tr>
+                )}
+                {state.raw.filter((r) => isReserveRawMaterial(r.name)).map((r) => {
+                  const have = availableStockMaps.raw[r.name] ?? r.quantity;
+                  const available = Math.max(0, have - r.needed);
+                  return (
+                  <tr key={r.name} className="border-b border-gray-50 bg-gray-50/40">
+                    <td className="py-2 pr-2">
+                      {r.name}
+                      <span className="text-gray-400 text-xs ml-1">g</span>
+                    </td>
+                    <td className="py-2 pr-2 text-right text-gray-300">—</td>
+                    <td className="py-2 pr-2 text-right text-gray-300">—</td>
+                    <td className={`py-2 text-right font-medium ${available <= 0 ? 'text-gray-400' : ''}`}>
+                      {formatRawQty(available, 'g')}
+                    </td>
+                    {state.isAdmin && (
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            openAdjustStock({
+                              kind: 'raw',
+                              key: r.name,
+                              label: r.name,
+                              current: r.quantity,
+                              unit: r.unit,
+                            })
+                          }
                           className="text-xs text-brand-600 hover:underline disabled:opacity-40"
                         >
                           設定
@@ -1235,8 +1338,9 @@ export default function KitchenPage() {
                     <div className="font-medium text-gray-700">消耗（包裝用成品樽/原料）</div>
                     {giftType.startsWith('sui_xin') && (
                       <p className="text-xs text-gray-500">
-                        預設換算：每份頂級乾燕餅 = {SUI_XIN_YAN_BING_G}g 燕餅、每份燕窩冰糖 ={' '}
-                        {SUI_XIN_BING_TANG_G}g 冰糖。可因批次誤差調整實際消耗。
+                        預設換算：每份頂級乾燕餅 = {SUI_XIN_YAN_BING_G}g 大燕餅、每份燕窩冰糖 ={' '}
+                        {SUI_XIN_BING_TANG_G}g 冰糖；玻璃燉瓶 = {defaultGiftBoxGlassBottleStockName()}。
+                        可因批次誤差調整實際消耗。
                       </p>
                     )}
                     {!giftType.startsWith('sui_xin') && (
@@ -1245,7 +1349,7 @@ export default function KitchenPage() {
                     {giftChecks.map((c) => {
                       const unit =
                         c.kind === 'raw'
-                          ? rawMaterials.find((m) => m.name === c.key)?.unit || 'g'
+                          ? rawMaterials.find((m) => m.name === resolveRawStockName(c.key))?.unit || 'g'
                           : '個';
                       const lineKey =
                         c.kind === 'finished' ? `finished:${c.key}` : `raw:${c.key}`;
@@ -1423,6 +1527,116 @@ export default function KitchenPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {adjustStock && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold mb-1">
+              {bi('Adjust stock', '調整庫存')}
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              {adjustStock.label}
+              {adjustStock.unit ? (
+                <span className="text-gray-400 ml-1">({adjustStock.unit})</span>
+              ) : null}
+            </p>
+
+            <p className="text-sm text-gray-500 mb-3">
+              {bi('Current stock', '目前庫存')}:{' '}
+              <span className="font-medium text-gray-800 tabular-nums">
+                {adjustStock.unit
+                  ? formatRawQty(adjustStock.current, adjustStock.unit)
+                  : adjustStock.current}
+              </span>
+            </p>
+
+            <div className="flex rounded-lg border border-gray-200 p-0.5 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdjustStockMode('set');
+                  setAdjustStockInput(String(adjustStock.current));
+                }}
+                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  adjustStockMode === 'set'
+                    ? 'bg-brand-600 text-white'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {bi('Set absolute', '設定絕對數量')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdjustStockMode('add');
+                  setAdjustStockInput('');
+                }}
+                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  adjustStockMode === 'add'
+                    ? 'bg-brand-600 text-white'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {bi('Add amount', '加減數量')}
+              </button>
+            </div>
+
+            <label className="block text-sm text-gray-600 mb-1">
+              {adjustStockMode === 'set'
+                ? bi('New stock level', '新庫存量')
+                : bi('Amount to add (use − to subtract)', '加減數量（減少請用 −）')}
+            </label>
+            <input
+              type="number"
+              step={adjustStock.unit === 'g' ? '0.001' : '1'}
+              className={`${inputCls} w-full mb-2 tabular-nums`}
+              value={adjustStockInput}
+              onChange={(e) => setAdjustStockInput(e.target.value)}
+              autoFocus
+            />
+            {adjustStockPreview != null && (
+              <p
+                className={`text-sm mb-4 tabular-nums ${
+                  adjustStockPreview < 0 ? 'text-red-600' : 'text-gray-500'
+                }`}
+              >
+                {bi('Result', '結果')}:{' '}
+                <span className="font-medium text-gray-800">
+                  {adjustStock.unit
+                    ? formatRawQty(Math.max(0, adjustStockPreview), adjustStock.unit)
+                    : Math.max(0, Math.floor(adjustStockPreview))}
+                </span>
+                {adjustStockPreview < 0 && (
+                  <span className="ml-2">{bi('(invalid)', '（無效）')}</span>
+                )}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg border"
+                disabled={busy}
+                onClick={closeAdjustStock}
+              >
+                {BTN.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  adjustStockPreview == null ||
+                  adjustStockPreview < 0
+                }
+                onClick={submitAdjustStock}
+                className="px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
+              >
+                {BTN.confirm}
+              </button>
+            </div>
           </div>
         </div>
       )}

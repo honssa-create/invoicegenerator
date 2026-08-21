@@ -1,6 +1,7 @@
 import {
   getFlavorFormula,
   getFormulaLines,
+  isBirdNestFormulaIngredient,
   isRedDateAllowed,
   type PrepCapacity,
   type PrepFlavor,
@@ -2294,7 +2295,7 @@ export function computeWeddingGiftMaterials(
     if (!formula) continue;
     totalBottles += qty;
     for (const l of getFormulaLines(formula, prep)) {
-      if (l.name === '燕餅') birdCake += qty * l.qty;
+      if (isBirdNestFormulaIngredient(l.name)) birdCake += qty * l.qty;
       else if (l.name === '桂花') osmanthus += qty * l.qty;
       else if (l.name === '紅棗') redDate += qty * l.qty;
       else if (l.name === '冰糖') rockSugar += qty * l.qty;

@@ -13,9 +13,12 @@ import {
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUSES,
   PREP_STATUS_LABELS,
+  BIRD_NEST_TYPES,
+  BIRD_NEST_TYPE_LABELS,
   formulaSummaryForCapacity,
   isRedDateAllowed,
   resolveActualQty,
+  type BirdNestType,
   type PrepCalculation,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
@@ -115,33 +118,55 @@ export default function KitchenPrepDetailPage() {
   const flavorPair = (
     orderKey: 'qty_osmanthus' | 'qty_red_date' | 'qty_rock_sugar',
     actualKey: 'actual_qty_osmanthus' | 'actual_qty_red_date' | 'actual_qty_rock_sugar',
+    birdNestKey: 'bird_nest_osmanthus' | 'bird_nest_red_date' | 'bird_nest_rock_sugar',
     label: string,
     disabled = false
   ) => (
-    <div className="grid grid-cols-2 gap-3">
-      <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1.5">{label} · 客人訂</label>
-        <input
-          type="number"
-          min="0"
-          disabled={disabled}
-          value={order[orderKey]}
-          onChange={(e) => setOrder({ ...order, [orderKey]: Number(e.target.value) || 0 })}
-          onBlur={() => patch({ [orderKey]: order[orderKey] })}
-          className={`${input} text-lg font-semibold ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
-        />
+    <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50/50 p-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">{label} · 客人訂</label>
+          <input
+            type="number"
+            min="0"
+            disabled={disabled}
+            value={order[orderKey]}
+            onChange={(e) => setOrder({ ...order, [orderKey]: Number(e.target.value) || 0 })}
+            onBlur={() => patch({ [orderKey]: order[orderKey] })}
+            className={`${input} text-lg font-semibold ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">實際生產</label>
+          <input
+            type="number"
+            min="0"
+            disabled={disabled}
+            value={resolveActualQty(order[orderKey], order[actualKey])}
+            onChange={(e) => setOrder({ ...order, [actualKey]: Number(e.target.value) || 0 })}
+            onBlur={() => patch({ [actualKey]: resolveActualQty(order[orderKey], order[actualKey]) })}
+            className={`${input} text-lg font-semibold text-brand-800 ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+          />
+        </div>
       </div>
       <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1.5">實際生產</label>
-        <input
-          type="number"
-          min="0"
+        <label className="block text-xs font-medium text-gray-500 mb-1.5">燕餅類型 Bird&apos;s-nest type</label>
+        <select
           disabled={disabled}
-          value={resolveActualQty(order[orderKey], order[actualKey])}
-          onChange={(e) => setOrder({ ...order, [actualKey]: Number(e.target.value) || 0 })}
-          onBlur={() => patch({ [actualKey]: resolveActualQty(order[orderKey], order[actualKey]) })}
-          className={`${input} text-lg font-semibold text-brand-800 ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
-        />
+          value={order[birdNestKey]}
+          onChange={(e) => {
+            const v = e.target.value as BirdNestType;
+            setOrder({ ...order, [birdNestKey]: v });
+            patch({ [birdNestKey]: v });
+          }}
+          className={`${input} ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+        >
+          {BIRD_NEST_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {BIRD_NEST_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );
@@ -242,9 +267,9 @@ export default function KitchenPrepDetailPage() {
 
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Order Quantities 訂購樽數</h3>
         <div className="grid md:grid-cols-3 gap-5 mb-4">
-          {flavorPair('qty_osmanthus', 'actual_qty_osmanthus', '桂花 Osmanthus')}
-          {flavorPair('qty_red_date', 'actual_qty_red_date', '紅棗 Red Date', !isRedDateAllowed(order.capacity))}
-          {flavorPair('qty_rock_sugar', 'actual_qty_rock_sugar', '冰糖 Rock Sugar')}
+          {flavorPair('qty_osmanthus', 'actual_qty_osmanthus', 'bird_nest_osmanthus', '桂花 Osmanthus')}
+          {flavorPair('qty_red_date', 'actual_qty_red_date', 'bird_nest_red_date', '紅棗 Red Date', !isRedDateAllowed(order.capacity))}
+          {flavorPair('qty_rock_sugar', 'actual_qty_rock_sugar', 'bird_nest_rock_sugar', '冰糖 Rock Sugar')}
         </div>
         <p className="text-xs text-gray-500 mb-4">
           實際生產樽數 is used for the kitchen summary. Defaults to the ordered qty; set it higher for extra bottles (e.g. 回禮).

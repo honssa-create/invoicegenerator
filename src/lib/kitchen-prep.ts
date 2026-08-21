@@ -20,6 +20,105 @@ export const PREP_FLAVOR_LABELS: Record<PrepFlavor, string> = {
   rock_sugar: '冰糖 Rock Sugar',
 };
 
+/** Per-flavor bird's-nest cake type for stewing (maps to raw stock name). */
+export const BIRD_NEST_TYPES = ['large', 'small'] as const;
+export type BirdNestType = (typeof BIRD_NEST_TYPES)[number];
+
+export const BIRD_NEST_TYPE_LABELS: Record<BirdNestType, string> = {
+  large: '大燕餅',
+  small: '細燕餅',
+};
+
+/** Formula line names that represent bird-nest grams (resolved at calc time). */
+export const BIRD_NEST_FORMULA_NAMES = ['燕餅', '大燕餅', '細燕餅'] as const;
+
+export function isBirdNestFormulaIngredient(name: string): boolean {
+  return (BIRD_NEST_FORMULA_NAMES as readonly string[]).includes(name);
+}
+
+export function birdNestMaterialName(type: BirdNestType): string {
+  return BIRD_NEST_TYPE_LABELS[type];
+}
+
+export function parseBirdNestType(raw: string | null | undefined): BirdNestType {
+  return raw === 'small' ? 'small' : 'large';
+}
+
+export function resolveFormulaIngredientName(
+  name: string,
+  birdNestType: BirdNestType,
+  capacity: PrepCapacity
+): string {
+  if (isBirdNestFormulaIngredient(name)) return birdNestMaterialName(birdNestType);
+  if (isGlassBottleFormulaIngredient(name)) return stewGlassBottleName(capacity);
+  return name;
+}
+
+/** Stew glass jar stock name per prep capacity. */
+export const STEW_GLASS_BOTTLE_STOCK_NAMES: Record<string, string> = {
+  '25g': '25g玻璃燉瓶',
+  '45g': '45g玻璃燉瓶',
+  '75g': '75g玻璃燉瓶(高身)',
+  '75g_big_belly': '75g玻璃燉瓶(大肚)',
+};
+
+export const LEGACY_GLASS_BOTTLE_NAME = '玻璃燉瓶';
+
+/** Default jar size for 隨心燉 gift-box BOM (legacy 「玻璃燉瓶」 slot). */
+export const DEFAULT_GIFT_BOX_GLASS_BOTTLE_CAPACITY: PrepCapacity = '75g_big_belly';
+
+export function defaultGiftBoxGlassBottleStockName(): string {
+  return stewGlassBottleName(DEFAULT_GIFT_BOX_GLASS_BOTTLE_CAPACITY);
+}
+
+export function stewGlassBottleName(capacity: PrepCapacity): string {
+  return STEW_GLASS_BOTTLE_STOCK_NAMES[capacity] ?? `${capacity}玻璃燉瓶`;
+}
+
+export function isGlassBottleFormulaIngredient(name: string): boolean {
+  if (name === LEGACY_GLASS_BOTTLE_NAME) return true;
+  return Object.values(STEW_GLASS_BOTTLE_STOCK_NAMES).includes(name);
+}
+
+export function resolveRawStockName(name: string): string {
+  if (name === LEGACY_GLASS_BOTTLE_NAME) return defaultGiftBoxGlassBottleStockName();
+  return name;
+}
+
+export function bomRawDisplayLabel(name: string): string {
+  if (name === LEGACY_GLASS_BOTTLE_NAME) return defaultGiftBoxGlassBottleStockName();
+  return name;
+}
+
+export function isStewGlassBottleStockName(name: string): boolean {
+  return name.includes('玻璃燉瓶');
+}
+
+export interface PrepBirdNestSelections {
+  osmanthus: BirdNestType;
+  red_date: BirdNestType;
+  rock_sugar: BirdNestType;
+}
+
+export function prepOrderBirdNestSelections(order: {
+  bird_nest_osmanthus?: string | null;
+  bird_nest_red_date?: string | null;
+  bird_nest_rock_sugar?: string | null;
+}): PrepBirdNestSelections {
+  return {
+    osmanthus: parseBirdNestType(order.bird_nest_osmanthus),
+    red_date: parseBirdNestType(order.bird_nest_red_date),
+    rock_sugar: parseBirdNestType(order.bird_nest_rock_sugar),
+  };
+}
+
+export function totalBirdNestGrams(ingredientGrams: Record<string, number>): number {
+  return round2(
+    (ingredientGrams[BIRD_NEST_TYPE_LABELS.large] || 0) +
+      (ingredientGrams[BIRD_NEST_TYPE_LABELS.small] || 0)
+  );
+}
+
 export const PREP_ORDER_TYPES = ['daily', 'wedding', 'restock'] as const;
 export type PrepOrderType = (typeof PREP_ORDER_TYPES)[number];
 
@@ -320,6 +419,9 @@ export interface PrepOrder {
   actual_qty_osmanthus: number | null;
   actual_qty_red_date: number | null;
   actual_qty_rock_sugar: number | null;
+  bird_nest_osmanthus: BirdNestType;
+  bird_nest_red_date: BirdNestType;
+  bird_nest_rock_sugar: BirdNestType;
   notes: string | null;
   expected_yield: number | null;
   actual_yield: number | null;
@@ -349,6 +451,7 @@ export interface FlavorCalcRow {
   slabSugarGrams: number;
   formula: FlavorFormulaPerBottle | null;
   disabled?: boolean;
+  birdNestType?: BirdNestType;
 }
 
 export interface PrepCalculation {
@@ -458,7 +561,8 @@ function calcRow(
   orderQty: number,
   actualOverride: number | null | undefined,
   capacity: PrepCapacity,
-  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
+  birdNestType: BirdNestType = 'large'
 ): FlavorCalcRow {
   const formula = getFlavorFormula(capacity, flavor, formulas);
   const disabled = formula == null;
@@ -489,7 +593,13 @@ function calcRow(
 
   const ingredientGrams: Record<string, number> = {};
   for (const l of getFormulaLines(formula, flavor)) {
-    ingredientGrams[l.name] = round2((ingredientGrams[l.name] || 0) + actualQty * l.qty);
+    if (isGlassBottleFormulaIngredient(l.name)) continue;
+    const resolved = resolveFormulaIngredientName(l.name, birdNestType, capacity);
+    ingredientGrams[resolved] = round2((ingredientGrams[resolved] || 0) + actualQty * l.qty);
+  }
+  if (actualQty > 0) {
+    const glassName = stewGlassBottleName(capacity);
+    ingredientGrams[glassName] = (ingredientGrams[glassName] || 0) + actualQty;
   }
 
   return {
@@ -499,7 +609,7 @@ function calcRow(
     actualQty,
     extraQty,
     ingredientGrams,
-    birdNestGrams: ingredientGrams['燕餅'] || 0,
+    birdNestGrams: totalBirdNestGrams(ingredientGrams),
     flavorGrams:
       flavor === 'osmanthus'
         ? ingredientGrams['桂花'] || 0
@@ -510,6 +620,7 @@ function calcRow(
     slabSugarGrams: ingredientGrams['片糖'] || 0,
     formula,
     disabled,
+    birdNestType,
   };
 }
 
@@ -518,7 +629,8 @@ export function computePrepCalculation(
   orderType: PrepOrderType,
   qtys: PrepFlavorQty,
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
-  actualQtys?: Partial<Record<keyof PrepFlavorQty, number | null>> | null
+  actualQtys?: Partial<Record<keyof PrepFlavorQty, number | null>> | null,
+  birdNestSelections?: Partial<PrepBirdNestSelections> | null
 ): PrepCalculation {
   const flavorMap: { flavor: PrepFlavor; qty: number; actual?: number | null }[] = [
     { flavor: 'osmanthus', qty: qtys.osmanthus, actual: actualQtys?.osmanthus },
@@ -527,7 +639,14 @@ export function computePrepCalculation(
   ];
 
   const rows = flavorMap.map(({ flavor, qty, actual }) =>
-    calcRow(flavor, qty, actual, capacity, formulas)
+    calcRow(
+      flavor,
+      qty,
+      actual,
+      capacity,
+      formulas,
+      birdNestSelections?.[flavor] ?? 'large'
+    )
   );
 
   if (rows.every((r) => r.orderQty === 0 && r.actualQty === 0)) {
@@ -548,7 +667,7 @@ export function computePrepCalculation(
   const totals = {
     bottles: activeRows.reduce((s, r) => s + r.actualQty, 0),
     ingredientGrams,
-    birdNestGrams: ingredientGrams['燕餅'] || 0,
+    birdNestGrams: totalBirdNestGrams(ingredientGrams),
     flavorGrams: round2(
       (ingredientGrams['桂花'] || 0) + (ingredientGrams['紅棗'] || 0)
     ),
@@ -571,7 +690,8 @@ export function computePrepCalculation(
 export function computeStewingRawNeeds(
   capacity: PrepCapacity,
   splits: { flavor: PrepFlavor; qty: number }[],
-  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
+  birdNestSelections?: Partial<PrepBirdNestSelections> | null
 ): { name: string; qty: number }[] {
   const acc: Record<string, number> = {};
   const add = (name: string, grams: number) => {
@@ -585,9 +705,15 @@ export function computeStewingRawNeeds(
     if (!s.flavor || qty <= 0) continue;
     const formula = getFlavorFormula(capacity, s.flavor, formulas);
     if (!formula) continue;
+    const birdNestType = birdNestSelections?.[s.flavor] ?? 'large';
     for (const l of getFormulaLines(formula, s.flavor)) {
-      add(l.name, round2(qty * l.qty));
+      if (isGlassBottleFormulaIngredient(l.name)) continue;
+      add(
+        resolveFormulaIngredientName(l.name, birdNestType, capacity),
+        round2(qty * l.qty)
+      );
     }
+    add(stewGlassBottleName(capacity), qty);
   }
 
   return Object.keys(acc)
@@ -605,9 +731,13 @@ export function computePrepCalculationForOrder(
     actual_qty_osmanthus?: number | null;
     actual_qty_red_date?: number | null;
     actual_qty_rock_sugar?: number | null;
+    bird_nest_osmanthus?: string | null;
+    bird_nest_red_date?: string | null;
+    bird_nest_rock_sugar?: string | null;
   },
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): PrepCalculation {
+  const birdNest = prepOrderBirdNestSelections(order);
   return computePrepCalculation(
     order.capacity,
     order.order_type,
@@ -617,7 +747,8 @@ export function computePrepCalculationForOrder(
       osmanthus: order.actual_qty_osmanthus,
       red_date: order.actual_qty_red_date,
       rock_sugar: order.actual_qty_rock_sugar,
-    }
+    },
+    birdNest
   );
 }
 
@@ -627,13 +758,21 @@ export function computePrepOrderRawNeeds(
   orderType: PrepOrderType,
   qtys: PrepFlavorQty,
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
-  actualQtys?: Partial<Record<keyof PrepFlavorQty, number | null>> | null
+  actualQtys?: Partial<Record<keyof PrepFlavorQty, number | null>> | null,
+  birdNestSelections?: Partial<PrepBirdNestSelections> | null
 ): { name: string; qty: number }[] {
-  const calc = computePrepCalculation(capacity, orderType, qtys, formulas, actualQtys);
+  const calc = computePrepCalculation(
+    capacity,
+    orderType,
+    qtys,
+    formulas,
+    actualQtys,
+    birdNestSelections
+  );
   const splits = calc.rows
     .filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled)
     .map((r) => ({ flavor: r.flavor, qty: r.actualQty }));
-  return computeStewingRawNeeds(capacity, splits, formulas);
+  return computeStewingRawNeeds(capacity, splits, formulas, birdNestSelections);
 }
 
 /** Sum raw needs across unfinished prep orders (any status except completed). */
@@ -648,12 +787,16 @@ export function aggregateRawNeedsFromPrepOrders(
     actual_qty_osmanthus?: number | null;
     actual_qty_red_date?: number | null;
     actual_qty_rock_sugar?: number | null;
+    bird_nest_osmanthus?: string | null;
+    bird_nest_red_date?: string | null;
+    bird_nest_rock_sugar?: string | null;
   }>,
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): Record<string, number> {
   const raw: Record<string, number> = {};
   for (const o of orders) {
     if (o.status === 'completed') continue;
+    const birdNest = prepOrderBirdNestSelections(o);
     const lines = computePrepOrderRawNeeds(
       o.capacity,
       o.order_type,
@@ -667,7 +810,8 @@ export function aggregateRawNeedsFromPrepOrders(
         osmanthus: o.actual_qty_osmanthus,
         red_date: o.actual_qty_red_date,
         rock_sugar: o.actual_qty_rock_sugar,
-      }
+      },
+      birdNest
     );
     for (const line of lines) {
       raw[line.name] = round2((raw[line.name] || 0) + line.qty);
@@ -679,6 +823,12 @@ export function aggregateRawNeedsFromPrepOrders(
 export function formatGrams(n: number): string {
   if (n === 0) return '—';
   return `${n.toFixed(2)}g`;
+}
+
+export function formatPrepIngredientQty(name: string, qty: number): string {
+  if (qty === 0) return '—';
+  if (isStewGlassBottleStockName(name)) return String(Math.round(qty));
+  return formatGrams(qty);
 }
 
 export function formulaSummaryForCapacity(capacity: PrepCapacity): string {

@@ -10,6 +10,8 @@ import {
   getStewFlavorFormula,
   giftBoxQtyKey,
   uniqueCatalogId,
+  mergeSuiXinGiftBoxBoms,
+  giftBoxBomRawOptions,
 } from './kitchen-catalog';
 import { expandGiftBoxBom, GIFT_BOX_BOMS } from './kitchen-bom';
 import {
@@ -23,7 +25,10 @@ import {
 describe('kitchen catalog defaults', () => {
   it('seeds raw materials, gift boxes, and finished SKUs', () => {
     const catalog = defaultKitchenCatalog();
-    expect(catalog.rawMaterials.map((m) => m.name)).toContain('燕餅');
+    expect(catalog.rawMaterials.map((m) => m.name)).toContain('大燕餅');
+    expect(catalog.rawMaterials.map((m) => m.name)).toContain('細燕餅');
+    expect(catalog.rawMaterials.map((m) => m.name)).toContain('25g玻璃燉瓶');
+    expect(catalog.rawMaterials.map((m) => m.name)).toContain('75g玻璃燉瓶(大肚)');
     expect(catalog.giftBoxTypes.length).toBeGreaterThanOrEqual(9);
     expect(finishedSkusFromCatalog(catalog)).toHaveLength(12);
     expect(giftBoxQtyKey('star_gold')).toBe('nestiee_gift_qty_star_gold');
@@ -39,9 +44,45 @@ describe('kitchen catalog defaults', () => {
   it('default formulas use variable ingredient lines', () => {
     const formulas = defaultKitchenFormulas();
     expect(formulas.giftBoxBoms.star_gold).toEqual(GIFT_BOX_BOMS.star_gold);
+    expect(formulas.giftBoxBoms.sui_xin_7?.[0]).toEqual({
+      kind: 'raw',
+      name: '75g玻璃燉瓶(大肚)',
+      qty: 2,
+    });
     expect(getStewFlavorFormula('25g', 'red_date', formulas.stewFormulas)).toBeNull();
     const lines = getFormulaLines(getStewFlavorFormula('45g', 'osmanthus', formulas.stewFormulas), 'osmanthus');
     expect(lines.find((l) => l.name === '燕餅')?.qty).toBe(0.8);
+  });
+
+  it('mergeSuiXinGiftBoxBoms adds glass jar and migrates legacy name', () => {
+    const formulas = defaultKitchenFormulas();
+    formulas.giftBoxBoms.sui_xin_7 = [
+      { kind: 'raw', name: '玻璃燉瓶', qty: 2 },
+      { kind: 'raw', name: '大燕餅', qty: 11.9 },
+      { kind: 'raw', name: '冰糖', qty: 4.2 },
+    ];
+    const merged = mergeSuiXinGiftBoxBoms(formulas);
+    expect(merged.giftBoxBoms.sui_xin_7![0].name).toBe('75g玻璃燉瓶(大肚)');
+
+    formulas.giftBoxBoms.sui_xin_14 = [
+      { kind: 'raw', name: '大燕餅', qty: 23.8 },
+      { kind: 'raw', name: '冰糖', qty: 8.4 },
+    ];
+    const merged2 = mergeSuiXinGiftBoxBoms(formulas);
+    expect(
+      merged2.giftBoxBoms.sui_xin_14!.some((l) => l.kind === 'raw' && l.name === '75g玻璃燉瓶(大肚)')
+    ).toBe(true);
+  });
+
+  it('giftBoxBomRawOptions lists jar sizes first', () => {
+    const catalog = defaultKitchenCatalog();
+    const opts = giftBoxBomRawOptions(catalog);
+    expect(opts.slice(0, 4)).toEqual([
+      '25g玻璃燉瓶',
+      '45g玻璃燉瓶',
+      '75g玻璃燉瓶(高身)',
+      '75g玻璃燉瓶(大肚)',
+    ]);
   });
 
   it('validate rejects BOM referencing unknown raw', () => {
@@ -78,8 +119,40 @@ describe('stew variable ingredient lines', () => {
       { osmanthus: 10, red_date: 0, rock_sugar: 0 },
       custom
     );
-    expect(calc.totals.ingredientGrams['燕餅']).toBe(10);
+    expect(calc.totals.ingredientGrams['大燕餅']).toBe(10);
     expect(calc.totals.birdNestGrams).toBe(10);
+  });
+
+  it('maps bird nest formula slot to 細燕餅 when selected', () => {
+    const custom = structuredClone(CAPACITY_FLAVOR_FORMULAS);
+    custom['45g']!.osmanthus = formulaFromLines([{ name: '燕餅', qty: 1 }]);
+    const calc = computePrepCalculation(
+      '45g',
+      'daily',
+      { osmanthus: 10, red_date: 0, rock_sugar: 0 },
+      custom,
+      null,
+      { osmanthus: 'small' }
+    );
+    expect(calc.totals.ingredientGrams['細燕餅']).toBe(10);
+    expect(calc.totals.ingredientGrams['大燕餅']).toBeUndefined();
+  });
+
+  it('adds one capacity-specific glass jar per actual stew bottle', () => {
+    const calc = computePrepCalculation('25g', 'daily', {
+      osmanthus: 0,
+      red_date: 0,
+      rock_sugar: 10,
+    });
+    expect(calc.totals.ingredientGrams['25g玻璃燉瓶']).toBe(10);
+    expect(calc.totals.ingredientGrams['45g玻璃燉瓶']).toBeUndefined();
+
+    const calc75 = computePrepCalculation('75g_big_belly', 'daily', {
+      osmanthus: 3,
+      red_date: 0,
+      rock_sugar: 0,
+    });
+    expect(calc75.totals.ingredientGrams['75g玻璃燉瓶(大肚)']).toBe(3);
   });
 
   it('supports more than 4 ingredients per bottle', () => {
@@ -93,7 +166,7 @@ describe('stew variable ingredient lines', () => {
     ]);
     const lines = computeStewingRawNeeds('45g', [{ flavor: 'osmanthus', qty: 2 }], custom);
     expect(lines).toHaveLength(5);
-    expect(lines.find((l) => l.name === '玻璃燉瓶')?.qty).toBe(2);
+    expect(lines.find((l) => l.name === '45g玻璃燉瓶')?.qty).toBe(2);
     expect(lines.find((l) => l.name === '冰糖')?.qty).toBe(1);
   });
 
@@ -104,9 +177,11 @@ describe('stew variable ingredient lines', () => {
       { name: '紅棗', qty: 1 },
     ]);
     const lines = computeStewingRawNeeds('45g', [{ flavor: 'osmanthus', qty: 4 }], custom);
+    expect(lines.find((l) => l.name === '大燕餅')?.qty).toBe(2);
     expect(lines.find((l) => l.name === '紅棗')?.qty).toBe(4);
     expect(lines.find((l) => l.name === '桂花')).toBeUndefined();
-    expect(lines).toHaveLength(2);
+    expect(lines.find((l) => l.name === '45g玻璃燉瓶')?.qty).toBe(4);
+    expect(lines).toHaveLength(3);
   });
 
   it('sanitize migrates legacy slot formulas to lines', () => {
@@ -125,15 +200,16 @@ describe('stew variable ingredient lines', () => {
       },
     });
     const cell = normalized.formulas.stewFormulas['45g']!.rock_sugar!;
-    const lines = getFormulaLines(cell, 'rock_sugar');
-    expect(lines.find((l) => l.name === '冰糖')?.qty).toBe(3.57);
-    expect(lines.find((l) => l.name === '燕餅')?.qty).toBe(0.8);
+    const formulaLines = getFormulaLines(cell, 'rock_sugar');
+    expect(formulaLines.find((l) => l.name === '冰糖')?.qty).toBe(3.57);
+    expect(formulaLines.find((l) => l.name === '燕餅')?.qty).toBe(0.8);
     const consumed = computeStewingRawNeeds(
       '45g',
       [{ flavor: 'rock_sugar', qty: 10 }],
       normalized.formulas.stewFormulas
     );
     expect(consumed.find((l) => l.name === '冰糖')?.qty).toBe(35.7);
+    expect(consumed.find((l) => l.name === '大燕餅')?.qty).toBe(8);
   });
 });
 

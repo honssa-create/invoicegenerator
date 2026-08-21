@@ -55,6 +55,10 @@ export {
   expandGiftBoxBomFrom,
   giftBoxQtyKey,
   uniqueCatalogId,
+  isReserveRawMaterial,
+  RESERVE_RAW_MATERIALS,
+  giftBoxBomRawOptions,
+  giftBoxBomRawSelectOptions,
 } from './kitchen-catalog';
 
 export const GIFT_BOX_TYPES = NESTIEE_GIFT_BOX_TYPES;
@@ -91,7 +95,9 @@ export const RAW_MATERIALS: RawMaterialDef[] = defaultKitchenCatalog().rawMateri
 
 /** Legacy raw names → canonical (fold stock on seed). */
 export const RAW_MATERIAL_ALIASES: Record<string, string> = {
-  頂級乾燕餅: '燕餅',
+  頂級乾燕餅: '大燕餅',
+  燕餅: '大燕餅',
+  玻璃燉瓶: '75g玻璃燉瓶(大肚)',
   燕窩冰糖: '冰糖',
 };
 

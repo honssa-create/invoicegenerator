@@ -10,9 +10,12 @@ import {
   hkTodayIso,
   isRedDateAllowed,
   nextActualQty,
+  parseBirdNestType,
+  prepOrderBirdNestSelections,
   validatePrepFlavorQtys,
   weddingPrepStatusFromDate,
   hkNowDateTime,
+  type BirdNestType,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
@@ -65,6 +68,9 @@ interface PrepRow {
   actual_qty_osmanthus: number | null;
   actual_qty_red_date: number | null;
   actual_qty_rock_sugar: number | null;
+  bird_nest_osmanthus: string | null;
+  bird_nest_red_date: string | null;
+  bird_nest_rock_sugar: string | null;
   notes: string | null;
   expected_yield: number | null;
   actual_yield: number | null;
@@ -102,6 +108,9 @@ function hydrate(row: PrepRow): PrepOrder {
     actual_qty_osmanthus: row.actual_qty_osmanthus ?? null,
     actual_qty_red_date: row.actual_qty_red_date ?? null,
     actual_qty_rock_sugar: row.actual_qty_rock_sugar ?? null,
+    bird_nest_osmanthus: parseBirdNestType(row.bird_nest_osmanthus),
+    bird_nest_red_date: parseBirdNestType(row.bird_nest_red_date),
+    bird_nest_rock_sugar: parseBirdNestType(row.bird_nest_rock_sugar),
     notes: row.notes,
     expected_yield: row.expected_yield ?? null,
     actual_yield: row.actual_yield ?? null,
@@ -164,6 +173,9 @@ export async function createPrepOrder(
     order_code?: string;
     notes?: string | null;
     status?: PrepStatus;
+    bird_nest_osmanthus?: BirdNestType;
+    bird_nest_red_date?: BirdNestType;
+    bird_nest_rock_sugar?: BirdNestType;
     /** Linked 回禮 auto-create may have qtys filled later. */
     allowEmptyQtys?: boolean;
   }
@@ -201,8 +213,9 @@ export async function createPrepOrder(
          (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
           qty_osmanthus, qty_red_date, qty_rock_sugar,
           actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
+          bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
           notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
@@ -218,6 +231,9 @@ export async function createPrepOrder(
       actualOsmanthus,
       actualRed,
       actualRock,
+      input.bird_nest_osmanthus ?? 'large',
+      input.bird_nest_red_date ?? 'large',
+      input.bird_nest_rock_sugar ?? 'large',
       input.notes?.trim() || null
     );
   return (await getPrepOrder(Number(res.lastInsertRowid)))!;
@@ -299,6 +315,9 @@ export async function updatePrepOrder(
     actual_qty_osmanthus?: number | null;
     actual_qty_red_date?: number | null;
     actual_qty_rock_sugar?: number | null;
+    bird_nest_osmanthus?: BirdNestType;
+    bird_nest_red_date?: BirdNestType;
+    bird_nest_rock_sugar?: BirdNestType;
     notes: string | null;
     allowEmptyQtys: boolean;
   }>
@@ -353,6 +372,7 @@ export async function updatePrepOrder(
        stewing_date = ?, order_type = ?, capacity = ?, status = ?,
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?,
        actual_qty_osmanthus = ?, actual_qty_red_date = ?, actual_qty_rock_sugar = ?,
+       bird_nest_osmanthus = ?, bird_nest_red_date = ?, bird_nest_rock_sugar = ?,
        notes = ?,
        updated_at = datetime('now')
      WHERE id = ?`
@@ -368,6 +388,9 @@ export async function updatePrepOrder(
       actualOsmanthus,
       actualRed,
       actualRock,
+      input.bird_nest_osmanthus ?? existing.bird_nest_osmanthus,
+      input.bird_nest_red_date ?? existing.bird_nest_red_date,
+      input.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
       input.notes !== undefined ? input.notes : existing.notes,
       id
     );
@@ -431,7 +454,8 @@ export async function completePrepProduction(
   const rawConsume = computeStewingRawNeeds(
     existing.capacity,
     flavoredSplits.map((s) => ({ flavor: s.flavor, qty: s.qty })),
-    stew
+    stew,
+    prepOrderBirdNestSelections(existing)
   );
 
   const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;

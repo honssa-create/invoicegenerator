@@ -16,6 +16,9 @@ import {
   PREP_CAPACITIES,
   getFormulaLines,
   formulaFromLines,
+  defaultGiftBoxGlassBottleStockName,
+  isGlassBottleFormulaIngredient,
+  LEGACY_GLASS_BOTTLE_NAME,
   type FlavorFormulaPerBottle,
   type PrepCapacity,
   type PrepFlavor,
@@ -49,6 +52,86 @@ export interface KitchenCatalog {
   finishedLabels: Record<string, string>;
 }
 
+/** Stew glass jars — one stock row per bottle capacity. */
+export const STEW_GLASS_BOTTLE_RAW_MATERIALS: CatalogRawMaterial[] = [
+  { name: '25g玻璃燉瓶', unit: '個', sortOrder: 6 },
+  { name: '45g玻璃燉瓶', unit: '個', sortOrder: 7 },
+  { name: '75g玻璃燉瓶(高身)', unit: '個', sortOrder: 8 },
+  { name: '75g玻璃燉瓶(大肚)', unit: '個', sortOrder: 9 },
+];
+
+/** Spare bird's-nest cake stock — shown separately at the bottom of the raw table (可用 only). */
+export const RESERVE_RAW_MATERIALS: CatalogRawMaterial[] = [
+  { name: '備用大燕餅', unit: 'g', sortOrder: 100 },
+  { name: '備用細燕餅', unit: 'g', sortOrder: 101 },
+];
+
+export function isReserveRawMaterial(name: string): boolean {
+  return String(name || '').trim().startsWith('備用');
+}
+
+/** Append built-in reserve raw rows when missing from a saved catalog. */
+export function mergeReserveRawMaterials(catalog: KitchenCatalog): KitchenCatalog {
+  const existing = new Set(catalog.rawMaterials.map((m) => m.name));
+  const missing = RESERVE_RAW_MATERIALS.filter((m) => !existing.has(m.name));
+  if (missing.length === 0) return catalog;
+  return {
+    ...catalog,
+    rawMaterials: [...catalog.rawMaterials, ...missing.map((m) => ({ ...m }))],
+  };
+}
+
+/** Replace legacy 燕餅 with 大燕餅 / 細燕餅 in saved catalogs. */
+export function mergeBirdNestCatalogRawMaterials(catalog: KitchenCatalog): KitchenCatalog {
+  const names = new Set(catalog.rawMaterials.map((m) => m.name));
+  let materials = catalog.rawMaterials.filter((m) => m.name !== '燕餅');
+  let changed = materials.length !== catalog.rawMaterials.length;
+
+  if (!materials.some((m) => m.name === '大燕餅')) {
+    materials = [{ name: '大燕餅', unit: 'g', sortOrder: 0 }, ...materials];
+    changed = true;
+  }
+  if (!materials.some((m) => m.name === '細燕餅')) {
+    const maxSort = materials.reduce((m, r) => Math.max(m, r.sortOrder ?? 0), 0);
+    materials.push({ name: '細燕餅', unit: 'g', sortOrder: maxSort + 1 });
+    changed = true;
+  }
+
+  if (!changed && !names.has('燕餅')) return catalog;
+
+  return {
+    ...catalog,
+    rawMaterials: materials.map((m, i) => ({
+      ...m,
+      sortOrder: Number.isFinite(m.sortOrder) ? m.sortOrder : i,
+    })),
+  };
+}
+
+/** Replace legacy 玻璃燉瓶 with capacity-specific jar rows. */
+export function mergeGlassBottleCatalogRawMaterials(catalog: KitchenCatalog): KitchenCatalog {
+  const names = new Set(catalog.rawMaterials.map((m) => m.name));
+  let materials = catalog.rawMaterials.filter((m) => m.name !== '玻璃燉瓶');
+  let changed = materials.length !== catalog.rawMaterials.length;
+
+  for (const jar of STEW_GLASS_BOTTLE_RAW_MATERIALS) {
+    if (!materials.some((m) => m.name === jar.name)) {
+      materials.push({ ...jar });
+      changed = true;
+    }
+  }
+
+  if (!changed && !names.has('玻璃燉瓶')) return catalog;
+
+  return {
+    ...catalog,
+    rawMaterials: materials.map((m, i) => ({
+      ...m,
+      sortOrder: Number.isFinite(m.sortOrder) ? m.sortOrder : i,
+    })),
+  };
+}
+
 export type StewFormulaMap = Partial<
   Record<string, Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>>>
 >;
@@ -56,6 +139,70 @@ export type StewFormulaMap = Partial<
 export interface KitchenFormulas {
   giftBoxBoms: Record<string, BomLine[]>;
   stewFormulas: StewFormulaMap;
+}
+
+const SUI_XIN_GIFT_BOX_IDS = ['sui_xin_7', 'sui_xin_14', 'sui_xin_18'] as const;
+
+function normalizeGiftBoxBomGlassLine(line: BomLine): BomLine {
+  if (line.kind !== 'raw') return line;
+  if (line.name === LEGACY_GLASS_BOTTLE_NAME) {
+    return { ...line, name: defaultGiftBoxGlassBottleStockName() };
+  }
+  return line;
+}
+
+/** Ensure 隨心燉 gift-box BOMs include an editable glass-jar line (migrate legacy 玻璃燉瓶). */
+export function mergeSuiXinGiftBoxBoms(formulas: KitchenFormulas): KitchenFormulas {
+  const giftBoxBoms = { ...(formulas.giftBoxBoms || {}) };
+  let changed = false;
+
+  for (const boxId of SUI_XIN_GIFT_BOX_IDS) {
+    const defaultLines = (GIFT_BOX_BOMS[boxId] || []).map(normalizeGiftBoxBomGlassLine);
+    let lines = (giftBoxBoms[boxId] || []).map(normalizeGiftBoxBomGlassLine);
+
+    if (lines.length === 0) {
+      giftBoxBoms[boxId] = defaultLines.map((l) => ({ ...l }));
+      changed = true;
+      continue;
+    }
+
+    const hasGlass = lines.some(
+      (l) => l.kind === 'raw' && isGlassBottleFormulaIngredient(l.name)
+    );
+    if (!hasGlass) {
+      const glassLine = defaultLines.find(
+        (l) => l.kind === 'raw' && isGlassBottleFormulaIngredient(l.name)
+      );
+      if (glassLine) {
+        lines = [{ ...glassLine }, ...lines];
+        changed = true;
+      }
+    }
+
+    const prevJson = JSON.stringify(giftBoxBoms[boxId] || []);
+    giftBoxBoms[boxId] = lines;
+    if (prevJson !== JSON.stringify(lines)) changed = true;
+  }
+
+  if (!changed) return formulas;
+  return { ...formulas, giftBoxBoms };
+}
+
+/** Raw ingredient options for gift-box BOM editor (jar sizes first). */
+export function giftBoxBomRawOptions(catalog: KitchenCatalog): string[] {
+  const names = catalog.rawMaterials.map((m) => m.name);
+  const jarSet = new Set(STEW_GLASS_BOTTLE_RAW_MATERIALS.map((m) => m.name));
+  const jars = names.filter((n) => jarSet.has(n));
+  const rest = names.filter((n) => !jarSet.has(n));
+  return [...jars, ...rest];
+}
+
+export function giftBoxBomRawSelectOptions(catalog: KitchenCatalog, currentName: string): string[] {
+  const base = giftBoxBomRawOptions(catalog);
+  if (currentName && !base.includes(currentName)) {
+    return [currentName, ...base];
+  }
+  return base;
 }
 
 export interface KitchenCatalogBundle {
@@ -103,12 +250,14 @@ export function uniqueCatalogId(
 export function defaultKitchenCatalog(): KitchenCatalog {
   return {
     rawMaterials: [
-      { name: '燕餅', unit: 'g', sortOrder: 0 },
-      { name: '桂花', unit: 'g', sortOrder: 1 },
-      { name: '紅棗', unit: 'g', sortOrder: 2 },
-      { name: '冰糖', unit: 'g', sortOrder: 3 },
-      { name: '片糖', unit: 'g', sortOrder: 4 },
-      { name: '玻璃燉瓶', unit: '個', sortOrder: 5 },
+      { name: '大燕餅', unit: 'g', sortOrder: 0 },
+      { name: '細燕餅', unit: 'g', sortOrder: 1 },
+      { name: '桂花', unit: 'g', sortOrder: 2 },
+      { name: '紅棗', unit: 'g', sortOrder: 3 },
+      { name: '冰糖', unit: 'g', sortOrder: 4 },
+      { name: '片糖', unit: 'g', sortOrder: 5 },
+      ...STEW_GLASS_BOTTLE_RAW_MATERIALS,
+      ...RESERVE_RAW_MATERIALS,
     ],
     giftBoxTypes: NESTIEE_GIFT_BOX_TYPES.map((g, i) => ({
       id: g.id,
@@ -167,6 +316,8 @@ export function expandGiftBoxBomFrom(
   boxType: string,
   quantity: number
 ): BomLine[] {
+  const isJar = (name: string) =>
+    name === '玻璃燉瓶' || STEW_GLASS_BOTTLE_RAW_MATERIALS.some((m) => m.name === name);
   const base = boms[boxType];
   if (!base || quantity <= 0) return [];
   const q = Math.floor(quantity);
@@ -177,7 +328,7 @@ export function expandGiftBoxBomFrom(
       : {
           kind: 'raw' as const,
           name: line.name,
-          qty: line.name === '玻璃燉瓶' ? line.qty * q : round3(line.qty * q),
+          qty: isJar(line.name) ? line.qty * q : round3(line.qty * q),
         }
   );
 }

@@ -7,7 +7,6 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { calculateInvoiceTotals } from '@/lib/utils';
-import { isSectionReadOnly } from '@/lib/permissions';
 import type { Customer } from '@/lib/types';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
@@ -29,8 +28,8 @@ const emptyLine = (): LineItem => ({
 
 export default function NewInvoicePage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
+  const { loading, isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('invoices');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {

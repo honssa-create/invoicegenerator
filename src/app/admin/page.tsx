@@ -6,8 +6,10 @@ import { useAuth } from '@/components/AuthProvider';
 import {
   PERMISSION_SECTIONS,
   ROLE_LABELS,
+  SECTION_ACCESS_LABELS,
   USER_ROLES,
   type PermissionSection,
+  type SectionAccessLevel,
   type UserRole,
 } from '@/lib/permissions';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -28,7 +30,7 @@ export default function AdminPage() {
   const { user: currentUser, logout, refreshUser } = useAuth();
   const [tab, setTab] = useState<Tab>('users');
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [matrix, setMatrix] = useState<Record<UserRole, Record<PermissionSection, boolean>> | null>(null);
+  const [matrix, setMatrix] = useState<Record<UserRole, Record<PermissionSection, SectionAccessLevel>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -184,11 +186,11 @@ export default function AdminPage() {
     loadUsers();
   };
 
-  const togglePermission = (role: UserRole, section: PermissionSection, allowed: boolean) => {
+  const setPermissionLevel = (role: UserRole, section: PermissionSection, level: SectionAccessLevel) => {
     if (!matrix) return;
     setMatrix({
       ...matrix,
-      [role]: { ...matrix[role], [section]: allowed },
+      [role]: { ...matrix[role], [section]: level },
     });
   };
 
@@ -341,8 +343,10 @@ export default function AdminPage() {
       ) : (
         <div className="space-y-8">
           <p className="text-sm text-gray-600">
-            Admin role always has full access. Configure which sections Operator and Accountant roles can use.
-            Users must sign in again (or refresh) to pick up permission changes.
+          {bi(
+              'Admin always has full access. For each module, choose Hidden, Read only, or Read & write. Changes apply on the next page load.',
+              '管理員永遠擁有全部權限。每個模組可設為隱藏、唯讀或讀寫。變更會在下次載入頁面時生效。',
+            )}
           </p>
           {(['operator', 'accountant'] as UserRole[]).map((role) => (
             <div key={role} className="bg-white rounded-xl border border-gray-200 p-5">
@@ -356,21 +360,37 @@ export default function AdminPage() {
                   {bi('Save', '儲存')} {ROLE_LABELS[role]} {bi('permissions', '權限')}
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {PERMISSION_SECTIONS.filter((s) => s.key !== 'admin').map((s) => (
-                  <label
-                    key={s.key}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={matrix?.[role]?.[s.key] ?? false}
-                      onChange={(e) => togglePermission(role, s.key, e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                    />
-                    <span className="text-sm text-gray-700">{s.label}</span>
-                  </label>
-                ))}
+              <div className="table-scroll">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                      <th className="px-3 py-2 font-medium">{bi('Module', '模組')}</th>
+                      <th className="px-3 py-2 font-medium w-48">{bi('Access', '權限')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {PERMISSION_SECTIONS.filter((s) => s.key !== 'admin').map((s) => (
+                      <tr key={s.key} className="hover:bg-gray-50">
+                        <td className="px-3 py-2.5 text-gray-800">{s.label}</td>
+                        <td className="px-3 py-2.5">
+                          <select
+                            value={matrix?.[role]?.[s.key] ?? 'none'}
+                            onChange={(e) =>
+                              setPermissionLevel(role, s.key, e.target.value as SectionAccessLevel)
+                            }
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-brand-500 outline-none"
+                          >
+                            {(['none', 'read', 'write'] as SectionAccessLevel[]).map((level) => (
+                              <option key={level} value={level}>
+                                {SECTION_ACCESS_LABELS[level]}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           ))}

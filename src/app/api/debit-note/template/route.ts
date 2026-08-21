@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  if (isSectionReadOnly(session.role, 'rentals')) {
+  if (isSectionReadOnly(session.role, 'rentals', session.readOnlySections)) {
     return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
   }
   const ownerId = await rentalOwnerId(session);

@@ -21,7 +21,7 @@ export async function GET(
   const session = await getSessionFromRequest(_request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (isSectionReadOnly(session.role, 'order_hub')) {
+  if (isSectionReadOnly(session.role, 'order_hub', session.readOnlySections)) {
     return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
   }
 

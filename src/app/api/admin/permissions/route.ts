@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireApiAdmin } from '@/lib/api-guard';
-import { PERMISSION_SECTIONS, USER_ROLES, ROLE_LABELS, type PermissionSection, type UserRole } from '@/lib/permissions';
+import { PERMISSION_SECTIONS, USER_ROLES, ROLE_LABELS, type PermissionSection, type SectionAccessLevel, type UserRole } from '@/lib/permissions';
 import { getPermissionMatrix, saveRolePermissions } from '@/lib/permissions-server';
 import { refreshSessionCookie } from '@/lib/auth';
 
@@ -24,7 +24,7 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const { role, permissions } = body as {
       role: UserRole;
-      permissions: Partial<Record<PermissionSection, boolean>>;
+      permissions: Partial<Record<PermissionSection, SectionAccessLevel>>;
     };
 
     if (!role || role === 'admin') {

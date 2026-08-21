@@ -5,7 +5,6 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { compressImage } from '@/lib/imageCompression';
-import { isSectionReadOnly } from '@/lib/permissions';
 import {
   UTILITY_METER_DEFINITIONS,
   periodFromReadingDate,
@@ -69,8 +68,8 @@ function itemForKey(round: UtilityMeterRound, key: UtilityMeterKey): UtilityMete
 }
 
 export default function UtilityMeterReadingsPage() {
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('rental_meters');
   const [rounds, setRounds] = useState<UtilityMeterRound[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

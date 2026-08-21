@@ -42,7 +42,6 @@ import {
   type TenantLeaseHistoryRow,
   type TenantProfileSummary,
 } from '@/lib/rentals';
-import { isSectionReadOnly } from '@/lib/permissions';
 
 function tenantChargeTypeTotal(
   charges: RentalChargeItem[],
@@ -73,8 +72,8 @@ interface TenantDetail {
 
 export default function TenantDetailPage() {
   const { id } = useParams();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('rentals');
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [fromPeriod, setFromPeriod] = useState(''); // optional override; auto-detect arrears when empty
   const [paidLookback, setPaidLookback] = useState(2);

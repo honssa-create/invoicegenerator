@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import { useRouter, usePathname } from 'next/navigation';
 import {
   canAccessSection,
+  isSectionReadOnly as checkSectionReadOnly,
   sectionForPagePath,
   type PermissionSection,
   type UserRole,
@@ -17,6 +18,7 @@ interface User {
   role: UserRole;
   role_label?: string;
   permissions: PermissionSection[];
+  readOnlySections?: PermissionSection[];
 }
 
 interface AuthContextType {
@@ -26,6 +28,7 @@ interface AuthContextType {
   register: (data: { email: string; password: string; name: string; company_name?: string }) => Promise<void>;
   logout: () => Promise<void>;
   canAccess: (section: PermissionSection) => boolean;
+  isSectionReadOnly: (section: PermissionSection) => boolean;
   refreshUser: () => Promise<void>;
 }
 
@@ -91,6 +94,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return canAccessSection(user.role, user.permissions, section);
   };
 
+  const isSectionReadOnly = (section: PermissionSection) => {
+    if (!user) return false;
+    return checkSectionReadOnly(user.role, section, user.readOnlySections);
+  };
+
   const login = async (email: string, password: string) => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -122,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, canAccess, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, canAccess, isSectionReadOnly, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

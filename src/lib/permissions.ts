@@ -20,6 +20,7 @@ export const PERMISSION_SECTIONS = [
   { key: 'kitchen_prep', label: 'Kitchen Prep 備料', navHref: '/kitchen-prep' },
   { key: 'stocks', label: 'Stocks 庫存', navHref: '/stocks' },
   { key: 'rentals', label: 'Rentals 租金', navHref: '/rentals' },
+  { key: 'rental_meters', label: 'Meter Readings 水電錶紀錄', navHref: '/rentals/meters' },
   { key: 'expenses', label: 'Expenses 支出', navHref: '/expenses' },
   { key: 'accounting', label: 'Accounting 會計', navHref: '/accounting' },
   { key: 'reconciliation', label: 'Reconciliation 對帳', navHref: '/reconciliation' },
@@ -35,51 +36,24 @@ export type PermissionSection = (typeof PERMISSION_SECTIONS)[number]['key'];
 
 export const ALL_SECTIONS: PermissionSection[] = PERMISSION_SECTIONS.map((s) => s.key);
 
-export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Record<PermissionSection, boolean>> = {
-  admin: Object.fromEntries(ALL_SECTIONS.map((k) => [k, true])) as Record<PermissionSection, boolean>,
-  operator: {
-    dashboard: true,
-    quotations: true,
-    invoices: true,
-    orders: true,
-    order_hub: true,
-    inbound: true,
-    kitchen: true,
-    kitchen_prep: true,
-    stocks: true,
-    rentals: true,
-    expenses: true,
-    accounting: false,
-    cashflow: false,
-    reconciliation: false,
-    scan_table: true,
-    customers: true,
-    settings: true,
-    trash: false,
-    admin: false,
-  },
-  accountant: {
-    dashboard: true,
-    quotations: true,
-    invoices: true,
-    orders: false,
-    order_hub: true,
-    inbound: false,
-    kitchen: false,
-    kitchen_prep: false,
-    stocks: false,
-    rentals: true,
-    expenses: true,
-    accounting: true,
-    cashflow: true,
-    reconciliation: true,
-    scan_table: true,
-    customers: true,
-    settings: true,
-    trash: true,
-    admin: false,
-  },
+/** Per-section access: hidden, view-only, or read & write. */
+export type SectionAccessLevel = 'none' | 'read' | 'write';
+
+export const SECTION_ACCESS_LEVELS: SectionAccessLevel[] = ['none', 'read', 'write'];
+
+export const SECTION_ACCESS_LABELS: Record<SectionAccessLevel, string> = {
+  none: 'Hidden 隱藏',
+  read: 'Read only 唯讀',
+  write: 'Read & write 讀寫',
 };
+
+export function sectionAccessAllowsView(level: SectionAccessLevel): boolean {
+  return level === 'read' || level === 'write';
+}
+
+export function sectionAccessAllowsWrite(level: SectionAccessLevel): boolean {
+  return level === 'write';
+}
 
 const NAV_HREF_SECTION: Record<string, PermissionSection> = Object.fromEntries(
   PERMISSION_SECTIONS.map((s) => [s.navHref, s.key])
@@ -111,6 +85,7 @@ const API_PREFIXES: [string, PermissionSection][] = [
   ['/api/kitchen-prep', 'kitchen_prep'],
   ['/api/kitchen', 'kitchen'],
   ['/api/stocks', 'stocks'],
+  ['/api/rentals/meters', 'rental_meters'],
   ['/api/rentals', 'rentals'],
   ['/api/rental-templates', 'rentals'],
   ['/api/expenses', 'expenses'],
@@ -147,9 +122,11 @@ export function navHrefToSection(href: string): PermissionSection | undefined {
   return NAV_HREF_SECTION[href];
 }
 
-/** Operators may view invoices & quotations but cannot create or edit them. */
-export const OPERATOR_READ_ONLY_SECTIONS: PermissionSection[] = ['invoices', 'quotations', 'rentals'];
-
-export function isSectionReadOnly(role: UserRole, section: PermissionSection): boolean {
-  return role === 'operator' && OPERATOR_READ_ONLY_SECTIONS.includes(section);
+export function isSectionReadOnly(
+  role: UserRole,
+  section: PermissionSection,
+  readOnlySections?: PermissionSection[],
+): boolean {
+  if (role === 'admin') return false;
+  return readOnlySections?.includes(section) ?? false;
 }

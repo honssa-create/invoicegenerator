@@ -567,12 +567,35 @@ async function runBootDataFixes(): Promise<void> {
     WHERE section = 'kitchen-prep'
   `);
   // Drop obsolete role seeds (staff/viewer) and unused admin rows from the old boot path.
-  // Admin permissions are always DEFAULT_ROLE_PERMISSIONS; operator/accountant are seeded below.
   await client().query(`DELETE FROM role_permissions WHERE role IN ('staff', 'viewer', 'admin')`);
 
-  // Seed role_permissions for operator/accountant when empty (canonical source: permissions-server).
-  const { seedRolePermissionsIfEmpty } = await import('./permissions-server');
-  await seedRolePermissionsIfEmpty();
+  // Column must exist before any role_permissions insert/select uses access_level.
+  await client().query(
+    `ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'none'`,
+  );
+
+  // One-time backfill from legacy allowed flag.
+  const migAccessLevel = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'role_permissions_access_level_v1'`,
+  );
+  if (!migAccessLevel.rows.length) {
+    await client().query(`UPDATE role_permissions SET access_level = 'none' WHERE allowed = 0`);
+    await client().query(
+      `UPDATE role_permissions SET access_level = 'read'
+       WHERE allowed = 1 AND role = 'operator' AND section IN ('invoices', 'quotations')`,
+    );
+    await client().query(
+      `UPDATE role_permissions SET access_level = 'write'
+       WHERE allowed = 1 AND access_level = 'none'`,
+    );
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('role_permissions_access_level_v1')`,
+    );
+  }
+
+  // Role permissions: seed missing rows only; runtime access always reads role_permissions table.
+  const { ensureRolePermissionRows } = await import('./permissions-server');
+  await ensureRolePermissionRows();
 
   // Store wall-clock timestamps in Asia/Hong_Kong (existing DBs still had UTC column defaults).
   const migHkt = await client().query<{ key: string }>(

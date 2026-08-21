@@ -710,6 +710,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   role TEXT NOT NULL,
   section TEXT NOT NULL,
   allowed INTEGER NOT NULL DEFAULT 0,
+  access_level TEXT NOT NULL DEFAULT 'none',
   PRIMARY KEY (role, section)
 );
 

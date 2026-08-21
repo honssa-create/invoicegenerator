@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { isSectionReadOnly } from '@/lib/permissions';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { ReminderCandidate, ReminderType } from '@/lib/payment-reminders';
 import { bi } from '@/lib/ui-labels';
@@ -30,8 +29,8 @@ function typeBadgeClass(type: ReminderType) {
 }
 
 export default function InvoiceRemindersPage() {
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('invoices');
   const [overdueDays, setOverdueDays] = useState(30);
   const [dueSoonDays, setDueSoonDays] = useState(7);
   const [candidates, setCandidates] = useState<ReminderCandidate[]>([]);

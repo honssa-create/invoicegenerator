@@ -8,7 +8,7 @@ import {
 } from '@/lib/utility-meter-server';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const session = await requireApiAccess(request, 'rentals');
+  const session = await requireApiAccess(request, 'rental_meters');
   if (session instanceof NextResponse) return session;
   const round = await getUtilityMeterRound(params.id, await rentalOwnerId(session));
   if (!round) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -16,9 +16,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
-  const session = await requireApiAccess(request, 'rentals');
+  const session = await requireApiAccess(request, 'rental_meters');
   if (session instanceof NextResponse) return session;
-  const denied = denyReadOnlyWrite(session, 'rentals', request.method);
+  const denied = denyReadOnlyWrite(session, 'rental_meters', request.method);
   if (denied) return denied;
   try {
     const body = await request.json();
@@ -36,9 +36,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 }
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
-  const session = await requireApiAccess(request, 'rentals');
+  const session = await requireApiAccess(request, 'rental_meters');
   if (session instanceof NextResponse) return session;
-  const denied = denyReadOnlyWrite(session, 'rentals', request.method);
+  const denied = denyReadOnlyWrite(session, 'rental_meters', request.method);
   if (denied) return denied;
   const ok = await deleteUtilityMeterRound(params.id, await rentalOwnerId(session));
   if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });

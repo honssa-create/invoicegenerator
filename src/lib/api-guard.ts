@@ -49,7 +49,7 @@ export function denyReadOnlyWrite(
   method: string
 ): NextResponse | null {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
-  if (isSectionReadOnly(session.role, section)) {
+  if (isSectionReadOnly(session.role, section, session.readOnlySections)) {
     return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
   }
   return null;

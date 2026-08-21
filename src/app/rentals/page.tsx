@@ -7,7 +7,6 @@ import AppLayout from '@/components/AppLayout';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
 import { useAuth } from '@/components/AuthProvider';
-import { isSectionReadOnly } from '@/lib/permissions';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
@@ -52,8 +51,8 @@ const blankUnit: UnitModalState = {
 
 export default function RentalsPage() {
   const router = useRouter();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('rentals');
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [data, setData] = useState<DashboardData | null>(null);
   const [tenants, setTenants] = useState<RentalTenant[]>([]);

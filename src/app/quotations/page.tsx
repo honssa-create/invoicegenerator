@@ -8,7 +8,6 @@ import FilterBar from '@/components/FilterBar';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
-import { isSectionReadOnly } from '@/lib/permissions';
 import {
   QUOTATION_STATUSES,
   QUOTATION_STATUS_COLORS,
@@ -21,8 +20,8 @@ const PAGE_SIZE = 50;
 
 export default function QuotationsPage() {
   const router = useRouter();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'quotations') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('quotations');
   const [quotations, setQuotations] = useState<QuotationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);

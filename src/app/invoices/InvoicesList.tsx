@@ -6,7 +6,6 @@ import { useSearchParams } from 'next/navigation';
 import FilterBar from '@/components/FilterBar';
 import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
-import { isSectionReadOnly } from '@/lib/permissions';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -62,8 +61,8 @@ function PaginationBar({
 
 export default function InvoicesList() {
   const searchParams = useSearchParams();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('invoices');
   const [invoices, setInvoices] = useState<InvoiceWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
 

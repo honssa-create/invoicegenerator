@@ -10,7 +10,6 @@ import { formatCurrency, StatusBadge } from '@/components/ui';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { invoiceFileUrl } from '@/lib/image-url';
-import { isSectionReadOnly } from '@/lib/permissions';
 import { calculateInvoiceTotals } from '@/lib/utils';
 import type {
   Customer,
@@ -56,8 +55,8 @@ const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue'] as const;
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('invoices');
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [orders, setOrders] = useState<

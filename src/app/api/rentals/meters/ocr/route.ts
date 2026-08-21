@@ -6,9 +6,9 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 
 export async function POST(request: Request) {
-  const session = await requireApiAccess(request, 'rentals');
+  const session = await requireApiAccess(request, 'rental_meters');
   if (session instanceof NextResponse) return session;
-  const denied = denyReadOnlyWrite(session, 'rentals', request.method);
+  const denied = denyReadOnlyWrite(session, 'rental_meters', request.method);
   if (denied) return denied;
 
   let formData: FormData;

@@ -14,12 +14,11 @@ import {
   type DocumentTypeId,
   type TemplateCompanyVariantId,
 } from '@/lib/document-templates';
-import { isSectionReadOnly } from '@/lib/permissions';
 import { NAV, bi } from '@/lib/ui-labels';
 
 export default function RentalTemplatesPage() {
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('rentals');
   const [documentType, setDocumentType] = useState<DocumentTypeId>('debit_note');
   const [companyVariant, setCompanyVariant] = useState<TemplateCompanyVariantId>('label');
 

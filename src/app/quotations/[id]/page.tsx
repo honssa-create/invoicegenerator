@@ -8,7 +8,6 @@ import ActivityFeed from '@/components/ActivityFeed';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { quotationFileUrl } from '@/lib/image-url';
-import { isSectionReadOnly } from '@/lib/permissions';
 import {
   calculateQuotationTotals,
   QUOTATION_STATUSES,
@@ -52,8 +51,8 @@ function isImageName(name: string | null | undefined): boolean {
 export default function QuotationDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'quotations') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('quotations');
   const [quote, setQuote] = useState<QuotationWithDetails | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');

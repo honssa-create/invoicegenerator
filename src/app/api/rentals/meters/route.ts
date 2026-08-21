@@ -7,7 +7,7 @@ import {
 } from '@/lib/utility-meter-server';
 
 export async function GET(request: Request) {
-  const session = await requireApiAccess(request, 'rentals');
+  const session = await requireApiAccess(request, 'rental_meters');
   if (session instanceof NextResponse) return session;
   const ownerId = await rentalOwnerId(session);
   const rounds = await listUtilityMeterRounds(ownerId);
@@ -15,9 +15,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const session = await requireApiAccess(request, 'rentals');
+  const session = await requireApiAccess(request, 'rental_meters');
   if (session instanceof NextResponse) return session;
-  const denied = denyReadOnlyWrite(session, 'rentals', request.method);
+  const denied = denyReadOnlyWrite(session, 'rental_meters', request.method);
   if (denied) return denied;
   try {
     const body = await request.json();

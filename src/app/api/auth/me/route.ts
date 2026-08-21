@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { getSessionFromRequest } from '@/lib/auth';
+import { buildSessionPayload, createToken, getSessionFromRequest, setSessionCookie } from '@/lib/auth';
 import { ROLE_LABELS } from '@/lib/permissions';
 
 export async function GET(request: Request) {
@@ -9,7 +9,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Trust JWT role/permissions (refreshed on login / role change). One DB read for profile fields only.
+  // Keep JWT permissions in sync with role_permissions for middleware route guards.
+  const payload = await buildSessionPayload(session.userId);
+  if (payload) {
+    await setSessionCookie(await createToken(payload));
+  }
+
   const user = await db
     .prepare('SELECT id, email, name, company_name, created_at FROM users WHERE id = ?')
     .get(session.userId) as {
@@ -32,7 +37,8 @@ export async function GET(request: Request) {
       company_name: user.company_name,
       role: session.role,
       role_label: ROLE_LABELS[session.role],
-      permissions: session.permissions,
+      permissions: payload?.permissions ?? session.permissions,
+      readOnlySections: payload?.readOnlySections ?? session.readOnlySections,
       created_at: user.created_at,
     },
   });

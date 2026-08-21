@@ -7,7 +7,18 @@ import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import SfExpressShipmentModal from '@/components/SfExpressShipmentModal';
 import OrderPropertyBar, { type AccountUser } from '@/components/OrderPropertyBar';
+import MultiChoiceSelect from '@/components/MultiChoiceSelect';
 import SupplierSelect from '@/components/SupplierSelect';
+import {
+  HONOUR_CLASP_OPTIONS,
+  HONOUR_CRAFT_OPTIONS,
+  HONOUR_INTERNAL_PACK_OPTIONS,
+  HONOUR_PACK_REQUIRED_OPTIONS,
+  HONOUR_PLATING_OPTIONS,
+  joinHonourMultiValue,
+  normalizeHonourInternalPack,
+  parseHonourMultiValue,
+} from '@/lib/honour-field-choices';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { DEFAULT_OPTIONS } from '@/lib/expenses';
@@ -1528,13 +1539,17 @@ export default function OrderDetailPage() {
                           </div>
                           <div className="grid md:grid-cols-3 gap-4">
                             {labeled(
-                              '出貨包裝',
-                              <input
-                                value={sup.supplier_pack}
-                                onChange={(e) => updateSup({ supplier_pack: e.target.value }, false)}
-                                onBlur={(e) => updateSup({ supplier_pack: e.target.value }, true)}
-                                placeholder="e.g. OPP獨立包裝"
-                                className={softInput}
+                              '交貨包裝',
+                              <MultiChoiceSelect
+                                values={parseHonourMultiValue(sup.supplier_pack)}
+                                options={HONOUR_PACK_REQUIRED_OPTIONS}
+                                onChange={(vals) =>
+                                  updateSup(
+                                    { supplier_pack: joinHonourMultiValue(vals, HONOUR_PACK_REQUIRED_OPTIONS) },
+                                    true
+                                  )
+                                }
+                                placeholder="選擇交貨包裝…"
                               />
                             )}
                             {labeled(
@@ -1575,31 +1590,38 @@ export default function OrderDetailPage() {
                               )}
                               {labeled(
                                 '加工工藝',
-                                <input
-                                  value={sup.craft}
-                                  onChange={(e) => updateSup({ craft: e.target.value }, false)}
-                                  onBlur={(e) => updateSup({ craft: e.target.value }, true)}
-                                  placeholder="e.g. 亞加力-單面"
-                                  className={softInput}
+                                <MultiChoiceSelect
+                                  values={parseHonourMultiValue(sup.craft)}
+                                  options={HONOUR_CRAFT_OPTIONS}
+                                  onChange={(vals) =>
+                                    updateSup({ craft: joinHonourMultiValue(vals, HONOUR_CRAFT_OPTIONS) }, true)
+                                  }
+                                  placeholder="選擇加工工藝…"
                                 />
                               )}
                               {labeled(
                                 '電鍍色',
-                                <input
-                                  value={sup.plating_color}
-                                  onChange={(e) => updateSup({ plating_color: e.target.value }, false)}
-                                  onBlur={(e) => updateSup({ plating_color: e.target.value }, true)}
-                                  className={softInput}
+                                <MultiChoiceSelect
+                                  values={parseHonourMultiValue(sup.plating_color)}
+                                  options={HONOUR_PLATING_OPTIONS}
+                                  onChange={(vals) =>
+                                    updateSup(
+                                      { plating_color: joinHonourMultiValue(vals, HONOUR_PLATING_OPTIONS) },
+                                      true
+                                    )
+                                  }
+                                  placeholder="選擇電鍍色…"
                                 />
                               )}
                               {labeled(
                                 '背扣',
-                                <input
-                                  value={sup.clasp}
-                                  onChange={(e) => updateSup({ clasp: e.target.value }, false)}
-                                  onBlur={(e) => updateSup({ clasp: e.target.value }, true)}
-                                  placeholder="e.g. 四節圓圈"
-                                  className={softInput}
+                                <MultiChoiceSelect
+                                  values={parseHonourMultiValue(sup.clasp)}
+                                  options={HONOUR_CLASP_OPTIONS}
+                                  onChange={(vals) =>
+                                    updateSup({ clasp: joinHonourMultiValue(vals, HONOUR_CLASP_OPTIONS) }, true)
+                                  }
+                                  placeholder="選擇背扣…"
                                 />
                               )}
                             </div>
@@ -1623,22 +1645,31 @@ export default function OrderDetailPage() {
                             <div className="grid md:grid-cols-2 gap-4">
                               {labeled(
                                 '內部包裝處理',
-                                <input
-                                  value={sup.internal_pack}
-                                  onChange={(e) => updateSup({ internal_pack: e.target.value }, false)}
-                                  onBlur={(e) => updateSup({ internal_pack: e.target.value }, true)}
-                                  placeholder="e.g. 不需要"
+                                <select
+                                  value={normalizeHonourInternalPack(sup.internal_pack)}
+                                  onChange={(e) => updateSup({ internal_pack: e.target.value }, true)}
                                   className={softInput}
-                                />
+                                >
+                                  <option value="">選擇…</option>
+                                  {HONOUR_INTERNAL_PACK_OPTIONS.map((o) => (
+                                    <option key={o} value={o}>
+                                      {o}
+                                    </option>
+                                  ))}
+                                </select>
                               )}
                               {labeled(
-                                '交貨包裝',
-                                <input
-                                  value={sup.pack_required}
-                                  onChange={(e) => updateSup({ pack_required: e.target.value }, false)}
-                                  onBlur={(e) => updateSup({ pack_required: e.target.value }, true)}
-                                  placeholder="e.g. OPP 獨立包裝"
-                                  className={softInput}
+                                '出貨包裝',
+                                <MultiChoiceSelect
+                                  values={parseHonourMultiValue(sup.pack_required)}
+                                  options={HONOUR_PACK_REQUIRED_OPTIONS}
+                                  onChange={(vals) =>
+                                    updateSup(
+                                      { pack_required: joinHonourMultiValue(vals, HONOUR_PACK_REQUIRED_OPTIONS) },
+                                      true
+                                    )
+                                  }
+                                  placeholder="選擇出貨包裝…"
                                 />
                               )}
                             </div>

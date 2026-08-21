@@ -59,7 +59,7 @@ function IconCalendar({ className = '' }: { className?: string }) {
 
 function PropertyLabel({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-2 min-w-[7.5rem] shrink-0 text-gray-400">
+    <div className="flex items-center gap-2 min-w-[7.5rem] shrink-0 text-gray-900">
       {icon}
       <span className="text-sm">{label}</span>
     </div>
@@ -139,7 +139,7 @@ export default function OrderPropertyBar({
     <div className="mt-3 space-y-2.5">
       <div className="grid sm:grid-cols-2 gap-x-8 gap-y-2.5">
         <div className="flex items-center gap-3 min-w-0">
-          <PropertyLabel icon={<IconTarget className="text-gray-400" />} label={bi('Status', '狀態')} />
+          <PropertyLabel icon={<IconTarget className="text-gray-900" />} label={bi('Status', '狀態')} />
           <div className="relative min-w-0">
             <select
               value={status}
@@ -155,7 +155,7 @@ export default function OrderPropertyBar({
         </div>
 
         <div className="flex items-center gap-3 min-w-0" ref={assigneesRef}>
-          <PropertyLabel icon={<IconPerson className="text-gray-400" />} label={bi('Assignees', '負責人')} />
+          <PropertyLabel icon={<IconPerson className="text-gray-900" />} label={bi('Assignees', '負責人')} />
           <div className="relative min-w-0 flex-1">
             <button
               type="button"
@@ -205,7 +205,7 @@ export default function OrderPropertyBar({
         </div>
 
         <div className="flex items-center gap-3 min-w-0">
-          <PropertyLabel icon={<IconCalendar className="text-gray-400" />} label={bi('Receipt date', '收貨日')} />
+          <PropertyLabel icon={<IconCalendar className="text-gray-900" />} label={bi('Receipt date', '收貨日')} />
           <input
             type="date"
             value={dueDate}
@@ -217,7 +217,7 @@ export default function OrderPropertyBar({
         </div>
 
         <div className="flex items-start gap-3 min-w-0" ref={tagsRef}>
-          <PropertyLabel icon={<IconTag className="text-gray-400 mt-1" />} label={bi('Tags', '標籤')} />
+          <PropertyLabel icon={<IconTag className="text-gray-900 mt-1" />} label={bi('Tags', '標籤')} />
           <div className="relative min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               {tags.map((tag) => (

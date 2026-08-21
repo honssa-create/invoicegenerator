@@ -731,7 +731,7 @@ export default function OrderDetailPage() {
   };
   const labeled = (label: string, node: React.ReactNode, hint?: string) => (
     <div>
-      <label className="block text-xs font-medium text-gray-500 mb-1.5">
+      <label className="block text-xs font-medium text-gray-900 mb-1.5">
         {label}
         {hint ? <span className="text-gray-400 font-normal"> · {hint}</span> : null}
       </label>
@@ -740,7 +740,7 @@ export default function OrderDetailPage() {
   );
   const readOnly = (label: string, value: React.ReactNode) => (
     <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="text-[11px] uppercase tracking-wide text-gray-900">{label}</p>
       <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{value}</p>
     </div>
   );
@@ -969,7 +969,7 @@ export default function OrderDetailPage() {
           <tr className="bg-gray-50/80 border-b border-gray-200">
             <th className="text-left font-semibold text-gray-700 px-3 py-2.5 whitespace-nowrap">{title}</th>
             {WEDDING_GIFT_PACK_CAPACITIES.map((c) => (
-              <th key={c.id} className="font-medium text-gray-500 px-2 py-2.5 text-center">{c.label}</th>
+              <th key={c.id} className="font-medium text-gray-900 px-2 py-2.5 text-center">{c.label}</th>
             ))}
           </tr>
         </thead>
@@ -1064,7 +1064,7 @@ export default function OrderDetailPage() {
             <div className="flex items-start justify-between gap-4">
               <h1 className="text-xl sm:text-2xl font-bold text-gray-900 min-w-0">{orderTitle(order)}</h1>
               <div className="text-right shrink-0">
-                <p className="text-[11px] uppercase tracking-wide text-gray-400">{bi('Total', '總額')}</p>
+                <p className="text-[11px] uppercase tracking-wide text-gray-900">{bi('Total', '總額')}</p>
                 <p className="text-xl sm:text-2xl font-bold text-gray-900 tabular-nums leading-tight">
                   {dueTotal != null
                     ? `$${dueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1110,7 +1110,7 @@ export default function OrderDetailPage() {
               className="mt-3 w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 rounded px-2 py-1 text-sm outline-none"
             />
             <div className="mt-4">
-              <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
+              <label className="block text-xs font-medium text-gray-900 mb-1">Notes 備註</label>
               <textarea value={order.notes} onChange={(e) => setCoreLocal('notes', e.target.value)} onBlur={(e) => patch({ core: { notes: e.target.value } })} rows={2} placeholder="Add notes… (manually input or edited)" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
             </div>
           </div>
@@ -1166,15 +1166,15 @@ export default function OrderDetailPage() {
             <h2 className="font-semibold text-gray-900 mb-4">Client 客戶</h2>
             <div className="grid md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Name 客戶</label>
+                <label className="block text-xs font-medium text-gray-900 mb-1">Name 客戶</label>
                 <input value={order.name} onChange={(e) => setCoreLocal('name', e.target.value)} onBlur={(e) => patch({ core: { name: e.target.value } })} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">電話 Phone</label>
+                <label className="block text-xs font-medium text-gray-900 mb-1">電話 Phone</label>
                 <input value={order.phone} onChange={(e) => setCoreLocal('phone', e.target.value)} onBlur={(e) => patch({ core: { phone: e.target.value } })} placeholder="+852…" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">E-mail</label>
+                <label className="block text-xs font-medium text-gray-900 mb-1">E-mail</label>
                 <input value={order.customer_email} onChange={(e) => setCoreLocal('customer_email', e.target.value)} onBlur={(e) => patch({ core: { customer_email: e.target.value } })} placeholder="name@email.com" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
               </div>
             </div>
@@ -1297,7 +1297,7 @@ export default function OrderDetailPage() {
                         <col className="w-10" />
                       </colgroup>
                       <thead>
-                        <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200 bg-gray-50/80">
+                        <tr className="text-[11px] uppercase tracking-wide text-gray-900 border-b border-gray-200 bg-gray-50/80">
                           <th className="text-left py-2 pl-3 pr-1 font-medium">#</th>
                           <th className="text-left py-2 pr-2 font-medium">Name 品名</th>
                           <th className="text-left py-2 pr-2 font-medium">Description 說明</th>
@@ -1575,7 +1575,7 @@ export default function OrderDetailPage() {
                           </div>
 
                           <div className="border-t border-dashed border-gray-100 pt-4 space-y-4">
-                            <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-900">
                               Craft 工藝
                             </h5>
                             <div className="grid md:grid-cols-2 gap-4">
@@ -1639,7 +1639,7 @@ export default function OrderDetailPage() {
                           </div>
 
                           <div className="border-t border-dashed border-gray-100 pt-4 space-y-4">
-                            <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-900">
                               Packaging 包裝
                             </h5>
                             <div className="grid md:grid-cols-2 gap-4">
@@ -1907,7 +1907,7 @@ export default function OrderDetailPage() {
                     return (
                       <div className="overflow-x-auto rounded-xl border border-gray-200">
                         <table className="min-w-full text-sm">
-                          <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-400">
+                          <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-900">
                             <tr>
                               <th className="px-4 py-2.5 font-medium">Product</th>
                               <th className="px-4 py-2.5 font-medium text-right">Qty</th>
@@ -2033,7 +2033,7 @@ export default function OrderDetailPage() {
                   return (
                     <div className="overflow-x-auto rounded-xl border border-gray-200">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-400">
+                        <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-900">
                           <tr>
                             <th className="px-3 py-2.5 font-medium w-14" />
                             <th className="px-4 py-2.5 font-medium">Product</th>
@@ -2161,7 +2161,7 @@ export default function OrderDetailPage() {
                   : '—'
               )}
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                <label className="block text-xs font-medium text-gray-900 mb-1.5">
                   Payment Status 付款狀態
                   <span className="text-gray-400 font-normal"> · auto</span>
                 </label>
@@ -2192,7 +2192,7 @@ export default function OrderDetailPage() {
                         className="max-h-28 rounded-lg cursor-zoom-in"
                       />
                     ) : (
-                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-900">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
                     )}
                   </div>
                   {paymentScanMsg[1] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[1]}</p>}
@@ -2241,7 +2241,7 @@ export default function OrderDetailPage() {
                         className="max-h-28 rounded-lg cursor-zoom-in"
                       />
                     ) : (
-                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-900">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
                     )}
                   </div>
                   {paymentScanMsg[2] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[2]}</p>}
@@ -2293,7 +2293,7 @@ export default function OrderDetailPage() {
                           className="max-h-28 rounded-lg cursor-zoom-in"
                         />
                       ) : (
-                        <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
+                        <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-900">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
                       )}
                     </div>
                     {paymentScanMsg[3] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[3]}</p>}

@@ -204,7 +204,7 @@ function OrdersPageContent() {
         pageRows.forEach((o) => next.delete(o.id));
         return next;
       }
-      return new Set([...prev, ...pageRows.map((o) => o.id)]);
+      return new Set([...Array.from(prev), ...pageRows.map((o) => o.id)]);
     });
   };
 

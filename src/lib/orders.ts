@@ -2045,6 +2045,145 @@ export function derivePaymentStatusLabel(
   return '部分付款 Partly Paid';
 }
 
+export type PaymentSlot = 1 | 2 | 3;
+
+export const PAYMENT_SLOTS: { slot: PaymentSlot; label: string; shortLabel: string }[] = [
+  { slot: 1, label: '第一期付款', shortLabel: '第一期' },
+  { slot: 2, label: '第二期付款', shortLabel: '第二期' },
+  { slot: 3, label: '第三期付款', shortLabel: '第三期' },
+];
+
+export interface PaymentSlotFieldKeys {
+  date: string;
+  amount: string;
+  bank: string;
+  method: string;
+  reference: string;
+  receipt: string;
+  verified: string;
+}
+
+/** Map installment slot → `fields_json` keys. Slot 1 reuses legacy `payment_*` names. */
+export function paymentSlotFields(slot: PaymentSlot): PaymentSlotFieldKeys {
+  if (slot === 2) {
+    return {
+      date: 'payment2_date',
+      amount: 'payment2_amount',
+      bank: 'payment2_bank',
+      method: 'payment2_method_detail',
+      reference: 'payment2_reference',
+      receipt: 'payment2_receipt_path',
+      verified: 'payment2_verified',
+    };
+  }
+  if (slot === 3) {
+    return {
+      date: 'payment3_date',
+      amount: 'payment3_amount',
+      bank: 'payment3_bank',
+      method: 'payment3_method_detail',
+      reference: 'payment3_reference',
+      receipt: 'payment3_receipt_path',
+      verified: 'payment3_verified',
+    };
+  }
+  return {
+    date: 'payment_date',
+    amount: 'payment_amount',
+    bank: 'payment_bank',
+    method: 'payment_method_detail',
+    reference: 'payment_reference',
+    receipt: 'payment_receipt_path',
+    verified: 'payment_verified',
+  };
+}
+
+export function normalizePaymentSlot(slot: unknown): PaymentSlot {
+  const n = Number(slot);
+  if (n === 2) return 2;
+  if (n === 3) return 3;
+  return 1;
+}
+
+export function isPaymentSlotVerified(
+  fields: Record<string, string | boolean>,
+  slot: PaymentSlot
+): boolean {
+  const key = paymentSlotFields(slot).verified;
+  const v = fields[key];
+  return v === true || v === 'true' || v === '1';
+}
+
+export function orderHasPaymentSlotData(
+  fields: Record<string, string | boolean>,
+  slot: PaymentSlot
+): boolean {
+  const keys = paymentSlotFields(slot);
+  return [keys.date, keys.amount, keys.bank, keys.method, keys.reference, keys.receipt].some((k) => {
+    const v = fields[k];
+    return v != null && String(v).trim() !== '';
+  });
+}
+
+export interface AccountingPaymentEntry {
+  order_id: number;
+  payment_slot: PaymentSlot;
+  installment_label: string;
+  order_ref: string;
+  title: string;
+  customer: string;
+  order_type: string;
+  payment_date: string;
+  amount: string;
+  bank: string;
+  method: string;
+  reference: string;
+  has_receipt: boolean;
+  payment_receipt_path: string;
+  verified: boolean;
+  linked_reconciliation_id: number | null;
+}
+
+/** Expand one order into 0–3 accounting rows (one per populated installment). */
+export function expandOrderToPaymentEntries(
+  order: {
+    id: number;
+    reference_number: string;
+    name: string | null;
+    fields: Record<string, string | boolean>;
+  },
+  meta: {
+    title: string;
+    linkedByOrderSlot: Map<string, number>;
+  }
+): AccountingPaymentEntry[] {
+  const entries: AccountingPaymentEntry[] = [];
+  for (const { slot, shortLabel } of PAYMENT_SLOTS) {
+    if (!orderHasPaymentSlotData(order.fields, slot)) continue;
+    const keys = paymentSlotFields(slot);
+    const linkedKey = `${order.id}-${slot}`;
+    entries.push({
+      order_id: order.id,
+      payment_slot: slot,
+      installment_label: shortLabel,
+      order_ref: order.reference_number,
+      title: meta.title,
+      customer: order.name || '',
+      order_type: String(order.fields.order_type || ''),
+      payment_date: String(order.fields[keys.date] || ''),
+      amount: String(order.fields[keys.amount] || ''),
+      bank: String(order.fields[keys.bank] || ''),
+      method: String(order.fields[keys.method] || ''),
+      reference: String(order.fields[keys.reference] || ''),
+      has_receipt: Boolean(order.fields[keys.receipt]),
+      payment_receipt_path: String(order.fields[keys.receipt] || ''),
+      verified: isPaymentSlotVerified(order.fields, slot),
+      linked_reconciliation_id: meta.linkedByOrderSlot.get(linkedKey) ?? null,
+    });
+  }
+  return entries;
+}
+
 export const BIRD_NEST_FLAVORS: { key: string; label: string }[] = [
   { key: 'qty_rock_sugar', label: '客人訂冰糖味 (樽)' },
   { key: 'qty_osmanthus', label: '客人訂桂花味 (樽)' },

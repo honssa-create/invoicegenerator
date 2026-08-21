@@ -647,6 +647,7 @@ ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_by TEXT;
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_at TEXT;
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS receipt_path TEXT;
 ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS payment_slot INTEGER;
 
 CREATE TABLE IF NOT EXISTS integration_tokens (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

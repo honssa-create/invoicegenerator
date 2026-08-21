@@ -2173,7 +2173,7 @@ export default function OrderDetailPage() {
 
             {/* First payment */}
             <div className="rounded-xl border border-gray-200 p-5 mb-6 bg-gray-50/30">
-              <h3 className="text-sm font-semibold text-gray-800 mb-4">第一次付款 First Payment</h3>
+              <h3 className="text-sm font-semibold text-gray-800 mb-4">第一期付款 First Payment</h3>
               <div className="grid md:grid-cols-[200px_1fr] gap-5">
                 <div>
                   <div
@@ -2222,7 +2222,7 @@ export default function OrderDetailPage() {
 
             {/* Second payment */}
             <div className="rounded-xl border border-gray-200 p-5 mb-6 bg-gray-50/30">
-              <h3 className="text-sm font-semibold text-gray-800 mb-4">第二次付款 Second Payment</h3>
+              <h3 className="text-sm font-semibold text-gray-800 mb-4">第二期付款 Second Payment</h3>
               <div className="grid md:grid-cols-[200px_1fr] gap-5">
                 <div>
                   <div
@@ -2261,7 +2261,7 @@ export default function OrderDetailPage() {
             {showPayment3 ? (
               <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/30">
                 <div className="flex items-center justify-between gap-3 mb-4">
-                  <h3 className="text-sm font-semibold text-gray-800">第三次付款 Third Payment</h3>
+                  <h3 className="text-sm font-semibold text-gray-800">第三期付款 Third Payment</h3>
                   {!hasPayment3Content ? (
                     <button
                       type="button"
@@ -2317,7 +2317,7 @@ export default function OrderDetailPage() {
                 }}
                 className="w-full rounded-xl border border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 transition-colors"
               >
-                + {bi('Add third payment', '新增第三次付款')}
+                + {bi('Add third payment', '新增第三期付款')}
               </button>
             )}
           </section>

@@ -46,6 +46,7 @@ export interface ReconciliationRecord {
   approved_at: string | null;
   created_by: string | null;
   created_at: string;
+  payment_slot: number | null;
   /** Hydrated for UI when suggested_order_id is set */
   suggested_order_no?: string | null;
   suggested_customer_name?: string | null;

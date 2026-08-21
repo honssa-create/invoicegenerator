@@ -4,10 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { orderPaymentReceiptUrl } from '@/lib/image-url';
+import type { PaymentSlot } from '@/lib/orders';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface Entry {
   order_id: number;
+  payment_slot: PaymentSlot;
+  installment_label: string;
   order_ref: string;
   title: string;
   customer: string;
@@ -43,6 +46,7 @@ export default function AccountingTable() {
   const goLinkPayment = (entry: Entry) => {
     const params = new URLSearchParams();
     params.set('linkOrderId', String(entry.order_id));
+    params.set('paymentSlot', String(entry.payment_slot));
     if (entry.amount) params.set('amount', entry.amount);
     if (entry.payment_date) params.set('date', entry.payment_date);
     if (entry.order_ref) params.set('orderRef', entry.order_ref);
@@ -107,11 +111,12 @@ export default function AccountingTable() {
           <div className="p-12 text-center text-gray-500">{MSG.noPaymentEntriesYet}</div>
         ) : (
           <>
-            <table className="w-full min-w-[1000px] text-sm">
+            <table className="w-full min-w-[1080px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                   <th className="px-4 py-3">Receipt</th>
                   <th className="px-4 py-3">Order #</th>
+                  <th className="px-4 py-3">{bi('Installment', '期數')}</th>
                   <th className="px-4 py-3">Customer</th>
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Payment Date</th>
@@ -124,10 +129,14 @@ export default function AccountingTable() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {pageRows.map((entry) => {
-                  const receiptUrl = orderPaymentReceiptUrl(entry.order_id, entry.payment_receipt_path);
+                  const receiptUrl = orderPaymentReceiptUrl(
+                    entry.order_id,
+                    entry.payment_receipt_path,
+                    entry.payment_slot
+                  );
                   return (
                     <tr
-                      key={entry.order_id}
+                      key={`${entry.order_id}-${entry.payment_slot}`}
                       className={`hover:bg-gray-50 ${entry.verified ? 'bg-green-50/30' : ''}`}
                     >
                       <td className="px-4 py-3">
@@ -152,6 +161,7 @@ export default function AccountingTable() {
                           {entry.order_ref}
                         </Link>
                       </td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{entry.installment_label}</td>
                       <td className="px-4 py-3 text-gray-700">{entry.customer || '—'}</td>
                       <td className="px-4 py-3 text-gray-500">{entry.order_type || '—'}</td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">

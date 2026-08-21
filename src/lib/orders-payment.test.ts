@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   computeOrderPaidTotal,
   derivePaymentStatusLabel,
+  expandOrderToPaymentEntries,
+  orderHasPaymentSlotData,
   parsePaymentAmount,
+  paymentSlotFields,
 } from './orders';
 
 describe('parsePaymentAmount', () => {
@@ -39,6 +42,57 @@ describe('derivePaymentStatusLabel', () => {
     expect(derivePaymentStatusLabel(50, 100)).toBe('部分付款 Partly Paid');
     expect(derivePaymentStatusLabel(100, 100)).toBe('Full Paid');
     expect(derivePaymentStatusLabel(100.005, 100)).toBe('Full Paid');
+  });
+});
+
+describe('paymentSlotFields', () => {
+  it('maps slots to the correct field keys', () => {
+    expect(paymentSlotFields(1).verified).toBe('payment_verified');
+    expect(paymentSlotFields(2).amount).toBe('payment2_amount');
+    expect(paymentSlotFields(3).receipt).toBe('payment3_receipt_path');
+  });
+});
+
+describe('orderHasPaymentSlotData', () => {
+  it('detects populated slots', () => {
+    expect(orderHasPaymentSlotData({ payment_amount: '100' }, 1)).toBe(true);
+    expect(orderHasPaymentSlotData({ payment2_date: '2026-01-01' }, 2)).toBe(true);
+    expect(orderHasPaymentSlotData({}, 3)).toBe(false);
+  });
+});
+
+describe('expandOrderToPaymentEntries', () => {
+  it('emits one row per populated installment', () => {
+    const linked = new Map<string, number>([['42-2', 99]]);
+    const entries = expandOrderToPaymentEntries(
+      {
+        id: 42,
+        reference_number: 'ORD-42',
+        name: 'Alice',
+        fields: {
+          order_type: 'honour訂製',
+          payment_amount: '500',
+          payment_date: '2026-01-01',
+          payment_verified: true,
+          payment2_amount: '300',
+          payment2_date: '2026-02-01',
+        },
+      },
+      { title: 'Badge order', linkedByOrderSlot: linked }
+    );
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      payment_slot: 1,
+      amount: '500',
+      verified: true,
+      linked_reconciliation_id: null,
+    });
+    expect(entries[1]).toMatchObject({
+      payment_slot: 2,
+      amount: '300',
+      verified: false,
+      linked_reconciliation_id: 99,
+    });
   });
 });
 

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import db from '@/lib/db';
 import { listOrdersSummary } from '@/lib/order-server';
-import { orderTitle } from '@/lib/orders';
+import { expandOrderToPaymentEntries, orderTitle } from '@/lib/orders';
 import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
@@ -14,33 +14,23 @@ export async function GET(request: Request) {
 
   const linkedRows = (await db
     .prepare(
-      `SELECT order_id, MAX(id) AS linked_reconciliation_id
+      `SELECT order_id, COALESCE(payment_slot, 1) AS payment_slot, MAX(id) AS linked_reconciliation_id
        FROM reconciliation_records
        WHERE user_id = ? AND status = 'Matched' AND order_id IS NOT NULL
-       GROUP BY order_id`
+       GROUP BY order_id, COALESCE(payment_slot, 1)`
     )
-    .all(ownerId)) as { order_id: number; linked_reconciliation_id: number }[];
+    .all(ownerId)) as { order_id: number; payment_slot: number; linked_reconciliation_id: number }[];
 
-  const linkedByOrder = new Map(
-    linkedRows.map((row) => [row.order_id, row.linked_reconciliation_id])
+  const linkedByOrderSlot = new Map(
+    linkedRows.map((row) => [`${row.order_id}-${row.payment_slot}`, row.linked_reconciliation_id])
   );
 
-  const entries = orders.map((o) => ({
-    order_id: o.id,
-    order_ref: o.reference_number,
-    title: orderTitle(o),
-    customer: o.name || '',
-    order_type: (o.fields.order_type as string) || '',
-    payment_date: (o.fields.payment_date as string) || '',
-    amount: (o.fields.payment_amount as string) || '',
-    bank: (o.fields.payment_bank as string) || '',
-    method: (o.fields.payment_method_detail as string) || '',
-    reference: (o.fields.payment_reference as string) || '',
-    has_receipt: Boolean(o.fields.payment_receipt_path),
-    payment_receipt_path: (o.fields.payment_receipt_path as string) || '',
-    verified: o.fields.payment_verified === true || o.fields.payment_verified === 'true',
-    linked_reconciliation_id: linkedByOrder.get(o.id) ?? null,
-  }));
+  const entries = orders.flatMap((o) =>
+    expandOrderToPaymentEntries(o, {
+      title: orderTitle(o),
+      linkedByOrderSlot,
+    })
+  );
 
   return NextResponse.json({ entries });
 }

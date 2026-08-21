@@ -22,6 +22,7 @@ import {
   type ReconciliationRecord,
 } from '@/lib/reconciliation';
 import { BTN } from '@/lib/ui-labels';
+import { PAYMENT_SLOTS, normalizePaymentSlot, type PaymentSlot } from '@/lib/orders';
 
 interface MatchCandidate {
   order_id: number;
@@ -152,6 +153,7 @@ function ReconciliationContent() {
   const [linkAmountHint, setLinkAmountHint] = useState<number | null>(null);
   const [linkDateHint, setLinkDateHint] = useState<string | null>(null);
   const [linkOrderRef, setLinkOrderRef] = useState<string | null>(null);
+  const [linkPaymentSlot, setLinkPaymentSlot] = useState<PaymentSlot>(1);
   const [showAllLinkRecords, setShowAllLinkRecords] = useState(false);
   const [focusRecordId, setFocusRecordId] = useState<number | null>(null);
   const [matchedOrderId, setMatchedOrderId] = useState<number | null>(null);
@@ -221,6 +223,7 @@ function ReconciliationContent() {
       setLinkAmountHint(parseAmountHint(searchParams.get('amount')));
       setLinkDateHint(searchParams.get('date') || null);
       setLinkOrderRef(searchParams.get('orderRef') || null);
+      setLinkPaymentSlot(normalizePaymentSlot(searchParams.get('paymentSlot')));
       setShowAllLinkRecords(false);
       setFocusRecordId(null);
       setMatchedOrderId(null);
@@ -268,6 +271,7 @@ function ReconciliationContent() {
     setLinkAmountHint(null);
     setLinkDateHint(null);
     setLinkOrderRef(null);
+    setLinkPaymentSlot(1);
     setShowAllLinkRecords(false);
     setZoneFilter('high');
     window.history.replaceState(null, '', '/reconciliation');
@@ -515,7 +519,7 @@ function ReconciliationContent() {
     const res = await fetch(`/api/reconciliation/${id}/link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: linkOrderId }),
+      body: JSON.stringify({ order_id: linkOrderId, payment_slot: linkPaymentSlot }),
     });
     const d = await res.json();
     setBusyId(null);
@@ -1098,6 +1102,7 @@ function ReconciliationContent() {
           <div>
             Linking payment for order{' '}
             <span className="font-mono font-medium">{linkOrderRef || `#${linkOrderId}`}</span>
+            {` · ${PAYMENT_SLOTS.find((s) => s.slot === linkPaymentSlot)?.shortLabel || `Installment ${linkPaymentSlot}`}`}
             {linkAmountHint != null ? ` · ${formatMoney(linkAmountHint)}` : ''}
             {linkDateHint ? ` · ${linkDateHint}` : ''}
             <div className="text-brand-700/80 text-xs mt-0.5">

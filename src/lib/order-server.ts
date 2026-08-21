@@ -128,6 +128,10 @@ const LIST_FIELD_KEYS = [
   'payment_amount', 'payment1_amount', 'payment2_amount', 'payment3_amount',
   'payment_date', 'payment_bank', 'payment_method_detail', 'payment_reference',
   'payment_receipt_path', 'payment_verified',
+  'payment2_date', 'payment2_bank', 'payment2_method_detail', 'payment2_reference',
+  'payment2_receipt_path', 'payment2_verified',
+  'payment3_date', 'payment3_bank', 'payment3_method_detail', 'payment3_reference',
+  'payment3_receipt_path', 'payment3_verified',
 ] as const;
 
 type ListFieldKey = (typeof LIST_FIELD_KEYS)[number];
@@ -168,13 +172,25 @@ interface LeanOrderRow {
   f_payment_reference: string | null;
   f_payment_receipt_path: string | null;
   f_payment_verified: string | null;
+  f_payment2_date: string | null;
+  f_payment2_bank: string | null;
+  f_payment2_method_detail: string | null;
+  f_payment2_reference: string | null;
+  f_payment2_receipt_path: string | null;
+  f_payment2_verified: string | null;
+  f_payment3_date: string | null;
+  f_payment3_bank: string | null;
+  f_payment3_method_detail: string | null;
+  f_payment3_reference: string | null;
+  f_payment3_receipt_path: string | null;
+  f_payment3_verified: string | null;
 }
 
 function leanRowToOrder(row: LeanOrderRow): Order {
   const fields: Record<string, string | boolean> = {};
   const set = (key: ListFieldKey, raw: string | null) => {
     if (raw == null || raw === '') return;
-    if (key === 'payment_verified') {
+    if (key.endsWith('_verified')) {
       fields[key] = raw === 'true' || raw === '1';
       return;
     }
@@ -192,9 +208,19 @@ function leanRowToOrder(row: LeanOrderRow): Order {
   set('payment_method_detail', row.f_payment_method_detail);
   set('payment_reference', row.f_payment_reference);
   set('payment_receipt_path', row.f_payment_receipt_path);
-  if (row.f_payment_verified != null && row.f_payment_verified !== '') {
-    set('payment_verified', row.f_payment_verified);
-  }
+  set('payment_verified', row.f_payment_verified);
+  set('payment2_date', row.f_payment2_date);
+  set('payment2_bank', row.f_payment2_bank);
+  set('payment2_method_detail', row.f_payment2_method_detail);
+  set('payment2_reference', row.f_payment2_reference);
+  set('payment2_receipt_path', row.f_payment2_receipt_path);
+  set('payment2_verified', row.f_payment2_verified);
+  set('payment3_date', row.f_payment3_date);
+  set('payment3_bank', row.f_payment3_bank);
+  set('payment3_method_detail', row.f_payment3_method_detail);
+  set('payment3_reference', row.f_payment3_reference);
+  set('payment3_receipt_path', row.f_payment3_receipt_path);
+  set('payment3_verified', row.f_payment3_verified);
 
   return {
     id: row.id,
@@ -259,6 +285,16 @@ export async function listOrdersSummary(
       OR NULLIF(j.fj->>'payment_method_detail', '') IS NOT NULL
       OR NULLIF(j.fj->>'payment_reference', '') IS NOT NULL
       OR NULLIF(j.fj->>'payment_receipt_path', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment2_amount', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment2_date', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment2_bank', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment2_reference', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment2_receipt_path', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment3_amount', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment3_date', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment3_bank', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment3_reference', '') IS NOT NULL
+      OR NULLIF(j.fj->>'payment3_receipt_path', '') IS NOT NULL
     )`;
   }
 

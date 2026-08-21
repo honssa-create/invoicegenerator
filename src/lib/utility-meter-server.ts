@@ -1,5 +1,6 @@
 import db from './db';
 import { saveReceipt, ocrImageText } from './receipt';
+import { deleteReplacedStoredFile, deleteStoredFiles } from './stored-file-cleanup';
 import { paddleOcrBoxes } from './paddle-ocr';
 import { parseMeterReadingFromBoxes, parseMeterReadingFromText, type MeterKind } from './meter-ocr';
 import {
@@ -357,16 +358,17 @@ async function upsertItemsAndSync(
 
     const existing = (await db
       .prepare(
-        'SELECT id FROM utility_meter_round_items WHERE round_id = ? AND meter_key = ?'
+        'SELECT id, photo_path FROM utility_meter_round_items WHERE round_id = ? AND meter_key = ?'
       )
-      .get(roundId, def.key)) as { id: number } | undefined;
+      .get(roundId, def.key)) as { id: number; photo_path: string | null } | undefined;
 
     let itemId = existing?.id;
     if (existing) {
+      await deleteReplacedStoredFile(existing.photo_path, photo);
       await db
         .prepare(
           `UPDATE utility_meter_round_items
-           SET reading_value = ?, photo_path = COALESCE(?, photo_path), ocr_text = COALESCE(?, ocr_text),
+           SET reading_value = ?, photo_path = ?, ocr_text = ?,
                updated_at = datetime('now')
            WHERE id = ?`
         )
@@ -465,9 +467,20 @@ export async function deleteUtilityMeterRound(
   id: number | string,
   userId: number,
 ): Promise<boolean> {
+  const items = (await db
+    .prepare(
+      `SELECT i.photo_path
+       FROM utility_meter_round_items i
+       JOIN utility_meter_rounds r ON r.id = i.round_id
+       WHERE r.id = ? AND r.user_id = ?`
+    )
+    .all(id, userId)) as { photo_path: string | null }[];
   const res = await db
     .prepare('DELETE FROM utility_meter_rounds WHERE id = ? AND user_id = ?')
     .run(id, userId);
+  if ((res.changes || 0) > 0) {
+    await deleteStoredFiles(items.map((item) => item.photo_path));
+  }
   return (res.changes || 0) > 0;
 }
 

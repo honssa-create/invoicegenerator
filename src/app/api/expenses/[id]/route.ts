@@ -13,6 +13,7 @@ import { normalizeExpensePaymentFields } from '@/lib/expense-payment-fields';
 import { legacyPaymentToFundingSource } from '@/lib/expenses';
 import { canAccessExpense, expenseWhereClause, getDataOwnerId } from '@/lib/org-server';
 import { trashExpense } from '@/lib/trash';
+import { deleteStoredPathsExcept } from '@/lib/stored-file-cleanup';
 import type { Expense } from '@/lib/types';
 import type { FundingSourceId } from '@/lib/expenses';
 
@@ -75,7 +76,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     await db.transaction(async () => {
       const existing = await db
         .prepare(
-          'SELECT batch_id, receipt_no, payment_method, funding_source, paid_date FROM expenses WHERE id = ? AND user_id = ?',
+          'SELECT batch_id, receipt_no, payment_method, funding_source, paid_date, receipt_path FROM expenses WHERE id = ? AND user_id = ?',
         )
         .get(params.id, ownerId) as {
         batch_id: string | null;
@@ -83,10 +84,15 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         payment_method: string | null;
         funding_source: string | null;
         paid_date: string | null;
+        receipt_path: string | null;
       } | undefined;
       if (!existing) {
         throw new Error('Expense not found');
       }
+
+      const previousReceipts = (await db
+        .prepare('SELECT path FROM expense_receipts WHERE expense_id = ? AND user_id = ?')
+        .all(params.id, ownerId)) as { path: string | null }[];
 
       const fundingSource = payment.fields.funding_source as FundingSourceId;
       let batchId = existing.batch_id;
@@ -155,6 +161,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
       );
       for (const p of receiptPaths) await insertReceipt.run(params.id, ownerId, p, null);
+
+      await deleteStoredPathsExcept(
+        [
+          existing.receipt_path,
+          ...previousReceipts.map((row) => row.path),
+        ],
+        receiptPaths,
+      );
     });
 
     const expense = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(params.id) as Expense;

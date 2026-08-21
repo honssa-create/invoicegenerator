@@ -10,6 +10,7 @@ import { isWeddingGiftOrderType, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
+import { cleanupReplacedOrderPaymentReceipts } from '@/lib/stored-file-cleanup';
 
 const CLIENT_SYNC_CORE_KEYS = ['name', 'phone', 'customer_email', 'shipping_address'] as const;
 const CLIENT_SYNC_FIELD_KEYS = ['company_name', 'order_type'] as const;
@@ -102,14 +103,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     let mergedFields: Record<string, unknown> | null = null;
+    let currentFields: Record<string, unknown> = {};
     if (Object.keys(fields).length) {
-      let current: Record<string, unknown> = {};
       try {
-        current = existing.fields_json ? JSON.parse(existing.fields_json) : {};
+        currentFields = existing.fields_json ? JSON.parse(existing.fields_json) : {};
       } catch {
-        current = {};
+        currentFields = {};
       }
-      mergedFields = { ...current, ...fields };
+      mergedFields = { ...currentFields, ...fields };
       pruneStaleOrderFields(mergedFields);
       setClauses.push('fields_json = ?');
       values.push(JSON.stringify(mergedFields));
@@ -137,6 +138,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       } else {
         values.push(params.id, ownerId);
         await db.prepare(`UPDATE orders SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+      }
+      if (mergedFields) {
+        await cleanupReplacedOrderPaymentReceipts(currentFields, mergedFields);
       }
     }
 

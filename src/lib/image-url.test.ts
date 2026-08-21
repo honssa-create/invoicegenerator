@@ -4,6 +4,7 @@ import {
   formReceiptPreviewUrl,
   isStoredImageUrl,
   scanPreviewReceiptUrl,
+  utilityMeterPhotoUrl,
 } from './image-url';
 
 describe('isStoredImageUrl', () => {
@@ -33,6 +34,22 @@ describe('scanPreviewReceiptUrl', () => {
   it('rejects paths with directories or http URLs', () => {
     expect(scanPreviewReceiptUrl('https://cdn.test/a.jpg')).toBeNull();
     expect(scanPreviewReceiptUrl('../etc/passwd')).toBeNull();
+  });
+});
+
+describe('utilityMeterPhotoUrl', () => {
+  it('includes stored path as cache buster', () => {
+    expect(utilityMeterPhotoUrl(12, 'abc.jpg')).toBe(
+      '/api/rentals/meters/files/12?v=abc.jpg',
+    );
+    expect(utilityMeterPhotoUrl(12, 'https://cdn.test/receipts/x.jpg')).toBe(
+      '/api/rentals/meters/files/12?v=https%3A%2F%2Fcdn.test%2Freceipts%2Fx.jpg',
+    );
+  });
+
+  it('returns null without item id or stored path', () => {
+    expect(utilityMeterPhotoUrl(0, 'abc.jpg')).toBeNull();
+    expect(utilityMeterPhotoUrl(5, null)).toBeNull();
   });
 });
 

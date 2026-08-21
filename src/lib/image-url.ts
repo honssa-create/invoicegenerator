@@ -83,3 +83,12 @@ export function reconciliationReceiptUrl(
   if (!storedPath) return null;
   return `/api/reconciliation/${recordId}/receipt`;
 }
+
+/** Auth-scoped meter dial photo; `v` busts browser cache when the stored path changes. */
+export function utilityMeterPhotoUrl(
+  itemId: number,
+  storedPath: string | null | undefined,
+): string | null {
+  if (!itemId || itemId <= 0 || !storedPath?.trim()) return null;
+  return `/api/rentals/meters/files/${itemId}?v=${encodeURIComponent(storedPath.trim())}`;
+}

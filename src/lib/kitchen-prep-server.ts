@@ -4,11 +4,12 @@ import type { PrepCapacity, PrepCompletionSplit, PrepFlavor, PrepOrder, PrepOrde
 import {
   PREP_FLAVORS,
   buildKitchenCompletionActivityBody,
-  computePrepCalculation,
+  computePrepCalculationForOrder,
   computeStewingRawNeeds,
   defaultPrepStatusForCreate,
   hkTodayIso,
   isRedDateAllowed,
+  nextActualQty,
   validatePrepFlavorQtys,
   weddingPrepStatusFromDate,
   hkNowDateTime,
@@ -24,9 +25,7 @@ export { resolveKitchenOwnerUserId };
 
 function normalizeCompletionSplits(
   input: PrepCompletionSplit[] | undefined,
-  capacity: PrepCapacity,
-  fallbackQtys: { osmanthus: number; red_date: number; rock_sugar: number },
-  orderType: PrepOrderType
+  existing: PrepOrder
 ): PrepCompletionSplit[] {
   if (input && input.length > 0) {
     return input.map((s, i) => {
@@ -41,9 +40,9 @@ function normalizeCompletionSplits(
       };
     });
   }
-  const calc = computePrepCalculation(capacity, orderType, fallbackQtys);
+  const calc = computePrepCalculationForOrder(existing);
   return calc.rows
-    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled)
     .map((r) => ({
       label: r.label,
       qty: r.actualQty,
@@ -63,6 +62,9 @@ interface PrepRow {
   qty_osmanthus: number;
   qty_red_date: number;
   qty_rock_sugar: number;
+  actual_qty_osmanthus: number | null;
+  actual_qty_red_date: number | null;
+  actual_qty_rock_sugar: number | null;
   notes: string | null;
   expected_yield: number | null;
   actual_yield: number | null;
@@ -97,6 +99,9 @@ function hydrate(row: PrepRow): PrepOrder {
     qty_osmanthus: row.qty_osmanthus,
     qty_red_date: row.qty_red_date,
     qty_rock_sugar: row.qty_rock_sugar,
+    actual_qty_osmanthus: row.actual_qty_osmanthus ?? null,
+    actual_qty_red_date: row.actual_qty_red_date ?? null,
+    actual_qty_rock_sugar: row.actual_qty_rock_sugar ?? null,
     notes: row.notes,
     expected_yield: row.expected_yield ?? null,
     actual_yield: row.actual_yield ?? null,
@@ -152,6 +157,9 @@ export async function createPrepOrder(
     qty_osmanthus?: number;
     qty_red_date?: number;
     qty_rock_sugar?: number;
+    actual_qty_osmanthus?: number | null;
+    actual_qty_red_date?: number | null;
+    actual_qty_rock_sugar?: number | null;
     linked_order_id?: number | null;
     order_code?: string;
     notes?: string | null;
@@ -166,6 +174,9 @@ export async function createPrepOrder(
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? 0);
   const qtyRed = isRedDateAllowed(capacity, stew) ? Math.max(0, input.qty_red_date ?? 0) : 0;
   const qtyRock = Math.max(0, input.qty_rock_sugar ?? 0);
+  const actualOsmanthus = Math.max(0, input.actual_qty_osmanthus ?? qtyOsmanthus);
+  const actualRed = isRedDateAllowed(capacity, stew) ? Math.max(0, input.actual_qty_red_date ?? qtyRed) : 0;
+  const actualRock = Math.max(0, input.actual_qty_rock_sugar ?? qtyRock);
 
   const validationErr = validatePrepFlavorQtys(
     capacity,
@@ -188,8 +199,10 @@ export async function createPrepOrder(
     .prepare(
       `INSERT INTO kitchen_prep_orders
          (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
-          qty_osmanthus, qty_red_date, qty_rock_sugar, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+          qty_osmanthus, qty_red_date, qty_rock_sugar,
+          actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
+          notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
@@ -202,6 +215,9 @@ export async function createPrepOrder(
       qtyOsmanthus,
       qtyRed,
       qtyRock,
+      actualOsmanthus,
+      actualRed,
+      actualRock,
       input.notes?.trim() || null
     );
   return (await getPrepOrder(Number(res.lastInsertRowid)))!;
@@ -280,6 +296,9 @@ export async function updatePrepOrder(
     qty_osmanthus: number;
     qty_red_date: number;
     qty_rock_sugar: number;
+    actual_qty_osmanthus?: number | null;
+    actual_qty_red_date?: number | null;
+    actual_qty_rock_sugar?: number | null;
     notes: string | null;
     allowEmptyQtys: boolean;
   }>
@@ -296,6 +315,26 @@ export async function updatePrepOrder(
     ? Math.max(0, input.qty_red_date ?? existing.qty_red_date)
     : 0;
   const qtyRock = Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar);
+  const actualOsmanthus = nextActualQty(
+    existing.qty_osmanthus,
+    existing.actual_qty_osmanthus,
+    qtyOsmanthus,
+    input.actual_qty_osmanthus
+  );
+  const actualRed = isRedDateAllowed(capacity, stew)
+    ? nextActualQty(
+        existing.qty_red_date,
+        existing.actual_qty_red_date,
+        qtyRed,
+        input.actual_qty_red_date
+      )
+    : 0;
+  const actualRock = nextActualQty(
+    existing.qty_rock_sugar,
+    existing.actual_qty_rock_sugar,
+    qtyRock,
+    input.actual_qty_rock_sugar
+  );
 
   const validationErr = validatePrepFlavorQtys(
     capacity,
@@ -312,7 +351,9 @@ export async function updatePrepOrder(
     .prepare(
       `UPDATE kitchen_prep_orders SET
        stewing_date = ?, order_type = ?, capacity = ?, status = ?,
-       qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?, notes = ?,
+       qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?,
+       actual_qty_osmanthus = ?, actual_qty_red_date = ?, actual_qty_rock_sugar = ?,
+       notes = ?,
        updated_at = datetime('now')
      WHERE id = ?`
     )
@@ -324,6 +365,9 @@ export async function updatePrepOrder(
       qtyOsmanthus,
       qtyRed,
       qtyRock,
+      actualOsmanthus,
+      actualRed,
+      actualRock,
       input.notes !== undefined ? input.notes : existing.notes,
       id
     );
@@ -354,29 +398,11 @@ export async function completePrepProduction(
   const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
   const stew = formulas.stewFormulas;
 
-  const calculation = computePrepCalculation(
-    existing.capacity,
-    existing.order_type,
-    {
-      osmanthus: existing.qty_osmanthus,
-      red_date: existing.qty_red_date,
-      rock_sugar: existing.qty_rock_sugar,
-    },
-    stew
-  );
+  const calculation = computePrepCalculationForOrder(existing, stew);
   const expectedYield = calculation.totals.bottles;
   const actualYield = Math.max(0, Math.round(input.actual_yield));
   const remarks = input.completion_remarks?.trim() || null;
-  const splits = normalizeCompletionSplits(
-    input.splits,
-    existing.capacity,
-    {
-      osmanthus: existing.qty_osmanthus,
-      red_date: existing.qty_red_date,
-      rock_sugar: existing.qty_rock_sugar,
-    },
-    existing.order_type
-  );
+  const splits = normalizeCompletionSplits(input.splits, existing);
 
   if (splits.length > 0) {
     const splitSum = splits.reduce((sum, s) => sum + s.qty, 0);
@@ -521,6 +547,11 @@ export async function ensurePrepFromWeddingOrder(
   const qtyOsmanthus = n('qty_osmanthus');
   const qtyRedDate = n('qty_red_date');
   const qtyRockSugar = n('qty_rock_sugar');
+  const actualFromField = (key: string, fallback: number) =>
+    (fields[key] || '').trim() ? n(key) : fallback;
+  const actualOsmanthus = actualFromField('actual_qty_osmanthus', qtyOsmanthus);
+  const actualRedDate = actualFromField('actual_qty_red_date', qtyRedDate);
+  const actualRockSugar = actualFromField('actual_qty_rock_sugar', qtyRockSugar);
   const nextStatus = weddingPrepStatusFromDate(stewingDate, {
     hasProductionDate: Boolean(productionDate),
   });
@@ -535,6 +566,9 @@ export async function ensurePrepFromWeddingOrder(
       qty_osmanthus: qtyOsmanthus,
       qty_red_date: qtyRedDate,
       qty_rock_sugar: qtyRockSugar,
+      actual_qty_osmanthus: actualOsmanthus,
+      actual_qty_red_date: actualRedDate,
+      actual_qty_rock_sugar: actualRockSugar,
       linked_order_id: order.id,
       order_code: orderCode,
       notes: null,
@@ -565,6 +599,9 @@ export async function ensurePrepFromWeddingOrder(
     qty_osmanthus: qtyOsmanthus,
     qty_red_date: qtyRedDate,
     qty_rock_sugar: qtyRockSugar,
+    actual_qty_osmanthus: (fields.actual_qty_osmanthus || '').trim() ? actualOsmanthus : undefined,
+    actual_qty_red_date: (fields.actual_qty_red_date || '').trim() ? actualRedDate : undefined,
+    actual_qty_rock_sugar: (fields.actual_qty_rock_sugar || '').trim() ? actualRockSugar : undefined,
     status: statusUpdate,
     allowEmptyQtys: true,
   });

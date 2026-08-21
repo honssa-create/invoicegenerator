@@ -8,8 +8,7 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUS_LABELS,
-  WEDDING_BUFFER,
-  computePrepCalculation,
+  computePrepCalculationForOrder,
   formulaSummaryForCapacity,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
@@ -43,14 +42,19 @@ export default function KitchenPrepPrintPage() {
     return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>;
   }
 
-  const calc = computePrepCalculation(order.capacity, order.order_type, {
-    osmanthus: order.qty_osmanthus,
-    red_date: order.qty_red_date,
-    rock_sugar: order.qty_rock_sugar,
-  });
+  const calc = computePrepCalculationForOrder(order);
 
   return (
-    <div className="min-h-screen bg-gray-100 print:bg-white">
+    <div className="prep-print-root min-h-screen bg-gray-100 print:bg-white">
+      {/* Dedicated prep print route: landscape A4 (overrides global portrait @page). */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 0;
+          }
+        }
+      `}</style>
       <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <Link href={`/kitchen-prep/${id}`} className="text-sm text-brand-600 hover:text-brand-700 font-medium">← {bi('Back to calculator', '返回計算器')}</Link>
         <button
@@ -82,12 +86,6 @@ export default function KitchenPrepPrintPage() {
             <div><span className="text-gray-500">容量 Capacity：</span><strong>{PREP_CAPACITY_LABELS[order.capacity]}</strong></div>
             <div><span className="text-gray-500">Status：</span><strong>{PREP_STATUS_LABELS[order.status]}</strong></div>
           </div>
-
-          {order.order_type === 'wedding' && (
-            <p className="mb-4 text-[15px] font-medium text-brand-800 bg-brand-50 px-4 py-2 rounded">
-              Wedding buffer applied: +{WEDDING_BUFFER} bottles per flavor (回禮訂單 +3 樽)
-            </p>
-          )}
 
           <p className="mb-4 text-sm text-gray-600">{formulaSummaryForCapacity(order.capacity)}</p>
 

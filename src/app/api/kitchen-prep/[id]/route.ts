@@ -9,7 +9,7 @@ import {
 import {
   PREP_ORDER_TYPES,
   PREP_STATUSES,
-  computePrepCalculation,
+  computePrepCalculationForOrder,
   validatePrepFlavorQtys,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
@@ -24,16 +24,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const kitchenOwnerId = await resolveKitchenOwnerUserId();
   const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
-  const calculation = computePrepCalculation(
-    order.capacity,
-    order.order_type,
-    {
-      osmanthus: order.qty_osmanthus,
-      red_date: order.qty_red_date,
-      rock_sugar: order.qty_rock_sugar,
-    },
-    formulas.stewFormulas
-  );
+  const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
 
   return NextResponse.json({ order, calculation });
 }
@@ -73,19 +64,16 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       qty_osmanthus: qtys.osmanthus,
       qty_red_date: qtys.red_date,
       qty_rock_sugar: qtys.rock_sugar,
+      actual_qty_osmanthus:
+        body.actual_qty_osmanthus !== undefined ? Number(body.actual_qty_osmanthus) : undefined,
+      actual_qty_red_date:
+        body.actual_qty_red_date !== undefined ? Number(body.actual_qty_red_date) : undefined,
+      actual_qty_rock_sugar:
+        body.actual_qty_rock_sugar !== undefined ? Number(body.actual_qty_rock_sugar) : undefined,
       notes: body.notes,
     });
 
-    const calculation = computePrepCalculation(
-      order!.capacity,
-      order!.order_type,
-      {
-        osmanthus: order!.qty_osmanthus,
-        red_date: order!.qty_red_date,
-        rock_sugar: order!.qty_rock_sugar,
-      },
-      formulas.stewFormulas
-    );
+    const calculation = computePrepCalculationForOrder(order!, formulas.stewFormulas);
 
     return NextResponse.json({ order, calculation });
   } catch (e) {

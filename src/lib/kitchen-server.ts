@@ -384,7 +384,8 @@ async function loadUnfinishedPrepRawDemand(
 ): Promise<Record<string, number>> {
   const rows = (await db
     .prepare(
-      `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar
+      `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar,
+              actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar
        FROM kitchen_prep_orders
        WHERE status != 'completed'`
     )
@@ -395,6 +396,9 @@ async function loadUnfinishedPrepRawDemand(
     qty_osmanthus: number;
     qty_red_date: number;
     qty_rock_sugar: number;
+    actual_qty_osmanthus: number | null;
+    actual_qty_red_date: number | null;
+    actual_qty_rock_sugar: number | null;
   }[];
   return aggregateRawNeedsFromPrepOrders(rows, formulas.stewFormulas);
 }

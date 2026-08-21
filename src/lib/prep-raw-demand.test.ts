@@ -5,17 +5,28 @@ import {
 } from './kitchen-prep';
 
 describe('computePrepOrderRawNeeds', () => {
-  it('uses actual production qty (wedding +3) for 25g rock sugar', () => {
-    // 10 order → 13 bottles × 0.4g 燕餅, × 1.98g 冰糖
+  it('uses stored actual production qty when provided', () => {
+    const lines = computePrepOrderRawNeeds(
+      '25g',
+      'wedding',
+      { osmanthus: 0, red_date: 0, rock_sugar: 10 },
+      undefined,
+      { rock_sugar: 13 }
+    );
+    const map = Object.fromEntries(lines.map((l) => [l.name, l.qty]));
+    expect(map['燕餅']).toBeCloseTo(13 * 0.4, 5);
+    expect(map['冰糖']).toBeCloseTo(13 * 1.98, 5);
+  });
+
+  it('does not auto-add a wedding +3 buffer', () => {
     const lines = computePrepOrderRawNeeds('25g', 'wedding', {
       osmanthus: 0,
       red_date: 0,
       rock_sugar: 10,
     });
     const map = Object.fromEntries(lines.map((l) => [l.name, l.qty]));
-    expect(map['燕餅']).toBeCloseTo(13 * 0.4, 5);
-    expect(map['冰糖']).toBeCloseTo(13 * 1.98, 5);
-    expect(map['桂花']).toBeUndefined();
+    expect(map['燕餅']).toBeCloseTo(10 * 0.4, 5);
+    expect(map['冰糖']).toBeCloseTo(10 * 1.98, 5);
   });
 });
 

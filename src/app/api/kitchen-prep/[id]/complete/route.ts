@@ -5,7 +5,7 @@ import {
   getPrepOrder,
   resolveKitchenOwnerUserId,
 } from '@/lib/kitchen-prep-server';
-import { computePrepCalculation, type PrepCompletionSplit } from '@/lib/kitchen-prep';
+import { computePrepCalculationForOrder, type PrepCompletionSplit } from '@/lib/kitchen-prep';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -45,16 +45,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
     const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
-    const calculation = computePrepCalculation(
-      order.capacity,
-      order.order_type,
-      {
-        osmanthus: order.qty_osmanthus,
-        red_date: order.qty_red_date,
-        rock_sugar: order.qty_rock_sugar,
-      },
-      formulas.stewFormulas
-    );
+    const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
 
     return NextResponse.json({ order, calculation });
   } catch (e) {

@@ -13,7 +13,7 @@ interface PrepSummaryTableProps {
 }
 
 export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }: PrepSummaryTableProps) {
-  const activeRows = calc.rows.filter((r) => r.orderQty > 0);
+  const activeRows = calc.rows.filter((r) => r.orderQty > 0 || r.actualQty > 0);
   const isPrint = variant === 'print';
 
   const theadClass = isPrint
@@ -63,8 +63,8 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
             <td className={`${cellPad} text-right ${PREP_SUMMARY_TYPO.qtyCell} text-gray-700`}>{r.orderQty}</td>
             <td className={`${cellPad} text-right`}>
               <span className={`${PREP_SUMMARY_TYPO.actualQtyCell} text-brand-700`}>{r.actualQty}</span>
-              {r.weddingBuffer > 0 && (
-                <p className="text-xs text-gray-500 mt-1">{r.orderQty} + {r.weddingBuffer} buffer</p>
+              {r.extraQty > 0 && (
+                <p className="text-xs text-gray-500 mt-1">{r.orderQty} + {r.extraQty}</p>
               )}
             </td>
             {ingredientCols.map((name) => {

@@ -6,7 +6,7 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
   completionSplitsTotal,
-  computePrepCalculation,
+  computePrepCalculationForOrder,
   defaultCompletionSplits,
   originalOrderQuantity,
   type PrepCompletionSplit,
@@ -22,12 +22,7 @@ interface CompletionModalProps {
 
 export default function CompletionModal({ order, onClose, onCompleted }: CompletionModalProps) {
   const calc = useMemo(
-    () =>
-      computePrepCalculation(order.capacity, order.order_type, {
-        osmanthus: order.qty_osmanthus,
-        red_date: order.qty_red_date,
-        rock_sugar: order.qty_rock_sugar,
-      }),
+    () => computePrepCalculationForOrder(order),
     [order]
   );
   const expectedQty = calc.totals.bottles;
@@ -123,12 +118,12 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-4">
               <p className="text-sm font-medium text-gray-500 mb-1">Expected 預期產量</p>
               <p className="text-4xl font-bold text-gray-900 tabular-nums">{expectedQty}</p>
-              <p className="text-xs text-gray-500 mt-1">樽 (incl. buffer)</p>
+              <p className="text-xs text-gray-500 mt-1">樽 (from 實際生產)</p>
             </div>
             <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-4">
               <p className="text-sm font-medium text-gray-500 mb-1">Original 原訂單</p>
               <p className="text-4xl font-bold text-gray-700 tabular-nums">{orderQty}</p>
-              <p className="text-xs text-gray-500 mt-1">樽 (excl. buffer)</p>
+              <p className="text-xs text-gray-500 mt-1">樽 (客人訂)</p>
             </div>
             <div
               className={`rounded-xl border-2 p-4 ${
@@ -170,9 +165,9 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
                   >
                     <div className="flex-1 min-w-[180px]">
                       <p className="text-base font-bold text-gray-900">{row.label}</p>
-                      {calcRow && calcRow.weddingBuffer > 0 && (
+                      {calcRow && calcRow.extraQty > 0 && (
                         <p className="text-xs text-gray-500 mt-0.5">
-                          Expected {calcRow.actualQty} ({calcRow.orderQty} + {calcRow.weddingBuffer} buffer)
+                          Expected {calcRow.actualQty} ({calcRow.orderQty} + {calcRow.extraQty})
                         </p>
                       )}
                     </div>

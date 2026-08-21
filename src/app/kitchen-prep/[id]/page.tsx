@@ -13,13 +13,13 @@ import {
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUSES,
   PREP_STATUS_LABELS,
-  WEDDING_BUFFER,
   formulaSummaryForCapacity,
   isRedDateAllowed,
+  resolveActualQty,
   type PrepCalculation,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
-import { MSG, bi } from '@/lib/ui-labels';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 export default function KitchenPrepDetailPage() {
   const params = useParams();
@@ -30,6 +30,7 @@ export default function KitchenPrepDetailPage() {
   const [calc, setCalc] = useState<PrepCalculation | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [showComplete, setShowComplete] = useState(false);
   const [capacityOptions, setCapacityOptions] = useState<{ id: string; label: string }[]>(
@@ -79,6 +80,29 @@ export default function KitchenPrepDetailPage() {
     setCalc(d.calculation);
   };
 
+  const remove = async () => {
+    if (
+      !confirm(
+        bi(
+          'Move this prep order to Deleted Records? You can restore it within 60 days.',
+          '將此備料單移至已刪除紀錄？可於 60 天內還原。'
+        )
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setError('');
+    const res = await fetch(`/api/kitchen-prep/${id}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    setDeleting(false);
+    if (!res.ok) {
+      setError(d.error || bi('Failed to delete', '刪除失敗'));
+      return;
+    }
+    router.push('/kitchen-prep');
+  };
+
   const input = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
 
   if (loading) {
@@ -88,18 +112,37 @@ export default function KitchenPrepDetailPage() {
     return <AppLayout><div className="p-12 text-center text-gray-500">{bi('Prep order not found.', '找不到備料單。')}</div></AppLayout>;
   }
 
-  const flavorField = (key: 'qty_osmanthus' | 'qty_red_date' | 'qty_rock_sugar', label: string, disabled = false) => (
-    <div>
-      <label className="block text-xs font-medium text-gray-500 mb-1.5">{label}</label>
-      <input
-        type="number"
-        min="0"
-        disabled={disabled}
-        value={order[key]}
-        onChange={(e) => setOrder({ ...order, [key]: Number(e.target.value) || 0 })}
-        onBlur={() => patch({ [key]: order[key] })}
-        className={`${input} text-lg font-semibold ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
-      />
+  const flavorPair = (
+    orderKey: 'qty_osmanthus' | 'qty_red_date' | 'qty_rock_sugar',
+    actualKey: 'actual_qty_osmanthus' | 'actual_qty_red_date' | 'actual_qty_rock_sugar',
+    label: string,
+    disabled = false
+  ) => (
+    <div className="grid grid-cols-2 gap-3">
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1.5">{label} · 客人訂</label>
+        <input
+          type="number"
+          min="0"
+          disabled={disabled}
+          value={order[orderKey]}
+          onChange={(e) => setOrder({ ...order, [orderKey]: Number(e.target.value) || 0 })}
+          onBlur={() => patch({ [orderKey]: order[orderKey] })}
+          className={`${input} text-lg font-semibold ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1.5">實際生產</label>
+        <input
+          type="number"
+          min="0"
+          disabled={disabled}
+          value={resolveActualQty(order[orderKey], order[actualKey])}
+          onChange={(e) => setOrder({ ...order, [actualKey]: Number(e.target.value) || 0 })}
+          onBlur={() => patch({ [actualKey]: resolveActualQty(order[orderKey], order[actualKey]) })}
+          className={`${input} text-lg font-semibold text-brand-800 ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+        />
+      </div>
     </div>
   );
 
@@ -120,6 +163,14 @@ export default function KitchenPrepDetailPage() {
           <Link href={`/kitchen-prep/${id}/print`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🖨 {bi('Print Prep Sheet', '列印備料單')}
           </Link>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={remove}
+            className="btn border border-red-200 text-red-600 hover:bg-red-50 w-full sm:w-auto disabled:opacity-50"
+          >
+            {deleting ? BTN.deleting : BTN.delete}
+          </button>
         </div>
       </div>
 
@@ -191,18 +242,16 @@ export default function KitchenPrepDetailPage() {
 
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Order Quantities 訂購樽數</h3>
         <div className="grid md:grid-cols-3 gap-5 mb-4">
-          {flavorField('qty_osmanthus', '桂花 Osmanthus (樽)')}
-          {flavorField('qty_red_date', '紅棗 Red Date (樽)', !isRedDateAllowed(order.capacity))}
-          {flavorField('qty_rock_sugar', '冰糖 Rock Sugar (樽)')}
+          {flavorPair('qty_osmanthus', 'actual_qty_osmanthus', '桂花 Osmanthus')}
+          {flavorPair('qty_red_date', 'actual_qty_red_date', '紅棗 Red Date', !isRedDateAllowed(order.capacity))}
+          {flavorPair('qty_rock_sugar', 'actual_qty_rock_sugar', '冰糖 Rock Sugar')}
         </div>
+        <p className="text-xs text-gray-500 mb-4">
+          實際生產樽數 is used for the kitchen summary. Defaults to the ordered qty; set it higher for extra bottles (e.g. 回禮).
+        </p>
         {!isRedDateAllowed(order.capacity) && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
             ⚠ Red Date (紅棗) is disabled for {PREP_CAPACITY_LABELS[order.capacity]}.
-          </p>
-        )}
-        {order.order_type === 'wedding' && (
-          <p className="text-xs text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2 mb-6">
-            Wedding buffer: each flavor adds +{WEDDING_BUFFER} bottles to actual production (回禮訂單 +3 樽).
           </p>
         )}
         {!calc.formulaReady && (

@@ -135,6 +135,7 @@ function KitchenPrepListContent() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('stewing_date');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
@@ -245,6 +246,29 @@ function KitchenPrepListContent() {
     }
   };
 
+  const remove = async (id: number) => {
+    if (
+      !confirm(
+        bi(
+          'Move this prep order to Deleted Records? You can restore it within 60 days.',
+          '將此備料單移至已刪除紀錄？可於 60 天內還原。'
+        )
+      )
+    ) {
+      return;
+    }
+    setDeletingId(id);
+    setError('');
+    const res = await fetch(`/api/kitchen-prep/${id}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    setDeletingId(null);
+    if (!res.ok) {
+      setError(d.error || bi('Failed to delete', '刪除失敗'));
+      return;
+    }
+    setOrders((prev) => prev.filter((o) => o.id !== id));
+  };
+
   const input = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
@@ -260,6 +284,10 @@ function KitchenPrepListContent() {
           </button>
         </div>
       </div>
+
+      {error && !showForm && (
+        <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <div className="px-6 py-4 border-b border-gray-200">
@@ -322,17 +350,25 @@ function KitchenPrepListContent() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {o.status !== 'completed' ? (
+                    <div className="inline-flex items-center justify-end gap-2">
+                      {o.status !== 'completed' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
+                          className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
+                        >
+                          {bi('Complete Stewing', '完成燉製')}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
-                        className="inline-flex items-center justify-center min-h-[48px] px-4 py-2.5 text-sm sm:text-base font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
+                        disabled={deletingId === o.id}
+                        onClick={(e) => { e.stopPropagation(); remove(o.id); }}
+                        className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-medium rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap"
                       >
-                        {bi('Complete Stewing', '完成燉製')}
+                        {deletingId === o.id ? BTN.deleting : BTN.delete}
                       </button>
-                    ) : (
-                      <span className="text-xs text-gray-400">—</span>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}

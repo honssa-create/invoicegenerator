@@ -246,8 +246,6 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
   },
 };
 
-export const WEDDING_BUFFER = 3;
-
 /** Quick-tap exception tags for the completion modal (tablet UI). */
 export const COMPLETION_EXCEPTION_TAGS = [
   { id: 'broken_glass', label: 'Broken Glass 爆樽', text: '爆樽' },
@@ -270,7 +268,7 @@ export function defaultCompletionSplits(
 ): PrepCompletionSplit[] {
   const capLabel = PREP_CAPACITY_LABELS[capacity];
   return calc.rows
-    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled)
     .map((r) => ({
       label: `${r.label} ${capLabel}`,
       qty: r.actualQty,
@@ -319,6 +317,9 @@ export interface PrepOrder {
   qty_osmanthus: number;
   qty_red_date: number;
   qty_rock_sugar: number;
+  actual_qty_osmanthus: number | null;
+  actual_qty_red_date: number | null;
+  actual_qty_rock_sugar: number | null;
   notes: string | null;
   expected_yield: number | null;
   actual_yield: number | null;
@@ -335,7 +336,7 @@ export interface FlavorCalcRow {
   label: string;
   orderQty: number;
   actualQty: number;
-  weddingBuffer: number;
+  extraQty: number;
   /** Total grams per raw ingredient for this flavor row (actualQty × per-bottle). */
   ingredientGrams: Record<string, number>;
   /** @deprecated use ingredientGrams['燕餅'] */
@@ -398,9 +399,54 @@ export function getFlavorFormula(
   return cell === undefined ? null : cell;
 }
 
-export function actualProductionQty(orderQty: number, orderType: PrepOrderType): number {
-  const base = Math.max(0, orderQty);
-  return orderType === 'wedding' ? base + WEDDING_BUFFER : base;
+/** Stored actual qty, or order qty when actual has not been set. */
+export function resolveActualQty(orderQty: number, actualQty?: number | null): number {
+  const base = Math.max(0, Math.round(Number(orderQty) || 0));
+  if (actualQty == null || actualQty === ('' as unknown as number)) return base;
+  const n = Number(actualQty);
+  if (!Number.isFinite(n)) return base;
+  return Math.max(0, Math.round(n));
+}
+
+export function prepOrderQtys(order: {
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+}): PrepFlavorQty {
+  return {
+    osmanthus: Math.max(0, order.qty_osmanthus || 0),
+    red_date: Math.max(0, order.qty_red_date || 0),
+    rock_sugar: Math.max(0, order.qty_rock_sugar || 0),
+  };
+}
+
+/** Keep a custom actual qty when order qty changes; otherwise follow the new order qty. */
+export function nextActualQty(
+  prevOrder: number,
+  prevActual: number | null | undefined,
+  nextOrder: number,
+  nextActual?: number | null
+): number {
+  if (nextActual !== undefined && nextActual !== null) {
+    return Math.max(0, Math.round(Number(nextActual) || 0));
+  }
+  if (prevActual == null || prevActual === prevOrder) return Math.max(0, nextOrder);
+  return Math.max(0, prevActual);
+}
+
+export function prepOrderActualQtys(order: {
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+  actual_qty_osmanthus?: number | null;
+  actual_qty_red_date?: number | null;
+  actual_qty_rock_sugar?: number | null;
+}): PrepFlavorQty {
+  return {
+    osmanthus: resolveActualQty(order.qty_osmanthus, order.actual_qty_osmanthus),
+    red_date: resolveActualQty(order.qty_red_date, order.actual_qty_red_date),
+    rock_sugar: resolveActualQty(order.qty_rock_sugar, order.actual_qty_rock_sugar),
+  };
 }
 
 function round2(n: number): number {
@@ -410,15 +456,15 @@ function round2(n: number): number {
 function calcRow(
   flavor: PrepFlavor,
   orderQty: number,
-  orderType: PrepOrderType,
+  actualOverride: number | null | undefined,
   capacity: PrepCapacity,
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): FlavorCalcRow {
   const formula = getFlavorFormula(capacity, flavor, formulas);
   const disabled = formula == null;
-  const safeOrderQty = disabled ? 0 : orderQty;
-  const weddingBuffer = orderType === 'wedding' && safeOrderQty > 0 ? WEDDING_BUFFER : 0;
-  const actualQty = actualProductionQty(safeOrderQty, orderType);
+  const safeOrderQty = disabled ? 0 : Math.max(0, Math.round(Number(orderQty) || 0));
+  const actualQty = disabled ? 0 : resolveActualQty(safeOrderQty, actualOverride);
+  const extraQty = Math.max(0, actualQty - safeOrderQty);
 
   const emptyLegacy = {
     birdNestGrams: 0,
@@ -428,13 +474,13 @@ function calcRow(
     ingredientGrams: {} as Record<string, number>,
   };
 
-  if (!formula || safeOrderQty <= 0) {
+  if (!formula || (safeOrderQty <= 0 && actualQty <= 0)) {
     return {
       flavor,
       label: PREP_FLAVOR_LABELS[flavor],
       orderQty: safeOrderQty,
-      actualQty: disabled ? 0 : actualQty,
-      weddingBuffer: disabled ? 0 : weddingBuffer,
+      actualQty,
+      extraQty: disabled ? 0 : extraQty,
       ...emptyLegacy,
       formula,
       disabled,
@@ -451,7 +497,7 @@ function calcRow(
     label: PREP_FLAVOR_LABELS[flavor],
     orderQty: safeOrderQty,
     actualQty,
-    weddingBuffer,
+    extraQty,
     ingredientGrams,
     birdNestGrams: ingredientGrams['燕餅'] || 0,
     flavorGrams:
@@ -471,25 +517,28 @@ export function computePrepCalculation(
   capacity: PrepCapacity,
   orderType: PrepOrderType,
   qtys: PrepFlavorQty,
-  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
+  actualQtys?: Partial<Record<keyof PrepFlavorQty, number | null>> | null
 ): PrepCalculation {
-  const flavorMap: { flavor: PrepFlavor; qty: number }[] = [
-    { flavor: 'osmanthus', qty: qtys.osmanthus },
-    { flavor: 'red_date', qty: qtys.red_date },
-    { flavor: 'rock_sugar', qty: qtys.rock_sugar },
+  const flavorMap: { flavor: PrepFlavor; qty: number; actual?: number | null }[] = [
+    { flavor: 'osmanthus', qty: qtys.osmanthus, actual: actualQtys?.osmanthus },
+    { flavor: 'red_date', qty: qtys.red_date, actual: actualQtys?.red_date },
+    { flavor: 'rock_sugar', qty: qtys.rock_sugar, actual: actualQtys?.rock_sugar },
   ];
 
-  const rows = flavorMap.map(({ flavor, qty }) => calcRow(flavor, qty, orderType, capacity, formulas));
+  const rows = flavorMap.map(({ flavor, qty, actual }) =>
+    calcRow(flavor, qty, actual, capacity, formulas)
+  );
 
-  if (rows.every((r) => r.orderQty === 0)) {
+  if (rows.every((r) => r.orderQty === 0 && r.actualQty === 0)) {
     for (const flavor of PREP_FLAVORS) {
       if (!rows.find((r) => r.flavor === flavor)) {
-        rows.push(calcRow(flavor, 0, orderType, capacity, formulas));
+        rows.push(calcRow(flavor, 0, null, capacity, formulas));
       }
     }
   }
 
-  const activeRows = rows.filter((r) => r.orderQty > 0 && !r.disabled);
+  const activeRows = rows.filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled);
   const ingredientGrams: Record<string, number> = {};
   for (const r of activeRows) {
     for (const [name, qty] of Object.entries(r.ingredientGrams)) {
@@ -511,7 +560,7 @@ export function computePrepCalculation(
     capacity,
     orderType,
     formulaReady: isCapacityFormulaReady(capacity, formulas),
-    rows: rows.filter((r) => r.orderQty > 0 || !r.disabled),
+    rows: rows.filter((r) => r.orderQty > 0 || r.actualQty > 0 || !r.disabled),
     totals,
   };
 }
@@ -546,16 +595,43 @@ export function computeStewingRawNeeds(
     .map((name) => ({ name, qty: acc[name] }));
 }
 
-/** Raw grams needed for one prep order (uses actual production qty incl. wedding buffer). */
+export function computePrepCalculationForOrder(
+  order: {
+    capacity: PrepCapacity;
+    order_type: PrepOrderType;
+    qty_osmanthus: number;
+    qty_red_date: number;
+    qty_rock_sugar: number;
+    actual_qty_osmanthus?: number | null;
+    actual_qty_red_date?: number | null;
+    actual_qty_rock_sugar?: number | null;
+  },
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+): PrepCalculation {
+  return computePrepCalculation(
+    order.capacity,
+    order.order_type,
+    prepOrderQtys(order),
+    formulas,
+    {
+      osmanthus: order.actual_qty_osmanthus,
+      red_date: order.actual_qty_red_date,
+      rock_sugar: order.actual_qty_rock_sugar,
+    }
+  );
+}
+
+/** Raw grams needed for one prep order (uses stored actual production qty). */
 export function computePrepOrderRawNeeds(
   capacity: PrepCapacity,
   orderType: PrepOrderType,
   qtys: PrepFlavorQty,
-  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
+  actualQtys?: Partial<Record<keyof PrepFlavorQty, number | null>> | null
 ): { name: string; qty: number }[] {
-  const calc = computePrepCalculation(capacity, orderType, qtys, formulas);
+  const calc = computePrepCalculation(capacity, orderType, qtys, formulas, actualQtys);
   const splits = calc.rows
-    .filter((r) => r.orderQty > 0 && !r.disabled)
+    .filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled)
     .map((r) => ({ flavor: r.flavor, qty: r.actualQty }));
   return computeStewingRawNeeds(capacity, splits, formulas);
 }
@@ -569,6 +645,9 @@ export function aggregateRawNeedsFromPrepOrders(
     qty_osmanthus: number;
     qty_red_date: number;
     qty_rock_sugar: number;
+    actual_qty_osmanthus?: number | null;
+    actual_qty_red_date?: number | null;
+    actual_qty_rock_sugar?: number | null;
   }>,
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): Record<string, number> {
@@ -583,7 +662,12 @@ export function aggregateRawNeedsFromPrepOrders(
         red_date: o.qty_red_date,
         rock_sugar: o.qty_rock_sugar,
       },
-      formulas
+      formulas,
+      {
+        osmanthus: o.actual_qty_osmanthus,
+        red_date: o.actual_qty_red_date,
+        rock_sugar: o.actual_qty_rock_sugar,
+      }
     );
     for (const line of lines) {
       raw[line.name] = round2((raw[line.name] || 0) + line.qty);
@@ -613,7 +697,7 @@ export function formulaSummaryForCapacity(capacity: PrepCapacity): string {
   return `${PREP_CAPACITY_LABELS[capacity]} formula pending configuration`;
 }
 
-/** Sum of flavor order quantities (excludes wedding buffer). */
+/** Sum of flavor order quantities (客人訂). */
 export function originalOrderQuantity(qtys: PrepFlavorQty): number {
   return Math.max(0, qtys.osmanthus) + Math.max(0, qtys.red_date) + Math.max(0, qtys.rock_sugar);
 }

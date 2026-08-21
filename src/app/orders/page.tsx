@@ -258,7 +258,7 @@ function OrdersPageContent() {
     }
   };
 
-  const changeBoardStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
+  const changeOrderStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
     const prev = orders.find((o) => o.id === orderId)?.status;
     if (prev == null || prev === nextStatus) return true;
     setBoardError('');
@@ -405,7 +405,7 @@ function OrdersPageContent() {
           <OrdersBoard
             orders={displayed}
             statuses={statusOptions}
-            onStatusChange={changeBoardStatus}
+            onStatusChange={changeOrderStatus}
             onCreateInStatus={(status) => { void create(status); }}
             creatingStatus={creatingStatus}
           />
@@ -492,7 +492,10 @@ function OrdersPageContent() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>{o.status}</span>
+                      <OrderLineStatusSelect
+                        order={o}
+                        onChange={(orderId, nextStatus) => { void changeOrderStatus(orderId, nextStatus); }}
+                      />
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500">{orderDueDate(o) || '—'}</td>
                     <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
@@ -534,5 +537,35 @@ function OrdersPageContent() {
         </div>
       )}
     </>
+  );
+}
+
+function OrderLineStatusSelect({
+  order,
+  onChange,
+}: {
+  order: Order;
+  onChange: (orderId: number, nextStatus: string) => void;
+}) {
+  const orderType = getOrderType(order);
+  const statusOptions = statusesForOrderType(orderType);
+  const statusList = statusOptions.includes(order.status)
+    ? statusOptions
+    : [order.status, ...statusOptions];
+
+  return (
+    <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+      <select
+        value={order.status}
+        onChange={(e) => onChange(order.id, e.target.value)}
+        aria-label={bi('Status', '狀態')}
+        className={`appearance-none text-xs font-medium rounded-full pl-2.5 pr-7 py-0.5 border-0 cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/40 ${STATUS_COLORS[order.status] || 'bg-gray-100 text-gray-700'}`}
+      >
+        {statusList.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] opacity-70">▾</span>
+    </div>
   );
 }

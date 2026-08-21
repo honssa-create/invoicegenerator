@@ -3,10 +3,12 @@ import { getInvoiceWithDetails, invoiceTotalsByIds } from './invoices';
 import { logActivity } from './activity';
 import {
   extractOrderNoFromYedpay,
-  fetchYedpayTransactions,
+  forEachYedpayTransactionPage,
+  transactionPaidAt,
   type YedpayTransaction,
   yedpayConfigured,
 } from './yedpay';
+import { getSyncState, setSyncState } from './hub-server';
 import {
   amountsClose,
   classifyMediumCandidates,
@@ -689,6 +691,41 @@ async function recordExistsByExternalId(userId: number, externalId: string): Pro
   return Boolean(row);
 }
 
+async function existingExternalIds(userId: number, externalIds: string[]): Promise<Set<string>> {
+  const uniq = Array.from(new Set(externalIds.filter(Boolean)));
+  if (!uniq.length) return new Set();
+  const placeholders = uniq.map(() => '?').join(', ');
+  const rows = (await db
+    .prepare(
+      `SELECT external_id FROM reconciliation_records WHERE user_id = ? AND external_id IN (${placeholders})`,
+    )
+    .all(userId, ...uniq)) as { external_id: string }[];
+  return new Set(rows.map((r) => r.external_id));
+}
+
+const YEDPAY_SYNC_PROVIDER = 'yedpay';
+const YEDPAY_SYNC_STORE = 'paid_at';
+
+async function yedpaySyncCursor(userId: number): Promise<string | undefined> {
+  const stored = await getSyncState(userId, YEDPAY_SYNC_PROVIDER, YEDPAY_SYNC_STORE);
+  if (stored) return stored;
+  const row = (await db
+    .prepare(
+      `SELECT MAX(deposit_time) AS last FROM reconciliation_records WHERE user_id = ? AND source = 'yedpay'`,
+    )
+    .get(userId)) as { last: string | null };
+  return row?.last || undefined;
+}
+
+function maxPaidAt(txns: YedpayTransaction[], current: string | null): string | null {
+  let max = current;
+  for (const txn of txns) {
+    const paidAt = transactionPaidAt(txn);
+    if (paidAt && (!max || paidAt > max)) max = paidAt;
+  }
+  return max;
+}
+
 /** Auto-score a deposit: suggest Pending Approval / Discrepancy — never marks invoice paid. */
 export async function scoreAndSuggest(
   userId: number,
@@ -1198,42 +1235,56 @@ export async function syncYedpayForUser(
     throw new Error('Yedpay is not configured — add credentials in Settings → API Integrations');
   }
 
-  const sinceRow = (await db
-    .prepare(
-      `SELECT MAX(deposit_time) AS last FROM reconciliation_records WHERE user_id = ? AND source = 'yedpay'`
-    )
-    .get(userId)) as { last: string | null };
+  const since = await yedpaySyncCursor(userId);
 
-  const transactions = await fetchYedpayTransactions(userId, {
-    since: sinceRow.last || undefined,
-  });
-
+  let fetched = 0;
   let imported = 0;
   let suggested = 0;
   let skipped = 0;
+  let latestPaidAt: string | null = since || null;
 
-  await db.transaction(async () => {
-    for (const txn of transactions) {
-      if (txn.status !== 'paid') {
-        skipped += 1;
-        continue;
-      }
-      if (await recordExistsByExternalId(userId, txn.id)) {
-        skipped += 1;
-        continue;
+  await forEachYedpayTransactionPage(userId, {
+    since,
+    onPage: async (batch) => {
+      const paid = batch.filter((txn) => txn.status === 'paid');
+      fetched += paid.length;
+      latestPaidAt = maxPaidAt(paid, latestPaidAt);
+
+      if (!paid.length) return 'continue';
+
+      const existing = await existingExternalIds(
+        userId,
+        paid.map((txn) => txn.id),
+      );
+
+      const toImport = paid.filter((txn) => !existing.has(txn.id));
+      skipped += paid.length - toImport.length;
+
+      if (toImport.length) {
+        await db.transaction(async () => {
+          for (const txn of toImport) {
+            const input: ReconciliationInput = {
+              ...yedpayTxnToInput(txn),
+              created_by: createdBy?.trim() || null,
+            };
+            const id = await insertReconciliationRecord(userId, input);
+            imported += 1;
+            const status = await scoreAndSuggest(userId, id, input);
+            if (status === 'Pending Approval' || status === 'Discrepancy') suggested += 1;
+          }
+        });
       }
 
-      const input: ReconciliationInput = {
-        ...yedpayTxnToInput(txn),
-        created_by: createdBy?.trim() || null,
-      };
-      const id = await insertReconciliationRecord(userId, input);
-      imported += 1;
-      const status = await scoreAndSuggest(userId, id, input);
-      if (status === 'Pending Approval' || status === 'Discrepancy') suggested += 1;
-    }
+      const allKnown = paid.every((txn) => existing.has(txn.id));
+      return allKnown ? 'stop' : 'continue';
+    },
   });
-  return { fetched: transactions.length, imported, suggested, skipped };
+
+  if (latestPaidAt) {
+    await setSyncState(userId, YEDPAY_SYNC_PROVIDER, YEDPAY_SYNC_STORE, latestPaidAt);
+  }
+
+  return { fetched, imported, suggested, skipped };
 }
 
 export async function importBankStatementRows(

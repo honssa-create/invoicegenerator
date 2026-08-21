@@ -7,7 +7,7 @@ import {
   paymentMethodMatches,
 } from './reconciliation';
 import { extractOrderNoFromRemarks, parseDateTime } from './reconciliation-server';
-import { extractOrderNoFromYedpay } from './yedpay';
+import { extractOrderNoFromYedpay, transactionPaidAt } from './yedpay';
 
 describe('extractOrderNoFromRemarks', () => {
   it('extracts invoice numbers', () => {
@@ -20,6 +20,36 @@ describe('extractOrderNoFromRemarks', () => {
 
   it('returns null when no token found', () => {
     expect(extractOrderNoFromRemarks('general transfer')).toBeNull();
+  });
+});
+
+describe('transactionPaidAt', () => {
+  it('prefers paid_at over settled_at and created_at', () => {
+    expect(
+      transactionPaidAt({
+        id: '1',
+        status: 'paid',
+        amount: '100',
+        charge: 1,
+        net: '99',
+        paid_at: '2026-04-01T10:00:00Z',
+        settled_at: '2026-04-02T10:00:00Z',
+        created_at: '2026-03-31T10:00:00Z',
+      }),
+    ).toBe('2026-04-01T10:00:00Z');
+  });
+
+  it('falls back to settled_at then created_at', () => {
+    expect(
+      transactionPaidAt({
+        id: '1',
+        status: 'paid',
+        amount: '100',
+        charge: 1,
+        net: '99',
+        settled_at: '2026-04-02T10:00:00Z',
+      }),
+    ).toBe('2026-04-02T10:00:00Z');
   });
 });
 

@@ -21,7 +21,7 @@ import {
   type PaymentMethod,
   type ReconciliationRecord,
 } from '@/lib/reconciliation';
-import { BTN } from '@/lib/ui-labels';
+import { BTN, bi } from '@/lib/ui-labels';
 import { PAYMENT_SLOTS, normalizePaymentSlot, type PaymentSlot } from '@/lib/orders';
 
 interface MatchCandidate {
@@ -446,17 +446,22 @@ function ReconciliationContent() {
     setSyncing(true);
     setError('');
     setMessage('');
-    const res = await fetch('/api/reconciliation/sync-yedpay', { method: 'POST' });
-    const d = await res.json();
-    setSyncing(false);
-    if (!res.ok) {
-      setError(d.error || 'Sync failed');
-      return;
+    try {
+      const res = await fetch('/api/reconciliation/sync-yedpay', { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) {
+        setError(d.error || 'Sync failed');
+        return;
+      }
+      setMessage(
+        `Yedpay sync: fetched ${d.fetched}, imported ${d.imported}, suggested ${d.suggested}, skipped ${d.skipped}`
+      );
+      load();
+    } catch {
+      setError(bi('Sync failed — check network and try again', '同步失敗 — 請檢查網絡後重試'));
+    } finally {
+      setSyncing(false);
     }
-    setMessage(
-      `Yedpay sync: fetched ${d.fetched}, imported ${d.imported}, suggested ${d.suggested}, skipped ${d.skipped}`
-    );
-    load();
   };
 
   const uploadStatement = async (file: File) => {

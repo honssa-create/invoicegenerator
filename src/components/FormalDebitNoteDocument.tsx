@@ -7,7 +7,7 @@ import {
   debitNoteStyleToCssVars,
   type DebitNoteStyleTemplate,
 } from '@/lib/debit-note-style';
-import { formatDebitNoteCompanyMeta, type FormalDebitNote } from '@/lib/rentals';
+import { formatDebitNoteCompanyMeta, formatTenantDisplayName, type FormalDebitNote } from '@/lib/rentals';
 import { PRINT_PAGE_HEIGHT_MM } from '@/lib/print-page-numbers';
 import PrintPageNumbers, { useA4PrintPageCount } from '@/components/PrintPageNumbers';
 
@@ -94,7 +94,7 @@ export default function FormalDebitNoteDocument({
           <div>
             <p>
               <span className="dn-label">致 (To):</span>{' '}
-              <span className="dn-value-strong">{doc.tenant.name}</span>
+              <span className="dn-value-strong">{formatTenantDisplayName(doc.tenant)}</span>
             </p>
             <p style={{ marginTop: '0.25rem' }}>
               <span className="dn-label">物業 (Premises):</span> {doc.premises}

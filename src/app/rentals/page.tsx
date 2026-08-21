@@ -515,6 +515,8 @@ export default function RentalsPage() {
               <thead className="text-xs uppercase tracking-wider text-gray-500 bg-gray-50 border-b">
                 <tr>
                   <th className="px-4 py-3 text-left">Tenant 租客</th>
+                  <th className="px-4 py-3 text-left">聯絡人姓名</th>
+                  <th className="px-4 py-3 text-left">公司名稱</th>
                   <th className="px-4 py-3 text-left">Contact</th>
                   <th className="px-4 py-3 text-right">Units</th>
                   <th className="px-4 py-3 text-right">Action</th>
@@ -524,6 +526,8 @@ export default function RentalsPage() {
                 {tenants.map((t) => (
                   <tr key={t.id} className="hover:bg-brand-50/40 cursor-pointer" onClick={() => router.push(`/rentals/tenants/${t.id}`)}>
                     <td className="px-4 py-3 font-semibold">{t.name}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.contact_name || '—'}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.company_name || '—'}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{t.phone || t.email || '—'}</td>
                     <td className="px-4 py-3 text-right">{t.unitCount ?? 0}</td>
                     <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>

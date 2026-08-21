@@ -92,7 +92,10 @@ import {
 interface UnitRow {
   id: number; user_id: number; unit_name: string; tenant_name: string;
   tenant_id: number | null;
+  tenant_contact_name?: string | null;
+  tenant_company_name?: string | null;
   tenant_phone: string | null; tenant_email: string | null;
+  tenant_address?: string | null;
   current_year_rent: number; previous_years_rent_json: string | null;
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
@@ -141,7 +144,10 @@ function hydrateUnit(row: UnitRow): RentalUnit {
   return {
     id: row.id, user_id: row.user_id, unitName: row.unit_name, tenantName: row.tenant_name,
     tenantId: row.tenant_id ?? null,
+    tenantContactName: row.tenant_contact_name || '',
+    tenantCompanyName: row.tenant_company_name || '',
     tenantPhone: row.tenant_phone || '', tenantEmail: row.tenant_email || '',
+    tenantAddress: row.tenant_address || '',
     currentYearRent: row.current_year_rent || 0,
     previousYearsRent: parsePrevious(row.previous_years_rent_json),
     leaseStartDate: row.lease_start_date || '', leaseEndDate: row.lease_end_date || '',
@@ -386,6 +392,15 @@ export async function updateRentalUnit(
   if (!vacant && !(nextName || '').trim()) throw new Error('Tenant name is required');
 
   const tenantName = vacant ? VACANT_TENANT_NAME : nextName.trim();
+  const tenantContactName = vacant
+    ? null
+    : ((input.tenantContactName ?? existing.tenantContactName) || null);
+  const tenantCompanyName = vacant
+    ? null
+    : ((input.tenantCompanyName ?? existing.tenantCompanyName) || null);
+  const tenantAddress = vacant
+    ? null
+    : ((input.tenantAddress ?? existing.tenantAddress) || null);
   const tenantPhone = vacant ? null : ((input.tenantPhone ?? existing.tenantPhone) || null);
   const tenantEmail = vacant ? null : ((input.tenantEmail ?? existing.tenantEmail) || null);
   const automationEnabled = vacant
@@ -406,7 +421,8 @@ export async function updateRentalUnit(
 
   await db.prepare(
     `UPDATE rental_units SET
-      unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
+      unit_name = ?, tenant_name = ?, tenant_contact_name = ?, tenant_company_name = ?,
+      tenant_phone = ?, tenant_email = ?, tenant_address = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
       utility_billing_mode = ?, address = ?, billing_company = ?,
@@ -415,7 +431,8 @@ export async function updateRentalUnit(
      WHERE id = ? AND user_id = ?`
   ).run(
     input.unitName ?? existing.unitName, tenantName,
-    tenantPhone, tenantEmail,
+    tenantContactName?.trim() || null, tenantCompanyName?.trim() || null,
+    tenantPhone, tenantEmail, tenantAddress?.trim() || null,
     Number(input.currentYearRent ?? existing.currentYearRent) || 0,
     JSON.stringify(input.previousYearsRent ?? existing.previousYearsRent),
     normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null,
@@ -450,6 +467,18 @@ export async function updateRentalUnit(
     await syncRentPeriodsForUnit(updated);
   }
   await ensureUnitTenantLink(updated);
+  if (updated.tenantId) {
+    await db.prepare(
+      `UPDATE rental_tenants SET contact_name = ?, company_name = ?, address = ?, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    ).run(
+      updated.tenantContactName?.trim() || null,
+      updated.tenantCompanyName?.trim() || null,
+      updated.tenantAddress?.trim() || null,
+      updated.tenantId,
+      userId,
+    );
+  }
   await updateCurrentLeaseFromUnit(updated, {
     depositAmount: input.depositAmount !== undefined ? Number(input.depositAmount) || 0 : undefined,
   });

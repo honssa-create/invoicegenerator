@@ -90,7 +90,9 @@ export default function TenantDetailPage() {
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
-  const [contactForm, setContactForm] = useState({ name: '', phone: '', email: '', notes: '' });
+  const [contactForm, setContactForm] = useState({
+    name: '', contact_name: '', company_name: '', phone: '', email: '', address: '', notes: '',
+  });
   const [contactSaving, setContactSaving] = useState(false);
   const [contactEditing, setContactEditing] = useState(false);
   const [periodRows, setPeriodRows] = useState<PaymentPeriodLine[]>([]);
@@ -115,8 +117,11 @@ export default function TenantDetailPage() {
           setDetail(d);
           setContactForm({
             name: d.tenant.name || '',
+            contact_name: d.tenant.contact_name || '',
+            company_name: d.tenant.company_name || '',
             phone: d.tenant.phone || '',
             email: d.tenant.email || '',
+            address: d.tenant.address || '',
             notes: d.tenant.notes || '',
           });
           setSelectedUnitIds((prev) => {
@@ -469,8 +474,16 @@ export default function TenantDetailPage() {
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Name 姓名</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Tenant Name 租單位人士</label>
                   <input className={inp} value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">聯絡人姓名</label>
+                  <input className={inp} value={contactForm.contact_name} onChange={(e) => setContactForm({ ...contactForm, contact_name: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">公司名稱</label>
+                  <input className={inp} value={contactForm.company_name} onChange={(e) => setContactForm({ ...contactForm, company_name: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Phone 電話</label>
@@ -480,6 +493,15 @@ export default function TenantDetailPage() {
                   <label className="block text-xs font-medium text-gray-500 mb-1">Email 電郵</label>
                   <input type="email" className={inp} value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">租客地址</label>
+                <textarea
+                  className={`${inp} min-h-[72px] resize-y`}
+                  value={contactForm.address}
+                  onChange={(e) => setContactForm({ ...contactForm, address: e.target.value })}
+                  rows={2}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
@@ -492,8 +514,11 @@ export default function TenantDetailPage() {
                     setContactEditing(false);
                     setContactForm({
                       name: tenant.name || '',
+                      contact_name: tenant.contact_name || '',
+                      company_name: tenant.company_name || '',
                       phone: tenant.phone || '',
                       email: tenant.email || '',
+                      address: tenant.address || '',
                       notes: tenant.notes || '',
                     });
                   }}
@@ -514,12 +539,28 @@ export default function TenantDetailPage() {
           ) : (
             <dl className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
               <div>
+                <dt className="text-xs text-gray-500 uppercase">Tenant Name 租單位人士</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">聯絡人姓名</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.contact_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">公司名稱</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.company_name || '—'}</dd>
+              </div>
+              <div>
                 <dt className="text-xs text-gray-500 uppercase">Phone 電話</dt>
                 <dd className="mt-1 font-medium text-gray-900">{tenant.phone || '—'}</dd>
               </div>
               <div>
                 <dt className="text-xs text-gray-500 uppercase">Email 電郵</dt>
                 <dd className="mt-1 font-medium text-gray-900 break-all">{tenant.email || '—'}</dd>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-4">
+                <dt className="text-xs text-gray-500 uppercase">租客地址</dt>
+                <dd className="mt-1 font-medium text-gray-900 whitespace-pre-wrap">{tenant.address || '—'}</dd>
               </div>
               <div>
                 <dt className="text-xs text-gray-500 uppercase">Last Payment 最近交租</dt>

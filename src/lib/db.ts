@@ -751,6 +751,12 @@ async function runBootDataFixes(): Promise<void> {
   // Idempotent every boot — columns must exist before API queries / filtered index.
   await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name TEXT`);
   await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ordered TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS company_name TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS contact_name TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_contact_name TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_company_name TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS address TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_address TEXT`);
   await client().query(
     `CREATE INDEX IF NOT EXISTS idx_customers_user_ordered ON customers(user_id, ordered)`
   );

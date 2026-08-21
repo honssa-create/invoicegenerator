@@ -26,6 +26,8 @@ export interface RentalUnit {
   unitName: string;
   tenantName: string;
   tenantId: number | null;
+  tenantContactName: string;
+  tenantCompanyName: string;
   tenantPhone: string;
   tenantEmail: string;
   currentYearRent: number;
@@ -38,7 +40,10 @@ export interface RentalUnit {
   utilityBillingMode: UtilityBillingMode;
   /** Honour Label vs Honour Elite debit note company; null = auto from unit name. */
   billingCompany: DebitNoteCompanyId | null;
+  /** Unit premises address 單位地址 */
   address: string;
+  /** Tenant mailing address 租客地址 */
+  tenantAddress: string;
   /** For company_shared_meter: other unit ids whose usage inputs are deducted from the main dial. */
   sharedMeterDeductionUnitIds: number[];
   created_at: string;
@@ -1016,13 +1021,22 @@ export interface RentalTenant {
   id: number;
   user_id: number;
   name: string;
+  contact_name: string;
+  company_name: string;
   phone: string;
   email: string;
+  /** Tenant mailing address 租客地址 */
+  address: string;
   notes: string;
   utilityBillingMode: UtilityBillingMode;
   unitCount?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Tenant-facing document label — tenant name only. */
+export function formatTenantDisplayName(t: { name?: string | null }): string {
+  return String(t.name ?? '').trim();
 }
 
 export interface RentalChargeItem {

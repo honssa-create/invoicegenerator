@@ -73,7 +73,11 @@ async function logRentalActivity(
 
 interface TenantRow {
   id: number; user_id: number; name: string;
-  phone: string | null; email: string | null; notes: string | null;
+  contact_name?: string | null;
+  company_name?: string | null;
+  phone: string | null; email: string | null;
+  address?: string | null;
+  notes: string | null;
   utility_billing_mode?: string | null;
   created_at: string; updated_at: string;
 }
@@ -100,7 +104,11 @@ interface AllocationRow {
 function hydrateTenant(row: TenantRow, unitCount = 0): RentalTenant {
   return {
     id: row.id, user_id: row.user_id, name: row.name,
-    phone: row.phone || '', email: row.email || '', notes: row.notes || '',
+    contact_name: row.contact_name || '',
+    company_name: row.company_name || '',
+    phone: row.phone || '', email: row.email || '',
+    address: row.address || '',
+    notes: row.notes || '',
     utilityBillingMode: normalizeUtilityBillingMode(row.utility_billing_mode),
     unitCount, created_at: row.created_at, updated_at: row.updated_at,
   };
@@ -169,6 +177,7 @@ export async function findOrCreateTenant(
   name: string,
   phone?: string | null,
   email?: string | null,
+  companyName?: string | null,
 ): Promise<RentalTenant> {
   const trimmed = name.trim();
   const existing = await db.prepare(
@@ -176,8 +185,8 @@ export async function findOrCreateTenant(
   ).get(userId, trimmed) as TenantRow | undefined;
   if (existing) return hydrateTenant(existing);
   const res = await db.prepare(
-    'INSERT INTO rental_tenants (user_id, name, phone, email) VALUES (?, ?, ?, ?)'
-  ).run(userId, trimmed, phone?.trim() || null, email?.trim() || null);
+    'INSERT INTO rental_tenants (user_id, name, company_name, phone, email) VALUES (?, ?, ?, ?, ?)'
+  ).run(userId, trimmed, companyName?.trim() || null, phone?.trim() || null, email?.trim() || null);
   return (await getRentalTenant(Number(res.lastInsertRowid), userId))!;
 }
 
@@ -193,8 +202,13 @@ export async function updateRentalTenant(
   userId: number,
   input: {
     name?: string;
+    contact_name?: string | null;
+    contactName?: string | null;
+    company_name?: string | null;
+    companyName?: string | null;
     phone?: string | null;
     email?: string | null;
+    address?: string | null;
     notes?: string | null;
     utilityBillingMode?: UtilityBillingMode;
   },
@@ -203,8 +217,13 @@ export async function updateRentalTenant(
   if (!existing) return null;
 
   const name = input.name !== undefined ? input.name.trim() : existing.name;
+  const contactRaw = input.contact_name !== undefined ? input.contact_name : input.contactName;
+  const contact_name = contactRaw !== undefined ? (contactRaw?.trim() || '') : existing.contact_name;
+  const companyRaw = input.company_name !== undefined ? input.company_name : input.companyName;
+  const company_name = companyRaw !== undefined ? (companyRaw?.trim() || '') : existing.company_name;
   const phone = input.phone !== undefined ? (input.phone?.trim() || null) : (existing.phone || null);
   const email = input.email !== undefined ? (input.email?.trim() || null) : (existing.email || null);
+  const address = input.address !== undefined ? (input.address?.trim() || '') : existing.address;
   const notes = input.notes !== undefined ? (input.notes?.trim() || null) : (existing.notes || null);
   const utilityBillingMode = input.utilityBillingMode !== undefined
     ? normalizeUtilityBillingMode(input.utilityBillingMode)
@@ -213,15 +232,16 @@ export async function updateRentalTenant(
   if (!name) throw new Error('Tenant name is required');
 
   await db.prepare(
-    `UPDATE rental_tenants SET name = ?, phone = ?, email = ?, notes = ?, utility_billing_mode = ?,
+    `UPDATE rental_tenants SET name = ?, contact_name = ?, company_name = ?, phone = ?, email = ?, address = ?, notes = ?, utility_billing_mode = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
-  ).run(name, phone, email, notes, utilityBillingMode, tenantId, userId);
+  ).run(name, contact_name || null, company_name || null, phone, email, address || null, notes, utilityBillingMode, tenantId, userId);
 
   await db.prepare(
-    `UPDATE rental_units SET tenant_name = ?, tenant_phone = ?, tenant_email = ?, updated_at = datetime('now')
+    `UPDATE rental_units SET tenant_name = ?, tenant_contact_name = ?, tenant_company_name = ?,
+      tenant_phone = ?, tenant_email = ?, tenant_address = ?, updated_at = datetime('now')
      WHERE tenant_id = ? AND user_id = ?`
-  ).run(name, phone, email, tenantId, userId);
+  ).run(name, contact_name || null, company_name || null, phone, email, address || null, tenantId, userId);
 
   await db.prepare(
     `UPDATE rental_leases SET tenant_name = ?, tenant_phone = ?, tenant_email = ?, updated_at = datetime('now')

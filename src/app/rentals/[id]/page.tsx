@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import TenantSelect from '@/components/TenantSelect';
 import AppLayout from '@/components/AppLayout';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 import DebitNoteActions from '@/components/DebitNoteActions';
@@ -73,6 +74,7 @@ import {
   type RentalLeaseDocument,
   type RentalPaymentReceipt,
   type RentalPaymentWithAllocations,
+  type RentalTenant,
   type RentalUnit,
   type RentalUnitWithRecord,
   type UnitLeasePaymentLedgerRow,
@@ -172,6 +174,8 @@ function RentalDetailInner() {
 
   // profile inputs
   const [tenantName, setTenantName] = useState('');
+  const [tenantContactName, setTenantContactName] = useState('');
+  const [tenantCompanyName, setTenantCompanyName] = useState('');
   const [tenantPhone, setTenantPhone] = useState('');
   const [tenantEmail, setTenantEmail] = useState('');
   const [dueDateDay, setDueDateDay] = useState('1');
@@ -183,6 +187,7 @@ function RentalDetailInner() {
   const [leaseEndDate, setLeaseEndDate] = useState('');
   const [depositAmount, setDepositAmount] = useState('');
   const [unitAddress, setUnitAddress] = useState('');
+  const [tenantAddress, setTenantAddress] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
 
   // utility inputs
@@ -286,6 +291,8 @@ function RentalDetailInner() {
           const profileLease = d.displayLease as RentalLease | null | undefined;
           const useLease = d.isHistoricalView && profileLease;
           setTenantName(useLease ? profileLease.tenantName : (d.unit.tenantName || ''));
+          setTenantContactName(d.unit.tenantContactName || '');
+          setTenantCompanyName(d.unit.tenantCompanyName || '');
           setTenantPhone(useLease ? profileLease.tenantPhone : (d.unit.tenantPhone || ''));
           setTenantEmail(useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''));
           setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
@@ -309,6 +316,7 @@ function RentalDetailInner() {
               : '',
           );
           setUnitAddress(d.unit.address || '');
+          setTenantAddress(d.unit.tenantAddress || '');
           const rec = d.currentRecord;
           if (rec) {
             const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
@@ -560,6 +568,19 @@ function RentalDetailInner() {
     utilityNote,
   ]);
 
+  const applyTenantFromList = (t: RentalTenant) => {
+    setTenantName(t.name);
+    setTenantContactName(t.contact_name || '');
+    setTenantCompanyName(t.company_name || '');
+    setTenantPhone(t.phone || '');
+    setTenantEmail(t.email || '');
+    setTenantAddress(t.address || '');
+  };
+
+  const addNewTenantName = (name: string) => {
+    setTenantName(name);
+  };
+
   const saveProfile = async () => {
     if (data?.readOnlyLease) return;
     setProfileSaving(true);
@@ -568,8 +589,11 @@ function RentalDetailInner() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tenantName: tenantName.trim(),
+        tenantContactName: tenantContactName.trim(),
+        tenantCompanyName: tenantCompanyName.trim(),
         tenantPhone: tenantPhone.trim(),
         tenantEmail: tenantEmail.trim(),
+        tenantAddress: tenantAddress.trim(),
         dueDateDay: Number(dueDateDay) || 1,
         currentYearRent: Number(baseRent) || 0,
         utilityBillingMode,
@@ -1039,7 +1063,14 @@ function RentalDetailInner() {
         <div className={`grid md:grid-cols-2 lg:grid-cols-3 gap-4 ${readOnly ? 'opacity-90' : ''}`}>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Tenant Name 租單位人士</label>
-            <input className={fieldCls} value={tenantName} onChange={(e) => setTenantName(e.target.value)} disabled={readOnly} readOnly={readOnly} />
+            <TenantSelect
+              value={tenantName}
+              onSelect={applyTenantFromList}
+              onAddNew={addNewTenantName}
+              placeholder={bi('Select or add tenant…', '選擇或新增租客…')}
+              disabled={readOnly || isHistoricalView}
+              className={readOnly ? 'opacity-100' : ''}
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Phone 電話</label>
@@ -1048,6 +1079,18 @@ function RentalDetailInner() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Email 電郵</label>
             <input type="email" className={fieldCls} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" disabled={readOnly} readOnly={readOnly} />
+          </div>
+          <div className="md:col-span-2 lg:col-span-3">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">聯絡人姓名</label>
+                <input className={fieldCls} value={tenantContactName} onChange={(e) => setTenantContactName(e.target.value)} disabled={readOnly} readOnly={readOnly} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">公司名稱</label>
+                <input className={fieldCls} value={tenantCompanyName} onChange={(e) => setTenantCompanyName(e.target.value)} disabled={readOnly} readOnly={readOnly} />
+              </div>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">每月交租日 Due Day (1–31)</label>
@@ -1070,16 +1113,32 @@ function RentalDetailInner() {
             <input type="number" min={0} className={fieldCls} value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="0" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div className="md:col-span-2 lg:col-span-3">
-            <label className="block text-xs font-medium text-gray-500 mb-1">地址 Address</label>
-            <textarea
-              className={`${fieldCls} min-h-[72px] resize-y`}
-              value={unitAddress}
-              onChange={(e) => setUnitAddress(e.target.value)}
-              placeholder="Unit / mailing address 單位地址"
-              rows={2}
-              disabled={readOnly}
-              readOnly={readOnly}
-            />
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">單位地址</label>
+                <textarea
+                  className={`${fieldCls} min-h-[72px] resize-y`}
+                  value={unitAddress}
+                  onChange={(e) => setUnitAddress(e.target.value)}
+                  placeholder="Unit premises address"
+                  rows={2}
+                  disabled={readOnly}
+                  readOnly={readOnly}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">租客地址</label>
+                <textarea
+                  className={`${fieldCls} min-h-[72px] resize-y`}
+                  value={tenantAddress}
+                  onChange={(e) => setTenantAddress(e.target.value)}
+                  placeholder="Tenant mailing address"
+                  rows={2}
+                  disabled={readOnly}
+                  readOnly={readOnly}
+                />
+              </div>
+            </div>
           </div>
           <div className="md:col-span-2 lg:col-span-2">
             <div className="grid sm:grid-cols-2 gap-4">

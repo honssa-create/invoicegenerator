@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import RentPaymentNoticeMatrixView from '@/components/RentPaymentNoticeMatrix';
-import { currentBillingPeriod, formatDisplayDate, formatMoney, type RentPaymentNoticeMatrix } from '@/lib/rentals';
+import { currentBillingPeriod, formatDisplayDate, formatMoney, formatTenantDisplayName, type RentPaymentNoticeMatrix } from '@/lib/rentals';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 type UnitNoticePayload = RentPaymentNoticeMatrix & { tenantId?: number; unitId?: number };
@@ -77,7 +77,7 @@ function UnitRentPaymentNoticeContent() {
         <div className="grid grid-cols-2 gap-6 mb-8 text-sm">
           <div>
             <p className="text-gray-400 uppercase text-xs">Tenant 租客</p>
-            <p className="font-semibold text-lg mt-1">{tenant.name}</p>
+            <p className="font-semibold text-lg mt-1">{formatTenantDisplayName(tenant)}</p>
             {tenant.phone && <p className="text-gray-600">{tenant.phone}</p>}
             <p className="text-gray-600">{tenant.email || '—'}</p>
           </div>

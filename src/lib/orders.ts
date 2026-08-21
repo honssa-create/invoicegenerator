@@ -76,6 +76,15 @@ export function statusesForOrderType(orderType: string): readonly string[] {
   return usesEcomOrderStatuses(orderType) ? ECOM_ORDER_STATUSES : ORDER_STATUSES;
 }
 
+export type OrderStatusFamily = 'manufacturing' | 'ecom' | 'cupmoka';
+
+/** Which status list applies to an order type (for bulk-change compatibility checks). */
+export function orderStatusFamily(orderType: string): OrderStatusFamily {
+  if (isCupmokaOrderType(orderType)) return 'cupmoka';
+  if (usesEcomOrderStatuses(orderType)) return 'ecom';
+  return 'manufacturing';
+}
+
 /** Local calendar YYYY-MM-DD (browser / Node local TZ). */
 export function localDateYmd(d: Date = new Date()): string {
   const y = d.getFullYear();

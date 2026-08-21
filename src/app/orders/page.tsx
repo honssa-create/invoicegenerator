@@ -14,6 +14,7 @@ import {
   isOrderUrgent,
   orderDueDate,
   orderMatchesTypeFilter,
+  orderStatusFamily,
   statusKeyForTypeFilter,
   statusesForOrderType,
   summarizeOrderDashboard,
@@ -65,6 +66,9 @@ function OrdersPageContent() {
   const [boardError, setBoardError] = useState('');
   const [page, setPage] = useState(1);
   const [dashFocus, setDashFocus] = useState<DashFocus>('all');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState('');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -158,6 +162,56 @@ function OrdersPageContent() {
   const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
   const pageEnd = Math.min(pageStart + PAGE_SIZE, displayed.length);
   const pageRows = displayed.slice(pageStart, pageEnd);
+
+  const selectedOrders = useMemo(
+    () => orders.filter((o) => selectedOrderIds.has(o.id)),
+    [orders, selectedOrderIds],
+  );
+
+  const bulkSelectionFamilies = useMemo(() => {
+    const families = new Set(selectedOrders.map((o) => orderStatusFamily(getOrderType(o))));
+    return families;
+  }, [selectedOrders]);
+
+  const bulkStatusMixedTypes = bulkSelectionFamilies.size > 1;
+
+  const bulkStatusOptions = useMemo(() => {
+    if (!selectedOrders.length || bulkStatusMixedTypes) return [];
+    return [...statusesForOrderType(getOrderType(selectedOrders[0]))];
+  }, [selectedOrders, bulkStatusMixedTypes]);
+
+  useEffect(() => {
+    if (bulkStatus && bulkStatusOptions.length && !bulkStatusOptions.includes(bulkStatus)) {
+      setBulkStatus('');
+    }
+  }, [bulkStatus, bulkStatusOptions]);
+
+  const allPageRowsSelected = pageRows.length > 0 && pageRows.every((o) => selectedOrderIds.has(o.id));
+
+  const toggleSelectOrder = (id: number) => {
+    setSelectedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllPageRows = () => {
+    setSelectedOrderIds((prev) => {
+      if (allPageRowsSelected) {
+        const next = new Set(prev);
+        pageRows.forEach((o) => next.delete(o.id));
+        return next;
+      }
+      return new Set([...prev, ...pageRows.map((o) => o.id)]);
+    });
+  };
+
+  const clearOrderSelection = () => {
+    setSelectedOrderIds(new Set());
+    setBulkStatus('');
+  };
 
   useEffect(() => {
     setPage(1);
@@ -258,11 +312,12 @@ function OrdersPageContent() {
     }
   };
 
-  const changeOrderStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
-    const prev = orders.find((o) => o.id === orderId)?.status;
-    if (prev == null || prev === nextStatus) return true;
-    setBoardError('');
-    setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
+  const patchOrderStatus = async (
+    orderId: number,
+    nextStatus: string,
+    prevStatus: string,
+    opts?: { quiet?: boolean },
+  ): Promise<boolean> => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
@@ -270,16 +325,63 @@ function OrdersPageContent() {
         body: JSON.stringify({ core: { status: nextStatus } }),
       });
       if (!res.ok) {
-        setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prev } : o)));
-        const data = await res.json().catch(() => ({}));
-        setBoardError(data.error || bi('Failed to update status', '無法更新狀態'));
+        setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prevStatus } : o)));
+        if (!opts?.quiet) {
+          const data = await res.json().catch(() => ({}));
+          setBoardError(data.error || bi('Failed to update status', '無法更新狀態'));
+        }
         return false;
       }
       return true;
     } catch {
-      setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prev } : o)));
-      setBoardError(bi('Failed to update status', '無法更新狀態'));
+      setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prevStatus } : o)));
+      if (!opts?.quiet) {
+        setBoardError(bi('Failed to update status', '無法更新狀態'));
+      }
       return false;
+    }
+  };
+
+  const changeOrderStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
+    const prev = orders.find((o) => o.id === orderId)?.status;
+    if (prev == null || prev === nextStatus) return true;
+    setBoardError('');
+    setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
+    return patchOrderStatus(orderId, nextStatus, prev);
+  };
+
+  const bulkChangeOrderStatus = async () => {
+    if (!bulkStatus || bulkStatusMixedTypes || bulkUpdating) return;
+    const targets = selectedOrders.filter((o) => o.status !== bulkStatus);
+    if (!targets.length) {
+      clearOrderSelection();
+      return;
+    }
+    setBulkUpdating(true);
+    setBoardError('');
+    const prevById = new Map(targets.map((o) => [o.id, o.status]));
+    const targetIds = targets.map((o) => o.id);
+    setOrders((list) =>
+      list.map((o) => (targetIds.includes(o.id) ? { ...o, status: bulkStatus } : o)),
+    );
+    const results = await Promise.allSettled(
+      targets.map((o) => patchOrderStatus(o.id, bulkStatus, prevById.get(o.id) || o.status, { quiet: true })),
+    );
+    const failed = results.filter((r) => r.status === 'fulfilled' && r.value === false).length
+      + results.filter((r) => r.status === 'rejected').length;
+    const succeeded = targets.length - failed;
+    setBulkUpdating(false);
+    if (failed === 0) {
+      clearOrderSelection();
+    } else if (succeeded > 0) {
+      setBoardError(
+        bi(
+          `Updated ${succeeded} order(s); ${failed} failed.`,
+          `已更新 ${succeeded} 張訂單；${failed} 張失敗。`,
+        ),
+      );
+    } else {
+      setBoardError(bi('Failed to update selected orders', '無法更新所選訂單'));
     }
   };
 
@@ -439,8 +541,53 @@ function OrdersPageContent() {
           ) : (
             <>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 text-sm">
-              <div className="text-gray-600">
-                Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="text-gray-600">
+                  Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+                </div>
+                {selectedOrderIds.size > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-gray-700 font-medium">
+                      {bi(`${selectedOrderIds.size} selected`, `已選 ${selectedOrderIds.size} 張`)}
+                    </span>
+                    <select
+                      value={bulkStatus}
+                      onChange={(e) => setBulkStatus(e.target.value)}
+                      disabled={bulkStatusMixedTypes || bulkUpdating}
+                      className={`${selectCls} min-w-[10rem] disabled:opacity-50`}
+                      aria-label={bi('Bulk status', '批量狀態')}
+                    >
+                      <option value="">{bi('Change status…', '更改狀態…')}</option>
+                      {bulkStatusOptions.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => { void bulkChangeOrderStatus(); }}
+                      disabled={!bulkStatus || bulkStatusMixedTypes || bulkUpdating}
+                      className="px-2.5 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 text-xs font-medium"
+                    >
+                      {bulkUpdating ? bi('Updating…', '更新中…') : bi('Apply', '套用')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearOrderSelection}
+                      disabled={bulkUpdating}
+                      className="text-xs text-gray-500 hover:text-gray-800 underline disabled:opacity-40"
+                    >
+                      {bi('Clear', '清除')}
+                    </button>
+                    {bulkStatusMixedTypes && (
+                      <span className="text-xs text-amber-700">
+                        {bi(
+                          'Select orders of the same type to bulk-change status',
+                          '請選擇相同類型的訂單以批量更改狀態',
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -465,9 +612,18 @@ function OrdersPageContent() {
               </div>
             </div>
             <div className="table-scroll">
-            <table className="w-full min-w-[840px]">
+            <table className="w-full min-w-[880px]">
               <thead>
                 <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                  <th className="px-4 py-3 w-12">
+                    <input
+                      type="checkbox"
+                      checked={allPageRowsSelected}
+                      onChange={toggleSelectAllPageRows}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                      aria-label={bi('Select all on page', '全選本頁')}
+                    />
+                  </th>
                   {sortTh('reference', bi('Reference Number', '參考編號'))}
                   {sortTh('order', bi('Order Number', '訂單號碼'))}
                   {sortTh('type', bi('Order Type', '訂單類型'))}
@@ -478,7 +634,16 @@ function OrdersPageContent() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {pageRows.map((o) => (
-                  <tr key={o.id} className="hover:bg-gray-50">
+                  <tr key={o.id} className={`hover:bg-gray-50 ${selectedOrderIds.has(o.id) ? 'bg-brand-50/40' : ''}`}>
+                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedOrderIds.has(o.id)}
+                        onChange={() => toggleSelectOrder(o.id)}
+                        className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                        aria-label={bi(`Select ${o.reference_number}`, `選取 ${o.reference_number}`)}
+                      />
+                    </td>
                     <td className="px-6 py-4">
                       <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
                         {o.reference_number}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getDataOwnerId } from '@/lib/org-server';
 import { trashInbound } from '@/lib/trash';
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
@@ -8,7 +9,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    if (!await trashInbound(session.userId, Number(params.id))) {
+    const ownerId = await getDataOwnerId(session);
+    if (!await trashInbound(ownerId, Number(params.id))) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     return NextResponse.json({ success: true, trashed: true, retention_days: 60 });

@@ -1,14 +1,16 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getDataOwnerId } from '@/lib/org-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const ownerId = await getDataOwnerId(session);
   const shipments = await db
     .prepare('SELECT * FROM inbound_shipments WHERE user_id = ? ORDER BY COALESCE(arrival_date, created_at) DESC, id DESC')
-    .all(session.userId);
+    .all(ownerId);
   return NextResponse.json({ shipments });
 }
 
@@ -21,13 +23,14 @@ export async function POST(request: Request) {
     if (!body.waybill_number?.trim() && !body.photo_path?.trim()) {
       return NextResponse.json({ error: 'Enter a waybill number or attach a photo' }, { status: 400 });
     }
+    const ownerId = await getDataOwnerId(session);
     const result = await db
       .prepare(
         `INSERT INTO inbound_shipments (user_id, waybill_number, sender, sender_address, receiver_address, arrival_date, photo_path, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
-        session.userId,
+        ownerId,
         body.waybill_number?.trim() || null,
         body.sender?.trim() || null,
         body.sender_address?.trim() || null,

@@ -824,6 +824,30 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('customers_simplified_schema_v1') ON CONFLICT DO NOTHING`
     );
   }
+
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT`);
+  await client().query(`ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT`);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user_kitchen_type ON orders(user_id, order_type)
+    WHERE order_type IS NOT NULL
+  `);
+
+  const migOrderType = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_order_type_column_v1'`
+  );
+  if (!migOrderType.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET order_type = NULLIF(TRIM(fields_json::jsonb->>'order_type'), '')
+      WHERE order_type IS NULL
+        AND fields_json IS NOT NULL
+        AND btrim(fields_json) <> ''
+        AND fields_json::jsonb ? 'order_type'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_order_type_column_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

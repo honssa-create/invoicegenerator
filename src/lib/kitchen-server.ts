@@ -89,22 +89,32 @@ function orderTypeOf(fields: Record<string, unknown>): string {
 /** Process-local: avoid re-running seed INSERT chatter on every kitchen request. */
 const seededOwnerIds = new Set<number>();
 
-const KITCHEN_ORDER_TYPES = [NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE] as const;
+/** Process-local cache — kitchen data owner is stable for the process lifetime. */
+let cachedKitchenOwnerId: number | null = null;
 
 /** Shared kitchen data owner — prep schedule + inventory visible company-wide. */
 export async function resolveKitchenOwnerUserId(): Promise<number> {
+  if (cachedKitchenOwnerId != null) return cachedKitchenOwnerId;
+
   const configured = Number(process.env.KITCHEN_OWNER_USER_ID || process.env.HUB_OWNER_USER_ID);
-  if (Number.isFinite(configured) && configured > 0) return configured;
+  if (Number.isFinite(configured) && configured > 0) {
+    cachedKitchenOwnerId = configured;
+    return configured;
+  }
 
   const admin = (await db
     .prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
     .get()) as { id: number } | undefined;
-  if (admin) return admin.id;
+  if (admin) {
+    cachedKitchenOwnerId = admin.id;
+    return admin.id;
+  }
 
   const anyUser = (await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()) as
     | { id: number }
     | undefined;
   if (!anyUser) throw new Error('No users in database — register an account first');
+  cachedKitchenOwnerId = anyUser.id;
   return anyUser.id;
 }
 
@@ -113,10 +123,9 @@ function isShippedKitchenStatus(status: string | null | undefined): boolean {
   return s === '已寄出 SENT' || /\bSENT\b/i.test(s);
 }
 
-export async function ensureSeed(userId: number) {
+export async function ensureSeed(userId: number, catalog: KitchenCatalog) {
   if (seededOwnerIds.has(userId)) return;
 
-  const { catalog } = await loadKitchenCatalog(userId);
   await ensureCatalogStockRows(userId, catalog);
 
   // Fold legacy alias rows (頂級乾燕餅→燕餅, 燕窩冰糖→冰糖) into canonical stock.
@@ -297,21 +306,17 @@ async function loadOpenOrders(
   fulfillments: Map<string, number>,
   catalog: KitchenCatalog
 ): Promise<KitchenOpenOrder[]> {
-  // Pre-filter Nestiee / 回禮 in SQL so we do not pull+parse every order's fields_json.
-  const typePatterns = KITCHEN_ORDER_TYPES.flatMap((t) => [`%"order_type":"${t}"%`, `%"order_type": "${t}"%`]);
   const rows = (await db
     .prepare(
       `SELECT id, reference_number, po_number, name, status, fields_json
        FROM orders
        WHERE user_id = ?
-         AND (
-           ${typePatterns.map(() => 'fields_json LIKE ?').join('\n           OR ')}
-         )
+         AND order_type IN (?, ?)
          AND COALESCE(TRIM(status), '') <> '已寄出 SENT'
          AND (status IS NULL OR status !~* '\\ySENT\\y')
        ORDER BY id DESC`
     )
-    .all(userId, ...typePatterns)) as OrderRow[];
+    .all(userId, NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE)) as OrderRow[];
 
   const giftTypes = catalog.giftBoxTypes;
   const out: KitchenOpenOrder[] = [];
@@ -389,7 +394,7 @@ function computeDemand(
 }
 
 async function loadUnfinishedPrepRawDemand(
-  _userId: number,
+  userId: number,
   formulas: KitchenFormulas
 ): Promise<Record<string, number>> {
   const rows = (await db
@@ -398,9 +403,9 @@ async function loadUnfinishedPrepRawDemand(
               actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
               bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar
        FROM kitchen_prep_orders
-       WHERE status != 'completed'`
+       WHERE user_id = ? AND status != 'completed'`
     )
-    .all()) as {
+    .all(userId)) as {
     capacity: PrepCapacity;
     order_type: PrepOrderType;
     status: PrepStatus;
@@ -417,7 +422,7 @@ async function loadUnfinishedPrepRawDemand(
   return aggregateRawNeedsFromPrepOrders(rows, formulas.stewFormulas);
 }
 
-async function loadMovements(userId: number): Promise<KitchenMovement[]> {
+export async function loadKitchenMovements(userId: number): Promise<KitchenMovement[]> {
   const rows = (await db
     .prepare(
       `SELECT m.id, m.action, m.details_json, m.order_id, m.created_at, m.created_by,
@@ -473,15 +478,22 @@ async function loadMovements(userId: number): Promise<KitchenMovement[]> {
   });
 }
 
-export async function getState(userId: number, opts?: { isAdmin?: boolean }): Promise<KitchenState> {
-  await ensureSeed(userId);
-  const { catalog, formulas } = await loadKitchenCatalog(userId);
+export interface GetStateOptions {
+  isAdmin?: boolean;
+  /** Default true. Set false for lite dashboard loads (lazy-fetch movements). */
+  includeMovements?: boolean;
+}
 
-  // Fulfillments must finish before open-orders; stock/movements/prep/holiday are independent.
+export async function getState(userId: number, opts?: GetStateOptions): Promise<KitchenState> {
+  const includeMovements = opts?.includeMovements !== false;
+
+  const { catalog, formulas } = await loadKitchenCatalog(userId);
+  await ensureSeed(userId, catalog);
+
   const fulfillmentsPromise = loadFulfillments(userId);
   const independentPromise = Promise.all([
     loadStockMaps(userId, catalog),
-    loadMovements(userId),
+    includeMovements ? loadKitchenMovements(userId) : Promise.resolve([] as KitchenMovement[]),
     loadUnfinishedPrepRawDemand(userId, formulas),
     getHolidayMode(userId),
   ]);
@@ -640,8 +652,8 @@ export async function makeGiftBox(
   state?: KitchenState;
   finished_shortfalls?: { capacity: string; qtys: { osmanthus: number; red_date: number; rock_sugar: number } }[];
 }> {
-  await ensureSeed(ownerId);
   const { catalog, formulas } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const boxType = input.boxType;
   if (!catalog.giftBoxTypes.some((g) => g.id === boxType && g.active)) {
     return { error: 'Invalid gift box type' };
@@ -724,8 +736,8 @@ export async function allocateGiftBox(
   actorId: number,
   input: { boxType: string; quantity: number; orderId: number }
 ): Promise<{ error?: string; state?: KitchenState }> {
-  await ensureSeed(ownerId);
   const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const boxType = input.boxType;
   if (!catalog.giftBoxTypes.some((g) => g.id === boxType)) {
     return { error: 'Invalid gift box type' };
@@ -793,8 +805,8 @@ export async function makeReturnGift(
   actorId: number,
   input: { orderId: number; lines?: { needKey: string; qty: number }[] }
 ): Promise<{ error?: string; state?: KitchenState }> {
-  await ensureSeed(ownerId);
   const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const orderId = Number(input.orderId);
   const row = (await db
     .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
@@ -874,8 +886,8 @@ export async function restockRaw(
     deltas: { name: string; qty: number }[];
   }
 ): Promise<{ error?: string; state?: KitchenState }> {
-  await ensureSeed(ownerId);
   const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const allowedRaw = new Set(catalog.rawMaterials.map((m) => m.name));
   const rawDeltas: MovementDeltas['rawDeltas'] = [];
   const summaryParts: string[] = [];
@@ -924,8 +936,8 @@ export async function adjustStock(
   input: { kind: 'raw' | 'finished' | 'gift_box'; key: string; quantity: number }
 ): Promise<{ error?: string; state?: KitchenState }> {
   if (!isAdmin) return { error: 'Only admin can adjust stock' };
-  await ensureSeed(ownerId);
   const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const kind = input.kind;
   const key = String(input.key || '').trim();
   if (!key) return { error: 'key required' };
@@ -1003,8 +1015,8 @@ export async function addFinishedFromStewing(
     remarks?: string | null;
   }
 ): Promise<{ error?: string }> {
-  await ensureSeed(ownerId);
   const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const allowedSku = new Set(finishedSkusFromCatalog(catalog));
   const allowedRaw = new Set(catalog.rawMaterials.map((m) => m.name));
   const finishedDeltas: MovementDeltas['finishedDeltas'] = [];
@@ -1086,7 +1098,8 @@ export async function logPrepSheetPrint(
   actorName: string,
   input: { prepOrderId: number; prepOrderCode: string }
 ): Promise<{ error?: string }> {
-  await ensureSeed(ownerId);
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
   const code = input.prepOrderCode?.trim() || `PREP#${input.prepOrderId}`;
   const name = actorName?.trim() || '—';
   const emptyDeltas: MovementDeltas = {
@@ -1120,7 +1133,8 @@ export async function voidMovement(
   isAdmin: boolean
 ): Promise<{ error?: string; state?: KitchenState }> {
   if (!isAdmin) return { error: 'Only admin can void movements' };
-  await ensureSeed(ownerId);
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
 
   const row = (await db
     .prepare('SELECT * FROM kitchen_movements WHERE id = ? AND user_id = ?')
@@ -1152,7 +1166,6 @@ export async function voidMovement(
   if (!details.deltas) return { error: 'Movement has no reversible deltas' };
 
   const reversed = reverseMovementDeltas(details.deltas);
-  const { catalog } = await loadKitchenCatalog(ownerId);
   const stock = await loadStockMaps(ownerId, catalog);
   const neg = wouldGoNegative(reversed, stock);
   if (neg) return { error: neg };

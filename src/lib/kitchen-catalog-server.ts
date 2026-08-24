@@ -18,6 +18,9 @@ import {
   type KitchenFormulas,
 } from './kitchen-catalog';
 
+/** Bump when merge helpers change so existing DBs re-run once. */
+export const KITCHEN_CATALOG_MERGE_VERSION = '2026-08-v1';
+
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -34,27 +37,21 @@ async function ensureSettingsRow(userId: number) {
     .run(userId);
 }
 
-/**
- * Load effective catalog + formulas for an org. Seeds JSON columns from code defaults
- * when null so subsequent reads are stable.
- */
-export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalogBundle> {
-  await ensureSettingsRow(userId);
-  const row = (await db
-    .prepare('SELECT catalog_json, formulas_json FROM kitchen_settings WHERE user_id = ?')
-    .get(userId)) as { catalog_json: string | null; formulas_json: string | null } | undefined;
+async function persistCatalogMergeVersion(userId: number) {
+  await db
+    .prepare('UPDATE kitchen_settings SET catalog_merge_version = ? WHERE user_id = ?')
+    .run(KITCHEN_CATALOG_MERGE_VERSION, userId);
+}
 
+async function runCatalogMerges(
+  userId: number,
+  catalogIn: KitchenCatalog,
+  formulasIn: KitchenFormulas,
+  opts: { hasCatalog: boolean; hasFormulas: boolean; row: { catalog_json: string | null; formulas_json: string | null } | undefined },
+): Promise<KitchenCatalogBundle> {
   const defaults = defaultKitchenCatalogBundle();
-  const hasCatalog = Boolean(row?.catalog_json);
-  const hasFormulas = Boolean(row?.formulas_json);
-
-  let catalog = hasCatalog
-    ? normalizeCatalogBundle(parseJson(row!.catalog_json, defaults.catalog), null, defaults).catalog
-    : defaults.catalog;
-  let formulas = hasFormulas
-    ? normalizeCatalogBundle(null, parseJson(row!.formulas_json, defaults.formulas), defaults)
-        .formulas
-    : defaults.formulas;
+  let catalog = catalogIn;
+  let formulas = formulasIn;
 
   const catalogWithBirdNest = mergeBirdNestCatalogRawMaterials(catalog);
   if (catalogWithBirdNest !== catalog) {
@@ -128,7 +125,7 @@ export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalog
       .run(JSON.stringify(formulas), userId);
   }
 
-  if (!hasCatalog || !hasFormulas) {
+  if (!opts.hasCatalog || !opts.hasFormulas) {
     await db
       .prepare(
         `UPDATE kitchen_settings
@@ -138,13 +135,50 @@ export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalog
          WHERE user_id = ?`
       )
       .run(
-        hasCatalog ? row!.catalog_json : JSON.stringify(defaults.catalog),
-        hasFormulas ? row!.formulas_json : JSON.stringify(defaults.formulas),
+        opts.hasCatalog ? opts.row!.catalog_json : JSON.stringify(defaults.catalog),
+        opts.hasFormulas ? opts.row!.formulas_json : JSON.stringify(defaults.formulas),
         userId
       );
   }
 
+  await persistCatalogMergeVersion(userId);
   return { catalog, formulas };
+}
+
+/**
+ * Load effective catalog + formulas for an org. Seeds JSON columns from code defaults
+ * when null so subsequent reads are stable.
+ */
+export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalogBundle> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare(
+      'SELECT catalog_json, formulas_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?'
+    )
+    .get(userId)) as
+    | { catalog_json: string | null; formulas_json: string | null; catalog_merge_version: string | null }
+    | undefined;
+
+  const defaults = defaultKitchenCatalogBundle();
+  const hasCatalog = Boolean(row?.catalog_json);
+  const hasFormulas = Boolean(row?.formulas_json);
+
+  let catalog = hasCatalog
+    ? normalizeCatalogBundle(parseJson(row!.catalog_json, defaults.catalog), null, defaults).catalog
+    : defaults.catalog;
+  let formulas = hasFormulas
+    ? normalizeCatalogBundle(null, parseJson(row!.formulas_json, defaults.formulas), defaults).formulas
+    : defaults.formulas;
+
+  if (
+    hasCatalog &&
+    hasFormulas &&
+    row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION
+  ) {
+    return { catalog, formulas };
+  }
+
+  return runCatalogMerges(userId, catalog, formulas, { hasCatalog, hasFormulas, row });
 }
 
 export async function saveKitchenCatalog(
@@ -169,10 +203,15 @@ export async function saveKitchenCatalog(
   await db
     .prepare(
       `UPDATE kitchen_settings
-       SET catalog_json = ?, formulas_json = ?, updated_at = datetime('now')
+       SET catalog_json = ?, formulas_json = ?, catalog_merge_version = ?, updated_at = datetime('now')
        WHERE user_id = ?`
     )
-    .run(JSON.stringify(next.catalog), JSON.stringify(next.formulas), ownerId);
+    .run(
+      JSON.stringify(next.catalog),
+      JSON.stringify(next.formulas),
+      KITCHEN_CATALOG_MERGE_VERSION,
+      ownerId
+    );
 
   await ensureCatalogStockRows(ownerId, next.catalog);
 
@@ -208,11 +247,5 @@ export async function ensureCatalogStockRows(userId: number, catalog: KitchenCat
         `INSERT OR IGNORE INTO kitchen_raw (user_id, name, unit, total_stock, allocated_stock) VALUES ${placeholders}`
       )
       .run(...params);
-  }
-
-  for (const m of raws) {
-    await db
-      .prepare('UPDATE kitchen_raw SET unit = ? WHERE user_id = ? AND name = ?')
-      .run(m.unit, userId, m.name);
   }
 }

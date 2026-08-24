@@ -6,7 +6,7 @@ import { getOrder, logActivity } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
-import { isWeddingGiftOrderType, pruneStaleOrderFields } from '@/lib/orders';
+import { isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
@@ -114,6 +114,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       pruneStaleOrderFields(mergedFields);
       setClauses.push('fields_json = ?');
       values.push(JSON.stringify(mergedFields));
+      setClauses.push('order_type = ?');
+      values.push(orderTypeFromFields(mergedFields));
     }
 
     if (setClauses.length) {

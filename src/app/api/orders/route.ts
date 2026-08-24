@@ -4,7 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrdersSummary, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
-import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE } from '@/lib/orders';
+import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE, orderTypeFromFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
@@ -51,8 +51,8 @@ export async function POST(request: Request) {
         .prepare(
           `INSERT INTO orders (
              user_id, reference_number, po_number, name, description, status,
-             customer_email, phone, shipping_address, notes, fields_json
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             customer_email, phone, shipping_address, notes, fields_json, order_type
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
@@ -65,7 +65,8 @@ export async function POST(request: Request) {
           body.phone?.trim() || null,
           body.shipping_address?.trim() || null,
           body.notes?.trim() || null,
-          fieldsJson
+          fieldsJson,
+          orderType || null
         );
       return { id: result.lastInsertRowid as number, referenceNumber };
     });

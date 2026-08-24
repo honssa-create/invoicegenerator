@@ -963,6 +963,12 @@ export function isNestieeOrderType(t: string): boolean {
   return t === NESTIEE_ORDER_TYPE;
 }
 
+/** Denormalized orders.order_type — kept in sync with fields_json.order_type. */
+export function orderTypeFromFields(fields: Record<string, unknown> | null | undefined): string | null {
+  const t = typeof fields?.order_type === 'string' ? fields.order_type.trim() : '';
+  return t || null;
+}
+
 export const CUPMOKA_ORDER_TYPE = 'Cupmoka' as const;
 export function isCupmokaOrderType(t: string): boolean {
   return t === CUPMOKA_ORDER_TYPE;

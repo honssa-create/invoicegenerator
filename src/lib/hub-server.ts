@@ -26,6 +26,7 @@ import {
   normalizeOrderDueDate,
   parseNestieeReceiptDateFromDeliveryOptions,
   pruneStaleOrderFields,
+  orderTypeFromFields,
   WOO_PLATFORM_ORDER_TYPE,
   parseCupmokaLinesFromWoo,
   appendCupmokaShippingLine,
@@ -341,6 +342,7 @@ export async function upsertHubOrder(
 
   const notesToWrite =
     importedNotes && !(existing?.notes || '').trim() ? importedNotes : null;
+  const orderType = orderTypeFromFields(fields);
 
   if (existing) {
     await db.prepare(
@@ -355,6 +357,7 @@ export async function upsertHubOrder(
          notes = COALESCE(?, notes),
          po_number = COALESCE(?, po_number),
          fields_json = ?,
+         order_type = ?,
          updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`
     ).run(
@@ -368,6 +371,7 @@ export async function upsertHubOrder(
       notesToWrite,
       input.external_po_number?.trim() || null,
       JSON.stringify(fields),
+      orderType,
       existing.id,
       userId
     );
@@ -387,8 +391,8 @@ export async function upsertHubOrder(
         `INSERT INTO orders (
            user_id, source_platform, original_order_id, system_order_no, reference_number,
            po_number, name, description, status, customer_email, phone,
-           shipping_address, total_amount, notes, fields_json, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+           shipping_address, total_amount, notes, fields_json, order_type, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
       )
       .run(
         userId,
@@ -406,6 +410,7 @@ export async function upsertHubOrder(
         input.total_amount,
         importedNotes || null,
         JSON.stringify(fields),
+        orderType,
         input.created_at
       );
   });

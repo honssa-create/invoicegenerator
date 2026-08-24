@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
@@ -24,6 +24,8 @@ import {
   activeGiftBoxTypes,
   isReserveRawMaterial,
   isUntrackedStewIngredient,
+  type KitchenCatalog,
+  type KitchenFormulas,
   type KitchenAction,
   type KitchenState,
   type KitchenOpenOrder,
@@ -113,6 +115,8 @@ function isNeedStockEnough(n: KitchenNeedLine, stock: StockMaps): boolean {
 export default function KitchenPage() {
   const router = useRouter();
   const [state, setState] = useState<KitchenState | null>(null);
+  const [movementsLoading, setMovementsLoading] = useState(true);
+  const catalogBundleRef = useRef<{ catalog: KitchenCatalog; formulas: KitchenFormulas } | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
@@ -144,17 +148,77 @@ export default function KitchenPage() {
   const giftBoxTypes = state ? activeGiftBoxTypes(state.catalog) : [];
   const rawMaterials = state?.catalog.rawMaterials || [];
 
-  const load = () =>
-    fetch('/api/kitchen/state')
-      .then((r) => r.json())
-      .then((d) => {
-        setState(d.state);
-        const first = d.state?.catalog ? activeGiftBoxTypes(d.state.catalog)[0]?.id : null;
+  const mergeCatalogIntoState = (
+    operational: Omit<KitchenState, 'catalog' | 'formulas' | 'movements'> & Partial<Pick<KitchenState, 'movements'>>,
+    movements?: KitchenState['movements']
+  ): KitchenState | null => {
+    const bundle = catalogBundleRef.current;
+    if (!bundle) return null;
+    return {
+      ...operational,
+      catalog: bundle.catalog,
+      formulas: bundle.formulas,
+      movements: movements ?? operational.movements ?? [],
+    } as KitchenState;
+  };
+
+  const loadMovements = async () => {
+    setMovementsLoading(true);
+    try {
+      const res = await fetch('/api/kitchen/movements');
+      const data = await res.json();
+      if (!res.ok) return;
+      setState((prev) => (prev ? { ...prev, movements: data.movements || [] } : prev));
+    } finally {
+      setMovementsLoading(false);
+    }
+  };
+
+  const loadCore = async () => {
+    const res = await fetch('/api/kitchen/state?lite=1');
+    const data = await res.json();
+    if (!res.ok) return;
+    setState((prev) => {
+      const merged = mergeCatalogIntoState(data.state, prev?.movements);
+      if (merged) {
+        const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
         if (first) setGiftType((cur) => cur || first);
-      });
+      }
+      return merged ?? prev;
+    });
+  };
+
+  const loadInitial = async () => {
+    const [stateRes, catalogRes] = await Promise.all([
+      fetch('/api/kitchen/state?lite=1'),
+      fetch('/api/kitchen/catalog'),
+    ]);
+    const stateData = await stateRes.json();
+    const catalogData = await catalogRes.json();
+    if (!stateRes.ok || !catalogRes.ok) return;
+
+    catalogBundleRef.current = {
+      catalog: catalogData.catalog,
+      formulas: catalogData.formulas,
+    };
+    const merged = mergeCatalogIntoState(stateData.state, []);
+    if (merged) {
+      setState(merged);
+      const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
+      if (first) setGiftType((cur) => cur || first);
+    }
+    void loadMovements();
+  };
+
+  const load = async (opts?: { refreshMovements?: boolean }) => {
+    await loadCore();
+    if (opts?.refreshMovements !== false) {
+      await loadMovements();
+    }
+  };
 
   useEffect(() => {
-    load();
+    void loadInitial();
   }, []);
   useEffect(() => {
     if (!toast) return;
@@ -792,7 +856,10 @@ export default function KitchenPage() {
         <KitchenAdminPanel
           state={state}
           busy={busy}
-          onSaved={setState}
+          onSaved={(next) => {
+            catalogBundleRef.current = { catalog: next.catalog, formulas: next.formulas };
+            setState(next);
+          }}
           onError={(msg) => flash(msg, 'error')}
           onSuccess={(msg) => flash(msg, 'success')}
           onBusy={setBusy}
@@ -1218,7 +1285,13 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredMovements.length === 0 && (
+                {movementsLoading ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-gray-400">
+                      <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600" />
+                    </td>
+                  </tr>
+                ) : filteredMovements.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-6 text-center text-gray-400">
                       {state.movements.length === 0
@@ -1226,8 +1299,8 @@ export default function KitchenPage() {
                         : bi('No movements for this action', '此動作尚無紀錄')}
                     </td>
                   </tr>
-                )}
-                {filteredMovements.map((m) => (
+                ) : (
+                filteredMovements.map((m) => (
                   <tr
                     key={m.id}
                     className={`border-b border-gray-50 align-top ${m.voidedAt ? 'opacity-50' : ''}`}
@@ -1256,7 +1329,8 @@ export default function KitchenPage() {
                       )}
                     </td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>

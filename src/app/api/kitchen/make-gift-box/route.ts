@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { resolveKitchenOwnerUserId, makeGiftBox, getState } from '@/lib/kitchen-server';
+import { parseBirdNestType } from '@/lib/kitchen-prep';
 
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
       boxType: String(body.boxType || ''),
       quantity: Number(body.quantity),
       consumeOverrides,
-      birdNestType: body.birdNestType != null ? String(body.birdNestType) : undefined,
+      birdNestType: body.birdNestType != null ? parseBirdNestType(String(body.birdNestType)) : undefined,
     });
     if (result.error) {
       return NextResponse.json(

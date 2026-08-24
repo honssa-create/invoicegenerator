@@ -30,6 +30,7 @@ import {
 import type { HubImportDateRange } from './hub-import';
 import { orderCreatedInRange } from './hub-import';
 import { wooOrderCreatedBounds } from './hub-import';
+import { normalizeCustomerName } from './customer-name';
 
 export async function syncWooStore(
   userId: number,
@@ -514,7 +515,8 @@ export async function syncQuickBooksInvoices(userId: number, dateRange?: HubImpo
         const balance = Number(inv.Balance ?? total);
         const systemNo = await allocateQbSystemNo(userId, inv.Id);
         const docNumber = inv.DocNumber || null;
-        const customerName = inv.CustomerRef?.name || 'QuickBooks Customer';
+        const customerName =
+          normalizeCustomerName(inv.CustomerRef?.name || '') || 'QuickBooks Customer';
         const txnDate = (inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
         const issueDate = txnDate;
         const dueDate = (inv.DueDate || inv.TxnDate || new Date().toISOString().slice(0, 10)).slice(0, 10);

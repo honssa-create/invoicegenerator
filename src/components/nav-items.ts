@@ -10,9 +10,9 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: NAV.dashboard, icon: '📊', section: 'dashboard' },
+  { href: '/orders', label: NAV.orders, icon: '📦', section: 'orders' },
   { href: '/quotations', label: NAV.quotations, icon: '📝', section: 'quotations' },
   { href: '/invoices', label: NAV.invoices, icon: '📄', section: 'invoices' },
-  { href: '/orders', label: NAV.orders, icon: '📦', section: 'orders' },
   { href: '/hub', label: NAV.orderHub, icon: '🛰️', section: 'order_hub' },
   { href: '/inbound', label: NAV.inbound, icon: '📥', section: 'inbound' },
   { href: '/kitchen', label: NAV.kitchen, icon: '🍲', section: 'kitchen' },

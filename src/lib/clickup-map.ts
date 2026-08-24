@@ -1,4 +1,5 @@
 import type { HubOrderUpsertInput } from './hub-server';
+import { normalizeCustomerName } from './customer-name';
 import {
   clickUpMsToCreatedAt,
   clickUpMsToDateYmd,
@@ -290,10 +291,11 @@ export function mapClickUpTaskToUpsert(task: ClickUpTask): HubOrderUpsertInput {
 
   const derived = deriveWeddingFields(merged.fields);
 
-  const customerName =
+  const customerName = normalizeCustomerName(
     merged.core.name?.trim() ||
-    cleanClickUpTaskCustomerName(stripClickUpTaskIdPrefix(task.name)) ||
-    'ClickUp Customer';
+      cleanClickUpTaskCustomerName(stripClickUpTaskIdPrefix(task.name)) ||
+      'ClickUp Customer',
+  ) || 'ClickUp Customer';
 
   const pay1 = Number(derived.payment1_amount || derived.payment_amount || 0);
   const totalAmount = pay1 > 0 ? pay1 : computeWeddingGiftTotal(derived as Record<string, string | boolean>);

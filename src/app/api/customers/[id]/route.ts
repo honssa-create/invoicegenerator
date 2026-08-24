@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
+import { normalizeCustomerName } from '@/lib/customer-name';
 import { trashCustomer } from '@/lib/trash';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -48,7 +49,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       `UPDATE customers SET name = ?, company_name = ?, email = ?, phone = ?, address = ?, ordered = ?
        WHERE id = ? AND user_id = ?`
     ).run(
-      name.trim(),
+      normalizeCustomerName(name.trim()) || name.trim(),
       company_name?.trim() || null,
       email?.trim() || null,
       phone?.trim() || null,

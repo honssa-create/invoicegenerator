@@ -2,6 +2,7 @@ import db from './db';
 import type { HubOrderRow, HubPlatform } from './hub';
 import { HUB_PLATFORM_PREFIX } from './hub';
 import { pickBestHubOrderMatch, type HubOrderMatchCandidate } from './hub-link';
+import { normalizeCustomerName } from './customer-name';
 import { allocateGlobalRecordNumber } from './record-numbering';
 import {
   formatWooAddress,
@@ -119,6 +120,10 @@ export async function upsertHubOrder(
   userId: number,
   input: HubOrderUpsertInput
 ): Promise<{ id: number; inserted: boolean; system_order_no: string }> {
+  input = {
+    ...input,
+    customer_name: normalizeCustomerName(input.customer_name) || input.customer_name.trim(),
+  };
   const existing = await db
     .prepare(
       `SELECT id, system_order_no, fields_json, notes, shipping_address FROM orders

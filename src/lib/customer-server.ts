@@ -1,6 +1,7 @@
 import db from './db';
 import type { Order } from './orders';
 import { resolveOrderAddressesForQuotation } from './orders';
+import { normalizeCustomerName } from './customer-name';
 
 export type CustomerOrderSyncInput = {
   name: string;
@@ -36,6 +37,10 @@ function normStr(v: string | null | undefined): string {
   return String(v ?? '').trim();
 }
 
+function normCustomerName(v: string | null | undefined): string {
+  return normalizeCustomerName(normStr(v));
+}
+
 function normEmail(v: string | null | undefined): string {
   return normStr(v).toLowerCase();
 }
@@ -51,7 +56,7 @@ function toDbField(v: string | null | undefined): string | null {
 
 /** Normalized contact fingerprint (legacy export; not used for dedup). */
 export function customerContactFingerprint(input: CustomerOrderSyncInput): CustomerFingerprint | null {
-  const name = normStr(input.name);
+  const name = normCustomerName(input.name);
   if (!name) return null;
   return {
     name,
@@ -66,7 +71,7 @@ export function customerContactFingerprint(input: CustomerOrderSyncInput): Custo
 export function orderToCustomerSyncInput(order: Order, nameOverride?: string): CustomerOrderSyncInput {
   const { billingAddress, shippingAddress } = resolveOrderAddressesForQuotation(order);
   return {
-    name: (nameOverride ?? order.name)?.trim() || '',
+    name: normCustomerName(nameOverride ?? order.name),
     companyName: String(order.fields?.company_name ?? '').trim() || null,
     email: order.customer_email?.trim() || null,
     phone: order.phone?.trim() || null,
@@ -119,7 +124,7 @@ export async function findCustomersByContact(
   userId: number,
   contact: { name: string; email: string; phone: string }
 ): Promise<CustomerRow[]> {
-  const name = normStr(contact.name);
+  const name = normCustomerName(contact.name);
   if (!name) return [];
 
   const email = normEmail(contact.email);
@@ -201,9 +206,10 @@ export async function upsertCustomer(
   userId: number,
   input: CustomerOrderSyncInput
 ): Promise<{ id: number; created: boolean }> {
-  const name = normStr(input.name);
+  const name = normCustomerName(input.name);
   if (!name) throw new Error('Customer name is required');
 
+  const normalizedInput: CustomerOrderSyncInput = { ...input, name };
   const contact = { name, email: normEmail(input.email), phone: normPhone(input.phone) };
   const matches = await findCustomersByContact(userId, contact);
 
@@ -216,11 +222,11 @@ export async function upsertCustomer(
       .run(
         userId,
         name,
-        toDbField(input.companyName),
-        toDbField(input.email),
-        toDbField(input.phone),
-        toDbField(input.address),
-        toDbField(input.orderType)
+        toDbField(normalizedInput.companyName),
+        toDbField(normalizedInput.email),
+        toDbField(normalizedInput.phone),
+        toDbField(normalizedInput.address),
+        toDbField(normalizedInput.orderType)
       );
     return { id: Number(result.lastInsertRowid), created: true };
   }
@@ -229,9 +235,9 @@ export async function upsertCustomer(
   const duplicateIds = matches.slice(1).map((m) => m.id);
 
   if (duplicateIds.length > 0) {
-    await mergeCustomersIntoCanonical(userId, canonical.id, duplicateIds, input, matches.slice(1));
+    await mergeCustomersIntoCanonical(userId, canonical.id, duplicateIds, normalizedInput, matches.slice(1));
   } else {
-    const merged = mergeCustomerFields(canonical, input);
+    const merged = mergeCustomerFields(canonical, normalizedInput);
     await updateCustomerRow(userId, canonical.id, merged);
   }
 
@@ -243,7 +249,7 @@ export async function syncCustomerFromOrder(
   userId: number,
   input: CustomerOrderSyncInput
 ): Promise<number | null> {
-  const name = normStr(input.name);
+  const name = normCustomerName(input.name);
   if (!name) return null;
   const { id } = await upsertCustomer(userId, input);
   return id;

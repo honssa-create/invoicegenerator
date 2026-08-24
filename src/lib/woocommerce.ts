@@ -5,6 +5,7 @@ import { appendWooQueryAuth, parseWooApiJson, wooApiErrorMessage, wooRequestHead
 import type { HubImportDateRange } from './hub-import';
 import { orderCreatedInRange } from './hub-import';
 import { formatWooAddress } from './orders';
+import { normalizeCustomerName } from './customer-name';
 
 export interface WooStoreConfig {
   platform: Exclude<HubPlatform, 'manual' | 'quickbooks' | 'clickup'>;
@@ -240,7 +241,8 @@ export function isWooDraftOrder(status: string | null | undefined): boolean {
 
 export function wooCustomerName(order: WooOrder): string {
   const b = order.billing;
-  const name = [b?.first_name, b?.last_name].filter(Boolean).join(' ').trim();
+  const raw = [b?.first_name, b?.last_name].filter(Boolean).join(' ').trim();
+  const name = normalizeCustomerName(raw);
   return name || `WooCommerce #${order.number}`;
 }
 

@@ -61,10 +61,9 @@ export {
   giftBoxBomRawOptions,
   giftBoxBomRawSelectOptions,
   stewFormulaRawSelectOptions,
-  BIRD_NEST_FORMULA_PLACEHOLDER,
 } from './kitchen-catalog';
 
-export { isUntrackedStewIngredient } from './kitchen-prep';
+export { isUntrackedStewIngredient, BIRD_NEST_FORMULA_PLACEHOLDER } from './kitchen-prep';
 
 export const GIFT_BOX_TYPES = NESTIEE_GIFT_BOX_TYPES;
 

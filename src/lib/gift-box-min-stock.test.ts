@@ -22,9 +22,9 @@ describe('giftBoxTopUpQty', () => {
 });
 
 describe('defaultPrepStatusForCreate restock', () => {
-  it('defaults restock to in_prep', () => {
-    expect(defaultPrepStatusForCreate('restock', '2099-01-01')).toBe('in_prep');
-    expect(defaultPrepStatusForCreate('restock', '2020-01-01')).toBe('in_prep');
+  it('defaults restock to scheduled', () => {
+    expect(defaultPrepStatusForCreate('restock', '2099-01-01')).toBe('scheduled');
+    expect(defaultPrepStatusForCreate('restock', '2020-01-01')).toBe('scheduled');
   });
 });
 

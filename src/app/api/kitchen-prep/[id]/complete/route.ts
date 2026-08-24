@@ -17,6 +17,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (existing.status === 'completed') {
     return NextResponse.json({ error: 'This prep order is already completed' }, { status: 400 });
   }
+  if (existing.status !== 'stewing') {
+    return NextResponse.json({ error: 'Prep must be in stewing status before completion' }, { status: 400 });
+  }
 
   try {
     const body = await request.json();

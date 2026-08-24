@@ -1194,7 +1194,7 @@ export async function voidMovement(
       await db
         .prepare(
           `UPDATE kitchen_prep_orders SET
-             status = 'scheduled',
+             status = 'stewing',
              expected_yield = NULL,
              actual_yield = NULL,
              completion_remarks = NULL,

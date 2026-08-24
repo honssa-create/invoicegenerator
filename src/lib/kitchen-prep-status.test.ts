@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultPrepStatusForCreate,
+  getPrepStatusAction,
   hkNowDateTime,
   weddingPrepStatusFromDate,
 } from './kitchen-prep';
@@ -13,22 +14,22 @@ describe('hkNowDateTime', () => {
 });
 
 describe('defaultPrepStatusForCreate', () => {
-  it('sets daily and restock creates to in_prep', () => {
-    expect(defaultPrepStatusForCreate('daily', '2099-01-01', { today: '2026-08-03' })).toBe('in_prep');
-    expect(defaultPrepStatusForCreate('daily', '2020-01-01', { today: '2026-08-03' })).toBe('in_prep');
-    expect(defaultPrepStatusForCreate('restock', '2099-01-01', { today: '2026-08-03' })).toBe('in_prep');
+  it('sets daily and restock creates to scheduled', () => {
+    expect(defaultPrepStatusForCreate('daily', '2099-01-01', { today: '2026-08-03' })).toBe('scheduled');
+    expect(defaultPrepStatusForCreate('daily', '2020-01-01', { today: '2026-08-03' })).toBe('scheduled');
+    expect(defaultPrepStatusForCreate('restock', '2099-01-01', { today: '2026-08-03' })).toBe('scheduled');
   });
 
-  it('sets wedding without production date to inactive', () => {
+  it('sets wedding without production date to not_started', () => {
     expect(
       weddingPrepStatusFromDate('2026-08-03', { hasProductionDate: false, today: '2026-08-03' })
-    ).toBe('inactive');
+    ).toBe('not_started');
   });
 
-  it('sets wedding future production date to inactive', () => {
+  it('sets wedding future production date to not_started', () => {
     expect(
       weddingPrepStatusFromDate('2026-08-20', { hasProductionDate: true, today: '2026-08-03' })
-    ).toBe('inactive');
+    ).toBe('not_started');
   });
 
   it('sets wedding due production date to scheduled', () => {
@@ -38,5 +39,26 @@ describe('defaultPrepStatusForCreate', () => {
     expect(
       weddingPrepStatusFromDate('2026-07-01', { hasProductionDate: true, today: '2026-08-03' })
     ).toBe('scheduled');
+  });
+});
+
+describe('getPrepStatusAction', () => {
+  it('maps workflow statuses to actions', () => {
+    expect(getPrepStatusAction('scheduled')).toMatchObject({
+      type: 'advance',
+      nextStatus: 'prepped',
+      label: '完成備料',
+    });
+    expect(getPrepStatusAction('prepped')).toMatchObject({
+      type: 'advance',
+      nextStatus: 'stewing',
+      label: '開始炖製',
+    });
+    expect(getPrepStatusAction('stewing')).toMatchObject({
+      type: 'complete',
+      label: '完成炖製',
+    });
+    expect(getPrepStatusAction('not_started')).toBeNull();
+    expect(getPrepStatusAction('completed')).toBeNull();
   });
 });

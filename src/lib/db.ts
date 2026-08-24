@@ -639,6 +639,30 @@ async function runBootDataFixes(): Promise<void> {
     );
   }
 
+  // Kitchen prep status v2: not_started / scheduled / prepped / stewing / completed.
+  const migPrepStatusV2 = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_status_v2'`
+  );
+  if (!migPrepStatusV2.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_status_check
+    `);
+    await client().query(`
+      UPDATE kitchen_prep_orders SET status = 'not_started' WHERE status = 'inactive'
+    `);
+    await client().query(`
+      UPDATE kitchen_prep_orders SET status = 'stewing' WHERE status = 'in_prep'
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_status_check
+        CHECK (status IN ('not_started', 'scheduled', 'prepped', 'stewing', 'completed'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_v2') ON CONFLICT DO NOTHING`
+    );
+  }
+
   // Allow kitchen_prep_orders.order_type = restock (補充存貨).
   const migType = await client().query<{ key: string }>(
     `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_order_type_restock'`
@@ -713,6 +737,7 @@ async function runBootDataFixes(): Promise<void> {
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_osmanthus INTEGER`);
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_red_date INTEGER`);
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_rock_sugar INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS stewing_started_at TEXT`);
 
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_osmanthus TEXT DEFAULT 'large'`);
   await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_red_date TEXT DEFAULT 'large'`);

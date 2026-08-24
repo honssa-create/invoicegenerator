@@ -11,6 +11,7 @@ import {
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUS_LABELS,
+  getPrepStatusAction,
   isRedDateAllowed,
   type PrepCapacity,
   type PrepOrder,
@@ -19,9 +20,10 @@ import {
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const STATUS_COLORS: Record<string, string> = {
-  inactive: 'bg-gray-100 text-gray-600',
+  not_started: 'bg-gray-100 text-gray-600',
   scheduled: 'bg-blue-100 text-blue-700',
-  in_prep: 'bg-amber-100 text-amber-700',
+  prepped: 'bg-amber-100 text-amber-700',
+  stewing: 'bg-orange-100 text-orange-700',
   completed: 'bg-green-100 text-green-700',
 };
 
@@ -135,6 +137,7 @@ function KitchenPrepListContent() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
+  const [advancingId, setAdvancingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('stewing_date');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -193,6 +196,29 @@ function KitchenPrepListContent() {
   };
 
   const sortIndicator = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
+
+  const handleStatusAction = async (order: PrepOrder, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const action = getPrepStatusAction(order.status);
+    if (!action) return;
+    if (action.type === 'complete') {
+      setCompleteOrder(order);
+      return;
+    }
+    setAdvancingId(order.id);
+    const res = await fetch(`/api/kitchen-prep/${order.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: action.nextStatus }),
+    });
+    const data = await res.json();
+    setAdvancingId(null);
+    if (!res.ok) {
+      setError(data.error || bi('Failed to update status', '更新狀態失敗'));
+      return;
+    }
+    setOrders((prev) => prev.map((o) => (o.id === order.id ? data.order : o)));
+  };
 
   const toggleCapacity = (capacity: PrepCapacity) => {
     setForm((prev) => {
@@ -314,6 +340,7 @@ function KitchenPrepListContent() {
                 <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('status')}>
                   Status{sortIndicator('status')}
                 </th>
+                <th className="px-4 py-3 whitespace-nowrap">開始炖製時間</th>
                 <th className="px-4 py-3 text-right">Action</th>
               </tr>
             </thead>
@@ -349,17 +376,25 @@ function KitchenPrepListContent() {
                       </p>
                     )}
                   </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-600 tabular-nums">
+                    {o.stewing_started_at || '—'}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex items-center justify-end gap-2">
-                      {o.status !== 'completed' ? (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setCompleteOrder(o); }}
-                          className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap"
-                        >
-                          {bi('Complete Stewing', '完成燉製')}
-                        </button>
-                      ) : null}
+                      {(() => {
+                        const action = getPrepStatusAction(o.status);
+                        if (!action) return null;
+                        return (
+                          <button
+                            type="button"
+                            disabled={advancingId === o.id}
+                            onClick={(e) => { void handleStatusAction(o, e); }}
+                            className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap disabled:opacity-50"
+                          >
+                            {advancingId === o.id ? '更新中…' : action.label}
+                          </button>
+                        );
+                      })()}
                       <button
                         type="button"
                         disabled={deletingId === o.id}

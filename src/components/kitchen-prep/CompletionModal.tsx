@@ -102,7 +102,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
       >
         <div className="px-4 sm:px-6 py-5 border-b border-gray-200 bg-brand-50 rounded-t-2xl shrink-0">
           <p className="text-sm font-semibold text-brand-800 uppercase tracking-wide">完成與匯報</p>
-          <h2 className="text-2xl font-bold text-gray-900 mt-1">Mark as Completed 完成燉製</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mt-1">完成炖製</h2>
           <p className="text-base text-gray-600 mt-2 font-mono">{order.order_code}</p>
           <p className="text-sm text-gray-500 mt-1">
             {order.stewing_date} · {PREP_ORDER_TYPE_LABELS[order.order_type]} · {PREP_CAPACITY_LABELS[order.capacity]}
@@ -247,7 +247,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             disabled={submitting || splits.length === 0}
             className="order-1 sm:order-2 flex-[2] min-h-[56px] text-lg font-bold rounded-xl bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:opacity-50 shadow-lg"
           >
-            {submitting ? bi('Submitting…', '提交中…') : bi('Submit & Complete', '確認完成')}
+            {submitting ? '提交中…' : '確認完成炖製'}
           </button>
         </div>
       </div>

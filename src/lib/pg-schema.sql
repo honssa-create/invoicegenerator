@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   stewing_date TEXT NOT NULL,
   order_type TEXT NOT NULL DEFAULT 'daily' CHECK (order_type IN ('daily', 'wedding', 'restock')),
   capacity TEXT NOT NULL DEFAULT '45g',
-  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('inactive', 'scheduled', 'in_prep', 'completed')),
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('not_started', 'scheduled', 'prepped', 'stewing', 'completed')),
   qty_osmanthus INTEGER NOT NULL DEFAULT 0,
   qty_red_date INTEGER NOT NULL DEFAULT 0,
   qty_rock_sugar INTEGER NOT NULL DEFAULT 0,
@@ -327,6 +327,7 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   completion_remarks TEXT,
   completed_at TEXT,
   completed_by TEXT,
+  stewing_started_at TEXT,
   completion_splits_json TEXT
 );
 

@@ -143,15 +143,34 @@ export const PREP_ORDER_TYPE_LABELS: Record<PrepOrderType, string> = {
   restock: '補充存貨 Restock',
 };
 
-export const PREP_STATUSES = ['inactive', 'scheduled', 'in_prep', 'completed'] as const;
+export const PREP_STATUSES = ['not_started', 'scheduled', 'prepped', 'stewing', 'completed'] as const;
 export type PrepStatus = (typeof PREP_STATUSES)[number];
 
 export const PREP_STATUS_LABELS: Record<PrepStatus, string> = {
-  inactive: 'Inactive 未開始',
-  scheduled: 'Scheduled 已排程',
-  in_prep: 'In Prep 備料中',
-  completed: 'Completed 已完成',
+  not_started: '未開始',
+  scheduled: '已排程',
+  prepped: '已備料',
+  stewing: '炖製中',
+  completed: '已完成',
 };
+
+export type PrepStatusAction =
+  | { type: 'advance'; nextStatus: PrepStatus; label: string }
+  | { type: 'complete'; label: string };
+
+/** Primary workflow button for scheduled → prepped → stewing → completed. */
+export function getPrepStatusAction(status: PrepStatus): PrepStatusAction | null {
+  switch (status) {
+    case 'scheduled':
+      return { type: 'advance', nextStatus: 'prepped', label: '完成備料' };
+    case 'prepped':
+      return { type: 'advance', nextStatus: 'stewing', label: '開始炖製' };
+    case 'stewing':
+      return { type: 'complete', label: '完成炖製' };
+    default:
+      return null;
+  }
+}
 
 /** Calendar date in Asia/Hong_Kong as YYYY-MM-DD. */
 export function hkTodayIso(now: Date = new Date()): string {
@@ -182,21 +201,21 @@ export function hkNowDateTime(now: Date = new Date()): string {
 
 /**
  * Default status when creating a prep row.
- * Daily / 補充存貨 → in_prep. Wedding/回禮 → inactive until stewing/production date is due.
+ * Daily / 補充存貨 → scheduled. Wedding/回禮 → not_started until stewing/production date is due.
  */
 export function defaultPrepStatusForCreate(
   orderType: PrepOrderType,
   stewingDate: string,
   opts?: { hasProductionDate?: boolean; today?: string }
 ): PrepStatus {
-  if (orderType === 'daily' || orderType === 'restock') return 'in_prep';
+  if (orderType === 'daily' || orderType === 'restock') return 'scheduled';
   const today = opts?.today ?? hkTodayIso();
-  if (opts?.hasProductionDate === false) return 'inactive';
-  if (!stewingDate?.trim() || stewingDate > today) return 'inactive';
+  if (opts?.hasProductionDate === false) return 'not_started';
+  if (!stewingDate?.trim() || stewingDate > today) return 'not_started';
   return 'scheduled';
 }
 
-/** Wedding/回禮 status from stewing date (does not touch in_prep / completed). */
+/** Wedding/回禮 status from stewing date (does not touch prepped / stewing / completed). */
 export function weddingPrepStatusFromDate(
   stewingDate: string,
   opts?: { hasProductionDate?: boolean; today?: string }
@@ -480,6 +499,7 @@ export interface PrepOrder {
   completion_remarks: string | null;
   completed_at: string | null;
   completed_by: string | null;
+  stewing_started_at: string | null;
   completion_splits: PrepCompletionSplit[] | null;
   created_at: string;
   updated_at: string;

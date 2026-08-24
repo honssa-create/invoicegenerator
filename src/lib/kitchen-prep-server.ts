@@ -77,6 +77,7 @@ interface PrepRow {
   completion_remarks: string | null;
   completed_at: string | null;
   completed_by: string | null;
+  stewing_started_at: string | null;
   completion_splits_json: string | null;
   created_at: string;
   updated_at: string;
@@ -117,6 +118,7 @@ function hydrate(row: PrepRow): PrepOrder {
     completion_remarks: row.completion_remarks ?? null,
     completed_at: row.completed_at ?? null,
     completed_by: row.completed_by ?? null,
+    stewing_started_at: row.stewing_started_at ?? null,
     completion_splits: parseSplits(row.completion_splits_json),
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -366,6 +368,14 @@ export async function updatePrepOrder(
   );
   if (validationErr) throw new Error(validationErr);
 
+  const nextStatus = input.status ?? existing.status;
+  let stewingStartedAt = existing.stewing_started_at;
+  if (nextStatus === 'stewing' && existing.status !== 'stewing') {
+    stewingStartedAt = hkNowDateTime();
+  } else if (nextStatus !== 'stewing' && nextStatus !== 'completed') {
+    stewingStartedAt = null;
+  }
+
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET
@@ -373,7 +383,7 @@ export async function updatePrepOrder(
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?,
        actual_qty_osmanthus = ?, actual_qty_red_date = ?, actual_qty_rock_sugar = ?,
        bird_nest_osmanthus = ?, bird_nest_red_date = ?, bird_nest_rock_sugar = ?,
-       notes = ?,
+       notes = ?, stewing_started_at = ?,
        updated_at = datetime('now')
      WHERE id = ?`
     )
@@ -381,7 +391,7 @@ export async function updatePrepOrder(
       input.stewing_date ?? existing.stewing_date,
       input.order_type ?? existing.order_type,
       capacity,
-      input.status ?? existing.status,
+      nextStatus,
       qtyOsmanthus,
       qtyRed,
       qtyRock,
@@ -392,6 +402,7 @@ export async function updatePrepOrder(
       input.bird_nest_red_date ?? existing.bird_nest_red_date,
       input.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
       input.notes !== undefined ? input.notes : existing.notes,
+      stewingStartedAt,
       id
     );
   return await getPrepOrder(id);
@@ -612,7 +623,7 @@ export async function ensurePrepFromWeddingOrder(
 
   const prevStewing = existing.stewing_date;
   const statusUpdate =
-    existing.status === 'inactive' || existing.status === 'scheduled'
+    existing.status === 'not_started' || existing.status === 'scheduled'
       ? nextStatus
       : existing.status;
 
@@ -655,17 +666,17 @@ export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
   let activated = 0;
   let skipped = 0;
 
-  // Activate due inactive preps.
+  // Activate due not-started preps.
   const inactiveRows = (await (userId == null
     ? db.prepare(
         `SELECT id, user_id, linked_order_id, stewing_date, order_code
          FROM kitchen_prep_orders
-         WHERE status = 'inactive' AND stewing_date <= ?`
+         WHERE status = 'not_started' AND stewing_date <= ?`
       ).all(today)
     : db.prepare(
         `SELECT id, user_id, linked_order_id, stewing_date, order_code
          FROM kitchen_prep_orders
-         WHERE user_id = ? AND status = 'inactive' AND stewing_date <= ?`
+         WHERE user_id = ? AND status = 'not_started' AND stewing_date <= ?`
       ).all(userId, today))) as {
     id: number;
     user_id: number;
@@ -678,7 +689,7 @@ export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
     await db
       .prepare(
         `UPDATE kitchen_prep_orders SET status = 'scheduled', updated_at = datetime('now')
-         WHERE id = ? AND user_id = ? AND status = 'inactive'`
+         WHERE id = ? AND user_id = ? AND status = 'not_started'`
       )
       .run(row.id, row.user_id);
     activated += 1;

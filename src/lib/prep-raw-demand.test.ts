@@ -51,7 +51,7 @@ describe('aggregateRawNeedsFromPrepOrders', () => {
       {
         capacity: '25g',
         order_type: 'daily',
-        status: 'in_prep',
+        status: 'stewing',
         qty_osmanthus: 10,
         qty_red_date: 0,
         qty_rock_sugar: 0,

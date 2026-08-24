@@ -13,6 +13,7 @@ import {
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUSES,
   PREP_STATUS_LABELS,
+  getPrepStatusAction,
   BIRD_NEST_TYPES,
   BIRD_NEST_TYPE_LABELS,
   formulaSummaryForCapacity,
@@ -36,6 +37,7 @@ export default function KitchenPrepDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [showComplete, setShowComplete] = useState(false);
+  const [advancingStatus, setAdvancingStatus] = useState(false);
   const [capacityOptions, setCapacityOptions] = useState<{ id: string; label: string }[]>(
     PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
   );
@@ -104,6 +106,31 @@ export default function KitchenPrepDetailPage() {
       return;
     }
     router.push('/kitchen-prep');
+  };
+
+  const handleStatusAction = async () => {
+    if (!order) return;
+    const action = getPrepStatusAction(order.status);
+    if (!action) return;
+    if (action.type === 'complete') {
+      setShowComplete(true);
+      return;
+    }
+    setAdvancingStatus(true);
+    setError('');
+    const res = await fetch(`/api/kitchen-prep/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: action.nextStatus }),
+    });
+    const d = await res.json();
+    setAdvancingStatus(false);
+    if (!res.ok) {
+      setError(d.error || MSG.saveFailed);
+      return;
+    }
+    setOrder(d.order);
+    setCalc(d.calculation);
   };
 
   const input = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
@@ -176,15 +203,20 @@ export default function KitchenPrepDetailPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
         <button onClick={() => router.push('/kitchen-prep')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to schedule', '返回排程')}</button>
         <div className="page-actions w-full sm:w-auto flex flex-col sm:flex-row gap-2">
-          {order.status !== 'completed' && (
-            <button
-              type="button"
-              onClick={() => setShowComplete(true)}
-              className="btn bg-green-600 text-white hover:bg-green-700 w-full sm:w-auto font-bold"
-            >
-              {bi('Complete Stewing', '完成燉製')}
-            </button>
-          )}
+          {(() => {
+            const action = getPrepStatusAction(order.status);
+            if (!action) return null;
+            return (
+              <button
+                type="button"
+                disabled={advancingStatus}
+                onClick={() => { void handleStatusAction(); }}
+                className="btn bg-green-600 text-white hover:bg-green-700 w-full sm:w-auto font-bold disabled:opacity-50"
+              >
+                {advancingStatus ? '更新中…' : action.label}
+              </button>
+            );
+          })()}
           <Link href={`/kitchen-prep/${id}/print`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
             🖨 {bi('Print Prep Sheet', '列印備料單')}
           </Link>

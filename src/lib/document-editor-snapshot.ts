@@ -1,5 +1,4 @@
 export type DocumentLineItem = {
-  service_date: string;
   product_service: string;
   description: string;
   quantity: number;
@@ -29,12 +28,16 @@ type SharedDocumentFields = {
   items: DocumentLineItem[];
 };
 
+type InvoiceEditorFields = SharedDocumentFields & {
+  depositOverride: number | null;
+};
+
 function filterLineItems(items: DocumentLineItem[]) {
   return items.filter((item) => item.description.trim() || item.product_service.trim());
 }
 
 export function buildInvoiceEditorSnapshot(
-  fields: SharedDocumentFields & { dueDate: string; term: string },
+  fields: InvoiceEditorFields & { dueDate: string; term: string },
 ): string {
   return JSON.stringify({
     ...fields,
@@ -74,8 +77,8 @@ export function invoiceSnapshotFromRecord(inv: {
   discount_type?: string | null;
   discount_value?: number | null;
   shipping_amount?: number | null;
+  deposit_amount?: number | null;
   items: Array<{
-    service_date?: string | null;
     product_service?: string | null;
     description?: string | null;
     quantity: number;
@@ -104,15 +107,15 @@ export function invoiceSnapshotFromRecord(inv: {
     discountType: inv.discount_type || 'percent',
     discountValue: inv.discount_value || 0,
     shippingAmount: inv.shipping_amount || 0,
+    depositOverride: inv.deposit_amount != null ? Number(inv.deposit_amount) : null,
     items: inv.items.length
       ? inv.items.map((item) => ({
-          service_date: item.service_date || '',
           product_service: item.product_service || '',
           description: item.description || '',
           quantity: item.quantity,
           unit_price: item.unit_price,
         }))
-      : [{ service_date: '', product_service: '', description: '', quantity: 1, unit_price: 0 }],
+      : [{ product_service: '', description: '', quantity: 1, unit_price: 0 }],
   });
 }
 
@@ -139,7 +142,6 @@ export function quotationSnapshotFromRecord(q: {
   discount_value?: number | null;
   shipping_amount?: number | null;
   items: Array<{
-    service_date?: string | null;
     product_service?: string | null;
     description?: string | null;
     quantity: number;
@@ -169,12 +171,11 @@ export function quotationSnapshotFromRecord(q: {
     shippingAmount: q.shipping_amount || 0,
     items: q.items.length
       ? q.items.map((item) => ({
-          service_date: item.service_date || '',
           product_service: item.product_service || '',
           description: item.description || '',
           quantity: item.quantity,
           unit_price: item.unit_price,
         }))
-      : [{ service_date: '', product_service: '', description: '', quantity: 1, unit_price: 0 }],
+      : [{ product_service: '', description: '', quantity: 1, unit_price: 0 }],
   });
 }

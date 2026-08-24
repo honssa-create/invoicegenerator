@@ -28,7 +28,6 @@ import type { Customer } from '@/lib/types';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface LineItem {
-  service_date: string;
   product_service: string;
   description: string;
   quantity: number;
@@ -36,7 +35,6 @@ interface LineItem {
 }
 
 const emptyLine = (): LineItem => ({
-  service_date: '',
   product_service: '',
   description: '',
   quantity: 1,
@@ -124,7 +122,6 @@ export default function QuotationDetailPage() {
         setItems(
           q.items.length
             ? q.items.map((i) => ({
-                service_date: i.service_date || '',
                 product_service: i.product_service || '',
                 description: i.description || '',
                 quantity: i.quantity,
@@ -306,17 +303,27 @@ export default function QuotationDetailPage() {
   };
 
   const copyToInvoice = async () => {
+    if (quote?.linked_invoice) {
+      alert(bi('This quotation is already linked to an invoice.', '此報價單已關聯發票。'));
+      router.push(`/invoices/${quote.linked_invoice.id}`);
+      return;
+    }
     setCopying(true);
     try {
       await save();
       const res = await fetch(`/api/quotations/${id}/copy-to-invoice`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setToast({ text: (data as { error?: string }).error || 'Failed to copy quotation', kind: 'error' });
+        if (res.status === 409 && (data as { id?: number }).id) {
+          alert(bi('Already linked to an invoice.', '已關聯發票。'));
+          router.push(`/invoices/${(data as { id: number }).id}`);
+          return;
+        }
+        setToast({ text: (data as { error?: string }).error || 'Failed to create invoice', kind: 'error' });
         setTimeout(() => setToast(null), 5000);
         return;
       }
-      setToast({ text: 'Successfully copied Quotation to a new Invoice!', kind: 'success' });
+      setToast({ text: bi('Invoice created from quotation.', '已從報價單建立發票。'), kind: 'success' });
       setTimeout(() => router.push(`/invoices/${(data as { id: number }).id}`), 1500);
     } catch {
       setToast({ text: 'Failed to copy quotation', kind: 'error' });
@@ -411,6 +418,14 @@ export default function QuotationDetailPage() {
                   `#${quote.linked_order.id}`}
               </Link>
             )}
+            {quote.linked_invoice && (
+              <Link
+                href={`/invoices/${quote.linked_invoice.id}`}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100"
+              >
+                🔗 {quote.linked_invoice.invoice_number} · {quote.linked_invoice.status}
+              </Link>
+            )}
           </div>
         </div>
         <div className="page-actions">
@@ -433,10 +448,19 @@ export default function QuotationDetailPage() {
               </button>
               <button
                 onClick={copyToInvoice}
-                disabled={copying}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                disabled={copying || Boolean(quote.linked_invoice)}
+                title={
+                  quote.linked_invoice
+                    ? bi('Already linked to an invoice', '已關聯發票')
+                    : undefined
+                }
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {copying ? bi('Copying…', '複製中…') : `📋 ${bi('Copy to New Invoice', '複製為新發票')}`}
+                {copying
+                  ? bi('Creating…', '建立中…')
+                  : quote.linked_invoice
+                    ? bi('Linked to Invoice', '已轉換為發票')
+                    : `📋 ${bi('Create New Invoice', '轉換為發票')}`}
               </button>
               <button
                 onClick={() => convert('order')}
@@ -575,7 +599,6 @@ export default function QuotationDetailPage() {
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
                   <th className="text-left py-2 pr-2 font-medium w-8">#</th>
-                  <th className="text-left py-2 pr-2 font-medium">Service date</th>
                   <th className="text-left py-2 pr-2 font-medium">Product/Service</th>
                   <th className="text-left py-2 pr-2 font-medium">Description</th>
                   <th className="text-right py-2 pr-2 font-medium w-20">Qty</th>
@@ -588,15 +611,6 @@ export default function QuotationDetailPage() {
                 {items.map((item, i) => (
                   <tr key={i} className="border-b border-gray-100 align-top">
                     <td className="py-2 pr-2 text-gray-400">{i + 1}</td>
-                    <td className="py-2 pr-2">
-                      <input
-                        type="date"
-                        value={item.service_date}
-                        onChange={(e) => updateItem(i, 'service_date', e.target.value)}
-                        disabled={readOnly}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
-                      />
-                    </td>
                     <td className="py-2 pr-2">
                       <input
                         value={item.product_service}

@@ -18,6 +18,7 @@ export interface Invoice {
   user_id: number;
   customer_id: number;
   order_id: number | null;
+  quotation_id: number | null;
   invoice_number: string;
   external_invoice_number: string | null;
   status: InvoiceStatus;
@@ -39,6 +40,7 @@ export interface Invoice {
   discount_type: InvoiceDiscountType;
   discount_value: number;
   shipping_amount: number;
+  deposit_amount: number | null;
   term: string | null;
   created_at: string;
   updated_at: string;
@@ -55,7 +57,6 @@ export interface LinkedOrderSummary {
 export interface InvoiceItem {
   id: number;
   invoice_id: number;
-  service_date: string | null;
   product_service: string | null;
   description: string;
   quantity: number;

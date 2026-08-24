@@ -56,13 +56,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
       const insertItem = db.prepare(
         `INSERT INTO quotation_items (
-           quotation_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           quotation_id, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const item of source.items) {
         await insertItem.run(
           qid,
-          item.service_date,
           item.product_service,
           item.description,
           item.quantity,

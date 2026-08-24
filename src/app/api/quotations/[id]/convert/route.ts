@@ -3,7 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
-import { createInvoiceFromQuotation } from '@/lib/quotation-to-invoice-server';
+import { createInvoiceFromQuotation, findInvoiceForQuotation } from '@/lib/quotation-to-invoice-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
@@ -31,6 +31,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (target === 'invoice') {
     if (!q.customer_id) {
       return NextResponse.json({ error: 'Set a customer on the quotation before converting to an invoice' }, { status: 400 });
+    }
+
+    const existing = await findInvoiceForQuotation(params.id, ownerId);
+    if (existing) {
+      return NextResponse.json(
+        {
+          error: 'Quotation is already linked to an invoice',
+          id: existing.id,
+          invoice_number: existing.invoice_number,
+        },
+        { status: 409 },
+      );
     }
 
     const { invoiceId: invId, invoiceNumber: invNo } = await createInvoiceFromQuotation(q, ownerId);

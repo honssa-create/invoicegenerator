@@ -26,8 +26,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
           `INSERT INTO invoices (
              user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms,
              billing_address, shipping_address, email, send_later, ship_via, shipping_date, tracking_no, order_no,
-             receipt_date, currency, discount_type, discount_value, shipping_amount, term
-           ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             receipt_date, currency, discount_type, discount_value, shipping_amount, deposit_amount, term
+           ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           ownerId,
@@ -51,19 +51,19 @@ export async function POST(request: Request, { params }: { params: { id: string 
           source.discount_type === 'amount' ? 'amount' : 'percent',
           Number(source.discount_value) || 0,
           Number(source.shipping_amount) || 0,
+          source.deposit_amount != null ? Number(source.deposit_amount) : null,
           source.term || 'NET30',
         );
       const invId = result.lastInsertRowid as number;
 
       const insertItem = db.prepare(
         `INSERT INTO invoice_items (
-           invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           invoice_id, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const item of source.items) {
         await insertItem.run(
           invId,
-          item.service_date,
           item.product_service,
           item.description,
           item.quantity,

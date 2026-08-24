@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
-import { createInvoiceFromQuotation } from '@/lib/quotation-to-invoice-server';
+import { createInvoiceFromQuotation, findInvoiceForQuotation } from '@/lib/quotation-to-invoice-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -23,6 +23,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json(
       { error: 'Add a customer to the quotation first — client name, email, phone and address are copied from it.' },
       { status: 400 }
+    );
+  }
+
+  const existing = await findInvoiceForQuotation(params.id, ownerId);
+  if (existing) {
+    return NextResponse.json(
+      {
+        error: 'This quotation already has an invoice.',
+        id: existing.id,
+        invoice_number: existing.invoice_number,
+      },
+      { status: 409 },
     );
   }
 

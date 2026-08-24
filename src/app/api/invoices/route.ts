@@ -64,7 +64,6 @@ export async function POST(request: Request) {
 
     const lineItems = (Array.isArray(items) ? items : [])
       .map((item: {
-        service_date?: unknown;
         product_service?: unknown;
         description?: unknown;
         quantity?: unknown;
@@ -74,7 +73,6 @@ export async function POST(request: Request) {
         const product = String(item?.product_service ?? '').trim();
         const description = String(item?.description ?? '').trim();
         return {
-          service_date: String(item?.service_date ?? '').trim() || null,
           product_service: product || null,
           description: description || product,
           quantity: Number(item?.quantity) || 0,
@@ -113,14 +111,13 @@ export async function POST(request: Request) {
       }
       const insertItem = db.prepare(
         `INSERT INTO invoice_items (
-           invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           invoice_id, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       );
 
       for (const item of lineItems) {
         await insertItem.run(
           invoiceId,
-          item.service_date,
           item.product_service,
           item.description,
           item.quantity,

@@ -828,6 +828,24 @@ async function runBootDataFixes(): Promise<void> {
     );
   }
 
+  const migDropLineItemServiceDate = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'drop_line_item_service_date_v1'`
+  );
+  if (!migDropLineItemServiceDate.rows.length) {
+    await client().query(`ALTER TABLE invoice_items DROP COLUMN IF EXISTS service_date`);
+    await client().query(`ALTER TABLE quotation_items DROP COLUMN IF EXISTS service_date`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('drop_line_item_service_date_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS quotation_id INTEGER`);
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deposit_amount DOUBLE PRECISION`);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_invoices_quotation ON invoices(quotation_id)
+    WHERE quotation_id IS NOT NULL
+  `);
+
   const { migrateCustomerDedupOnce } = await import('./customer-server');
   await migrateCustomerDedupOnce();
 

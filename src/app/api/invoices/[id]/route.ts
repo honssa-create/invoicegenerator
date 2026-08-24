@@ -135,6 +135,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       discount_type,
       discount_value,
       shipping_amount,
+      deposit_amount,
       term,
       status,
       items,
@@ -175,6 +176,15 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
       if (discount_value !== undefined) pushField(fields, values, 'discount_value', discount_value, (v) => Number(v) || 0);
       if (shipping_amount !== undefined) pushField(fields, values, 'shipping_amount', shipping_amount, (v) => Number(v) || 0);
+      if (deposit_amount !== undefined) {
+        pushField(
+          fields,
+          values,
+          'deposit_amount',
+          deposit_amount,
+          (v) => (v === null || v === undefined || v === '' ? null : Number(v) || 0),
+        );
+      }
       if (term !== undefined) pushField(fields, values, 'term', term || 'NET30', (v) => String(v || 'NET30'));
       if (status !== undefined) pushField(fields, values, 'status', status, (v) => String(v));
       if (order_id !== undefined) pushField(fields, values, 'order_id', order_id || null, (v) => v as number | null);
@@ -201,8 +211,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         await db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(params.id);
         const insertItem = db.prepare(
           `INSERT INTO invoice_items (
-             invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             invoice_id, product_service, description, quantity, unit_price, amount, class_name
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         );
         for (const item of items) {
           const desc = String(item.description || item.product_service || '').trim();
@@ -211,7 +221,6 @@ export async function PUT(request: Request, { params }: { params: { id: string }
           const price = Number(item.unit_price) || 0;
           await insertItem.run(
             params.id,
-            item.service_date?.trim() || null,
             item.product_service?.trim() || null,
             desc || item.product_service?.trim() || '',
             qty,

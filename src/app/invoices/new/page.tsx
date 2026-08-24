@@ -13,7 +13,6 @@ import type { Customer } from '@/lib/types';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface LineItem {
-  service_date: string;
   product_service: string;
   description: string;
   quantity: number;
@@ -21,7 +20,6 @@ interface LineItem {
 }
 
 const emptyLine = (): LineItem => ({
-  service_date: '',
   product_service: '',
   description: '',
   quantity: 1,
@@ -198,7 +196,6 @@ export default function NewInvoicePage() {
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
                     <th className="text-left py-2 pr-2 font-medium w-8">#</th>
-                    <th className="text-left py-2 pr-2 font-medium">{bi('Service date', '服務日期')}</th>
                     <th className="text-left py-2 pr-2 font-medium">{bi('Product/Service', '產品／服務')}</th>
                     <th className="text-left py-2 pr-2 font-medium">{bi('Description', '描述')}</th>
                     <th className="text-right py-2 pr-2 font-medium w-20">{bi('Qty', '數量')}</th>
@@ -211,14 +208,6 @@ export default function NewInvoicePage() {
                   {items.map((item, i) => (
                     <tr key={i} className="border-b border-gray-100 align-top">
                       <td className="py-2 pr-2 text-gray-400">{i + 1}</td>
-                      <td className="py-2 pr-2">
-                        <input
-                          type="date"
-                          value={item.service_date}
-                          onChange={(e) => updateItem(i, 'service_date', e.target.value)}
-                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
-                        />
-                      </td>
                       <td className="py-2 pr-2">
                         <input
                           value={item.product_service}

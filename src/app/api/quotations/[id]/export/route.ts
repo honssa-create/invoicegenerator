@@ -32,9 +32,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     ['Shipping Address', q.shipping_address || ''],
     ['Currency', q.currency || 'HKD'],
     [],
-    ['Service Date', 'Product/Service', 'Description', 'Qty', 'Rate', 'Amount'],
+    ['Product/Service', 'Description', 'Qty', 'Rate', 'Amount'],
     ...q.items.map((i) => [
-      i.service_date || '',
       i.product_service || '',
       i.description,
       i.quantity,

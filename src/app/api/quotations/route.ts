@@ -92,8 +92,8 @@ export async function POST(request: Request) {
       const qid = result.lastInsertRowid as number;
       const insertItem = db.prepare(
         `INSERT INTO quotation_items (
-           quotation_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           quotation_id, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       );
       for (const item of items) {
         const desc = String(item.description || item.product_service || '').trim();
@@ -102,7 +102,6 @@ export async function POST(request: Request) {
         const price = Number(item.unit_price) || 0;
         await insertItem.run(
           qid,
-          item.service_date?.trim() || null,
           item.product_service?.trim() || null,
           desc || item.product_service?.trim() || '',
           qty,

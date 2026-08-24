@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeBalanceDueAmount,
+  defaultDepositAmount,
   defaultReceiptPaymentRemarks,
+  invoiceToDepositPreview,
   invoiceToFormalPreview,
   invoiceToReceiptPreview,
+  resolveInvoiceDepositAmount,
 } from './invoice-print';
 import type { InvoiceWithDetails } from './types';
 
@@ -34,6 +37,8 @@ function minimalInvoice(overrides: Partial<InvoiceWithDetails> = {}): InvoiceWit
     discount_type: 'percent',
     discount_value: 0,
     shipping_amount: 0,
+    deposit_amount: null,
+    quotation_id: null,
     order_id: null,
     last_reminder_at: null,
     created_at: '',
@@ -61,6 +66,32 @@ function minimalInvoice(overrides: Partial<InvoiceWithDetails> = {}): InvoiceWit
     ...overrides,
   } as InvoiceWithDetails;
 }
+
+describe('resolveInvoiceDepositAmount', () => {
+  it('defaults to half total when deposit is unset', () => {
+    expect(resolveInvoiceDepositAmount(1000, null)).toBe(500);
+    expect(resolveInvoiceDepositAmount(1000, undefined)).toBe(500);
+    expect(defaultDepositAmount(1000)).toBe(500);
+  });
+
+  it('uses stored deposit when set', () => {
+    expect(resolveInvoiceDepositAmount(1000, 300)).toBe(300);
+  });
+});
+
+describe('invoiceToDepositPreview', () => {
+  it('uses stored deposit_amount for deposit due', () => {
+    const inv = minimalInvoice({ total: 1000, deposit_amount: 250 });
+    const model = invoiceToDepositPreview(inv);
+    expect(model.depositDue).toContain('250');
+  });
+
+  it('defaults deposit due to half total when deposit_amount is null', () => {
+    const inv = minimalInvoice({ total: 1000, deposit_amount: null });
+    const model = invoiceToDepositPreview(inv);
+    expect(model.depositDue).toContain('500');
+  });
+});
 
 describe('computeBalanceDueAmount', () => {
   it('defaults to half total when not linked to an order', () => {

@@ -86,6 +86,11 @@
     box-sizing: border-box;
     background: white;
   }
+
+  /* Print preview — line-item descriptions & notes match body text */
+  .quo-preview-page.quo-print-mode .muted {
+    color: var(--quo-color-text);
+  }
 }
 
 @media print {
@@ -107,6 +112,16 @@
 
   .no-print {
     display: none !important;
+  }
+
+  /* Quotation / invoice / delivery note — extra info lines print black */
+  .quo-preview-page .muted {
+    color: var(--quo-color-text) !important;
+  }
+
+  .preview-page .quo-item-desc,
+  .preview-page .quo-message {
+    color: var(--quo-color-text) !important;
   }
 
   .debit-note-print-root .no-print,

@@ -71,6 +71,10 @@ export async function getInvoiceWithDetails(invoiceId: number | string, userId: 
     discount_type: (invoice.discount_type as InvoiceWithDetails['discount_type']) || 'percent',
     discount_value: Number(invoice.discount_value) || 0,
     shipping_amount: Number(invoice.shipping_amount) || 0,
+    deposit_amount:
+      invoice.deposit_amount != null && invoice.deposit_amount !== ''
+        ? Number(invoice.deposit_amount)
+        : null,
     currency: (invoice.currency as string) || 'HKD',
     send_later: Boolean(Number(invoice.send_later) || 0),
     term: (invoice.term as string) || 'NET30',
@@ -150,6 +154,10 @@ export async function listInvoices(
       discount_type: (invoice.discount_type as InvoiceWithDetails['discount_type']) || 'percent',
       discount_value: Number(invoice.discount_value) || 0,
       shipping_amount: Number(invoice.shipping_amount) || 0,
+      deposit_amount:
+        invoice.deposit_amount != null && invoice.deposit_amount !== ''
+          ? Number(invoice.deposit_amount)
+          : null,
       currency: (invoice.currency as string) || 'HKD',
       send_later: Boolean(Number(invoice.send_later) || 0),
       term: (invoice.term as string) || 'NET30',

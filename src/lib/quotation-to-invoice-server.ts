@@ -11,10 +11,24 @@ function addDaysIso(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+export async function findInvoiceForQuotation(
+  quotationId: number | string,
+  userId: number,
+): Promise<{ id: number; invoice_number: string; status: string } | null> {
+  const row = (await db
+    .prepare(
+      `SELECT id, invoice_number, status FROM invoices
+       WHERE quotation_id = ? AND user_id = ?
+       ORDER BY id ASC LIMIT 1`,
+    )
+    .get(quotationId, userId)) as { id: number; invoice_number: string; status: string } | undefined;
+  return row ?? null;
+}
+
 /**
  * Create a draft invoice from a quotation, copying addresses, dates, ship meta,
  * discount/shipping, rich line items, and attachment file refs.
- * Caller must ensure quote.customer_id is set.
+ * Caller must ensure quote.customer_id is set and no invoice exists yet for this quotation.
  */
 export async function createInvoiceFromQuotation(
   quote: QuotationWithDetails,
@@ -28,14 +42,15 @@ export async function createInvoiceFromQuotation(
     const result = await db
       .prepare(
         `INSERT INTO invoices (
-           user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms,
+           user_id, customer_id, quotation_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms,
            billing_address, shipping_address, email, send_later, ship_via, shipping_date, tracking_no, order_no,
            receipt_date, currency, discount_type, discount_value, shipping_amount, term
-         ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NET30')`,
+         ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NET30')`,
       )
       .run(
         ownerId,
         quote.customer_id,
+        quote.id,
         invoiceNumber,
         issueDate,
         dueDate,
@@ -60,13 +75,12 @@ export async function createInvoiceFromQuotation(
 
     const insertItem = db.prepare(
       `INSERT INTO invoice_items (
-         invoice_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         invoice_id, product_service, description, quantity, unit_price, amount, class_name
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const it of quote.items) {
       await insertItem.run(
         invoiceId,
-        it.service_date,
         it.product_service,
         it.description,
         it.quantity,

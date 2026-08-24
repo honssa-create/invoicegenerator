@@ -4,7 +4,6 @@ export type QuotationDiscountType = 'percent' | 'amount';
 export interface QuotationItem {
   id: number;
   quotation_id: number;
-  service_date: string | null;
   product_service: string | null;
   description: string;
   quantity: number;
@@ -58,6 +57,8 @@ export interface QuotationWithDetails {
   total: number;
   /** Order created from / linked to this quotation (via orders.quotation_id). */
   linked_order: { id: number; reference_number: string | null; po_number: string | null } | null;
+  /** Invoice created from this quotation (via invoices.quotation_id). */
+  linked_invoice: { id: number; invoice_number: string; status: string } | null;
 }
 
 export const QUOTATION_STATUSES: QuotationStatus[] = ['draft', 'sent', 'approved', 'rejected'];

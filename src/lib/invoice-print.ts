@@ -84,14 +84,20 @@ function invoiceLineItems(inv: InvoiceWithDetails, money: (n: number) => string)
     : [{ name: '—', description: '', qty: '0', rate: money(0), amount: money(0) }];
 }
 
-function resolveHalfOrOverride(
+/** Default deposit: half of invoice total, rounded to cents. */
+export function defaultDepositAmount(total: number): number {
+  return Math.round((Number(total) / 2) * 100) / 100;
+}
+
+/** Stored deposit when set; otherwise half of total. */
+export function resolveInvoiceDepositAmount(
   total: number,
-  money: (n: number) => string,
-  override?: string | number,
-): string {
-  if (typeof override === 'string') return override;
-  if (typeof override === 'number') return money(override);
-  return money(total / 2);
+  depositAmount: number | null | undefined,
+): number {
+  if (depositAmount != null && Number.isFinite(Number(depositAmount))) {
+    return Math.round(Number(depositAmount) * 100) / 100;
+  }
+  return defaultDepositAmount(total);
 }
 
 /** Map a saved invoice into the Honour Label formal print/preview model. */
@@ -170,7 +176,12 @@ export function invoiceToDepositPreview(
     subtotal: money(Number(inv.subtotal) || 0),
     discount: money(Number(inv.discount_amount) || 0),
     total: money(total),
-    depositDue: resolveHalfOrOverride(total, money, options?.depositDue),
+    depositDue: money(
+      resolveInvoiceDepositAmount(
+        total,
+        options?.depositDue != null ? Number(options.depositDue) : inv.deposit_amount,
+      ),
+    ),
     companySignName: companyAddressLines[0],
     logoSrc: '/company-logo.png',
     chopSrc: '/company-chop.png',

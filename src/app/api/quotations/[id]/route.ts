@@ -105,8 +105,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         await db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(params.id);
         const insertItem = db.prepare(
           `INSERT INTO quotation_items (
-             quotation_id, service_date, product_service, description, quantity, unit_price, amount, class_name
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+             quotation_id, product_service, description, quantity, unit_price, amount, class_name
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
         );
         for (const item of items) {
           const desc = String(item.description || item.product_service || '').trim();
@@ -115,7 +115,6 @@ export async function PUT(request: Request, { params }: { params: { id: string }
           const price = Number(item.unit_price) || 0;
           await insertItem.run(
             params.id,
-            item.service_date?.trim() || null,
             item.product_service?.trim() || null,
             desc || item.product_service?.trim() || '',
             qty,

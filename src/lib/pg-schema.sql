@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   order_id INTEGER,
+  quotation_id INTEGER,
   last_reminder_at TEXT,
   last_due_soon_reminder_at TEXT,
   source_platform TEXT NOT NULL DEFAULT 'manual',
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   discount_value DOUBLE PRECISION DEFAULT 0,
   shipping_amount DOUBLE PRECISION DEFAULT 0,
   term TEXT DEFAULT 'NET30',
+  deposit_amount DOUBLE PRECISION,
   UNIQUE (user_id, invoice_number)
 );
 
@@ -68,7 +70,6 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   quantity DOUBLE PRECISION NOT NULL DEFAULT 1,
   unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
   amount DOUBLE PRECISION NOT NULL DEFAULT 0,
-  service_date TEXT,
   product_service TEXT,
   class_name TEXT
 );
@@ -217,6 +218,8 @@ CREATE TABLE IF NOT EXISTS quotations (
 );
 
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS external_invoice_number TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS quotation_id INTEGER;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deposit_amount DOUBLE PRECISION;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS reference_number TEXT;
 
 CREATE TABLE IF NOT EXISTS quotation_items (
@@ -226,7 +229,6 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   quantity DOUBLE PRECISION NOT NULL DEFAULT 1,
   unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
   amount DOUBLE PRECISION NOT NULL DEFAULT 0,
-  service_date TEXT,
   product_service TEXT,
   class_name TEXT
 );
@@ -740,6 +742,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type
 
 CREATE INDEX IF NOT EXISTS idx_invoice_files_invoice ON invoice_files(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_order_id ON invoices(order_id) WHERE order_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_invoices_quotation ON invoices(quotation_id) WHERE quotation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_invoices_user_status ON invoices(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_invoices_user_status_due ON invoices(user_id, status, due_date);
 

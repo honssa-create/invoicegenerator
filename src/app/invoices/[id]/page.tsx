@@ -18,6 +18,7 @@ import { formatCustomerPartyBlockFromCustomer } from '@/lib/customer-party';
 import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { invoiceFileUrl } from '@/lib/image-url';
 import { calculateInvoiceTotals } from '@/lib/utils';
+import { defaultDepositAmount } from '@/lib/invoice-print';
 import type {
   Customer,
   InvoiceDiscountType,
@@ -30,7 +31,6 @@ import { orderTitle } from '@/lib/orders';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface LineItem {
-  service_date: string;
   product_service: string;
   description: string;
   quantity: number;
@@ -38,7 +38,6 @@ interface LineItem {
 }
 
 const emptyLine = (): LineItem => ({
-  service_date: '',
   product_service: '',
   description: '',
   quantity: 1,
@@ -91,6 +90,7 @@ export default function InvoiceDetailPage() {
   const [discountType, setDiscountType] = useState<InvoiceDiscountType>('percent');
   const [discountValue, setDiscountValue] = useState(0);
   const [shippingAmount, setShippingAmount] = useState(0);
+  const [depositOverride, setDepositOverride] = useState<number | null>(null);
   const [items, setItems] = useState<LineItem[]>([emptyLine()]);
   const [files, setFiles] = useState<InvoiceFile[]>([]);
   const [uploadMsg, setUploadMsg] = useState('');
@@ -132,10 +132,10 @@ export default function InvoiceDetailPage() {
         setDiscountType(inv.discount_type || 'percent');
         setDiscountValue(inv.discount_value || 0);
         setShippingAmount(inv.shipping_amount || 0);
+        setDepositOverride(inv.deposit_amount != null ? Number(inv.deposit_amount) : null);
         setItems(
           inv.items.length
             ? inv.items.map((i) => ({
-                service_date: i.service_date || '',
                 product_service: i.product_service || '',
                 description: i.description || '',
                 quantity: i.quantity,
@@ -172,6 +172,11 @@ export default function InvoiceDetailPage() {
     [items, taxRate, discountType, discountValue, shippingAmount],
   );
 
+  const effectiveDeposit = useMemo(() => {
+    if (depositOverride != null) return depositOverride;
+    return defaultDepositAmount(totals.total);
+  }, [depositOverride, totals.total]);
+
   const currentSnapshot = useMemo(
     () =>
       buildInvoiceEditorSnapshot({
@@ -196,6 +201,7 @@ export default function InvoiceDetailPage() {
         discountType,
         discountValue,
         shippingAmount,
+        depositOverride,
         items,
       }),
     [
@@ -220,6 +226,7 @@ export default function InvoiceDetailPage() {
       discountType,
       discountValue,
       shippingAmount,
+      depositOverride,
       items,
     ],
   );
@@ -254,6 +261,7 @@ export default function InvoiceDetailPage() {
         discount_type: discountType,
         discount_value: discountValue,
         shipping_amount: shippingAmount,
+        deposit_amount: depositOverride,
         items: items.filter((i) => i.description.trim() || i.product_service.trim()),
         expected_updated_at: invoice?.updated_at || undefined,
       }),
@@ -642,7 +650,6 @@ export default function InvoiceDetailPage() {
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
                   <th className="text-left py-2 pr-2 font-medium w-8">#</th>
-                  <th className="text-left py-2 pr-2 font-medium">Service date</th>
                   <th className="text-left py-2 pr-2 font-medium">Product/Service</th>
                   <th className="text-left py-2 pr-2 font-medium">Description</th>
                   <th className="text-right py-2 pr-2 font-medium w-20">Qty</th>
@@ -655,15 +662,6 @@ export default function InvoiceDetailPage() {
                 {items.map((item, i) => (
                   <tr key={i} className="border-b border-gray-100 align-top">
                     <td className="py-2 pr-2 text-gray-400">{i + 1}</td>
-                    <td className="py-2 pr-2">
-                      <input
-                        type="date"
-                        value={item.service_date}
-                        onChange={(e) => updateItem(i, 'service_date', e.target.value)}
-                        disabled={readOnly}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
-                      />
-                    </td>
                     <td className="py-2 pr-2">
                       <input
                         value={item.product_service}
@@ -821,6 +819,18 @@ export default function InvoiceDetailPage() {
               <div className="flex justify-between font-semibold border-t border-gray-200 pt-2 mt-1">
                 <span>Total</span>
                 <span className="tabular-nums">{formatCurrency(totals.total)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500">{bi('Deposit', '訂金')}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={effectiveDeposit}
+                  onChange={(e) => setDepositOverride(Number(e.target.value))}
+                  disabled={readOnly}
+                  className="w-28 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                />
               </div>
               <div className="flex justify-between font-bold text-base">
                 <span>Invoice Total</span>

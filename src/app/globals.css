@@ -91,6 +91,11 @@
   .quo-preview-page.quo-print-mode .muted {
     color: var(--quo-color-text);
   }
+
+  .prep-print-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
 }
 
 @media print {
@@ -104,10 +109,46 @@
   /* Kitchen prep sheet — named page used by /kitchen-prep/[id]/print */
   .prep-print-root .prep-print-sheet {
     page: prep-landscape;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    padding: 10mm 8mm !important;
+    overflow: hidden;
   }
   @page prep-landscape {
     size: A4 landscape;
     margin: 0;
+  }
+
+  .prep-print-root .prep-print-table-wrap {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .prep-print-root .prep-summary-table--print {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .prep-print-root .prep-summary-table--print th,
+  .prep-print-root .prep-summary-table--print td {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
+  }
+
+  .prep-print-root .prep-summary-table--print thead {
+    display: table-header-group;
+  }
+
+  .prep-print-root .prep-summary-table--print tfoot {
+    display: table-footer-group;
+  }
+
+  .prep-print-root .prep-summary-table--print tr {
+    page-break-inside: avoid;
   }
 
   .no-print {

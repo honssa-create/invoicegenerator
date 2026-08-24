@@ -70,27 +70,27 @@ export default function KitchenPrepPrintPage() {
         </button>
       </div>
 
-      <div className="max-w-5xl mx-auto my-8 bg-white shadow-lg print:shadow-none print:my-0 print:max-w-none">
+      <div className="max-w-[297mm] mx-auto my-8 bg-white shadow-lg print:shadow-none print:my-0 print:max-w-none">
         <div className="p-8 print:p-6 prep-print-sheet">
-          <div className="flex justify-between items-start border-b-4 border-brand-600 pb-5 mb-6">
+          <div className="flex justify-between items-start border-b-4 border-brand-600 pb-5 mb-6 print:pb-3 print:mb-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 leading-tight">{TITLE.kitchenPrepSheet}</h1>
-              <p className="text-base text-gray-600 mt-1">{bi('Kitchen Summary', '廚房總結')}</p>
+              <h1 className="text-2xl print:text-xl font-bold text-gray-900 leading-tight">{TITLE.kitchenPrepSheet}</h1>
+              <p className="text-base print:text-sm text-gray-600 mt-1">{bi('Kitchen Summary', '廚房總結')}</p>
             </div>
             <div className="text-right">
-              <p className="text-xl font-bold font-mono text-brand-700">{order.order_code}</p>
-              <p className="text-sm text-gray-500 mt-1">{bi('Printed', '列印時間')} {new Date().toLocaleString('en-HK')}</p>
+              <p className="text-xl print:text-lg font-bold font-mono text-brand-700">{order.order_code}</p>
+              <p className="text-sm print:text-xs text-gray-500 mt-1">{bi('Printed', '列印時間')} {new Date().toLocaleString('en-HK')}</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-6 text-[15px] leading-snug">
+          <div className="grid grid-cols-2 gap-3 mb-6 print:mb-4 print:gap-2 text-[15px] print:text-xs leading-snug">
             <div><span className="text-gray-500">Stewing Date 燉製日期：</span><strong>{order.stewing_date}</strong></div>
             <div><span className="text-gray-500">Order Type：</span><strong>{PREP_ORDER_TYPE_LABELS[order.order_type]}</strong></div>
             <div><span className="text-gray-500">容量 Capacity：</span><strong>{PREP_CAPACITY_LABELS[order.capacity]}</strong></div>
             <div><span className="text-gray-500">Status：</span><strong>{PREP_STATUS_LABELS[order.status]}</strong></div>
           </div>
 
-          <p className="mb-4 text-sm text-gray-600">{formulaSummaryForCapacity(order.capacity)}</p>
+          <p className="mb-4 print:mb-3 text-sm print:text-xs text-gray-600">{formulaSummaryForCapacity(order.capacity)}</p>
 
           {!calc.formulaReady ? (
             <p className="text-amber-800 bg-amber-50 p-4 rounded text-[15px]">

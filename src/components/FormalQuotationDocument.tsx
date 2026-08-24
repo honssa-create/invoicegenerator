@@ -7,6 +7,8 @@ import {
   type QuotationStyleTemplate,
 } from '@/lib/quotation-style';
 import { PRINT_PAGE_HEIGHT_MM } from '@/lib/print-page-numbers';
+import { QUOTATION_DOCUMENT_CSS } from '@/lib/quotation-document-css';
+import HonourLabelSignatureBlock from '@/components/HonourLabelSignatureBlock';
 import PrintPageNumbers, { useA4PrintPageCount } from '@/components/PrintPageNumbers';
 
 /** Live preview / print of the Honour Label quotation layout (mirrors public/quotation-template-*.html). */
@@ -25,6 +27,8 @@ export interface QuotationPreviewModel {
   shippingAddress: string;
   orderNo: string;
   quotationNo: string;
+  /** When set, shows PAYMENT TERMS in the meta block (invoice layouts). */
+  paymentTerms?: string;
   date: string;
   items: QuotationLinePreview[];
   message: string;
@@ -64,7 +68,8 @@ export const DEFAULT_QUOTATION_PREVIEW: QuotationPreviewModel = {
   message: '<Message>',
   remarks: [
     '請刪去不適用並安排以公司名義蓋印及簽回報價單作確認',
-    '同事會於收到簽回報價單後正式安排, 香港免一個地址運費',
+    '同事會於收到簽回報價單後正式安排',
+    '香港免一個地址運費',
     '貨期會於簽回報價單及最終的效果圖確認後, 正式開始計算',
     '付款方式：支票,銀行轉帳及轉數快, 詳細資料將會列於invoice上',
   ],
@@ -87,6 +92,7 @@ export default function FormalQuotationDocument({
   documentTitle = 'QUOTATION',
   numberLabel = 'Quotation No.',
   dateLabel = 'Date',
+  paymentTermsLabel = 'Payment Terms',
   billingLabel = 'Invoice To',
   remarksMode = 'list',
 }: {
@@ -108,6 +114,8 @@ export default function FormalQuotationDocument({
   numberLabel?: string;
   /** Right-meta date row label. */
   dateLabel?: string;
+  /** Right-meta payment terms row label (invoice only). */
+  paymentTermsLabel?: string;
   /** Left address column label (Invoice To / To). */
   billingLabel?: string;
   /** Quotation uses a numbered Remarks list; invoice HTML uses plain payment text. */
@@ -118,6 +126,7 @@ export default function FormalQuotationDocument({
   const six = lines.slice(0, 6);
   const cssVars = quotationStyleToCssVars(style);
   const items = model.items.length ? model.items : DEFAULT_QUOTATION_PREVIEW.items;
+  const signName = model.companySignName || six[0] || 'Honour Label Limited';
   const hasRemarksBlock = Boolean(model.message) || model.remarks.length > 0;
   const showBottom = hasRemarksBlock || showSum;
   const pageRef = useRef<HTMLDivElement>(null);
@@ -137,96 +146,7 @@ export default function FormalQuotationDocument({
         } as CSSProperties
       }
     >
-      <style>{`
-        .quo-preview-page {
-          font-family: var(--quo-font-family);
-          font-size: var(--quo-font-size);
-          line-height: var(--quo-line-height);
-          color: var(--quo-color-text);
-        }
-        .quo-preview-page .accent { color: var(--quo-color-accent); }
-        .quo-preview-page .accent-bg {
-          background: var(--quo-color-accent);
-          color: var(--quo-color-accent-text);
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-        .quo-preview-page .muted { color: var(--quo-color-muted); }
-        .quo-preview-page .label {
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: var(--quo-color-label);
-        }
-        .quo-preview-page .quo-field {
-          background: var(--quo-field-bg);
-          border-radius: 2px;
-          padding: 4px 6px;
-          min-height: 4.5em;
-        }
-        .quo-preview-page.quo-print-mode .quo-field {
-          background: transparent;
-          padding: 0;
-        }
-        .quo-preview-page .quo-rule {
-          border: 0;
-          border-top: 2px solid var(--quo-color-rule);
-        }
-        .quo-preview-page .quo-page-number {
-          position: absolute;
-          left: 0;
-          right: 0;
-          height: 297mm;
-          display: flex;
-          align-items: flex-end;
-          justify-content: flex-end;
-          padding: 0 52px 24px 0;
-          font-size: var(--quo-page-number-size);
-          line-height: 1;
-          color: var(--quo-page-number-color);
-          text-align: right;
-          pointer-events: none;
-          user-select: none;
-          z-index: 2;
-        }
-        .quo-preview-page .quo-title {
-          color: var(--quo-color-accent);
-          font-size: var(--quo-title-size);
-          font-weight: 700;
-          letter-spacing: 0.04em;
-          margin: 0;
-          line-height: 1;
-        }
-        .quo-preview-page .quo-th {
-          font-size: var(--quo-table-header-size);
-        }
-        .quo-preview-page .quo-logo {
-          max-height: var(--quo-logo-max-height);
-          max-width: var(--quo-logo-max-width);
-        }
-        .quo-preview-page .quo-chop {
-          display: block;
-          max-height: 88px;
-          max-width: 88px;
-          width: auto;
-          height: auto;
-          object-fit: contain;
-          margin: 8px auto 4px;
-        }
-        @media print {
-          @page { size: A4 portrait; margin: 0; }
-          .quo-preview-page {
-            width: 100% !important;
-            box-shadow: none !important;
-            margin: 0 !important;
-          }
-          .quo-preview-page .accent-bg {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-        }
-      `}</style>
+      <style>{QUOTATION_DOCUMENT_CSS}</style>
 
       <div ref={bodyRef}>
       <header className="flex justify-between items-start gap-6 mb-7">
@@ -238,9 +158,9 @@ export default function FormalQuotationDocument({
             className="quo-logo block object-contain"
           />
         </div>
-        <div className="text-right leading-[1.4] max-w-[280px]" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+        <div className="quo-company-address text-right max-w-[280px]" style={{ fontSize: 'var(--quo-font-size)' }}>
           {six.map((line, i) => (
-            <div key={i} className={i === 0 ? 'font-bold' : undefined} style={i === 0 ? { fontSize: 'var(--quo-font-size)' } : undefined}>
+            <div key={i} className={i === 0 ? 'font-bold' : undefined}>
               {line || '\u00A0'}
             </div>
           ))}
@@ -249,63 +169,64 @@ export default function FormalQuotationDocument({
 
       <div className="mb-7">
         <h1 className="quo-title">{documentTitle}</h1>
-        <hr className="quo-rule mt-2.5" />
       </div>
 
-      <section className="grid grid-cols-3 gap-4 mb-7">
+      <section className="quo-parties-grid mb-7">
         <div>
-          <p className="label mb-2">{billingLabel}</p>
+          <p className="label">{billingLabel}</p>
           <p className="quo-field whitespace-pre-wrap m-0">{model.billingAddress || '—'}</p>
         </div>
         <div>
-          <p className="label mb-2">Ship To</p>
+          <p className="label">Ship To</p>
           <p className="quo-field whitespace-pre-wrap m-0">{model.shippingAddress || '—'}</p>
         </div>
-        <div className="text-right space-y-1.5" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
-          <p className="m-0">
-            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">Order No.</span>
-            <span className="inline-block min-w-[5.5em] text-left">{model.orderNo || '—'}</span>
+        <div className="quo-meta-block">
+          <p className="quo-meta-row">
+            <span className="quo-meta-k">Order No.</span>
+            <span className="quo-meta-v">{model.orderNo || '—'}</span>
           </p>
-          <p className="m-0">
-            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">{numberLabel}</span>
-            <span className="inline-block min-w-[5.5em] text-left">{model.quotationNo || '—'}</span>
+          <p className="quo-meta-row">
+            <span className="quo-meta-k">{numberLabel}</span>
+            <span className="quo-meta-v">{model.quotationNo || '—'}</span>
           </p>
-          <p className="m-0">
-            <span className="muted font-bold uppercase tracking-wide inline-block min-w-[7.5em] text-right mr-2.5">{dateLabel}</span>
-            <span className="inline-block min-w-[5.5em] text-left">{model.date || '—'}</span>
+          {model.paymentTerms !== undefined ? (
+            <p className="quo-meta-row">
+              <span className="quo-meta-k">{paymentTermsLabel}</span>
+              <span className="quo-meta-v">{model.paymentTerms || '—'}</span>
+            </p>
+          ) : null}
+          <p className="quo-meta-row">
+            <span className="quo-meta-k">{dateLabel}</span>
+            <span className="quo-meta-v">{model.date || '—'}</span>
           </p>
         </div>
       </section>
 
-      <table className="w-full border-collapse mb-7" style={{ fontSize: 'var(--quo-font-size)' }}>
+      <table className="quo-table-grid mb-7">
         <thead>
           <tr>
-            <th className="quo-th accent-bg text-left font-bold tracking-wider uppercase px-3 py-2.5">Description</th>
-            <th className="quo-th accent-bg text-right font-bold tracking-wider uppercase px-3 py-2.5">Qty</th>
-            <th className="quo-th accent-bg text-right font-bold tracking-wider uppercase px-3 py-2.5">Price</th>
-            <th className="quo-th accent-bg text-right font-bold tracking-wider uppercase px-3 py-2.5">Amount</th>
+            <th className="quo-th accent-bg text-left">Description</th>
+            <th className="quo-th accent-bg text-right">Qty</th>
+            <th className="quo-th accent-bg text-right">Price</th>
+            <th className="quo-th accent-bg text-right">Amount</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, i) => (
             <Fragment key={i}>
-              <tr className={item.description ? undefined : 'border-b border-gray-200'}>
-                <td className="px-3 pt-3.5 pb-1 align-top">
+              <tr>
+                <td>
                   <p className="font-bold m-0">
                     {i + 1}. {item.name || '—'}
                   </p>
                 </td>
-                <td className="px-3 pt-3.5 pb-1 text-right align-top whitespace-nowrap">{item.qty}</td>
-                <td className="px-3 pt-3.5 pb-1 text-right align-top whitespace-nowrap">{item.rate}</td>
-                <td className="px-3 pt-3.5 pb-1 text-right align-top whitespace-nowrap">{item.amount}</td>
+                <td className="text-right whitespace-nowrap">{item.qty}</td>
+                <td className="text-right whitespace-nowrap">{item.rate}</td>
+                <td className="text-right whitespace-nowrap">{item.amount}</td>
               </tr>
               {item.description ? (
-                <tr className="border-b border-gray-200">
-                  <td
-                    colSpan={4}
-                    className="px-3 pt-0 pb-3.5 align-top muted whitespace-pre-wrap"
-                    style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}
-                  >
+                <tr>
+                  <td colSpan={4} className="quo-item-desc whitespace-pre-wrap">
                     {item.description}
                   </td>
                 </tr>
@@ -328,16 +249,13 @@ export default function FormalQuotationDocument({
               ) : null}
               {model.remarks.length > 0 ? (
                 remarksMode === 'plain' ? (
-                  <p
-                    className="m-0 whitespace-pre-wrap leading-relaxed"
-                    style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}
-                  >
+                  <p className="quo-payment-text m-0 whitespace-pre-wrap">
                     {model.remarks.join('\n')}
                   </p>
                 ) : (
                   <>
                     <p className="m-0 mb-2 font-bold">Remarks:</p>
-                    <ol className="m-0 pl-5 leading-relaxed space-y-1" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+                    <ol className="quo-payment-text m-0 pl-5 space-y-1">
                       {model.remarks.map((r, i) => (
                         <li key={i}>{r}</li>
                       ))}
@@ -349,23 +267,19 @@ export default function FormalQuotationDocument({
           ) : null}
           {showSum ? (
             <div className={!hasRemarksBlock ? 'ml-auto' : undefined}>
-              <table className="w-full max-w-[260px] ml-auto" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
+              <table className="w-full max-w-[260px] ml-auto">
                 <tbody>
                   <tr>
-                    <td className="py-1 text-right muted font-bold uppercase tracking-wide pr-4">Subtotal</td>
-                    <td className="py-1 text-right min-w-[90px]">{model.subtotal}</td>
+                    <td className="py-1 quo-tot-label">Subtotal</td>
+                    <td className="py-1 quo-tot-value">{model.subtotal}</td>
                   </tr>
                   <tr>
-                    <td className="py-1 text-right muted font-bold uppercase tracking-wide pr-4">Discount</td>
-                    <td className="py-1 text-right">{model.discount}</td>
+                    <td className="py-1 quo-tot-label">Discount</td>
+                    <td className="py-1 quo-tot-value">{model.discount}</td>
                   </tr>
-                  <tr>
-                    <td className="pt-2 text-right font-bold pr-4" style={{ fontSize: 'calc(var(--quo-font-size) * 1.08)' }}>
-                      Total
-                    </td>
-                    <td className="pt-2 text-right font-bold" style={{ fontSize: 'calc(var(--quo-font-size) * 1.08)' }}>
-                      {model.total}
-                    </td>
+                  <tr className="quo-tot-grand">
+                    <td className="pt-2 quo-tot-label">Total</td>
+                    <td className="pt-2 quo-tot-value">{model.total}</td>
                   </tr>
                 </tbody>
               </table>
@@ -375,44 +289,36 @@ export default function FormalQuotationDocument({
       ) : null}
 
       {showAcceptedBy || showSignature ? (
-        <footer
-          className={`mt-6 ${
-            showAcceptedBy && showSignature
-              ? 'grid grid-cols-2 gap-6'
-              : showSignature
-                ? 'flex justify-end'
-                : ''
-          }`}
-        >
-          {showAcceptedBy ? (
-            <div className={showSignature ? 'self-end' : 'w-1/2'}>
-              <p className="m-0 mb-7">Accepted by &amp; Date</p>
-              <hr className="border-0 border-t border-gray-800 w-[85%] m-0" />
-            </div>
-          ) : null}
-          {showSignature ? (
-            <div className={`text-center self-end ${showAcceptedBy ? '' : 'w-1/2'}`}>
-              <p className="m-0 mb-2.5 whitespace-pre-line" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
-                {'For and on behalf of\nHonour Label Limited'}
-              </p>
-              {showChop ? (
-                <img
-                  className="quo-chop"
-                  src={model.chopSrc || '/company-chop.png'}
-                  alt="Company chop"
-                />
-              ) : null}
-              <hr
-                className={`border-0 border-t border-gray-800 w-[70%] mx-auto mb-2 ${
-                  showChop ? 'mt-3' : 'mt-[72px]'
-                }`}
+        showAcceptedBy && showSignature ? (
+          <footer className="quo-sign-footer quo-sign-footer--accept">
+            <p className="quo-sign-accept-label">Accepted by &amp; Date</p>
+            <div className="quo-sign-block-slot">
+              <HonourLabelSignatureBlock
+                signName={signName}
+                chopSrc={model.chopSrc}
+                showChop={showChop}
+                hideAuth
               />
-              <p className="m-0" style={{ fontSize: 'calc(var(--quo-font-size) * 0.92)' }}>
-                Authorized Signature
-              </p>
             </div>
-          ) : null}
-        </footer>
+            <div className="quo-sign-left-fill" aria-hidden="true" />
+            <hr className="quo-sign-accept-line" />
+            <hr className="quo-sign-auth-line-slot" />
+            <p className="quo-sign-auth-label-slot">Authorized Signature</p>
+          </footer>
+        ) : showAcceptedBy ? (
+          <footer className="quo-sign-accept-only">
+            <p className="quo-sign-accept-label">Accepted by &amp; Date</p>
+            <hr className="quo-sign-accept-line" />
+          </footer>
+        ) : (
+          <footer className="quo-sign-only">
+            <HonourLabelSignatureBlock
+              signName={signName}
+              chopSrc={model.chopSrc}
+              showChop={showChop}
+            />
+          </footer>
+        )
       ) : null}
       </div>
 

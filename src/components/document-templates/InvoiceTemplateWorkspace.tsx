@@ -114,7 +114,7 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
     defaultInvoicePaymentRemarks('<refnumber>'),
   );
   const [message, setMessage] = useState('<Message>');
-  const [paymentTerms, setPaymentTerms] = useState('<terms>');
+  const [paymentTerms, setPaymentTerms] = useState('<term>');
   const [style, setStyle] = useState<QuotationStyleTemplate>({ ...DEFAULT_QUOTATION_STYLE });
   const [saveMessage, setSaveMessage] = useState('');
   const [showChop, setShowChop] = useState(true);
@@ -163,6 +163,7 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
       shippingAddress: DEFAULT_DEPOSIT_INVOICE_PREVIEW.shippingAddress,
       orderNo: DEFAULT_DEPOSIT_INVOICE_PREVIEW.orderNo,
       quotationNo: DEFAULT_DEPOSIT_INVOICE_PREVIEW.invoiceNo,
+      paymentTerms,
       date: DEFAULT_DEPOSIT_INVOICE_PREVIEW.date,
       items: DEFAULT_DEPOSIT_INVOICE_PREVIEW.items,
       message,
@@ -174,7 +175,7 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
       logoSrc: '/company-logo.png',
       chopSrc: '/company-chop.png',
     }),
-    [companyAddressLines, message, paymentRemarks],
+    [companyAddressLines, message, paymentRemarks, paymentTerms],
   );
 
   const depositModel: DepositInvoicePreviewModel = useMemo(

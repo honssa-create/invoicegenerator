@@ -79,6 +79,14 @@ describe('resolveInvoiceDepositAmount', () => {
   });
 });
 
+describe('invoiceToFormalPreview', () => {
+  it('uses invoice term field for payment terms', () => {
+    const inv = minimalInvoice({ term: 'NET30', terms: 'Long terms and conditions text' });
+    const model = invoiceToFormalPreview(inv);
+    expect(model.paymentTerms).toBe('NET30');
+  });
+});
+
 describe('invoiceToDepositPreview', () => {
   it('uses stored deposit_amount for deposit due', () => {
     const inv = minimalInvoice({ total: 1000, deposit_amount: 250 });
@@ -90,6 +98,12 @@ describe('invoiceToDepositPreview', () => {
     const inv = minimalInvoice({ total: 1000, deposit_amount: null });
     const model = invoiceToDepositPreview(inv);
     expect(model.depositDue).toContain('500');
+  });
+
+  it('uses invoice term field for payment terms', () => {
+    const inv = minimalInvoice({ term: 'NET30', terms: 'Long terms and conditions text' });
+    const model = invoiceToDepositPreview(inv);
+    expect(model.paymentTerms).toBe('NET30');
   });
 });
 

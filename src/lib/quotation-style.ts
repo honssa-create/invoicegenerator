@@ -18,26 +18,46 @@ export interface QuotationStyleTemplate {
   tableHeaderFontSize: string;
   logoMaxHeight: string;
   logoMaxWidth: string;
+  tableHeaderBackground: string;
+  tableBorderColor: string;
+  itemFontSize: string;
+  labelFontSize: string;
+  paymentFontSize: string;
+  signatureFontSize: string;
+  totalLabelFontSize: string;
+  totalGrandFontSize: string;
+  tableCellPadding: string;
+  tableHeaderCellPadding: string;
 }
 
 export const DEFAULT_QUOTATION_STYLE: QuotationStyleTemplate = {
-  fontFamily: "Arial, 'Helvetica Neue', Helvetica, 'Microsoft JhengHei', 'PingFang TC', sans-serif",
-  fontSize: '13px',
-  lineHeight: '1.45',
-  colorText: '#222222',
-  colorMuted: '#9a9a9a',
-  colorLabel: '#b0b0b0',
-  colorAccent: '#e8a070',
-  colorAccentText: '#ffffff',
-  colorRule: '#e8a070',
+  fontFamily: "Arial, 'Microsoft JhengHei', 'PingFang TC', sans-serif",
+  fontSize: '10pt',
+  lineHeight: '1',
+  colorText: '#404040',
+  colorMuted: '#808080',
+  colorLabel: '#B8B8B8',
+  colorAccent: '#FF9966',
+  colorAccentText: '#969696',
+  colorRule: '#FF9966',
   fieldBackground: '#fafafa',
-  titleSize: '36px',
-  pagePadding: '48px 52px 56px',
-  pageNumberSize: '11px',
-  pageNumberColor: '#666666',
-  tableHeaderFontSize: '11px',
+  titleSize: '25pt',
+  pagePadding: '10mm 12.7mm 12mm',
+  pageNumberSize: '8pt',
+  pageNumberColor: '#404040',
+  tableHeaderFontSize: '9pt',
   logoMaxHeight: '88px',
   logoMaxWidth: '160px',
+  tableHeaderBackground: '#FCCC8C',
+  tableBorderColor: '#BFBFBF',
+  itemFontSize: '9pt',
+  labelFontSize: '10pt',
+  paymentFontSize: '8pt',
+  signatureFontSize: '9pt',
+  totalLabelFontSize: '10pt',
+  totalGrandFontSize: '11pt',
+  tableCellPadding: '3.6pt',
+  tableHeaderCellPadding: '5.75pt 3.6pt',
 };
 
 export type QuotationStyleField = keyof QuotationStyleTemplate;
@@ -50,13 +70,13 @@ export const QUOTATION_STYLE_FIELDS: {
   placeholder?: string;
 }[] = [
   { key: 'fontFamily', label: 'Font family', labelZh: '字體', type: 'text', placeholder: 'Arial, sans-serif' },
-  { key: 'fontSize', label: 'Body font size', labelZh: '內文字號', type: 'size', placeholder: '13px' },
-  { key: 'lineHeight', label: 'Line height', labelZh: '行距', type: 'text', placeholder: '1.45' },
+  { key: 'fontSize', label: 'Body font size', labelZh: '內文字號', type: 'size', placeholder: '10pt' },
+  { key: 'lineHeight', label: 'Line height', labelZh: '行距', type: 'text', placeholder: '1' },
   { key: 'colorText', label: 'Text colour', labelZh: '文字顏色', type: 'color' },
   { key: 'colorMuted', label: 'Muted text', labelZh: '次要文字', type: 'color' },
   { key: 'colorLabel', label: 'Label colour', labelZh: '標籤顏色', type: 'color' },
   { key: 'colorAccent', label: 'Accent colour', labelZh: '主題色', type: 'color' },
-  { key: 'colorAccentText', label: 'Accent text', labelZh: '主題文字色', type: 'color' },
+  { key: 'colorAccentText', label: 'Table header text', labelZh: '表頭文字色', type: 'color' },
   { key: 'colorRule', label: 'Rule / divider', labelZh: '分隔線顏色', type: 'color' },
   {
     key: 'fieldBackground',
@@ -64,10 +84,13 @@ export const QUOTATION_STYLE_FIELDS: {
     labelZh: '欄位底色',
     type: 'color',
   },
-  { key: 'titleSize', label: 'Title size', labelZh: '標題字號', type: 'size', placeholder: '36px' },
-  { key: 'tableHeaderFontSize', label: 'Table header size', labelZh: '表頭字號', type: 'size', placeholder: '11px' },
-  { key: 'pagePadding', label: 'Page padding', labelZh: '頁面內距', type: 'size', placeholder: '48px 52px 56px' },
-  { key: 'pageNumberSize', label: 'Page number size', labelZh: '頁碼字號', type: 'size', placeholder: '11px' },
+  { key: 'titleSize', label: 'Title size', labelZh: '標題字號', type: 'size', placeholder: '25pt' },
+  { key: 'tableHeaderFontSize', label: 'Table header size', labelZh: '表頭字號', type: 'size', placeholder: '9pt' },
+  { key: 'tableHeaderBackground', label: 'Table header background', labelZh: '表頭底色', type: 'color' },
+  { key: 'tableBorderColor', label: 'Table border', labelZh: '表格框線', type: 'color' },
+  { key: 'itemFontSize', label: 'Line item size', labelZh: '項目字號', type: 'size', placeholder: '9pt' },
+  { key: 'pagePadding', label: 'Page padding', labelZh: '頁面內距', type: 'size', placeholder: '10mm 12.7mm 12mm' },
+  { key: 'pageNumberSize', label: 'Page number size', labelZh: '頁碼字號', type: 'size', placeholder: '8pt' },
   { key: 'pageNumberColor', label: 'Page number colour', labelZh: '頁碼顏色', type: 'color' },
   { key: 'logoMaxHeight', label: 'Logo max height', labelZh: '標誌高度', type: 'size', placeholder: '88px' },
   { key: 'logoMaxWidth', label: 'Logo max width', labelZh: '標誌寬度', type: 'size', placeholder: '160px' },
@@ -99,6 +122,16 @@ export function quotationStyleToCssVars(style: QuotationStyleTemplate): Record<s
     '--quo-table-header-size': style.tableHeaderFontSize,
     '--quo-logo-max-height': style.logoMaxHeight,
     '--quo-logo-max-width': style.logoMaxWidth,
+    '--quo-color-table-header-bg': style.tableHeaderBackground,
+    '--quo-color-table-border': style.tableBorderColor,
+    '--quo-item-font-size': style.itemFontSize,
+    '--quo-label-size': style.labelFontSize,
+    '--quo-payment-size': style.paymentFontSize,
+    '--quo-signature-size': style.signatureFontSize,
+    '--quo-total-label-size': style.totalLabelFontSize,
+    '--quo-total-grand-size': style.totalGrandFontSize,
+    '--quo-table-cell-padding': style.tableCellPadding,
+    '--quo-table-header-cell-padding': style.tableHeaderCellPadding,
   };
 }
 
@@ -146,4 +179,3 @@ export function formatQuotationDate(dateStr: string | null | undefined): string 
   }
   return raw;
 }
-

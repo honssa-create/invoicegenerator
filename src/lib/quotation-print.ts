@@ -22,14 +22,6 @@ function customerBillingFallback(q: QuotationWithDetails): string {
   });
 }
 
-function remarksFromQuote(q: QuotationWithDetails): string[] {
-  const fromTerms = (q.terms || '')
-    .split(/\n+/)
-    .map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim())
-    .filter(Boolean);
-  if (fromTerms.length) return fromTerms;
-  return [...DEFAULT_QUOTATION_PREVIEW.remarks];
-}
 
 /** Map a saved quotation into the Honour Label formal print/preview model. */
 export function quotationToFormalPreview(
@@ -80,7 +72,7 @@ export function quotationToFormalPreview(
       ? items
       : [{ name: '—', description: '', qty: '0', rate: money(0), amount: money(0) }],
     message: q.notes?.trim() || '',
-    remarks: remarksFromQuote(q),
+    remarks: [...DEFAULT_QUOTATION_PREVIEW.remarks],
     subtotal: money(Number(q.subtotal) || 0),
     discount: money(Number(q.discount_amount) || 0),
     total: money(Number(q.total) || 0),

@@ -1,9 +1,11 @@
 import {
   DEFAULT_DELIVERY_NOTE_PREVIEW,
+  type DeliveryNoteLinePreview,
   type DeliveryNotePreviewModel,
 } from '@/components/DeliveryNoteDocument';
 import type { Order } from '@/lib/orders';
-import { orderDueDate } from '@/lib/orders';
+import { HONOUR_SHIPPING_LINE_STYLE, orderDueDate } from '@/lib/orders';
+import { buildQuotationItemsFromOrder } from '@/lib/order-to-quotation';
 import { formatQuotationDate } from '@/lib/quotation-style';
 
 function fieldStr(fields: Record<string, string | boolean>, key: string): string {
@@ -12,23 +14,35 @@ function fieldStr(fields: Record<string, string | boolean>, key: string): string
   return String(v ?? '').trim();
 }
 
+function buildDeliveryNoteItems(order: Order): DeliveryNoteLinePreview[] {
+  const shippingStyle = HONOUR_SHIPPING_LINE_STYLE.toLowerCase();
+  const drafts = buildQuotationItemsFromOrder(order).filter(
+    (item) => item.product_service.trim().toLowerCase() !== shippingStyle,
+  );
+
+  if (drafts.length) {
+    return drafts.map((item) => ({
+      name: item.product_service,
+      description: item.description,
+      qty: String(item.quantity),
+    }));
+  }
+
+  return [
+    {
+      name: (order.description || order.name || '—').trim() || '—',
+      description: '',
+      qty:
+        fieldStr(order.fields, 'qty_ordered') ||
+        fieldStr(order.fields, 'supplier_qty') ||
+        '—',
+    },
+  ];
+}
+
 /** Map a saved order into the delivery-note / delivery-note-chop print model. */
 export function orderToDeliveryNotePreview(order: Order): DeliveryNotePreviewModel {
-  const productName = (order.description || order.name || '—').trim() || '—';
-  const qty =
-    fieldStr(order.fields, 'qty_ordered') ||
-    fieldStr(order.fields, 'supplier_qty') ||
-    '—';
-  const cartonNote = order.carton_count?.trim()
-    ? `Cartons / 箱數: ${order.carton_count.trim()}`
-    : '';
-  const tracking = fieldStr(order.fields, 'tracking_no');
   const receiptDate = orderDueDate(order);
-  const descParts = [
-    cartonNote,
-    tracking ? `Tracking: ${tracking}` : '',
-    receiptDate ? `Delivery: ${receiptDate}` : '',
-  ].filter(Boolean);
 
   const invoiceNo =
     order.linked_invoice?.invoice_number?.trim() ||
@@ -54,13 +68,7 @@ export function orderToDeliveryNotePreview(order: Order): DeliveryNotePreviewMod
     orderNo,
     invoiceNo,
     date,
-    items: [
-      {
-        name: productName,
-        description: descParts.join('\n'),
-        qty,
-      },
-    ],
+    items: buildDeliveryNoteItems(order),
     message: order.notes?.trim() || '',
     companySignName: companyAddressLines[0],
     logoSrc: '/company-logo.png',

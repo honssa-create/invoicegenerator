@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import TenantSelect from '@/components/TenantSelect';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 import DebitNoteActions from '@/components/DebitNoteActions';
 import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
@@ -33,6 +34,9 @@ import {
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
+  displayRentalStatusForUnit,
+  isLeaseFormallyEnded,
+  isLeaseStaleEnded,
   isVirtualRentRecord,
   defaultRentInvoiceBody,
   defaultRentInvoiceSubject,
@@ -165,6 +169,8 @@ function RentalDetailInner() {
   const params = useParams();
   const router = useRouter();
   const sp = useSearchParams();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const id = params.id as string;
   const viewLeaseId = sp.get('leaseId');
 
@@ -895,6 +901,27 @@ function RentalDetailInner() {
     load();
   };
 
+  const deleteLeaseRecord = async (leaseId: number, tenantLabel: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(bi(`Delete lease record for ${tenantLabel}? This cannot be undone.`, `刪除 ${tenantLabel} 的租約紀錄？此操作無法復原。`))) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch(`/api/rentals/leases/${leaseId}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setToast(d.error || bi('Failed to delete lease record', '刪除租約紀錄失敗'));
+      return;
+    }
+    setToast(bi('Lease record deleted', '租約紀錄已刪除'));
+    if (viewLeaseId === String(leaseId)) {
+      router.push(`/rentals/${id}?period=${period}`);
+      return;
+    }
+    load();
+  };
+
   const uploadLeaseDoc = async (file: File) => {
     const leaseId = data?.currentLease?.id;
     if (!leaseId) return;
@@ -933,8 +960,8 @@ function RentalDetailInner() {
   const rec = currentRecord;
   const remaining = daysRemaining(unit.leaseEndDate);
   const recStatus = rec
-    ? displayRentalStatus(rec, { dueDateDay: unit.dueDateDay, period: rec.billingPeriod || period })
-    : 'pending';
+    ? displayRentalStatusForUnit(unit, rec, currentLease, { dueDateDay: unit.dueDateDay, period: rec.billingPeriod || period })
+    : 'vacant';
   const balance = rec ? outstandingBalance(rec) : 0;
   const hasPersistedRecord = Boolean(rec && !isVirtualRentRecord(rec));
   const readOnly = Boolean(readOnlyLease);
@@ -946,7 +973,9 @@ function RentalDetailInner() {
     : currentLease
       ? computeLeaseDisplayStatus(currentLease)
       : !isVacantUnitName(unit.tenantName) ? 'active' : 'vacant';
-  const contractEnded = readOnly || leaseStatus === 'ended' || leaseStatus === 'terminated';
+  const formallyEnded = currentLease ? isLeaseFormallyEnded(currentLease) : false;
+  const staleEnded = currentLease ? isLeaseStaleEnded(currentLease) : false;
+  const contractEnded = readOnly || formallyEnded || staleEnded;
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
   const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
   const liveElectricityMeter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
@@ -989,7 +1018,18 @@ function RentalDetailInner() {
         </div>
       )}
 
-      {readOnly && !isHistoricalView && (
+      {staleEnded && !isHistoricalView && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {bi(
+            'Lease end date has passed. Use',
+            '租約已到期。請使用',
+          )}{' '}
+          <strong>{bi('End Contract', '完約')}</strong>{' '}
+          {bi('to archive this tenancy and mark the unit vacant or start a new lease.', '封存租約，並將單位標記為空置或開始新租約。')}
+        </div>
+      )}
+
+      {readOnly && !isHistoricalView && !staleEnded && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Contract ended — profile is locked. Use <strong>完約 End Contract</strong> to archive and start a new tenancy.
         </div>
@@ -1026,7 +1066,7 @@ function RentalDetailInner() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {!contractEnded && !isHistoricalView && (
+            {currentLease?.isCurrent && !formallyEnded && !isHistoricalView && (
               <button
                 type="button"
                 onClick={() => {
@@ -1152,11 +1192,11 @@ function RentalDetailInner() {
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start 租期</label>
-                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={fieldCls} value={leaseStartDate} onChange={(e) => setLeaseStartDate(e.target.value)} disabled={readOnly} readOnly={readOnly} />
+                <input {...periodDateInputProps(leaseStartDate, setLeaseStartDate, fieldCls, readOnly)} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End 租期</label>
-                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={fieldCls} value={leaseEndDate} onChange={(e) => setLeaseEndDate(e.target.value)} disabled={readOnly} readOnly={readOnly} />
+                <input {...periodDateInputProps(leaseEndDate, setLeaseEndDate, fieldCls, readOnly)} />
               </div>
             </div>
           </div>
@@ -1605,6 +1645,7 @@ function RentalDetailInner() {
                   <th className="px-4 py-3 text-left">起租日</th>
                   <th className="px-4 py-3 text-left">完租日</th>
                   <th className="px-4 py-3 text-left">Status</th>
+                  {isAdmin && <th className="px-4 py-3 text-right">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -1626,11 +1667,23 @@ function RentalDetailInner() {
                         {pastLeaseStatusLabel(l.status)}
                       </span>
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={(e) => deleteLeaseRecord(l.id, l.tenantName, e)}
+                          className="text-xs font-medium text-red-600 hover:text-red-800 hover:underline disabled:opacity-50"
+                        >
+                          {bi('Delete', '刪除')}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {previousTenants.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">
+                    <td colSpan={isAdmin ? 7 : 6} className="px-4 py-8 text-center text-gray-400 text-sm">
                       {bi('No previous tenants for this unit yet.', '此單位尚無歷任租客。')}
                       {!currentLease && <span className="block mt-1 text-xs">{bi('Use', '請使用')} <strong>{bi('End Contract', '完約')}</strong> {bi('when a tenant moves out.', '於租客遷出時封存租約。')}</span>}
                     </td>
@@ -1930,7 +1983,11 @@ function RentalDetailInner() {
             <p className="text-gray-600">{bi('Close the current lease for', '完結現任租約：')} <strong>{unit.tenantName}</strong>. {bi('Auto-invoices will stop after the lease end date.', '租約完結日後將停止自動發票。')}</p>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Actual move-out date 實際退租日</label>
-              <input className={inp} value={endContractForm.actualEndDate} onChange={(e) => setEndContractForm({ ...endContractForm, actualEndDate: e.target.value })} placeholder="DD/MM/YYYY" />
+              <input {...periodDateInputProps(
+                endContractForm.actualEndDate,
+                (v) => setEndContractForm({ ...endContractForm, actualEndDate: v }),
+                inp,
+              )} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1959,11 +2016,19 @@ function RentalDetailInner() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">{bi('Lease start', '起租日')}</label>
-                    <input className={inp} placeholder="DD/MM/YYYY" value={endContractForm.newLeaseStart} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseStart: e.target.value })} />
+                    <input {...periodDateInputProps(
+                      endContractForm.newLeaseStart,
+                      (v) => setEndContractForm({ ...endContractForm, newLeaseStart: v }),
+                      inp,
+                    )} />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">{bi('Lease end', '完租日')}</label>
-                    <input className={inp} placeholder="DD/MM/YYYY" value={endContractForm.newLeaseEnd} onChange={(e) => setEndContractForm({ ...endContractForm, newLeaseEnd: e.target.value })} />
+                    <input {...periodDateInputProps(
+                      endContractForm.newLeaseEnd,
+                      (v) => setEndContractForm({ ...endContractForm, newLeaseEnd: v }),
+                      inp,
+                    )} />
                   </div>
                 </div>
                 <div>

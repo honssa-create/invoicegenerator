@@ -1,11 +1,12 @@
 export type RentalStatus = 'pending' | 'paid' | 'overdue';
-export type RentalDisplayStatus = RentalStatus | 'partial';
+export type RentalDisplayStatus = RentalStatus | 'partial' | 'vacant';
 
 export const RENTAL_STATUS_LABELS: Record<RentalDisplayStatus, string> = {
   pending: '待付款 Pending',
   paid: '已付款 Paid',
   overdue: '遲交 Overdue',
   partial: '部分付款 Partial',
+  vacant: '空置 Vacant',
 };
 
 export const RENTAL_STATUS_BADGE: Record<RentalDisplayStatus, string> = {
@@ -13,6 +14,7 @@ export const RENTAL_STATUS_BADGE: Record<RentalDisplayStatus, string> = {
   paid: 'bg-green-100 text-green-800 border border-green-200',
   overdue: 'bg-red-100 text-red-800 border border-red-200',
   partial: 'bg-orange-100 text-orange-800 border border-orange-200',
+  vacant: 'bg-slate-100 text-slate-600 border border-slate-200',
 };
 
 export interface PreviousYearRent {
@@ -505,6 +507,24 @@ export function applyTemplatePlaceholders(body: string, vars: Record<string, str
 
 const ENDING_SOON_DAYS = 60;
 
+/** Stored status marks lease as closed (End Contract was run). */
+export function isLeaseFormallyEnded(
+  lease: Pick<RentalLease, 'status'> | null | undefined,
+): boolean {
+  if (!lease) return false;
+  return lease.status === 'ended' || lease.status === 'terminated';
+}
+
+/** End date passed but lease not yet archived — needs End Contract. */
+export function isLeaseStaleEnded(
+  lease: Pick<RentalLease, 'leaseEndDate' | 'actualEndDate' | 'status' | 'isCurrent'> | null | undefined,
+): boolean {
+  if (!lease || !lease.isCurrent || isLeaseFormallyEnded(lease)) return false;
+  const endIso = normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate) || '';
+  const today = new Date().toISOString().slice(0, 10);
+  return Boolean(endIso && today > endIso);
+}
+
 /** Derive display status from lease dates + stored status. */
 export function computeLeaseDisplayStatus(
   lease: Pick<RentalLease, 'leaseEndDate' | 'actualEndDate' | 'status' | 'isCurrent'>,
@@ -578,15 +598,88 @@ export function isVirtualRentRecord(record: Pick<RentRecord, 'id'> | null | unde
   return !record || !record.id;
 }
 
+/** True when the unit has no active occupant for billing purposes. */
+export function isVacantRentalUnit(
+  unit: Pick<RentalUnit, 'tenantName'>,
+  lease?: Pick<RentalLease, 'isCurrent'> | null,
+): boolean {
+  return isVacantUnitName(unit.tenantName) && !lease?.isCurrent;
+}
+
+/** Zero-amount placeholder — vacant units are not billable for the period. */
+export function buildVacantRentRecord(
+  unit: Pick<RentalUnit, 'id' | 'user_id'>,
+  period: string,
+): RentRecord {
+  const now = new Date().toISOString();
+  return {
+    id: 0,
+    user_id: unit.user_id,
+    unitId: unit.id,
+    billingPeriod: period,
+    baseRent: 0,
+    baseRentPeriodFrom: null,
+    baseRentPeriodTo: null,
+    waterFee: 0,
+    electricityFee: 0,
+    waterPeriodFrom: null,
+    waterPeriodTo: null,
+    electricityPeriodFrom: null,
+    electricityPeriodTo: null,
+    actualAmount: 0,
+    amountPaid: 0,
+    status: 'paid',
+    paidDate: null,
+    invoiceRef: null,
+    receiptRef: null,
+    receiptImagePath: null,
+    invoiceSentAt: null,
+    receiptSentAt: null,
+    paidAt: null,
+    customInvoiceNote: null,
+    customReceiptNote: null,
+    electricityMeter: null,
+    waterMeter: null,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+/** Dashboard/detail card for a unit × period (vacant → non-billable placeholder). */
+export function resolveUnitPeriodRecord(
+  unit: Pick<RentalUnit, 'id' | 'user_id' | 'tenantName' | 'currentYearRent' | 'dueDateDay'>,
+  period: string,
+  persisted: RentRecord | undefined,
+  lease: Pick<RentalLease, 'baseRent' | 'dueDateDay' | 'leaseStartDate' | 'leaseEndDate' | 'isCurrent'> | null | undefined,
+): RentRecord {
+  if (isVacantRentalUnit(unit, lease)) {
+    return buildVacantRentRecord(unit, period);
+  }
+  return persisted ?? buildVirtualRentRecord(unit, period, lease ?? null);
+}
+
+export function displayRentalStatusForUnit(
+  unit: Pick<RentalUnit, 'tenantName' | 'dueDateDay'>,
+  record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'> & { billingPeriod?: string },
+  lease: Pick<RentalLease, 'isCurrent'> | null | undefined,
+  opts?: DisplayRentalStatusOpts,
+): RentalDisplayStatus {
+  if (isVacantRentalUnit(unit, lease)) return 'vacant';
+  return displayRentalStatus(record, opts);
+}
+
 /**
  * In-memory pending card for a unit × period with no DB row yet.
  * Materialized by cron or the first write (ensureRentRecord).
  */
 export function buildVirtualRentRecord(
-  unit: Pick<RentalUnit, 'id' | 'user_id' | 'currentYearRent' | 'dueDateDay'>,
+  unit: Pick<RentalUnit, 'id' | 'user_id' | 'tenantName' | 'currentYearRent' | 'dueDateDay'>,
   period: string,
   lease?: Pick<RentalLease, 'baseRent' | 'dueDateDay' | 'leaseStartDate' | 'leaseEndDate'> | null,
 ): RentRecord {
+  if (isVacantUnitName(unit.tenantName)) {
+    return buildVacantRentRecord(unit, period);
+  }
   const dueDay = lease?.dueDateDay || unit.dueDateDay || 1;
   const defaults = defaultRentPeriod(period, dueDay);
   let base = unit.currentYearRent || 0;
@@ -1554,12 +1647,14 @@ export const PERIOD_LEDGER_STATUS_LABELS: Record<'paid' | 'partial' | 'unpaid', 
 };
 
 export function periodLedgerStatusLabel(status: RentalDisplayStatus): string {
+  if (status === 'vacant') return RENTAL_STATUS_LABELS.vacant;
   if (status === 'paid') return PERIOD_LEDGER_STATUS_LABELS.paid;
   if (status === 'partial') return PERIOD_LEDGER_STATUS_LABELS.partial;
   return PERIOD_LEDGER_STATUS_LABELS.unpaid;
 }
 
 export function periodLedgerStatusBadge(status: RentalDisplayStatus): string {
+  if (status === 'vacant') return RENTAL_STATUS_BADGE.vacant;
   if (status === 'paid') return RENTAL_STATUS_BADGE.paid;
   if (status === 'partial') return RENTAL_STATUS_BADGE.partial;
   return RENTAL_STATUS_BADGE.pending;

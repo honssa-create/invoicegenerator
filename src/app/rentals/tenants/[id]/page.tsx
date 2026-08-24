@@ -72,8 +72,9 @@ interface TenantDetail {
 
 export default function TenantDetailPage() {
   const { id } = useParams();
-  const { isSectionReadOnly } = useAuth();
+  const { isSectionReadOnly, user } = useAuth();
   const readOnly = isSectionReadOnly('rentals');
+  const isAdmin = user?.role === 'admin';
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [fromPeriod, setFromPeriod] = useState(''); // optional override; auto-detect arrears when empty
   const [paidLookback, setPaidLookback] = useState(2);
@@ -152,6 +153,22 @@ export default function TenantDetailPage() {
     }
     setContactEditing(false);
     setToast('Contact details saved');
+    load();
+  };
+
+  const deleteLeaseRecord = async (leaseId: number, tenantLabel: string) => {
+    if (!window.confirm(bi(`Delete lease record for ${tenantLabel}? This cannot be undone.`, `刪除 ${tenantLabel} 的租約紀錄？此操作無法復原。`))) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch(`/api/rentals/leases/${leaseId}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setToast(d.error || bi('Failed to delete lease record', '刪除租約紀錄失敗'));
+      return;
+    }
+    setToast(bi('Lease record deleted', '租約紀錄已刪除'));
     load();
   };
 
@@ -667,7 +684,19 @@ export default function TenantDetailPage() {
                 <div key={l.id} className={`rounded-xl border p-3 text-sm ${l.isCurrent ? 'border-brand-200 bg-brand-50/40' : 'border-gray-100'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Link href={`/rentals/${l.unitId}`} className="font-semibold text-brand-700 hover:underline">{l.unitName}</Link>
-                    <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                    <div className="flex items-center gap-2">
+                      <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                      {isAdmin && !l.isCurrent && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => deleteLeaseRecord(l.id, l.tenantName || tenant.name)}
+                          className="text-xs font-medium text-red-600 hover:text-red-800 hover:underline disabled:opacity-50"
+                        >
+                          {bi('Delete', '刪除')}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}

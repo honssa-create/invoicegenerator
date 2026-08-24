@@ -33,9 +33,13 @@ import {
   computeTotal,
   chargeOutstanding,
   computeLeaseDisplayStatus,
+  isLeaseFormallyEnded,
   currentBillingPeriod,
   displayRentalStatus,
+  displayRentalStatusForUnit,
   buildVirtualRentRecord,
+  resolveUnitPeriodRecord,
+  isVacantRentalUnit,
   defaultRentPeriod,
   dueDateForPeriod,
   formatMoney,
@@ -448,8 +452,8 @@ export async function updateRentalUnit(
     tenantPhone, tenantEmail, tenantAddress?.trim() || null,
     Number(input.currentYearRent ?? existing.currentYearRent) || 0,
     JSON.stringify(input.previousYearsRent ?? existing.previousYearsRent),
-    normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null,
-    normalizeStoredDate(input.leaseEndDate ?? existing.leaseEndDate) || null,
+    vacant ? null : (normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null),
+    vacant ? null : (normalizeStoredDate(input.leaseEndDate ?? existing.leaseEndDate) || null),
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
     autoSendReceiptEmail ? 1 : 0,
     automationEnabled ? 1 : 0,
@@ -733,8 +737,8 @@ export async function listRentalDashboard(userId: number, period = currentBillin
 
   const withRecords: RentalUnitWithRecord[] = units.map((unit) => {
     const currentLease = leaseByUnitId.get(unit.id) || null;
-    const currentRecord =
-      recordByUnitId.get(unit.id) || buildVirtualRentRecord(unit, period, currentLease);
+    const persisted = recordByUnitId.get(unit.id);
+    const currentRecord = resolveUnitPeriodRecord(unit, period, persisted, currentLease);
     const leaseStatus = currentLease ? computeLeaseDisplayStatus(currentLease) : 'vacant';
     return {
       ...unit,
@@ -745,14 +749,14 @@ export async function listRentalDashboard(userId: number, period = currentBillin
     };
   });
 
-  const records = withRecords.map((u) => u.currentRecord);
-  const totalRevenue = records.reduce((s, r) => s + (r.amountPaid || 0), 0);
-  const outstanding = withRecords.reduce(
+  const billableUnits = withRecords.filter((u) => !isVacantRentalUnit(u, u.currentLease));
+  const totalRevenue = withRecords.reduce((s, u) => s + (u.currentRecord.amountPaid || 0), 0);
+  const outstanding = billableUnits.reduce(
     (s, u) => s + outstandingBalance(u.currentRecord),
     0,
   );
-  const paidCount = withRecords.filter(
-    (u) => displayRentalStatus(u.currentRecord, { dueDateDay: u.dueDateDay, period }) === 'paid',
+  const paidCount = billableUnits.filter(
+    (u) => displayRentalStatusForUnit(u, u.currentRecord, u.currentLease, { dueDateDay: u.dueDateDay, period }) === 'paid',
   ).length;
   const alerts = buildRentalDashboardAlerts(
     units.map((u) => ({ id: u.id, unitName: u.unitName })),
@@ -763,7 +767,7 @@ export async function listRentalDashboard(userId: number, period = currentBillin
   const previousLeases = await getPreviousLeasesForUser(userId);
   return {
     units: withRecords,
-    metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length },
+    metrics: { totalRevenue, outstanding, paidCount, totalUnits: billableUnits.length || units.length },
     period,
     alerts,
     previousLeases,
@@ -791,10 +795,7 @@ export async function getRentalUnitDetail(
 
   const displayLease = isHistoricalView ? requestedLease! : activeLease;
   const readOnlyLease = isHistoricalView || (
-    displayLease != null && (
-      computeLeaseDisplayStatus(displayLease) === 'ended'
-      || computeLeaseDisplayStatus(displayLease) === 'terminated'
-    )
+    displayLease != null && isLeaseFormallyEnded(displayLease)
   );
 
   const recordIdRow = await db.prepare(
@@ -803,7 +804,9 @@ export async function getRentalUnitDetail(
   let currentRecord: RentRecord | null = recordIdRow?.id
     ? await getRentRecord(recordIdRow.id, userId)
     : null;
-  if (!currentRecord) {
+  if (isVacantRentalUnit(unit, activeLease)) {
+    currentRecord = resolveUnitPeriodRecord(unit, period, currentRecord ?? undefined, activeLease);
+  } else if (!currentRecord) {
     currentRecord = buildVirtualRentRecord(unit, period, activeLease);
   }
 

@@ -249,13 +249,24 @@ export async function getLeaseDocuments(leaseId: number, userId: number): Promis
   ).all(leaseId, userId) as DocRow[]).map(hydrateDoc);
 }
 
+async function clearUnitForVacancy(unitId: number, userId: number) {
+  await db.prepare(
+    `UPDATE rental_units SET
+      tenant_name = ?, tenant_id = NULL,
+      tenant_contact_name = NULL, tenant_company_name = NULL,
+      tenant_notes = NULL, tenant_phone = NULL, tenant_email = NULL,
+      tenant_address = NULL,
+      lease_start_date = NULL, lease_end_date = NULL,
+      current_lease_id = NULL,
+      automation_enabled = 0, auto_send_receipt_email = 0,
+      updated_at = datetime('now')
+     WHERE id = ? AND user_id = ?`
+  ).run(VACANT_TENANT_NAME, unitId, userId);
+}
+
 async function syncUnitFromLease(unitId: number, userId: number, lease: RentalLease | null) {
   if (!lease) {
-    await db.prepare(
-      `UPDATE rental_units SET tenant_name = '', tenant_phone = NULL, tenant_email = NULL,
-        tenant_id = NULL, current_lease_id = NULL, automation_enabled = 0, updated_at = datetime('now')
-       WHERE id = ? AND user_id = ?`
-    ).run(unitId, userId);
+    await clearUnitForVacancy(unitId, userId);
     return;
   }
   await db.prepare(
@@ -401,12 +412,6 @@ export async function endRentalContract(
   );
 
   await syncUnitFromLease(unitId, userId, null);
-  await db.prepare(
-    `UPDATE rental_units SET tenant_id = NULL, tenant_name = ?,
-      tenant_phone = NULL, tenant_email = NULL, automation_enabled = 0,
-      current_lease_id = NULL, updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(VACANT_TENANT_NAME, unitId, userId);
 
   let newLease: RentalLease | null = null;
   if (input.startNewLease?.tenantName?.trim()) {
@@ -417,6 +422,34 @@ export async function endRentalContract(
     endedLease: (await getLeaseById(lease.id, userId))!,
     newLease,
   };
+}
+
+export async function deleteRentalLease(
+  leaseId: number | string,
+  userId: number,
+): Promise<
+  | { ok: true; unitId: number; tenantName: string }
+  | { ok: false; status: 404 | 400; error: string }
+> {
+  const lease = await getLeaseById(leaseId, userId);
+  if (!lease) return { ok: false, status: 404, error: 'Lease not found' };
+  if (lease.isCurrent) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Cannot delete the current lease — use End Contract instead',
+    };
+  }
+
+  await db.prepare(
+    `UPDATE rental_units SET current_lease_id = NULL, updated_at = datetime('now')
+     WHERE id = ? AND user_id = ? AND current_lease_id = ?`
+  ).run(lease.unitId, userId, lease.id);
+
+  const res = await db.prepare('DELETE FROM rental_leases WHERE id = ? AND user_id = ?').run(lease.id, userId);
+  if (!res.changes) return { ok: false, status: 404, error: 'Lease not found' };
+
+  return { ok: true, unitId: lease.unitId, tenantName: lease.tenantName };
 }
 
 export async function addLeaseDocument(

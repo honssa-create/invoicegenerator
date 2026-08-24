@@ -14,11 +14,15 @@ import {
   currentBillingPeriod,
   daysRemaining,
   displayRentalStatus,
+  displayRentalStatusForUnit,
   formatDisplayDate,
   formatDueDayLabel,
   formatMoney,
+  isLeaseFormallyEnded,
+  isLeaseStaleEnded,
   isVacantUnitName,
   toFormDate,
+  isoFromDisplayDate,
   type LeaseDisplayStatus,
   type PreviousYearRent,
   type RentalDashboardAlert,
@@ -51,8 +55,9 @@ const blankUnit: UnitModalState = {
 
 export default function RentalsPage() {
   const router = useRouter();
-  const { isSectionReadOnly } = useAuth();
+  const { isSectionReadOnly, user } = useAuth();
   const readOnly = isSectionReadOnly('rentals');
+  const isAdmin = user?.role === 'admin';
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [data, setData] = useState<DashboardData | null>(null);
   const [tenants, setTenants] = useState<RentalTenant[]>([]);
@@ -88,12 +93,11 @@ export default function RentalsPage() {
     ? units
     : units.filter((u) => (u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || { leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false })) === leaseFilter);
 
-  /** Master panel shows current occupancy only — ended tenancies live in history table. */
+  /** Master panel shows current occupancy only — archived tenancies live in history table. */
   const activePanelUnits = filteredUnits.filter((u) => {
-    const status = u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || {
-      leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false,
-    });
-    return status !== 'ended' && status !== 'terminated';
+    const lease = u.currentLease;
+    if (!lease) return true;
+    return lease.isCurrent && !isLeaseFormallyEnded(lease);
   });
 
   const tenantGroupKey = (u: Pick<RentalUnit, 'tenantId' | 'tenantName'>) => {
@@ -199,6 +203,23 @@ export default function RentalsPage() {
     }
     setUnitModal(null);
     setToast(isEdit ? MSG.leaseUpdated : MSG.newUnitAdded);
+    load();
+  };
+
+  const deleteLeaseRecord = async (leaseId: number, tenantName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(bi(`Delete lease record for ${tenantName}? This cannot be undone.`, `刪除 ${tenantName} 的租約紀錄？此操作無法復原。`))) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch(`/api/rentals/leases/${leaseId}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setToast(d.error || bi('Failed to delete lease record', '刪除租約紀錄失敗'));
+      return;
+    }
+    setToast(bi('Lease record deleted', '租約紀錄已刪除'));
     load();
   };
 
@@ -352,13 +373,14 @@ export default function RentalsPage() {
                 {activePanelUnits.map((u) => {
                   const remaining = daysRemaining(u.leaseEndDate);
                   const rec = u.currentRecord;
-                  const recStatus = displayRentalStatus(rec, {
+                  const recStatus = displayRentalStatusForUnit(u, rec, u.currentLease, {
                     dueDateDay: u.dueDateDay,
                     period: rec.billingPeriod || period,
                   });
                   const leaseStatus = u.leaseStatus || (u.currentLease
                     ? computeLeaseDisplayStatus(u.currentLease)
                     : 'vacant');
+                  const needsEndContract = u.currentLease ? isLeaseStaleEnded(u.currentLease) : false;
                   const selectable = canSelectUnit(u);
                   const groupKey = tenantGroupKey(u);
                   const sameTenantCount = groupKey
@@ -399,6 +421,9 @@ export default function RentalsPage() {
                       </td>
                       <td className="px-4 py-3.5">
                         <LeaseStatusBadge status={leaseStatus} />
+                        {needsEndContract && (
+                          <p className="text-[10px] text-amber-700 mt-1 font-medium">{bi('Run End Contract', '請完約')}</p>
+                        )}
                         {remaining !== null && leaseStatus === 'ending_soon' && (
                           <p className="text-[10px] text-amber-700 mt-1">{remaining} days left</p>
                         )}
@@ -473,6 +498,7 @@ export default function RentalsPage() {
                   <th className="px-4 py-3 text-left">起租日</th>
                   <th className="px-4 py-3 text-left">完租日</th>
                   <th className="px-4 py-3 text-left">Status</th>
+                  {isAdmin && <th className="px-4 py-3 text-right">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -494,6 +520,18 @@ export default function RentalsPage() {
                         {l.statusLabel}
                       </span>
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={(e) => deleteLeaseRecord(l.leaseId, l.tenantName, e)}
+                          className="text-xs font-medium text-red-600 hover:text-red-800 hover:underline disabled:opacity-50"
+                        >
+                          {bi('Delete', '刪除')}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -628,13 +666,21 @@ export default function RentalsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">起租日 Lease Start</label>
-                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={unitModal.leaseStartDate || ''}
-                  onChange={(e) => setUnitModal({ ...unitModal, leaseStartDate: e.target.value })} />
+                <input
+                  type="date"
+                  className={inp}
+                  value={isoFromDisplayDate(unitModal.leaseStartDate) || ''}
+                  onChange={(e) => setUnitModal({ ...unitModal, leaseStartDate: toFormDate(e.target.value) })}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">完租日 Lease End</label>
-                <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" className={inp} value={unitModal.leaseEndDate || ''}
-                  onChange={(e) => setUnitModal({ ...unitModal, leaseEndDate: e.target.value })} />
+                <input
+                  type="date"
+                  className={inp}
+                  value={isoFromDisplayDate(unitModal.leaseEndDate) || ''}
+                  onChange={(e) => setUnitModal({ ...unitModal, leaseEndDate: toFormDate(e.target.value) })}
+                />
               </div>
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-500 mb-1">往年租金 (one per line: YYYY, amount)</label>

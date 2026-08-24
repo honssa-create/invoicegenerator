@@ -29,10 +29,11 @@ const PLATFORM_COLORS: Record<HubPlatform, string> = {
   honour_en: 'bg-violet-100 text-violet-800',
   cupmoka: 'bg-orange-100 text-orange-800',
   quickbooks: 'bg-green-100 text-green-800',
+  clickup: 'bg-teal-100 text-teal-800',
   manual: 'bg-gray-100 text-gray-700',
 };
 
-const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks'] as const;
+const IMPORTABLE_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks', 'clickup'] as const;
 type ImportPlatform = (typeof IMPORTABLE_PLATFORMS)[number];
 const WOO_IMPORT_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka'] as const;
 type WooImportPlatform = (typeof WOO_IMPORT_PLATFORMS)[number];

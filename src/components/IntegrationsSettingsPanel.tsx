@@ -40,6 +40,7 @@ const EMPTY_MASKED: IntegrationSettingsMasked = {
     environment: 'sandbox',
   },
   yedpay: { user_id: '', access_token_set: false, access_token_hint: '' },
+  clickup: { list_id: '', api_token_set: false, api_token_hint: '' },
   sf_express: {
     partner_id: '',
     partner_id_set: false,
@@ -90,6 +91,7 @@ export default function IntegrationsSettingsPanel({
     environment: 'sandbox' as 'sandbox' | 'production',
   });
   const [yedpay, setYedpay] = useState({ user_id: '', access_token: '' });
+  const [clickup, setClickup] = useState({ list_id: '', api_token: '' });
   const [sf, setSf] = useState({
     partner_id: '',
     checkword: '',
@@ -124,6 +126,7 @@ export default function IntegrationsSettingsPanel({
       environment: s.quickbooks.environment,
     });
     setYedpay({ user_id: s.yedpay.user_id, access_token: '' });
+    setClickup({ list_id: s.clickup.list_id, api_token: '' });
     setSf({
       partner_id: s.sf_express.partner_id,
       checkword: '',
@@ -208,6 +211,10 @@ export default function IntegrationsSettingsPanel({
           user_id: yedpay.user_id,
           ...(yedpay.access_token ? { access_token: yedpay.access_token } : {}),
         },
+        clickup: {
+          list_id: clickup.list_id,
+          ...(clickup.api_token ? { api_token: clickup.api_token } : {}),
+        },
         sf_express: {
           partner_id: sf.partner_id,
           monthly_card: sf.monthly_card,
@@ -253,6 +260,7 @@ export default function IntegrationsSettingsPanel({
       applyMasked(data.settings);
       setQb((prev) => ({ ...prev, client_secret: '' }));
       setYedpay((prev) => ({ ...prev, access_token: '' }));
+      setClickup((prev) => ({ ...prev, api_token: '' }));
       setSf((prev) => ({ ...prev, checkword: '' }));
       setResend((prev) => ({
         honour: { ...prev.honour, api_key: '' },
@@ -431,6 +439,39 @@ export default function IntegrationsSettingsPanel({
               value={yedpay.access_token}
               onChange={(e) => setYedpay({ ...yedpay, access_token: e.target.value })}
               placeholder={masked.yedpay.access_token_set ? masked.yedpay.access_token_hint : 'Bearer token'}
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ClickUp */}
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
+          <h2 className="text-lg font-semibold text-gray-900">ClickUp 回禮</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Personal API token from ClickUp → Settings → Apps → API Token, plus the List ID (number after{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">/li/</code> in the list link). Import from Hub.
+          </p>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500">List ID</label>
+            <input
+              type="text"
+              value={clickup.list_id}
+              onChange={(e) => setClickup({ ...clickup, list_id: e.target.value })}
+              placeholder="901812202272"
+              className={`${inputCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500">API Token</label>
+            <input
+              type="password"
+              value={clickup.api_token}
+              onChange={(e) => setClickup({ ...clickup, api_token: e.target.value })}
+              placeholder={masked.clickup.api_token_set ? masked.clickup.api_token_hint : 'pk_…'}
               className={`${inputCls} mt-1`}
             />
           </div>

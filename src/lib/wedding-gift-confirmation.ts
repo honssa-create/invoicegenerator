@@ -92,18 +92,39 @@ function extractCapacity(text: string, warnings: string[]): string | null {
   return mapped;
 }
 
+function normalizePhoneFromParens(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 8) {
+    return `${digits.slice(0, 4)} ${digits.slice(4)}`;
+  }
+  return raw.replace(/\s+/g, ' ').trim();
+}
+
+/** Parenthesized HK phone: (6123 4567) or (12345678). */
+const PHONE_IN_PARENS = String.raw`(\d{4}\s+\d{4}|\d{6,})`;
+
 function extractNamePhone(text: string): { name?: string; phone?: string } {
-  // After Big Day date line: "Jane Doe (12345678)"
+  // After Big Day date line: "Jane Doe (12345678)" or "A & B (6123 4567)"
   const afterBigDay = text.match(
-    /(?:Big\s*Day|日期)[^\n]*\n+\*?[^\n]*?(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)[^\n]*\*?\s*\n+\s*([^\n(]+?)\s*\((\d{6,})\)/i
+    new RegExp(
+      String.raw`(?:Big\s*Day|日期)[^\n]*\n+\*?[^\n]*?(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)[^\n]*\*?\s*\n+\s*([^\n(]+?)\s*\(${PHONE_IN_PARENS}\)`,
+      'i',
+    ),
   );
   if (afterBigDay) {
-    return { name: afterBigDay[2].replace(/\*/g, '').trim(), phone: afterBigDay[3] };
+    return {
+      name: afterBigDay[2].replace(/\*/g, '').trim(),
+      phone: normalizePhoneFromParens(afterBigDay[3]),
+    };
   }
   // Fallback: any Name (phone) early in the message (before 味道 / Special Price)
   const cut = text.split(/味道|Special|專享|收件人/)[0] || text;
-  const m = cut.match(/([A-Za-z\u4e00-\u9fff][A-Za-z\u4e00-\u9fff .'-]{0,60}?)\s*\((\d{6,})\)/);
-  if (m) return { name: m[1].replace(/\*/g, '').trim(), phone: m[2] };
+  const m = cut.match(
+    new RegExp(String.raw`([A-Za-z\u4e00-\u9fff][A-Za-z\u4e00-\u9fff .'&-]{0,80}?)\s*\(${PHONE_IN_PARENS}\)`),
+  );
+  if (m) {
+    return { name: m[1].replace(/\*/g, '').trim(), phone: normalizePhoneFromParens(m[2]) };
+  }
   return {};
 }
 

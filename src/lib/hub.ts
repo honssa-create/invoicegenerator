@@ -1,6 +1,6 @@
 /** Client-safe types for the Centralized Order & Reconciliation Hub. */
 
-export const HUB_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks', 'manual'] as const;
+export const HUB_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks', 'clickup', 'manual'] as const;
 export type HubPlatform = (typeof HUB_PLATFORMS)[number];
 
 export const HUB_PLATFORM_LABELS: Record<HubPlatform, string> = {
@@ -9,6 +9,7 @@ export const HUB_PLATFORM_LABELS: Record<HubPlatform, string> = {
   honour_en: 'Honour EN',
   cupmoka: 'Cup Moka (cupmoka.com.hk)',
   quickbooks: 'QuickBooks',
+  clickup: 'ClickUp 回禮',
   manual: 'Manual 手動',
 };
 
@@ -18,6 +19,7 @@ export const HUB_PLATFORM_PREFIX: Record<Exclude<HubPlatform, 'manual'>, string>
   honour_en: 'HEN',
   cupmoka: 'CUP',
   quickbooks: 'QB',
+  clickup: 'CLK',
 };
 
 export interface HubOrderRow {

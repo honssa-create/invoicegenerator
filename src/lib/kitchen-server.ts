@@ -37,6 +37,7 @@ import { ensureCatalogStockRows, loadKitchenCatalog } from './kitchen-catalog-se
 import {
   NESTIEE_ORDER_TYPE,
   WEDDING_GIFT_ORDER_TYPE,
+  isOrderShipped,
   mapWeddingCapacityToPrep,
 } from './orders';
 import {
@@ -118,9 +119,11 @@ export async function resolveKitchenOwnerUserId(): Promise<number> {
   return anyUser.id;
 }
 
-function isShippedKitchenStatus(status: string | null | undefined): boolean {
-  const s = (status || '').trim();
-  return s === '已寄出 SENT' || /\bSENT\b/i.test(s);
+function isShippedKitchenStatus(
+  status: string | null | undefined,
+  fields: Record<string, unknown>,
+): boolean {
+  return isOrderShipped({ status: status ?? '', fields });
 }
 
 export async function ensureSeed(userId: number, catalog: KitchenCatalog) {
@@ -321,10 +324,10 @@ async function loadOpenOrders(
   const giftTypes = catalog.giftBoxTypes;
   const out: KitchenOpenOrder[] = [];
   for (const row of rows) {
-    // Hide shipped orders from the kitchen list.
-    if (isShippedKitchenStatus(row.status)) continue;
-
     const fields = parseFields(row.fields_json);
+    // Hide shipped orders from the kitchen list.
+    if (isShippedKitchenStatus(row.status, fields)) continue;
+
     const ot = orderTypeOf(fields);
     let type: 'nestiee' | 'return_gift' | null = null;
     let typeLabel = '';

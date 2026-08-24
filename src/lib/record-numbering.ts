@@ -65,6 +65,24 @@ async function isNumberTaken(recordType: GlobalRecordType, value: string): Promi
   return res.rows.length > 0;
 }
 
+/** Reset the stored counter to MAX(live table) + 1 (e.g. after tests that inflate the sequence). */
+export async function realignGlobalRecordSequence(recordType: GlobalRecordType): Promise<void> {
+  await ensureSchema();
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO global_record_sequences (record_type, next_serial)
+     VALUES ($1, 1)
+     ON CONFLICT (record_type) DO NOTHING`,
+    [recordType],
+  );
+  await pool.query(
+    `UPDATE global_record_sequences
+     SET next_serial = (${LIVE_MAX_SQL[recordType]}) + 1
+     WHERE record_type = $1`,
+    [recordType],
+  );
+}
+
 /** Atomically reserve the next office-wide number. Safe to call inside a record insert transaction. */
 export async function allocateGlobalRecordNumber(recordType: GlobalRecordType): Promise<string> {
   for (let attempt = 0; attempt < 64; attempt += 1) {

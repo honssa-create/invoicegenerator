@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import db from '@/lib/db';
-import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
+import { allocateGlobalRecordNumber, realignGlobalRecordSequence } from '@/lib/record-numbering';
 
 const TEST_USER_ID = 99905;
 /** High fixtures so we don't collide with real local/prod-like ORD rows. */
@@ -20,6 +20,7 @@ afterEach(async () => {
   await db.prepare('DELETE FROM orders WHERE user_id = ?').run(TEST_USER_ID);
   await db.prepare(`DELETE FROM orders WHERE reference_number IN (?, ?)`).run(FIXTURE_A, FIXTURE_B);
   await db.prepare('DELETE FROM users WHERE id = ?').run(TEST_USER_ID);
+  await realignGlobalRecordSequence('order');
 });
 
 describe('allocateGlobalRecordNumber', () => {
@@ -95,5 +96,25 @@ describe('allocateGlobalRecordNumber', () => {
     expect(ref).not.toBe(FIXTURE_A);
     expect(ref).toMatch(/^ORD-\d{7}$/);
     expect(Number(ref.slice(4))).toBeGreaterThan(9999908);
+  });
+
+  it('realignGlobalRecordSequence heals an inflated counter after fixture cleanup', async () => {
+    await db
+      .prepare(
+        `INSERT INTO orders (user_id, reference_number, name, status, fields_json)
+         VALUES (?, ?, 'existing', 'OPEN', '{}')`,
+      )
+      .run(TEST_USER_ID, FIXTURE_B);
+    await db
+      .prepare(`UPDATE global_record_sequences SET next_serial = 9999912 WHERE record_type = 'order'`)
+      .run();
+    await db.prepare(`DELETE FROM orders WHERE reference_number = ?`).run(FIXTURE_B);
+
+    await realignGlobalRecordSequence('order');
+
+    const seq = (await db
+      .prepare(`SELECT next_serial FROM global_record_sequences WHERE record_type = 'order'`)
+      .get()) as { next_serial: number };
+    expect(Number(seq.next_serial)).toBeLessThan(1000);
   });
 });

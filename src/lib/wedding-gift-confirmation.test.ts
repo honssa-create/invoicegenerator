@@ -72,7 +72,7 @@ describe('parseWeddingGiftConfirmation', () => {
     });
     expect(result.core).toMatchObject({
       name: 'Jane Doe',
-      phone: '12345678',
+      phone: '1234 5678',
       shipping_address: 'Grand Hyatt Pool Side\n香港君悅酒店, 1 Harbour Rd, Wan Chai',
     });
     expect(result.core.notes).toContain('總額：$4,100');
@@ -110,5 +110,18 @@ Somewhere, HK
     expect(result.fields.receiving_time).toBe('2-6pm');
     expect(result.fields.production_date).toBe('2024-12-26');
     expect(result.fields.expiry_date).toBe('2025-02-02');
+  });
+
+  it('parses spaced HK phone in parentheses after Big Day', () => {
+    const text = `日期 The Big Day：
+2026年12月6日 (Sunday) 午宴
+Jxxxxxx Cxxx & Jxx Vxxxxx (6123 4567)
+
+45ml 即食燕窩回禮
+味道：紅棗 X 50
+`;
+    const result = parseWeddingGiftConfirmation(text);
+    expect(result.core.name).toBe('Jxxxxxx Cxxx & Jxx Vxxxxx');
+    expect(result.core.phone).toBe('6123 4567');
   });
 });

@@ -27,6 +27,7 @@ import {
   parseNestieeReceiptDateFromDeliveryOptions,
   pruneStaleOrderFields,
   orderTypeFromFields,
+  WEDDING_GIFT_ORDER_TYPE,
   WOO_PLATFORM_ORDER_TYPE,
   parseCupmokaLinesFromWoo,
   appendCupmokaShippingLine,
@@ -324,6 +325,33 @@ export async function upsertHubOrder(
       if (!hasPayDate && pay.datePaid) {
         fields.payment_date = pay.datePaid;
         fields.payment1_date = pay.datePaid;
+      }
+    }
+  }
+
+  if (input.source_platform === 'clickup' && input.raw_payload) {
+    const payload = input.raw_payload as { _mapped_fields?: Record<string, string> };
+    fields.order_type = WEDDING_GIFT_ORDER_TYPE;
+    fields.order_from = 'clickup';
+    const mapped = payload._mapped_fields;
+    const verified = fields.payment_verified === true || fields.payment_verified === 'true';
+    const paymentKeys = new Set([
+      'payment_amount',
+      'payment1_amount',
+      'payment2_amount',
+      'payment_date',
+      'payment1_date',
+      'payment2_date',
+      'payment_bank',
+      'payment_method_detail',
+      'payment_status_label',
+      'payment_method_note',
+    ]);
+    if (mapped) {
+      for (const [k, v] of Object.entries(mapped)) {
+        if (v === undefined || v === null || String(v).trim() === '') continue;
+        if (verified && paymentKeys.has(k)) continue;
+        fields[k] = String(v);
       }
     }
   }

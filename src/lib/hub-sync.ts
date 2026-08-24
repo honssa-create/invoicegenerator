@@ -8,7 +8,10 @@ import {
   upsertHubOrder,
 } from './hub-server';
 import { HUB_PLATFORM_PREFIX } from './hub';
-import { getQuickBooksCredentials } from './integration-settings-server';
+import { getQuickBooksCredentials, getClickUpCredentials, clickupConfigured } from './integration-settings-server';
+import { fetchClickUpListTasks, clickUpMsToDateYmd } from './clickup';
+import { mapClickUpTaskToUpsert } from './clickup-map';
+import { ensurePrepFromWeddingOrder } from './kitchen-prep-server';
 import {
   fetchWooOrders,
   getWooStoreConfigs,
@@ -25,6 +28,7 @@ import {
   type WooOrder,
 } from './woocommerce';
 import type { HubImportDateRange } from './hub-import';
+import { orderCreatedInRange } from './hub-import';
 import { wooOrderCreatedBounds } from './hub-import';
 
 export async function syncWooStore(
@@ -142,11 +146,87 @@ export async function syncAllWooStores(userId: number, dateRange?: HubImportDate
   return results;
 }
 
+export async function syncClickUpTasks(
+  userId: number,
+  dateRange?: HubImportDateRange,
+): Promise<HubSyncResult> {
+  const result: HubSyncResult = {
+    platform: 'clickup',
+    fetched: 0,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    linked: 0,
+    errors: [],
+  };
+
+  if (!(await clickupConfigured(userId))) {
+    result.errors.push('ClickUp is not configured. Add API token and List ID in Settings → Integrations.');
+    return result;
+  }
+
+  const creds = await getClickUpCredentials(userId);
+  const lastSync = await getSyncState(userId, 'clickup', 'tasks');
+  const dateUpdatedGt = lastSync
+    ? String(
+        Date.parse(lastSync.includes('T') ? lastSync : `${lastSync.replace(' ', 'T')}Z`) || '',
+      ) || undefined
+    : undefined;
+
+  let tasks;
+  try {
+    tasks = await fetchClickUpListTasks(creds, {
+      include_closed: true,
+      date_updated_gt: dateRange ? undefined : dateUpdatedGt,
+    });
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : 'ClickUp fetch failed');
+    return result;
+  }
+
+  if (dateRange) {
+    tasks = tasks.filter((t) => {
+      const created = clickUpMsToDateYmd(t.date_created);
+      if (!created) return true;
+      return orderCreatedInRange(created, dateRange);
+    });
+  }
+
+  result.fetched = tasks.length;
+  const syncedAt = new Date().toISOString();
+
+  for (const task of tasks) {
+    try {
+      const upsertInput = mapClickUpTaskToUpsert(task);
+      const upsert = await upsertHubOrder(userId, upsertInput);
+      if (upsert.inserted) result.inserted += 1;
+      else result.updated += 1;
+      try {
+        await ensurePrepFromWeddingOrder(userId, upsert.id);
+      } catch {
+        // Prep can be caught up later.
+      }
+    } catch (err) {
+      result.skipped += 1;
+      result.errors.push(`Task ${task.id}: ${err instanceof Error ? err.message : 'upsert failed'}`);
+    }
+  }
+
+  if (!dateRange) {
+    await setSyncState(userId, 'clickup', 'tasks', syncedAt);
+  }
+
+  return result;
+}
+
 export async function importHubPlatform(
   userId: number,
-  platform: 'nestiee' | 'honour' | 'honour_en' | 'cupmoka' | 'quickbooks',
+  platform: 'nestiee' | 'honour' | 'honour_en' | 'cupmoka' | 'quickbooks' | 'clickup',
   dateRange?: HubImportDateRange
 ): Promise<HubSyncResult> {
+  if (platform === 'clickup') {
+    return await syncClickUpTasks(userId, dateRange);
+  }
   if (platform === 'quickbooks') {
     return await syncQuickBooksInvoices(userId, dateRange);
   }

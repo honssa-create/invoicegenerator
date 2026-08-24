@@ -42,7 +42,7 @@ export const ORDER_STATUSES = [
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** Ecommerce statuses for Nestiee + 燕窩回禮燉製. */
+/** Ecommerce statuses for Nestiee 燕窩訂單. */
 export const ECOM_ORDER_STATUSES = [
   'checkout-draft',
   'pending payment',
@@ -66,21 +66,52 @@ export const CUPMOKA_ORDER_STATUSES = [
 
 export type CupmokaOrderStatus = (typeof CUPMOKA_ORDER_STATUSES)[number];
 
+/** 燕窩回禮燉製 workflow statuses (board order). */
+export const WEDDING_GIFT_ORDER_STATUSES = [
+  'OPEN',
+  '訂單已確認, 待客人提供資料',
+  '已跟客人確認基本資料',
+  '處理LOGO CARD / 開單中',
+  '圓卡印刷完成',
+  '已預備好材料 (WINNIE - 1個月前)',
+  '同客人做最後資料確認 (送貨前 3 星期)',
+  '已燉製 (HING - 2.5星期前)',
+  '包裝完成 (WINNIE - 2星期前)',
+  '一星期前再次跟客人聯絡及SEND產品',
+  'CINDY FINAL CHECK (印送貨單)',
+  '已封箱待寄出',
+  '已交給司機/寄出',
+  '司機送到',
+  '已跟客人問好, 訂單完成',
+  '特別情況',
+] as const;
+
+export type WeddingGiftOrderStatus = (typeof WEDDING_GIFT_ORDER_STATUSES)[number];
+
+/** Post-shipment statuses for 燕窩回禮燉製 (dashboard + kitchen). */
+export const WEDDING_GIFT_SHIPPED_STATUSES = [
+  '已交給司機/寄出',
+  '司機送到',
+  '已跟客人問好, 訂單完成',
+] as const;
+
 export function usesEcomOrderStatuses(orderType: string): boolean {
-  return isNestieeOrderType(orderType) || isWeddingGiftOrderType(orderType);
+  return isNestieeOrderType(orderType);
 }
 
-/** Status options for the given order type (manufacturing vs ecommerce vs Cupmoka). */
+/** Status options for the given order type (manufacturing vs ecommerce vs Cupmoka vs wedding). */
 export function statusesForOrderType(orderType: string): readonly string[] {
   if (isCupmokaOrderType(orderType)) return CUPMOKA_ORDER_STATUSES;
+  if (isWeddingGiftOrderType(orderType)) return WEDDING_GIFT_ORDER_STATUSES;
   return usesEcomOrderStatuses(orderType) ? ECOM_ORDER_STATUSES : ORDER_STATUSES;
 }
 
-export type OrderStatusFamily = 'manufacturing' | 'ecom' | 'cupmoka';
+export type OrderStatusFamily = 'manufacturing' | 'ecom' | 'cupmoka' | 'wedding';
 
 /** Which status list applies to an order type (for bulk-change compatibility checks). */
 export function orderStatusFamily(orderType: string): OrderStatusFamily {
   if (isCupmokaOrderType(orderType)) return 'cupmoka';
+  if (isWeddingGiftOrderType(orderType)) return 'wedding';
   if (usesEcomOrderStatuses(orderType)) return 'ecom';
   return 'manufacturing';
 }
@@ -95,13 +126,16 @@ export function localDateYmd(d: Date = new Date()): string {
 
 /**
  * Whether an order is considered shipped / completed delivery for its type.
- * Manufacturing: `已寄出 SENT`; Nestiee/wedding: shipped|completed; Cupmoka: Shipped|Delivered.
+ * Manufacturing: `已寄出 SENT`; Nestiee: shipped|completed; 回禮: post-handoff statuses; Cupmoka: Shipped|Delivered.
  */
 export function isOrderShipped(o: { status?: string; fields?: Record<string, unknown> }): boolean {
   const s = (o.status || '').trim();
   const ot = typeof o.fields?.order_type === 'string' ? o.fields.order_type : '';
   if (isCupmokaOrderType(ot)) return s === 'Shipped' || s === 'Delivered';
-  if (usesEcomOrderStatuses(ot)) return s === 'shipped' || s === 'completed';
+  if (isWeddingGiftOrderType(ot)) {
+    return (WEDDING_GIFT_SHIPPED_STATUSES as readonly string[]).includes(s);
+  }
+  if (isNestieeOrderType(ot)) return s === 'shipped' || s === 'completed';
   return s === '已寄出 SENT' || /\bSENT\b/i.test(s);
 }
 
@@ -273,6 +307,21 @@ export const STATUS_DOT_COLORS: Record<string, string> = {
   'Delivered': '#16A34A',
   '取消': '#6B7280',
   '已退費': '#E04B8A',
+  '訂單已確認, 待客人提供資料': '#EAB308',
+  '已跟客人確認基本資料': '#5BA4CF',
+  '處理LOGO CARD / 開單中': '#CA8A04',
+  '圓卡印刷完成': '#E04B8A',
+  '已預備好材料 (WINNIE - 1個月前)': '#D97706',
+  '同客人做最後資料確認 (送貨前 3 星期)': '#8B6CC1',
+  '已燉製 (HING - 2.5星期前)': '#C2410C',
+  '包裝完成 (WINNIE - 2星期前)': '#EA580C',
+  '一星期前再次跟客人聯絡及SEND產品': '#7C3AED',
+  'CINDY FINAL CHECK (印送貨單)': '#B45309',
+  '已封箱待寄出': '#C23A8A',
+  '已交給司機/寄出': '#16A34A',
+  '司機送到': '#22C55E',
+  '已跟客人問好, 訂單完成': '#14B8A6',
+  '特別情況': '#DC2626',
 };
 
 export const STATUS_COLORS: Record<string, string> = {
@@ -303,6 +352,21 @@ export const STATUS_COLORS: Record<string, string> = {
   'Delivered': 'bg-[#DCFCE7] text-[#15803D]',
   '取消': 'bg-[#E5E7EB] text-[#4B5563]',
   '已退費': 'bg-[#FCE8F1] text-[#B8306A]',
+  '訂單已確認, 待客人提供資料': 'bg-[#FEF9C3] text-[#A16207]',
+  '已跟客人確認基本資料': 'bg-[#E8F4FA] text-[#3D7FA8]',
+  '處理LOGO CARD / 開單中': 'bg-[#FEF3C7] text-[#B45309]',
+  '圓卡印刷完成': 'bg-[#FCE8F1] text-[#B8306A]',
+  '已預備好材料 (WINNIE - 1個月前)': 'bg-[#FEF3C7] text-[#B45309]',
+  '同客人做最後資料確認 (送貨前 3 星期)': 'bg-[#F0EBF8] text-[#6B4FA0]',
+  '已燉製 (HING - 2.5星期前)': 'bg-[#FFEDD5] text-[#9A3412]',
+  '包裝完成 (WINNIE - 2星期前)': 'bg-[#FFEDD5] text-[#C2410C]',
+  '一星期前再次跟客人聯絡及SEND產品': 'bg-[#EDE9FE] text-[#5B21B6]',
+  'CINDY FINAL CHECK (印送貨單)': 'bg-[#FEF3C7] text-[#92400E]',
+  '已封箱待寄出': 'bg-[#F9E8F2] text-[#9A2D6C]',
+  '已交給司機/寄出': 'bg-[#DCFCE7] text-[#15803D]',
+  '司機送到': 'bg-[#DCFCE7] text-[#16A34A]',
+  '已跟客人問好, 訂單完成': 'bg-[#CCFBF1] text-[#0F766E]',
+  '特別情況': 'bg-[#FEE2E2] text-[#B91C1C]',
 };
 
 export const STATUS_COLUMN_BG: Record<string, string> = {
@@ -333,6 +397,21 @@ export const STATUS_COLUMN_BG: Record<string, string> = {
   'Delivered': 'bg-[#BBF7D0]',
   '取消': 'bg-[#E5E7EB]',
   '已退費': 'bg-[#F9D6E7]',
+  '訂單已確認, 待客人提供資料': 'bg-[#FDE68A]',
+  '已跟客人確認基本資料': 'bg-[#D4EAF6]',
+  '處理LOGO CARD / 開單中': 'bg-[#FDE68A]',
+  '圓卡印刷完成': 'bg-[#F9D6E7]',
+  '已預備好材料 (WINNIE - 1個月前)': 'bg-[#FDE68A]',
+  '同客人做最後資料確認 (送貨前 3 星期)': 'bg-[#E4D9F4]',
+  '已燉製 (HING - 2.5星期前)': 'bg-[#FED7AA]',
+  '包裝完成 (WINNIE - 2星期前)': 'bg-[#FED7AA]',
+  '一星期前再次跟客人聯絡及SEND產品': 'bg-[#DDD6FE]',
+  'CINDY FINAL CHECK (印送貨單)': 'bg-[#FDE68A]',
+  '已封箱待寄出': 'bg-[#F5D6E8]',
+  '已交給司機/寄出': 'bg-[#BBF7D0]',
+  '司機送到': 'bg-[#BBF7D0]',
+  '已跟客人問好, 訂單完成': 'bg-[#99F6E4]',
+  '特別情況': 'bg-[#FECACA]',
 };
 
 export const STATUS_COLUMN_ACCENT: Record<string, string> = {
@@ -363,6 +442,21 @@ export const STATUS_COLUMN_ACCENT: Record<string, string> = {
   'Delivered': 'border-t-[#16A34A]',
   '取消': 'border-t-[#6B7280]',
   '已退費': 'border-t-[#E04B8A]',
+  '訂單已確認, 待客人提供資料': 'border-t-[#EAB308]',
+  '已跟客人確認基本資料': 'border-t-[#5BA4CF]',
+  '處理LOGO CARD / 開單中': 'border-t-[#CA8A04]',
+  '圓卡印刷完成': 'border-t-[#E04B8A]',
+  '已預備好材料 (WINNIE - 1個月前)': 'border-t-[#D97706]',
+  '同客人做最後資料確認 (送貨前 3 星期)': 'border-t-[#8B6CC1]',
+  '已燉製 (HING - 2.5星期前)': 'border-t-[#C2410C]',
+  '包裝完成 (WINNIE - 2星期前)': 'border-t-[#EA580C]',
+  '一星期前再次跟客人聯絡及SEND產品': 'border-t-[#7C3AED]',
+  'CINDY FINAL CHECK (印送貨單)': 'border-t-[#B45309]',
+  '已封箱待寄出': 'border-t-[#C23A8A]',
+  '已交給司機/寄出': 'border-t-[#16A34A]',
+  '司機送到': 'border-t-[#22C55E]',
+  '已跟客人問好, 訂單完成': 'border-t-[#14B8A6]',
+  '特別情況': 'border-t-[#DC2626]',
 };
 
 /** Shipment Detail / Woo normalize options for 寄出方式. */

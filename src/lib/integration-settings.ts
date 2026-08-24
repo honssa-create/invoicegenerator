@@ -92,6 +92,17 @@ export interface YedpaySettingsMasked {
   access_token_hint: string;
 }
 
+export interface ClickUpSettings {
+  api_token: string;
+  list_id: string;
+}
+
+export interface ClickUpSettingsMasked {
+  list_id: string;
+  api_token_set: boolean;
+  api_token_hint: string;
+}
+
 export const SF_EXPRESS_DEFAULT_PRINT_TEMPLATE = 'fm_150_hongkonglocal_HYSBOO5I2I7';
 
 export interface SfExpressSettings {
@@ -128,6 +139,7 @@ export interface IntegrationSettings {
   woocommerce: Record<WooPlatformKey, WooStoreSettings>;
   quickbooks: QuickBooksSettings;
   yedpay: YedpaySettings;
+  clickup: ClickUpSettings;
   sf_express: SfExpressSettings;
   resend: Record<ResendBrandKey, ResendBrandSettings>;
 }
@@ -136,6 +148,7 @@ export interface IntegrationSettingsMasked {
   woocommerce: Record<WooPlatformKey, WooStoreSettingsMasked>;
   quickbooks: QuickBooksSettingsMasked;
   yedpay: YedpaySettingsMasked;
+  clickup: ClickUpSettingsMasked;
   sf_express: SfExpressSettingsMasked;
   resend: Record<ResendBrandKey, ResendBrandSettingsMasked>;
 }
@@ -163,6 +176,10 @@ export const EMPTY_INTEGRATION_SETTINGS: IntegrationSettings = {
   yedpay: {
     access_token: '',
     user_id: '',
+  },
+  clickup: {
+    api_token: '',
+    list_id: '',
   },
   sf_express: {
     partner_id: '',

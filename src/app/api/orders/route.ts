@@ -4,7 +4,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrdersSummary, logActivity } from '@/lib/order-server';
 import { getDataOwnerId } from '@/lib/org-server';
-import { ORDER_TYPES, ORDER_STATUSES, WEDDING_GIFT_ORDER_TYPE, orderTypeFromFields } from '@/lib/orders';
+import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE, orderTypeFromFields, statusesForOrderType } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
@@ -42,8 +42,9 @@ export async function POST(request: Request) {
         ? body.order_type.trim()
         : '';
     const statusRaw = typeof body.status === 'string' ? body.status.trim() : '';
+    const allowedStatuses = statusesForOrderType(orderType);
     const status =
-      statusRaw && (ORDER_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : 'OPEN';
+      statusRaw && allowedStatuses.includes(statusRaw) ? statusRaw : 'OPEN';
     const fieldsJson = JSON.stringify(orderType ? { order_type: orderType } : {});
     const { id, referenceNumber } = await db.transaction(async () => {
       const referenceNumber = await allocateGlobalRecordNumber('order');

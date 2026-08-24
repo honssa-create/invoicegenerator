@@ -7,7 +7,7 @@ import { orderCreatedInRange } from './hub-import';
 import { formatWooAddress } from './orders';
 
 export interface WooStoreConfig {
-  platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
+  platform: Exclude<HubPlatform, 'manual' | 'quickbooks' | 'clickup'>;
   label: string;
   storeUrl: string;
   consumerKey: string;
@@ -66,7 +66,7 @@ export interface WooOrder {
 }
 
 const STORE_META: Array<{
-  platform: Exclude<HubPlatform, 'manual' | 'quickbooks'>;
+  platform: Exclude<HubPlatform, 'manual' | 'quickbooks' | 'clickup'>;
   label: string;
 }> = [
   { platform: 'nestiee', label: 'nestiee.com.hk' },

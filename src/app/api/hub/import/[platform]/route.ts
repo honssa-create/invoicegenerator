@@ -4,10 +4,10 @@ import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getDataOwnerId } from '@/lib/org-server';
 import { importHubPlatform, isQuickBooksConnected } from '@/lib/hub-sync';
 import { getWooStoreSetupIssue } from '@/lib/woocommerce';
-import { getQuickBooksCredentials } from '@/lib/integration-settings-server';
+import { clickupConfigured, getQuickBooksCredentials } from '@/lib/integration-settings-server';
 import { parseHubImportDateRange } from '@/lib/hub-import';
 
-const PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks'] as const;
+const PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks', 'clickup'] as const;
 type ImportPlatform = (typeof PLATFORMS)[number];
 
 function isImportPlatform(value: string): value is ImportPlatform {
@@ -45,6 +45,13 @@ export async function POST(
   if (platform === 'quickbooks') {
     if (!isQuickBooksConnected(ownerId)) {
       return NextResponse.json({ error: 'QuickBooks is not connected. Connect OAuth first.' }, { status: 400 });
+    }
+  } else if (platform === 'clickup') {
+    if (!(await clickupConfigured(ownerId))) {
+      return NextResponse.json(
+        { error: 'ClickUp is not configured. Add API token and List ID in Settings → Integrations.' },
+        { status: 400 },
+      );
     }
   } else {
     const issue = await getWooStoreSetupIssue(ownerId, platform);

@@ -5,7 +5,7 @@ import { HUB_PLATFORMS, HUB_PLATFORM_LABELS, type HubIntegrationStatus } from '@
 import { listHubOrders, getSyncState } from '@/lib/hub-server';
 import { getWooStoreConfigs, getWooStoreSetupIssue } from '@/lib/woocommerce';
 import { isQuickBooksConnected, quickbooksConfigured } from '@/lib/hub-sync';
-import { getQuickBooksCredentials } from '@/lib/integration-settings-server';
+import { clickupConfigured, getQuickBooksCredentials } from '@/lib/integration-settings-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -15,6 +15,16 @@ export async function GET(request: Request) {
   const orders = await listHubOrders(ownerId);
 
   const integrations: HubIntegrationStatus[] = await Promise.all(HUB_PLATFORMS.filter((p) => p !== 'manual').map(async (platform) => {
+    if (platform === 'clickup') {
+      const configured = await clickupConfigured(ownerId);
+      return {
+        platform,
+        label: HUB_PLATFORM_LABELS[platform],
+        configured,
+        connected: configured,
+        last_synced_at: await getSyncState(ownerId, 'clickup', 'tasks'),
+      };
+    }
     if (platform === 'quickbooks') {
       const qb = await getQuickBooksCredentials(ownerId);
       return {

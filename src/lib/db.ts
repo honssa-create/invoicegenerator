@@ -499,6 +499,9 @@ async function migrateOrderStatusesV2Once(): Promise<void> {
 }
 
 async function syncGlobalRecordSequences(): Promise<void> {
+  // Align counters to the highest issued number in each table. Using GREATEST()
+  // only (never lowering) let Vitest fixtures (ORD-99999xx) inflate next_serial
+  // permanently after the fixture rows were deleted.
   await getPool().query(`
     INSERT INTO global_record_sequences (record_type, next_serial)
     VALUES
@@ -506,14 +509,14 @@ async function syncGlobalRecordSequences(): Promise<void> {
       ('quotation', COALESCE((SELECT MAX(CAST(quote_number AS INTEGER)) + 1 FROM quotations WHERE quote_number ~ '^[0-9]{8}$'), 1)),
       ('invoice', COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) + 1 FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'), 1))
     ON CONFLICT (record_type) DO UPDATE
-    SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
+    SET next_serial = EXCLUDED.next_serial
   `);
 }
 
 async function runBootDataFixes(): Promise<void> {
   await migrateUnifiedRecordNumberingOnce();
   await migrateOrderStatusesV2Once();
-  // Keep counters at or above live max so a stale sequence cannot reissue ORD-0000008.
+  // Keep counters aligned with live max on boot (also heals inflated test counters).
   await syncGlobalRecordSequences();
 
   // Sequence MAX scans once per DB (not every process cold start).

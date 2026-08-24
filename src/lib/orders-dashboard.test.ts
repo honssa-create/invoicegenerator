@@ -14,6 +14,12 @@ describe('order dashboard helpers', () => {
     expect(isOrderShipped({ status: 'processing', fields: { order_type: 'Nestiee 燕窩訂單' } })).toBe(false);
     expect(isOrderShipped({ status: 'Delivered', fields: { order_type: 'Cupmoka' } })).toBe(true);
     expect(isOrderUnshipped({ status: '處理中', fields: { order_type: 'Cupmoka' } })).toBe(true);
+    expect(
+      isOrderShipped({ status: '已交給司機/寄出', fields: { order_type: '燕窩回禮燉製' } }),
+    ).toBe(true);
+    expect(
+      isOrderUnshipped({ status: '包裝完成 (WINNIE - 2星期前)', fields: { order_type: '燕窩回禮燉製' } }),
+    ).toBe(true);
   });
 
   it('marks urgent when due within 2 days and unshipped', () => {

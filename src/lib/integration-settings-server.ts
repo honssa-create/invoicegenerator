@@ -15,6 +15,7 @@ import {
   type WooPlatformKey,
   type WooStoreSettings,
   type YedpaySettings,
+  type ClickUpSettings,
 } from './integration-settings';
 import { normalizeWooStoreUrl } from './woo-url';
 
@@ -52,6 +53,7 @@ function parseSettings(json: string | null | undefined): IntegrationSettings {
       },
       quickbooks: { ...EMPTY_INTEGRATION_SETTINGS.quickbooks, ...parsed.quickbooks },
       yedpay: { ...EMPTY_INTEGRATION_SETTINGS.yedpay, ...parsed.yedpay },
+      clickup: { ...EMPTY_INTEGRATION_SETTINGS.clickup, ...parsed.clickup },
       sf_express: {
         ...EMPTY_INTEGRATION_SETTINGS.sf_express,
         ...parsed.sf_express,
@@ -175,6 +177,10 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
       access_token: pick(settings.yedpay.access_token, process.env.YEDPAY_ACCESS_TOKEN || ''),
       user_id: pick(settings.yedpay.user_id, process.env.YEDPAY_USER_ID || ''),
     },
+    clickup: {
+      api_token: pick(settings.clickup.api_token, process.env.CLICKUP_API_TOKEN || ''),
+      list_id: pick(settings.clickup.list_id, process.env.CLICKUP_LIST_ID || ''),
+    },
     sf_express: {
       partner_id: pick(sf.partner_id, envSf.partner_id),
       checkword: pick(sf.checkword, envSf.checkword),
@@ -221,6 +227,7 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
 
   const qbSecret = maskSecret(s.quickbooks.client_secret);
   const yedToken = maskSecret(s.yedpay.access_token);
+  const clickupToken = maskSecret(s.clickup.api_token);
   const sfCheck = maskSecret(s.sf_express.checkword);
 
   const maskResend = (brand: ResendBrandKey) => {
@@ -254,6 +261,11 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
       access_token_set: yedToken.set,
       access_token_hint: yedToken.hint,
     },
+    clickup: {
+      list_id: s.clickup.list_id,
+      api_token_set: clickupToken.set,
+      api_token_hint: clickupToken.hint,
+    },
     sf_express: {
       partner_id: s.sf_express.partner_id,
       partner_id_set: Boolean(s.sf_express.partner_id.trim()),
@@ -281,6 +293,7 @@ export type IntegrationSettingsUpdate = {
   woocommerce?: Partial<Record<WooPlatformKey, Partial<WooStoreSettings>>>;
   quickbooks?: Partial<QuickBooksSettings>;
   yedpay?: Partial<YedpaySettings>;
+  clickup?: Partial<ClickUpSettings>;
   sf_express?: Partial<SfExpressSettings>;
   resend?: Partial<Record<ResendBrandKey, Partial<ResendBrandSettings>>>;
 };
@@ -334,6 +347,7 @@ export async function saveIntegrationSettings(userId: number, update: Integratio
     woocommerce: { ...current.woocommerce },
     quickbooks: { ...current.quickbooks },
     yedpay: { ...current.yedpay },
+    clickup: { ...current.clickup },
     sf_express: { ...current.sf_express },
     resend: {
       honour: { ...current.resend.honour, order_types: [...current.resend.honour.order_types] },
@@ -375,6 +389,13 @@ export async function saveIntegrationSettings(userId: number, update: Integratio
     next.yedpay = {
       user_id: keepOrReplace(current.yedpay.user_id, update.yedpay.user_id, true),
       access_token: keepOrReplace(current.yedpay.access_token, update.yedpay.access_token),
+    };
+  }
+
+  if (update.clickup) {
+    next.clickup = {
+      list_id: keepOrReplace(current.clickup.list_id, update.clickup.list_id, true),
+      api_token: keepOrReplace(current.clickup.api_token, update.clickup.api_token),
     };
   }
 
@@ -437,6 +458,15 @@ export async function getQuickBooksCredentials(userId: number): Promise<QuickBoo
 
 export async function getYedpayCredentials(userId: number): Promise<YedpaySettings> {
   return (await getIntegrationSettings(userId)).yedpay;
+}
+
+export async function getClickUpCredentials(userId: number): Promise<ClickUpSettings> {
+  return (await getIntegrationSettings(userId)).clickup;
+}
+
+export async function clickupConfigured(userId: number): Promise<boolean> {
+  const c = await getClickUpCredentials(userId);
+  return Boolean(c.api_token.trim() && c.list_id.trim());
 }
 
 export async function getSfExpressCredentials(userId: number): Promise<SfExpressSettings> {

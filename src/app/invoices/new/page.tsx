@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import CustomerSelect from '@/components/CustomerSelect';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { calculateInvoiceTotals } from '@/lib/utils';
@@ -36,8 +37,8 @@ export default function NewInvoicePage() {
     if (!loading && readOnly) router.replace('/invoices');
   }, [loading, readOnly, router]);
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(
     new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
@@ -48,12 +49,6 @@ export default function NewInvoicePage() {
   const [status, setStatus] = useState('draft');
   const [items, setItems] = useState<LineItem[]>([emptyLine()]);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    fetch('/api/customers')
-      .then((res) => res.json())
-      .then((data) => setCustomers(data.customers || []));
-  }, []);
 
   const totals = calculateInvoiceTotals(items, taxRate);
 
@@ -127,13 +122,7 @@ export default function NewInvoicePage() {
         <h1 className="text-2xl font-bold text-gray-900 mt-2">{TITLE.newInvoice}</h1>
       </div>
 
-      {customers.length === 0 ? (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-yellow-800">
-          {bi('You need at least one customer before creating an invoice.', '建立發票前需至少有一位客戶。')}{' '}
-          <Link href="/customers" className="font-medium underline">{bi('Add a customer', '新增客戶')}</Link>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}</div>
           )}
@@ -143,17 +132,14 @@ export default function NewInvoicePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Customer', '客戶')} *</label>
-                <select
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"
-                >
-                  <option value="">{bi('Select customer', '選擇客戶')}</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <CustomerSelect
+                  value={customerName}
+                  onSelect={(c) => {
+                    setCustomerId(String(c.id));
+                    setCustomerName(c.name);
+                  }}
+                  placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Issue Date', '開立日期')} *</label>
@@ -315,7 +301,6 @@ export default function NewInvoicePage() {
             {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
         </form>
-      )}
     </AppLayout>
   );
 }

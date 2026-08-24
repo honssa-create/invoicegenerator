@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
+import { upsertCustomer } from '@/lib/customer-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -39,23 +40,17 @@ export async function POST(request: Request) {
     }
 
     const ownerId = await getDataOwnerId(session);
-    const result = await db
-      .prepare(
-        `INSERT INTO customers (user_id, name, company_name, email, phone, address, ordered)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        ownerId,
-        name.trim(),
-        company_name?.trim() || null,
-        email?.trim() || null,
-        phone?.trim() || null,
-        address?.trim() || null,
-        ordered?.trim() || null
-      );
+    const { id, created } = await upsertCustomer(ownerId, {
+      name: name.trim(),
+      companyName: company_name?.trim() || null,
+      email: email?.trim() || null,
+      phone: phone?.trim() || null,
+      address: address?.trim() || null,
+      orderType: ordered?.trim() || null,
+    });
 
-    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);
-    return NextResponse.json({ customer }, { status: 201 });
+    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+    return NextResponse.json({ customer, created }, { status: created ? 201 : 200 });
   } catch {
     return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 });
   }

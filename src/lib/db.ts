@@ -828,6 +828,9 @@ async function runBootDataFixes(): Promise<void> {
     );
   }
 
+  const { migrateCustomerDedupOnce } = await import('./customer-server');
+  await migrateCustomerDedupOnce();
+
   await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT`);
   await client().query(`ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT`);
   await client().query(`

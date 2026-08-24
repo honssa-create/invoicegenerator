@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import CustomerSelect from '@/components/CustomerSelect';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
 import { quotationFileUrl } from '@/lib/image-url';
@@ -54,8 +55,8 @@ export default function QuotationDetailPage() {
   const { isSectionReadOnly } = useAuth();
   const readOnly = isSectionReadOnly('quotations');
   const [quote, setQuote] = useState<QuotationWithDetails | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [email, setEmail] = useState('');
   const [sendLater, setSendLater] = useState(false);
   const [issueDate, setIssueDate] = useState('');
@@ -93,6 +94,7 @@ export default function QuotationDetailPage() {
         if (!q) return;
         setQuote(q);
         setCustomerId(q.customer_id ? String(q.customer_id) : '');
+        setCustomerName(q.customer_name || '');
         setEmail(q.email || q.customer_email || '');
         setSendLater(Boolean(q.send_later));
         setIssueDate(q.issue_date);
@@ -129,11 +131,6 @@ export default function QuotationDetailPage() {
   useEffect(() => {
     load();
   }, [id]);
-  useEffect(() => {
-    fetch('/api/customers')
-      .then((r) => r.json())
-      .then((d) => setCustomers(d.customers || []));
-  }, []);
 
   const totals = useMemo(
     () =>
@@ -304,11 +301,9 @@ export default function QuotationDetailPage() {
   const removeItem = (i: number) =>
     setItems((prev) => (prev.length <= 1 ? [emptyLine()] : prev.filter((_, idx) => idx !== i)));
 
-  const applyCustomer = (nextId: string) => {
-    setCustomerId(nextId);
-    if (!nextId) return;
-    const c = customers.find((x) => String(x.id) === nextId);
-    if (!c) return;
+  const applyCustomer = (c: Customer) => {
+    setCustomerId(String(c.id));
+    setCustomerName(c.name);
     if (!email.trim() && c.email) setEmail(c.email);
     const composed = [c.name, c.address, c.phone].filter(Boolean).join('\n');
     if (!billingAddress.trim() && composed) setBillingAddress(composed);
@@ -418,14 +413,12 @@ export default function QuotationDetailPage() {
             <div className="space-y-3">
               <div>
                 <label className={labelCls}>{bi('Customer', '客戶')}</label>
-                <select value={customerId} onChange={(e) => applyCustomer(e.target.value)} disabled={readOnly} className={inputCls}>
-                  <option value="">Choose a customer</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <CustomerSelect
+                  value={customerName}
+                  onSelect={applyCustomer}
+                  disabled={readOnly}
+                  placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
+                />
               </div>
             </div>
             <div className="space-y-3">

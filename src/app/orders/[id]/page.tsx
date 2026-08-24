@@ -621,11 +621,6 @@ export default function OrderDetailPage() {
     });
   };
 
-  const addNewCustomerName = (name: string) => {
-    setCoreLocal('name', name);
-    patch({ core: { name } });
-  };
-
   /** Clamp typed quantity to ≥ 0 (empty stays empty). */
   const nonNeg = (value: string): string => {
     if (value.trim() === '') return '';
@@ -1209,8 +1204,8 @@ export default function OrderDetailPage() {
                 <CustomerSelect
                   value={order.name}
                   orderType={fVal('order_type')}
+                  requireOrderType
                   onSelect={applyCustomerFromList}
-                  onAddNew={addNewCustomerName}
                   placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
                 />
               </div>

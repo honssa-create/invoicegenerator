@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
+import CustomerSelect from '@/components/CustomerSelect';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency, StatusBadge } from '@/components/ui';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
@@ -58,12 +59,12 @@ export default function InvoiceDetailPage() {
   const { isSectionReadOnly } = useAuth();
   const readOnly = isSectionReadOnly('invoices');
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [orders, setOrders] = useState<
     { id: number; reference_number: string; po_number?: string; name?: string }[]
   >([]);
   const [linkedOrder, setLinkedOrder] = useState<LinkedOrderSummary | null>(null);
   const [customerId, setCustomerId] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [email, setEmail] = useState('');
   const [sendLater, setSendLater] = useState(false);
   const [issueDate, setIssueDate] = useState('');
@@ -103,6 +104,7 @@ export default function InvoiceDetailPage() {
         setInvoice(inv);
         setLinkedOrder(d.linkedOrder || null);
         setCustomerId(inv.customer_id ? String(inv.customer_id) : '');
+        setCustomerName(inv.customer_name || '');
         setEmail(inv.email || inv.customer_email || '');
         setSendLater(Boolean(inv.send_later));
         setIssueDate(inv.issue_date);
@@ -145,9 +147,6 @@ export default function InvoiceDetailPage() {
   useRefetchOnFocus(load, Boolean(id));
 
   useEffect(() => {
-    fetch('/api/customers')
-      .then((r) => r.json())
-      .then((d) => setCustomers(d.customers || []));
     fetch('/api/orders?fields=options')
       .then((r) => r.json())
       .then((d) => setOrders(d.orders || []))
@@ -328,11 +327,9 @@ export default function InvoiceDetailPage() {
   const removeItem = (i: number) =>
     setItems((prev) => (prev.length <= 1 ? [emptyLine()] : prev.filter((_, idx) => idx !== i)));
 
-  const applyCustomer = (nextId: string) => {
-    setCustomerId(nextId);
-    if (!nextId) return;
-    const c = customers.find((x) => String(x.id) === nextId);
-    if (!c) return;
+  const applyCustomer = (c: Customer) => {
+    setCustomerId(String(c.id));
+    setCustomerName(c.name);
     if (!email.trim() && c.email) setEmail(c.email);
     const composed = [c.name, c.address, c.phone].filter(Boolean).join('\n');
     if (!billingAddress.trim() && composed) setBillingAddress(composed);
@@ -439,19 +436,12 @@ export default function InvoiceDetailPage() {
             <div className="space-y-3">
               <div>
                 <label className={labelCls}>{bi('Customer', '客戶')}</label>
-                <select
-                  value={customerId}
-                  onChange={(e) => applyCustomer(e.target.value)}
+                <CustomerSelect
+                  value={customerName}
+                  onSelect={applyCustomer}
                   disabled={readOnly}
-                  className={inputCls}
-                >
-                  <option value="">Choose a customer</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
+                />
               </div>
             </div>
             <div className="space-y-3">

@@ -101,23 +101,12 @@ async function findOrCreateCustomer(
   name: string,
   email?: string | null
 ): Promise<number> {
-  const trimmedEmail = email?.trim() || null;
-  if (trimmedEmail) {
-    const byEmail = await db
-      .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(email) = LOWER(?)')
-      .get(userId, trimmedEmail) as { id: number } | undefined;
-    if (byEmail) return byEmail.id;
-  }
-
-  const byName = await db
-    .prepare('SELECT id FROM customers WHERE user_id = ? AND LOWER(name) = LOWER(?)')
-    .get(userId, name.trim()) as { id: number } | undefined;
-  if (byName) return byName.id;
-
-  const result = await db
-    .prepare('INSERT INTO customers (user_id, name, email) VALUES (?, ?, ?)')
-    .run(userId, name.trim() || 'Unknown Customer', trimmedEmail);
-  return Number(result.lastInsertRowid);
+  const { upsertCustomer } = await import('./customer-server');
+  const { id } = await upsertCustomer(userId, {
+    name: name.trim() || 'Unknown Customer',
+    email: email?.trim() || null,
+  });
+  return id;
 }
 
 async function syncCustomerAfterHubOrder(userId: number, orderId: number): Promise<void> {

@@ -6,6 +6,7 @@ import { parseMeterReadingFromBoxes, parseMeterReadingFromText, type MeterKind }
 import {
   ensureDefaultRentalUnits,
   ensureRentRecord,
+  getRentRecord,
   getRentalUnit,
   getSuggestedPrevElectricityReading,
   getSuggestedPrevWaterReading,
@@ -14,9 +15,14 @@ import {
 import {
   UTILITY_METER_DEFINITIONS,
   UTILITY_METER_KEYS,
+  electricityUsageUnits,
   isUtilityMeterKey,
+  legacyOtherUnitMeterField,
   periodFromReadingDate,
+  utilityMeterDefinition,
   type ElectricityMeterData,
+  type RentalUnit,
+  type UtilityMeterDefinition,
   type UtilityMeterKey,
   type UtilityMeterRound,
   type UtilityMeterRoundItem,
@@ -181,15 +187,24 @@ async function previousRoundReading(
   return row?.reading_value != null ? Number(row.reading_value) : null;
 }
 
+function utilityMeterSyncOrder(a: UtilityMeterDefinition, b: UtilityMeterDefinition): number {
+  const rank = (def: UtilityMeterDefinition) => {
+    if (def.feedsSharedMeterDeduction) return 0;
+    if (def.isSharedMeterMain) return 2;
+    return 1;
+  };
+  const indexOf = (def: UtilityMeterDefinition) =>
+    UTILITY_METER_DEFINITIONS.findIndex((d) => d.key === def.key);
+  return rank(a) - rank(b) || indexOf(a) - indexOf(b);
+}
+
 async function mergeElectricity(
   userId: number,
-  unitName: string,
+  unit: RentalUnit,
   period: string,
   patch: Partial<ElectricityMeterData>,
   fillPrevFrom?: number | null,
 ): Promise<number | null> {
-  const unit = await findUnitByName(userId, unitName);
-  if (!unit) return null;
   const record = await ensureRentRecord(unit, period);
   const existing = record.electricityMeter || {
     prevReading: null,
@@ -216,15 +231,68 @@ async function mergeElectricity(
   return record.id;
 }
 
+/** Push sub-meter usage into every shared-meter unit that lists sourceUnit as a deduction. */
+async function pushUsageToSharedMeterParents(
+  userId: number,
+  period: string,
+  sourceUnit: RentalUnit,
+  usage: number,
+): Promise<void> {
+  const rows = (await db
+    .prepare(
+      `SELECT id FROM rental_units
+       WHERE user_id = ? AND utility_billing_mode = 'company_shared_meter'`
+    )
+    .all(userId)) as { id: number }[];
+
+  const legacyField = legacyOtherUnitMeterField(sourceUnit.unitName);
+  const patch: Partial<ElectricityMeterData> = {
+    otherUnitUsages: { [String(sourceUnit.id)]: usage },
+  };
+  if (legacyField) patch[legacyField] = usage;
+
+  for (const row of rows) {
+    const shared = await getRentalUnit(row.id, userId);
+    if (!shared?.sharedMeterDeductionUnitIds.includes(sourceUnit.id)) continue;
+    await mergeElectricity(userId, shared, period, patch);
+  }
+}
+
+/** Best-effort usage for shared-meter deduction; falls back to the dial reading when no baseline exists yet. */
+async function resolveDeductionUsage(
+  userId: number,
+  unit: RentalUnit,
+  period: string,
+  readingValue: number,
+  prevFromRound: number | null,
+  subMeter: ElectricityMeterData | null | undefined,
+): Promise<number> {
+  if (
+    subMeter?.currReading != null
+    && subMeter.prevReading != null
+    && Number.isFinite(subMeter.currReading)
+    && Number.isFinite(subMeter.prevReading)
+  ) {
+    return electricityUsageUnits(subMeter.currReading, subMeter.prevReading);
+  }
+  if (prevFromRound != null && Number.isFinite(prevFromRound)) {
+    return Math.max(0, readingValue - prevFromRound);
+  }
+  const suggested = await getSuggestedPrevElectricityReading(userId, unit.id, period);
+  if (suggested != null && Number.isFinite(suggested)) {
+    return Math.max(0, readingValue - suggested);
+  }
+  // No previous baseline yet — still populate the shared-meter field with the latest dial reading.
+  return readingValue;
+}
+
 async function mergeWater(
   userId: number,
-  unitName: string,
+  unit: RentalUnit,
   period: string,
   currReading: number,
   fillPrevFrom?: number | null,
 ): Promise<number | null> {
-  const unit = await findUnitByName(userId, unitName);
-  if (!unit) return null;
   const record = await ensureRentRecord(unit, period);
   const existing = record.waterMeter || {
     prevReading: null,
@@ -256,79 +324,36 @@ async function syncItemToBilling(
   readingValue: number | null,
 ): Promise<number | null> {
   if (readingValue == null || !Number.isFinite(readingValue)) return null;
-  const prevFromRound = await previousRoundReading(userId, meterKey, readingDate);
-  const usage =
-    prevFromRound != null && Number.isFinite(prevFromRound)
-      ? Math.max(0, readingValue - prevFromRound)
-      : null;
+  const def = utilityMeterDefinition(meterKey);
+  const unit = await findUnitByName(userId, def.billingUnitName);
+  if (!unit) return null;
 
-  switch (meterKey) {
-    case 'elec_213a_main':
-      return mergeElectricity(
-        userId,
-        '213A',
-        period,
-        { currReading: readingValue },
-        prevFromRound,
-      );
-    case 'water_213a':
-      return mergeWater(userId, '213A', period, readingValue, prevFromRound);
-    case 'water_213b':
-      return mergeWater(userId, '213B', period, readingValue, prevFromRound);
-    case 'elec_213b': {
-      const synced = await mergeElectricity(
-        userId,
-        '213B',
-        period,
-        { currReading: readingValue },
-        prevFromRound,
-      );
-      if (usage != null) {
-        const deduction = await findUnitByName(userId, '213B');
-        await mergeElectricity(userId, '213A', period, {
-          meter213B: usage,
-          otherUnitUsages: deduction ? { [String(deduction.id)]: usage } : undefined,
-        });
-      }
-      return synced;
-    }
-    case 'stock_room_1_elec': {
-      const synced = await mergeElectricity(
-        userId,
-        'Stock Room 1',
-        period,
-        { currReading: readingValue },
-        prevFromRound,
-      );
-      if (usage != null) {
-        const sr1 = await findUnitByName(userId, 'Stock Room 1');
-        await mergeElectricity(userId, '213A', period, {
-          meterStockRoom1: usage,
-          otherUnitUsages: sr1 ? { [String(sr1.id)]: usage } : undefined,
-        });
-      }
-      return synced;
-    }
-    case 'stock_room_2_elec': {
-      const synced = await mergeElectricity(
-        userId,
-        'Stock Room 2',
-        period,
-        { currReading: readingValue },
-        prevFromRound,
-      );
-      if (usage != null) {
-        const sr2 = await findUnitByName(userId, 'Stock Room 2');
-        await mergeElectricity(userId, '213A', period, {
-          meterStockRoom2: usage,
-          otherUnitUsages: sr2 ? { [String(sr2.id)]: usage } : undefined,
-        });
-      }
-      return synced;
-    }
-    default:
-      return null;
+  const prevFromRound = await previousRoundReading(userId, meterKey, readingDate);
+
+  if (def.kind === 'water') {
+    return mergeWater(userId, unit, period, readingValue, prevFromRound);
   }
+
+  const synced = await mergeElectricity(
+    userId,
+    unit,
+    period,
+    { currReading: readingValue },
+    prevFromRound,
+  );
+  if (def.feedsSharedMeterDeduction) {
+    const subMeter = synced ? (await getRentRecord(synced, userId))?.electricityMeter : null;
+    const deductionUsage = await resolveDeductionUsage(
+      userId,
+      unit,
+      period,
+      readingValue,
+      prevFromRound,
+      subMeter,
+    );
+    await pushUsageToSharedMeterParents(userId, period, unit, deductionUsage);
+  }
+  return synced;
 }
 
 async function upsertItemsAndSync(
@@ -345,7 +370,8 @@ async function upsertItemsAndSync(
     byKey.set(item.meter_key, item);
   }
 
-  for (const def of UTILITY_METER_DEFINITIONS) {
+  const defsToSync = [...UTILITY_METER_DEFINITIONS].sort(utilityMeterSyncOrder);
+  for (const def of defsToSync) {
     const input = byKey.get(def.key);
     if (!input) continue;
     const reading =

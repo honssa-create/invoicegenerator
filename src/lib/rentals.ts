@@ -1041,12 +1041,46 @@ export function waterMeterDataFromInputs(prev: string, curr: string, rate: strin
 }
 
 export const UTILITY_METER_DEFINITIONS = [
-  { key: 'stock_room_1_elec', label: 'Stock Room 1 電錶 - 2樓走廊', kind: 'electricity' },
-  { key: 'stock_room_2_elec', label: 'Stock Room 2 電錶 - 2樓走廊', kind: 'electricity' },
-  { key: 'elec_213a_main', label: '213A 大電錶 - 2樓走廊', kind: 'electricity' },
-  { key: 'water_213a', label: '213A 水錶 - 213男廁內', kind: 'water' },
-  { key: 'water_213b', label: '213B 水錶 - 天台', kind: 'water' },
-  { key: 'elec_213b', label: '213B 電錶 - 213室門口位置', kind: 'electricity' },
+  {
+    key: 'stock_room_1_elec',
+    label: 'Stock Room 1 電錶 - 2樓走廊',
+    kind: 'electricity',
+    billingUnitName: 'Stock Room 1',
+    feedsSharedMeterDeduction: true,
+  },
+  {
+    key: 'stock_room_2_elec',
+    label: 'Stock Room 2 電錶 - 2樓走廊',
+    kind: 'electricity',
+    billingUnitName: 'Stock Room 2',
+    feedsSharedMeterDeduction: true,
+  },
+  {
+    key: 'elec_213a_main',
+    label: '213A 大電錶 - 2樓走廊',
+    kind: 'electricity',
+    billingUnitName: '213A',
+    isSharedMeterMain: true,
+  },
+  {
+    key: 'water_213a',
+    label: '213A 水錶 - 213男廁內',
+    kind: 'water',
+    billingUnitName: '213A',
+  },
+  {
+    key: 'water_213b',
+    label: '213B 水錶 - 天台',
+    kind: 'water',
+    billingUnitName: '213B',
+  },
+  {
+    key: 'elec_213b',
+    label: '213B 電錶 - 213室門口位置',
+    kind: 'electricity',
+    billingUnitName: '213B',
+    feedsSharedMeterDeduction: true,
+  },
 ] as const;
 
 export type UtilityMeterKey = (typeof UTILITY_METER_DEFINITIONS)[number]['key'];
@@ -1055,7 +1089,21 @@ export type UtilityMeterDefinition = {
   key: UtilityMeterKey;
   label: string;
   kind: 'electricity' | 'water';
+  billingUnitName: string;
+  feedsSharedMeterDeduction?: boolean;
+  isSharedMeterMain?: boolean;
 };
+
+export function utilityMeterDefinition(key: UtilityMeterKey): UtilityMeterDefinition {
+  return UTILITY_METER_DEFINITIONS.find((d) => d.key === key)!;
+}
+
+/** Legacy electricity_meter_json field for a deduction source unit name, if any. */
+export function legacyOtherUnitMeterField(
+  unitName: string,
+): 'meter213B' | 'meterStockRoom1' | 'meterStockRoom2' | null {
+  return LEGACY_OTHER_UNIT_METER_FIELDS[unitName.trim().toLowerCase()] ?? null;
+}
 
 export const UTILITY_METER_KEYS: readonly UtilityMeterKey[] = UTILITY_METER_DEFINITIONS.map((d) => d.key);
 

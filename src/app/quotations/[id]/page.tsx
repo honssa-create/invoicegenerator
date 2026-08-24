@@ -23,6 +23,7 @@ import {
   type QuotationFile,
   type QuotationWithDetails,
 } from '@/lib/quotations';
+import { formatCustomerPartyBlockFromCustomer } from '@/lib/customer-party';
 import type { Customer } from '@/lib/types';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
@@ -366,7 +367,7 @@ export default function QuotationDetailPage() {
     setCustomerId(String(c.id));
     setCustomerName(c.name);
     if (!email.trim() && c.email) setEmail(c.email);
-    const composed = [c.name, c.address, c.phone].filter(Boolean).join('\n');
+    const composed = formatCustomerPartyBlockFromCustomer(c);
     if (!billingAddress.trim() && composed) setBillingAddress(composed);
     if (!shippingAddress.trim() && composed) setShippingAddress(composed);
   };

@@ -14,6 +14,7 @@ import {
   buildInvoiceEditorSnapshot,
   invoiceSnapshotFromRecord,
 } from '@/lib/document-editor-snapshot';
+import { formatCustomerPartyBlockFromCustomer } from '@/lib/customer-party';
 import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { invoiceFileUrl } from '@/lib/image-url';
 import { calculateInvoiceTotals } from '@/lib/utils';
@@ -394,7 +395,7 @@ export default function InvoiceDetailPage() {
     setCustomerId(String(c.id));
     setCustomerName(c.name);
     if (!email.trim() && c.email) setEmail(c.email);
-    const composed = [c.name, c.address, c.phone].filter(Boolean).join('\n');
+    const composed = formatCustomerPartyBlockFromCustomer(c);
     if (!billingAddress.trim() && composed) setBillingAddress(composed);
     if (!shippingAddress.trim() && composed) setShippingAddress(composed);
   };

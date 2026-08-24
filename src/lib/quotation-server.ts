@@ -19,6 +19,7 @@ export async function getQuotationWithDetails(
   const quotation = (await db
     .prepare(
       `SELECT q.*, c.name as customer_name, c.email as customer_email,
+              c.company_name as customer_company_name, c.phone as customer_phone,
               c.address as customer_address
        FROM quotations q
        LEFT JOIN customers c ON c.id = q.customer_id
@@ -86,6 +87,7 @@ export async function listQuotations(
   const rows = (await db
     .prepare(
       `SELECT q.*, c.name as customer_name, c.email as customer_email,
+              c.company_name as customer_company_name, c.phone as customer_phone,
               c.address as customer_address
        FROM quotations q
        LEFT JOIN customers c ON c.id = q.customer_id

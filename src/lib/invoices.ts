@@ -41,6 +41,7 @@ export async function getInvoiceWithDetails(invoiceId: number | string, userId: 
   const invoice = await db
     .prepare(
       `SELECT i.*, c.name as customer_name, c.email as customer_email,
+              c.company_name as customer_company_name, c.phone as customer_phone,
               c.address as customer_address
        FROM invoices i
        JOIN customers c ON c.id = i.customer_id
@@ -108,6 +109,7 @@ export async function listInvoices(
   const rows = (await db
     .prepare(
       `SELECT i.*, c.name as customer_name, c.email as customer_email,
+              c.company_name as customer_company_name, c.phone as customer_phone,
               c.address as customer_address
        FROM invoices i
        JOIN customers c ON c.id = i.customer_id

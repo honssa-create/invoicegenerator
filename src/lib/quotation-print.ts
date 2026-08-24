@@ -3,6 +3,7 @@ import {
   type QuotationPreviewModel,
 } from '@/components/FormalQuotationDocument';
 import type { QuotationWithDetails } from '@/lib/quotations';
+import { formatCustomerPartyBlock } from '@/lib/customer-party';
 import { formatQuotationDate, formatQuotationMoney } from '@/lib/quotation-style';
 
 export interface QuotationPrintBusiness {
@@ -12,7 +13,13 @@ export interface QuotationPrintBusiness {
 }
 
 function customerBillingFallback(q: QuotationWithDetails): string {
-  return [q.customer_name, q.customer_address, q.customer_email].filter(Boolean).join('\n');
+  return formatCustomerPartyBlock({
+    name: q.customer_name,
+    companyName: q.customer_company_name,
+    phone: q.customer_phone,
+    email: q.email?.trim() || q.customer_email,
+    address: q.customer_address,
+  });
 }
 
 function remarksFromQuote(q: QuotationWithDetails): string[] {

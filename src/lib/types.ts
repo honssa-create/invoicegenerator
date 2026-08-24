@@ -73,6 +73,8 @@ export interface InvoiceFile {
 export interface InvoiceWithDetails extends Invoice {
   customer_name: string;
   customer_email: string | null;
+  customer_company_name: string | null;
+  customer_phone: string | null;
   customer_address: string | null;
   items: InvoiceItem[];
   files: InvoiceFile[];

@@ -1270,19 +1270,16 @@ export function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
 }
 
-/** Join non-empty Woo address parts into a multiline string. */
+/** Join non-empty Woo address parts into a multiline string (street/city only; name & phone live on the order). */
 export function formatWooAddress(addr: WooAddressLike | null | undefined): string {
   if (!addr) return '';
   const part = (v: unknown) => String(v ?? '').replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim();
-  const name = [part(addr.first_name), part(addr.last_name)].filter(Boolean).join(' ').trim();
   const lines = [
-    name,
     part(addr.company),
     part(addr.address_1),
     part(addr.address_2),
     [part(addr.city), part(addr.state), part(addr.postcode)].filter(Boolean).join(', ').trim(),
     part(addr.country),
-    part(addr.phone) ? `Tel: ${part(addr.phone)}` : '',
   ].filter(Boolean);
   return lines.join('\n');
 }

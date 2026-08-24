@@ -11,6 +11,7 @@ import {
   type BalanceInvoicePreviewModel,
 } from '@/components/BalanceInvoiceDocument';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { formatCustomerPartyBlock } from '@/lib/customer-party';
 import { computeOrderPaidTotal } from '@/lib/orders';
 import { formatQuotationDate, formatQuotationMoney } from '@/lib/quotation-style';
 
@@ -41,7 +42,13 @@ export function defaultReceiptPaymentRemarks(): string {
 }
 
 function customerBillingFallback(inv: InvoiceWithDetails): string {
-  return [inv.customer_name, inv.customer_address, inv.customer_email].filter(Boolean).join('\n');
+  return formatCustomerPartyBlock({
+    name: inv.customer_name,
+    companyName: inv.customer_company_name,
+    phone: inv.customer_phone,
+    email: inv.email?.trim() || inv.customer_email,
+    address: inv.customer_address,
+  });
 }
 
 function invoiceLineItems(inv: InvoiceWithDetails, money: (n: number) => string) {

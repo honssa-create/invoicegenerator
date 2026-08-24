@@ -23,9 +23,8 @@ function customerMatchesQuery(c: Customer, q: string): boolean {
   return hay.includes(q.toLowerCase());
 }
 
-function customerHint(c: Customer): string {
-  const parts = [c.ordered, c.company_name, c.email].filter(Boolean);
-  return parts.join(' · ');
+export function formatCustomerSelectionLabel(c: Customer): string {
+  return [c.name, c.company_name, c.phone].filter(Boolean).join(' | ');
 }
 
 export default function CustomerSelect({
@@ -79,6 +78,8 @@ export default function CustomerSelect({
   const filtered = q ? customers.filter((c) => customerMatchesQuery(c, q)) : customers;
   const exactNameMatch = customers.some((c) => c.name.toLowerCase() === q.toLowerCase());
   const canAdd = q && !exactNameMatch && !searchBlocked && !disabled;
+  const selectedCustomer = customers.find((c) => c.name === value);
+  const displayValue = selectedCustomer ? formatCustomerSelectionLabel(selectedCustomer) : value;
 
   const pick = (c: Customer) => {
     onSelect(c);
@@ -126,8 +127,8 @@ export default function CustomerSelect({
         disabled={disabled}
         className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm text-left bg-white disabled:bg-gray-50 disabled:text-gray-400"
       >
-        <span className={value ? 'text-gray-900' : 'text-gray-400'}>
-          {value || placeholder || bi('Select customer…', '選擇客戶…')}
+        <span className={value ? 'text-gray-900 truncate' : 'text-gray-400'}>
+          {displayValue || placeholder || bi('Select customer…', '選擇客戶…')}
         </span>
         <span className="text-gray-400 ml-2">▾</span>
       </button>
@@ -182,10 +183,7 @@ export default function CustomerSelect({
                   c.name === value ? 'text-brand-700 font-medium bg-brand-50/60' : 'text-gray-700'
                 }`}
               >
-                <div>{c.name}</div>
-                {customerHint(c) && (
-                  <div className="text-xs text-gray-500 truncate">{customerHint(c)}</div>
-                )}
+                <div className="truncate">{formatCustomerSelectionLabel(c)}</div>
               </button>
             ))}
             {canAdd && (

@@ -3,6 +3,7 @@ import type { Order } from './orders';
 import { orderDueDate } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
+import { formatCustomerPartyBlock } from './customer-party';
 
 interface OrderRow {
   id: number;
@@ -50,9 +51,13 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
       const details = await getInvoiceWithDetails(invRow.id, row.user_id);
       const billingFromInvoice = details?.billing_address?.trim() || '';
       const billingFallback = details
-        ? [details.customer_name, details.customer_address, details.customer_email]
-            .filter(Boolean)
-            .join('\n')
+        ? formatCustomerPartyBlock({
+            name: details.customer_name,
+            companyName: details.customer_company_name,
+            phone: details.customer_phone,
+            email: details.email?.trim() || details.customer_email,
+            address: details.customer_address,
+          })
         : '';
       linkedInvoice = {
         id: invRow.id,

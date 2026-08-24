@@ -47,6 +47,8 @@ export interface QuotationWithDetails {
   updated_at: string;
   customer_name: string | null;
   customer_email: string | null;
+  customer_company_name: string | null;
+  customer_phone: string | null;
   customer_address: string | null;
   items: QuotationItem[];
   files: QuotationFile[];

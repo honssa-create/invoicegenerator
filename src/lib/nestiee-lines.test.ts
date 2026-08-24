@@ -324,8 +324,21 @@ describe('formatWooAddress / stripHtml', () => {
         state: 'KOWLOON',
         country: 'HK',
         phone: '98775249',
-      })
-    ).toBe('香港, KOWLOON\nHK\nTel: 98775249');
+      }),
+    ).toBe('香港, KOWLOON\nHK');
+  });
+
+  it('omits customer name and phone (stored on the order separately)', () => {
+    expect(
+      formatWooAddress({
+        first_name: 'Jane',
+        last_name: 'Doe',
+        phone: '91234567',
+        address_1: '1 Harbour Rd',
+        city: 'Wan Chai',
+        country: 'HK',
+      }),
+    ).toBe('1 Harbour Rd\nWan Chai\nHK');
   });
 });
 

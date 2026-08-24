@@ -8,15 +8,16 @@ import { paddleOcrBoxes } from '@/lib/paddle-ocr';
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 
-type ScanFields = Pick<ShipmentScanResult, 'waybill_number' | 'sender' | 'sender_address' | 'receiver_address'>;
+type ScanFields = Pick<ShipmentScanResult, 'waybill_number' | 'sender' | 'sender_address' | 'receiver_address' | 'amount'>;
 
 const PROMPT = `You are reading a courier / logistics shipping label (e.g. SF Express 順豐, or other couriers).
 Extract these fields and return ONLY JSON:
-{"waybill_number": string|null, "sender": string|null, "sender_address": string|null, "receiver_address": string|null}.
+{"waybill_number": string|null, "sender": string|null, "sender_address": string|null, "receiver_address": string|null, "amount": number|null}.
 - waybill_number: the tracking / waybill number (運單號) printed on the label (may look like SF followed by digits, or a long digit string).
 - sender: the sender's name or company (寄件人名稱/公司) — name only, not the address.
 - sender_address: the sender's full address (寄件地址 / 发件地址). Keep line breaks if multi-line. Do not include phone numbers unless they are part of the address block.
 - receiver_address: the receiver's full address (收件地址 / 收方地址). Keep line breaks if multi-line.
+- amount: shipping fee or COD amount (金額 / 费用合计 / 代收金额) as a number without currency symbol, e.g. 28.00. Return null if not visible.
 Return null for anything you cannot read. Do not invent values. Prefer simplified or traditional Chinese text exactly as printed.`;
 
 function strOrNull(v: unknown, max = 240): string | null {
@@ -24,6 +25,13 @@ function strOrNull(v: unknown, max = 240): string | null {
   const s = String(v).trim();
   if (!s) return null;
   return s.slice(0, max);
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, ''));
+  if (!Number.isFinite(n) || n <= 0 || n > 999_999) return null;
+  return Math.round(n * 100) / 100;
 }
 
 async function geminiExtract(base64: string, mimeType: string): Promise<ScanFields | null> {
@@ -52,6 +60,7 @@ async function geminiExtract(base64: string, mimeType: string): Promise<ScanFiel
       sender: strOrNull(parsed.sender, 80),
       sender_address: strOrNull(parsed.sender_address),
       receiver_address: strOrNull(parsed.receiver_address),
+      amount: numOrNull(parsed.amount),
     };
   } catch {
     return null;

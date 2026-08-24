@@ -365,6 +365,7 @@ CREATE TABLE IF NOT EXISTS inbound_shipments (
   sender_address TEXT,
   receiver_address TEXT,
   arrival_date TEXT,
+  amount DOUBLE PRECISION,
   photo_path TEXT,
   notes TEXT,
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
@@ -372,6 +373,7 @@ CREATE TABLE IF NOT EXISTS inbound_shipments (
 
 ALTER TABLE inbound_shipments ADD COLUMN IF NOT EXISTS sender_address TEXT;
 ALTER TABLE inbound_shipments ADD COLUMN IF NOT EXISTS receiver_address TEXT;
+ALTER TABLE inbound_shipments ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION;
 
 -- Org-wide inbound: child-user rows belong to the admin data pool.
 UPDATE inbound_shipments s

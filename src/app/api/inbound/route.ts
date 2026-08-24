@@ -26,8 +26,8 @@ export async function POST(request: Request) {
     const ownerId = await getDataOwnerId(session);
     const result = await db
       .prepare(
-        `INSERT INTO inbound_shipments (user_id, waybill_number, sender, sender_address, receiver_address, arrival_date, photo_path, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO inbound_shipments (user_id, waybill_number, sender, sender_address, receiver_address, arrival_date, amount, photo_path, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         ownerId,
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
         body.sender_address?.trim() || null,
         body.receiver_address?.trim() || null,
         body.arrival_date?.trim() || null,
+        body.amount != null && body.amount !== '' ? Number(body.amount) : null,
         body.photo_path?.trim() || null,
         body.notes?.trim() || null
       );

@@ -23,6 +23,7 @@ function sfSampleBoxes(): OcrBox[] {
     { text: '测试收件人', score: 0.97, x0: 50, y0: 225, x1: 150, y1: 245 },
     { text: '香港九龙尖沙咀弥敦道100号', score: 0.96, x0: 50, y0: 250, x1: 340, y1: 270 },
     { text: '费用合计', score: 0.98, x0: 50, y0: 300, x1: 120, y1: 320 },
+    { text: '28.00', score: 0.99, x0: 210, y0: 300, x1: 270, y1: 320 },
     { text: '寄付现结', score: 0.97, x0: 130, y0: 300, x1: 200, y1: 320 },
     // Waybill often outside the 寄 band (e.g. barcode / footer area)
     { text: 'SF1234567890123', score: 0.99, x0: 80, y0: 360, x1: 280, y1: 380 },
@@ -43,6 +44,7 @@ describe('extractFieldsFromBoxes (SF 寄/收)', () => {
     expect(fields.receiver_address).toContain('尖沙咀');
     expect(fields.receiver_address).not.toContain('费用合计');
     expect(fields.receiver_address).not.toContain('JC-ZJEK');
+    expect(fields.amount).toBe(28);
   });
 
   it('prefers sender name slightly above 寄 over lower name-like lines', () => {
@@ -162,12 +164,50 @@ describe('extractFieldsFromBoxes (SF 寄/收)', () => {
     expect(fields.receiver_address).toContain('北京市');
   });
 
+  it('extracts inline 费用合计 amount from one box', () => {
+    const boxes: OcrBox[] = [
+      { text: '寄', score: 0.99, x0: 10, y0: 100, x1: 40, y1: 140 },
+      { text: '测试寄件人', score: 0.97, x0: 50, y0: 88, x1: 140, y1: 108 },
+      { text: '收', score: 0.99, x0: 10, y0: 200, x1: 40, y1: 240 },
+      { text: '香港九龙', score: 0.96, x0: 50, y0: 210, x1: 200, y1: 230 },
+      { text: '费用合计: 36.50', score: 0.98, x0: 50, y0: 280, x1: 180, y1: 300 },
+      { text: 'SF1234567890123', score: 0.99, x0: 80, y0: 360, x1: 280, y1: 380 },
+    ];
+    expect(extractFieldsFromBoxes(boxes).amount).toBe(36.5);
+  });
+
+  it('extracts 代收金额 from label row', () => {
+    const boxes: OcrBox[] = [
+      { text: '寄', score: 0.99, x0: 10, y0: 100, x1: 40, y1: 140 },
+      { text: '测试寄件人', score: 0.97, x0: 50, y0: 88, x1: 140, y1: 108 },
+      { text: '收', score: 0.99, x0: 10, y0: 200, x1: 40, y1: 240 },
+      { text: '香港九龙', score: 0.96, x0: 50, y0: 210, x1: 200, y1: 230 },
+      { text: '代收金额', score: 0.98, x0: 50, y0: 280, x1: 130, y1: 300 },
+      { text: '150.00', score: 0.99, x0: 140, y0: 280, x1: 210, y1: 300 },
+      { text: 'SF1234567890123', score: 0.99, x0: 80, y0: 360, x1: 280, y1: 380 },
+    ];
+    expect(extractFieldsFromBoxes(boxes).amount).toBe(150);
+  });
+
+  it('ignores weight KG values as amount', () => {
+    const boxes: OcrBox[] = [
+      { text: '寄', score: 0.99, x0: 10, y0: 100, x1: 40, y1: 140 },
+      { text: '测试寄件人', score: 0.97, x0: 50, y0: 88, x1: 140, y1: 108 },
+      { text: '收', score: 0.99, x0: 10, y0: 200, x1: 40, y1: 240 },
+      { text: '香港九龙', score: 0.96, x0: 50, y0: 210, x1: 200, y1: 230 },
+      { text: '实际重量:0.500 KG', score: 0.97, x0: 50, y0: 280, x1: 200, y1: 300 },
+      { text: 'SF1234567890123', score: 0.99, x0: 80, y0: 360, x1: 280, y1: 380 },
+    ];
+    expect(extractFieldsFromBoxes(boxes).amount).toBeNull();
+  });
+
   it('returns empty fields for empty boxes', () => {
     expect(extractFieldsFromBoxes([])).toEqual({
       waybill_number: null,
       sender: null,
       sender_address: null,
       receiver_address: null,
+      amount: null,
     });
   });
 });
@@ -188,11 +228,17 @@ describe('ocrExtractFields', () => {
     expect(fields.sender_address).toContain('上海市');
     expect(fields.receiver_address).toContain('杭州市');
   });
+
+  it('parses amount from flat billing line', () => {
+    const text = ['费用合计: 42.00', 'SF1234567890123'].join('\n');
+    expect(ocrExtractFields(text).amount).toBe(42);
+  });
 });
 
 describe('hasAnyInboundField', () => {
   it('detects partial fills', () => {
-    expect(hasAnyInboundField({ waybill_number: '1', sender: null, sender_address: null, receiver_address: null })).toBe(true);
-    expect(hasAnyInboundField({ waybill_number: null, sender: null, sender_address: null, receiver_address: null })).toBe(false);
+    expect(hasAnyInboundField({ waybill_number: '1', sender: null, sender_address: null, receiver_address: null, amount: null })).toBe(true);
+    expect(hasAnyInboundField({ waybill_number: null, sender: null, sender_address: null, receiver_address: null, amount: 28 })).toBe(true);
+    expect(hasAnyInboundField({ waybill_number: null, sender: null, sender_address: null, receiver_address: null, amount: null })).toBe(false);
   });
 });

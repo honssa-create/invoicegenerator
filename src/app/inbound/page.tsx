@@ -30,6 +30,7 @@ export default function InboundPage() {
   const [senderAddress, setSenderAddress] = useState('');
   const [receiverAddress, setReceiverAddress] = useState('');
   const [arrival, setArrival] = useState(today());
+  const [amount, setAmount] = useState('');
   const [photoPath, setPhotoPath] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -46,7 +47,7 @@ export default function InboundPage() {
   useEffect(() => { load(); }, []);
 
   const resetForm = () => {
-    setWaybill(''); setSender(''); setSenderAddress(''); setReceiverAddress(''); setArrival(today()); setPhotoPath(''); setPreview(null); setScanMsg('');
+    setWaybill(''); setSender(''); setSenderAddress(''); setReceiverAddress(''); setArrival(today()); setAmount(''); setPhotoPath(''); setPreview(null); setScanMsg('');
   };
 
   const handlePhoto = async (rawFile: File) => {
@@ -79,6 +80,7 @@ export default function InboundPage() {
       if (r.sender) setSender(r.sender);
       if (r.sender_address) setSenderAddress(r.sender_address);
       if (r.receiver_address) setReceiverAddress(r.receiver_address);
+      if (r.amount != null) setAmount(String(r.amount));
       const via =
         r.source === 'paddle' ? 'PaddleOCR' : r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
       const found = [
@@ -86,6 +88,7 @@ export default function InboundPage() {
         r.sender && 'sender',
         r.sender_address && 'sender address',
         r.receiver_address && 'receiver address',
+        r.amount != null && 'amount',
       ].filter(Boolean);
       setScanMsg(`${compressNote}${found.length ? `Extracted via ${via}: ${found.join(', ')}. Review & edit if needed.` : `No fields auto-extracted (${via}). Enter manually.`}`);
     } catch {
@@ -110,6 +113,7 @@ export default function InboundPage() {
         sender_address: senderAddress,
         receiver_address: receiverAddress,
         arrival_date: arrival,
+        amount: amount === '' ? null : Number(amount),
         photo_path: photoPath,
       }),
     });
@@ -250,6 +254,10 @@ export default function InboundPage() {
               <label className="block text-xs font-medium text-gray-600 mb-1">Arrival Date 到貨日</label>
               <input type="date" value={arrival} onChange={(e) => setArrival(e.target.value)} className={inputCls} />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Amount 金額</label>
+              <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} placeholder="0.00" />
+            </div>
             <button onClick={save} disabled={saving} className="w-full py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
               {saving ? BTN.saving : bi('Save Shipment', '儲存到件')}
             </button>
@@ -295,6 +303,7 @@ export default function InboundPage() {
                 <th className="px-6 py-3">Sender Addr 寄件地址</th>
                 <th className="px-6 py-3">Receiver Addr 收件地址</th>
                 {sortTh('arrival', 'Arrival 到貨日')}
+                <th className="px-6 py-3">Amount 金額</th>
                 <th className="px-6 py-3">Actions</th>
               </tr>
             </thead>
@@ -312,6 +321,7 @@ export default function InboundPage() {
                   <td className="px-6 py-3 text-sm text-gray-600 whitespace-pre-line max-w-[12rem]">{s.sender_address || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-600 whitespace-pre-line max-w-[12rem]">{s.receiver_address || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-500">{s.arrival_date || '—'}</td>
+                  <td className="px-6 py-3 text-sm text-gray-700 tabular-nums">{s.amount != null ? s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
                   <td className="px-6 py-3 text-sm"><button onClick={() => del(s.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button></td>
                 </tr>
               ))}

@@ -10,6 +10,7 @@ export type InboundScanFields = {
   sender: string | null;
   sender_address: string | null;
   receiver_address: string | null;
+  amount: number | null;
 };
 
 const FIELD_START =
@@ -17,6 +18,9 @@ const FIELD_START =
 
 const BILLING_STOP =
   /费用合计|費用合計|代收金额|代收金額|增值服务|增值服務|计费重量|計費重量|实际重量|實際重量|^备注$|^備註$|^包$/;
+
+const AMOUNT_LABEL =
+  /(?:费用合计|費用合計|代收金额|代收金額|运费|運費|实际运费|實際運費|总费用|總費用|金額|金额|amount)/i;
 
 const HEADER_NOISE =
   /第\s*\d+\s*次打印|打印时间|打印時間|sf-express\.com|顺丰速运|順豐速運|^SF\s*EXPRESS$|NEXT|\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/i;
@@ -87,7 +91,21 @@ export function ocrExtractFields(text: string): InboundScanFields {
     /(?:收件地址|收方地址|到件地址|收件人地址|receiver\s*address|recipient\s*address|ship\s*to|to\s*address)\s*[:：]?\s*(.*)/i
   );
 
-  return { waybill_number: waybill, sender, sender_address, receiver_address };
+  let amount: number | null = null;
+  for (const line of lines) {
+    const m = line.match(
+      /(?:费用合计|費用合計|代收金额|代收金額|运费|運費|金額|金额)\s*[:：]?\s*(?:HKD|CNY|RMB|HK\$|\$|¥|￥)?\s*([0-9][0-9,]*\.?\d{0,2})/i
+    );
+    if (m) {
+      const n = parseFloat(m[1].replace(/,/g, ''));
+      if (Number.isFinite(n) && n > 0 && n <= 999_999) {
+        amount = Math.round(n * 100) / 100;
+        break;
+      }
+    }
+  }
+
+  return { waybill_number: waybill, sender, sender_address, receiver_address, amount };
 }
 
 function sortBoxes(boxes: OcrBox[]): OcrBox[] {
@@ -209,6 +227,69 @@ function looksLikeName(text: string): boolean {
   return /[\u4e00-\u9fffA-Za-z]/.test(t);
 }
 
+function amountOrNull(n: number | null | undefined): number | null {
+  if (n == null || !Number.isFinite(n) || n <= 0 || n > 999_999) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/** Parse a currency/decimal token; rejects weights, waybills, and phones. */
+function parseAmountToken(text: string): number | null {
+  const t = text.trim();
+  if (!t || /KG|kg|重量|计费重量|計費重量|实际重量|實際重量/.test(t)) return null;
+  if (isPhoneLike(t) || sfTokenFromText(t) || looksLikeWaybill(t, { allowBareDigits: false })) return null;
+
+  const inline = t.match(
+    /(?:费用合计|費用合計|代收金额|代收金額|运费|運費|金額|金额|amount)\s*[:：]?\s*(?:HKD|CNY|RMB|HK\$|\$|¥|￥)?\s*([0-9][0-9,]*\.?\d{0,2})/i
+  );
+  if (inline) return amountOrNull(parseFloat(inline[1].replace(/,/g, '')));
+
+  const bare = t.match(/^(?:HKD|CNY|RMB|HK\$|\$|¥|￥)?\s*([0-9][0-9,]*\.?\d{0,2})\s*(?:HKD|CNY|RMB|元)?$/i);
+  if (bare) return amountOrNull(parseFloat(bare[1].replace(/,/g, '')));
+
+  return null;
+}
+
+function yOverlap(a: OcrBox, b: OcrBox, tolerance = 14): boolean {
+  return Math.abs(midY(a) - midY(b)) <= tolerance;
+}
+
+/** Extract 金額 from SF billing rows (费用合计 / 代收金额 and neighbors). */
+function extractAmountFromBoxes(boxes: OcrBox[]): number | null {
+  const sorted = sortBoxes(boxes);
+
+  for (const b of sorted) {
+    const amt = parseAmountToken(b.text);
+    if (amt != null && AMOUNT_LABEL.test(b.text)) return amt;
+  }
+
+  for (const b of sorted) {
+    const t = b.text.trim();
+    if (!AMOUNT_LABEL.test(t)) continue;
+
+    const right = sorted
+      .filter((other) => other !== b && yOverlap(b, other) && other.x0 >= b.x0 - 4)
+      .sort((a, c) => a.x0 - c.x0 || a.y0 - c.y0);
+    for (const c of right) {
+      const amt = parseAmountToken(c.text);
+      if (amt != null) return amt;
+    }
+
+    const below = sorted
+      .filter((other) => {
+        if (other === b) return false;
+        const dy = other.y0 - b.y1;
+        return dy >= -2 && dy <= 28 && other.x0 >= b.x0 - 20 && other.x0 <= b.x1 + 40;
+      })
+      .sort((a, c) => a.y0 - c.y0 || a.x0 - c.x0);
+    for (const c of below) {
+      const amt = parseAmountToken(c.text);
+      if (amt != null) return amt;
+    }
+  }
+
+  return null;
+}
+
 /** Sender name sits slightly above the 寄 glyph (smaller Y). */
 const SENDER_ABOVE_JI_MIN = 2;
 const SENDER_ABOVE_JI_MAX = 55;
@@ -298,6 +379,7 @@ function extractFromSfRegions(boxes: OcrBox[]): InboundScanFields | null {
     sender: strOrNull(sender, 80),
     sender_address: strOrNull(senderAddrParts.join('\n'), 240),
     receiver_address: strOrNull(recvParts.join('\n'), 240),
+    amount: null,
   };
 }
 
@@ -309,23 +391,25 @@ function flattenBoxesText(boxes: OcrBox[]): string {
 }
 
 export function hasAnyInboundField(fields: InboundScanFields): boolean {
-  return !!(fields.waybill_number || fields.sender || fields.sender_address || fields.receiver_address);
+  return !!(fields.waybill_number || fields.sender || fields.sender_address || fields.receiver_address || fields.amount != null);
 }
 
 /** Primary entry: SF 寄/收 regions, then label-regex fallback on box text. */
 export function extractFieldsFromBoxes(boxes: OcrBox[]): InboundScanFields {
+  const amount = boxes.length ? extractAmountFromBoxes(boxes) : null;
   if (!boxes.length) {
-    return { waybill_number: null, sender: null, sender_address: null, receiver_address: null };
+    return { waybill_number: null, sender: null, sender_address: null, receiver_address: null, amount: null };
   }
   const regional = extractFromSfRegions(boxes);
-  if (regional && hasAnyInboundField(regional)) {
+  if (regional && hasAnyInboundField({ ...regional, amount })) {
     // Always prefer a page-wide SF… token for waybill when present.
     const { waybill } = extractWaybillSf(boxes);
-    if (waybill) return { ...regional, waybill_number: waybill };
-    return regional;
+    if (waybill) return { ...regional, waybill_number: waybill, amount };
+    return { ...regional, amount };
   }
   const fallback = ocrExtractFields(flattenBoxesText(boxes));
   const { waybill } = extractWaybillSf(boxes);
-  if (waybill) return { ...fallback, waybill_number: waybill };
-  return fallback;
+  const mergedAmount = amount ?? fallback.amount;
+  if (waybill) return { ...fallback, waybill_number: waybill, amount: mergedAmount };
+  return { ...fallback, amount: mergedAmount };
 }

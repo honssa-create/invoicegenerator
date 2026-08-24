@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import FilterBar from '@/components/FilterBar';
 import CompletionModal from '@/components/kitchen-prep/CompletionModal';
 import {
   PREP_CAPACITIES,
@@ -114,6 +115,30 @@ function parsePrefillForm(searchParams: URLSearchParams): FormState | null {
 type SortKey = 'stewing_date' | 'order_code' | 'capacity' | 'status';
 type SortDir = 'asc' | 'desc';
 
+function localIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function thisWeekRange(date = new Date()): { start: string; end: string } {
+  const d = new Date(date);
+  const weekday = d.getDay();
+  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+  const start = new Date(d);
+  start.setDate(d.getDate() + mondayOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return { start: localIsoDate(start), end: localIsoDate(end) };
+}
+
+function thisMonthRange(date = new Date()): { start: string; end: string } {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return { start: localIsoDate(start), end: localIsoDate(end) };
+}
+
 export default function KitchenPrepListPage() {
   return (
     <Suspense
@@ -142,6 +167,9 @@ function KitchenPrepListContent() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('stewing_date');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
+  const [search, setSearch] = useState('');
   const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
     PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
   );
@@ -180,8 +208,29 @@ function KitchenPrepListContent() {
     router.replace('/kitchen-prep', { scroll: false });
   }, [searchParams, router]);
 
+  const filteredOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (dateStart && o.stewing_date < dateStart) return false;
+      if (dateEnd && o.stewing_date > dateEnd) return false;
+      if (!q) return true;
+      const haystack = [
+        o.stewing_date,
+        o.order_code,
+        o.capacity,
+        o.status,
+        PREP_ORDER_TYPE_LABELS[o.order_type],
+        PREP_CAPACITY_LABELS[o.capacity],
+        PREP_STATUS_LABELS[o.status],
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [orders, dateStart, dateEnd, search]);
+
   const sortedOrders = useMemo(() => {
-    const list = [...orders];
+    const list = [...filteredOrders];
     list.sort((a, b) => {
       let cmp = 0;
       if (sortKey === 'stewing_date') cmp = a.stewing_date.localeCompare(b.stewing_date);
@@ -191,7 +240,25 @@ function KitchenPrepListContent() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
-  }, [orders, sortKey, sortDir]);
+  }, [filteredOrders, sortKey, sortDir]);
+
+  const applyThisWeek = () => {
+    const { start, end } = thisWeekRange();
+    setDateStart(start);
+    setDateEnd(end);
+  };
+
+  const applyThisMonth = () => {
+    const { start, end } = thisMonthRange();
+    setDateStart(start);
+    setDateEnd(end);
+  };
+
+  const clearFilters = () => {
+    setDateStart('');
+    setDateEnd('');
+    setSearch('');
+  };
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -318,14 +385,45 @@ function KitchenPrepListContent() {
         <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>
       )}
 
+      <FilterBar
+        dateStart={dateStart}
+        dateEnd={dateEnd}
+        onDateStart={setDateStart}
+        onDateEnd={setDateEnd}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder={bi('Order ID, capacity, status, type…', '訂單編號、容量、狀態、類型…')}
+        onClear={clearFilters}
+      />
+
+      <p className="text-sm text-gray-600 -mt-4 mb-6">
+        {bi('Quick filters:', '快速篩選：')}{' '}
+        <button type="button" onClick={applyThisWeek} className="text-brand-600 hover:text-brand-700 hover:underline font-medium">
+          {bi('This week', '本週')}
+        </button>
+        <span className="text-gray-400 mx-1">·</span>
+        <button type="button" onClick={applyThisMonth} className="text-brand-600 hover:text-brand-700 hover:underline font-medium">
+          {bi('This month', '本月')}
+        </button>
+      </p>
+
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
           <h2 className="font-semibold text-gray-900">Scheduled Orders 排程列表</h2>
+          {!loading && orders.length > 0 && (
+            <span className="text-xs text-gray-500">
+              {sortedOrders.length === orders.length
+                ? bi(`${orders.length} order(s)`, `${orders.length} 張`)
+                : bi(`${sortedOrders.length} of ${orders.length}`, `${sortedOrders.length} / ${orders.length} 張`)}
+            </span>
+          )}
         </div>
         {loading ? (
           <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
         ) : orders.length === 0 ? (
           <div className="p-12 text-center text-gray-500">{bi('No scheduled prep orders yet. Create one to get started.', '尚無排程備料單。建立第一張以開始。')}</div>
+        ) : sortedOrders.length === 0 ? (
+          <div className="p-12 text-center text-gray-500">{bi('No prep orders match these filters.', '沒有符合篩選條件的備料單。')}</div>
         ) : (
           <table className="w-full min-w-[800px] text-sm">
             <thead>

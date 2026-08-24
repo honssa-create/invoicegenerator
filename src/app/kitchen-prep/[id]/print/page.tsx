@@ -8,8 +8,8 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUS_LABELS,
-  computePrepCalculationForOrder,
   formulaSummaryForCapacity,
+  type PrepCalculation,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -17,12 +17,17 @@ import { BTN, TITLE, bi } from '@/lib/ui-labels';
 export default function KitchenPrepPrintPage() {
   const { id } = useParams();
   const [order, setOrder] = useState<PrepOrder | null>(null);
+  const [calc, setCalc] = useState<PrepCalculation | null>(null);
   const [loggingPrint, setLoggingPrint] = useState(false);
 
   useEffect(() => {
     fetch(`/api/kitchen-prep/${id}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.order && setOrder(d.order));
+      .then((d) => {
+        if (!d?.order) return;
+        setOrder(d.order);
+        setCalc(d.calculation ?? null);
+      });
   }, [id]);
 
   const handlePrint = async () => {
@@ -38,11 +43,9 @@ export default function KitchenPrepPrintPage() {
     window.print();
   };
 
-  if (!order) {
+  if (!order || !calc) {
     return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>;
   }
-
-  const calc = computePrepCalculationForOrder(order);
 
   return (
     <div className="prep-print-root min-h-screen bg-gray-100 print:bg-white">

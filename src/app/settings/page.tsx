@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import IntegrationsSettingsPanel from '@/components/IntegrationsSettingsPanel';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import {
   OPTION_LABELS,
   OPTION_TYPES,
@@ -41,6 +42,8 @@ export default function SettingsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
+
+  useModalUnsavedWarning(editingId !== null, { editingId, editValue });
 
   useEffect(() => {
     if (!isAdmin && section === 'integrations') setSection('dropdowns');

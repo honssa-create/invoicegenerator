@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { compressImage } from '@/lib/imageCompression';
 import {
   INCOME_CATEGORIES,
@@ -32,6 +33,8 @@ export default function CashflowPage() {
 
   const load = () => fetch(`/api/cashflow?month=${month}`).then((r) => r.json()).then(setData);
   useEffect(() => { load(); }, [month]);
+
+  useModalUnsavedWarning(showForm, { form, receiptPath, preview: Boolean(preview) });
 
   const openForm = () => { setForm(EMPTY_FORM); setReceiptPath(''); setPreview(null); setUploadMsg(''); setError(''); setShowForm(true); };
 

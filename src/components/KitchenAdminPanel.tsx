@@ -24,6 +24,7 @@ import {
   getFormulaLines,
   defaultGiftBoxGlassBottleStockName,
 } from '@/lib/kitchen-prep';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { bi } from '@/lib/ui-labels';
 
 type Tab = 'raw' | 'products' | 'bom' | 'stew';
@@ -61,6 +62,8 @@ export default function KitchenAdminPanel({
     setCatalog(state.catalog);
     setFormulas(state.formulas);
   }, [state.catalog, state.formulas]);
+
+  useModalUnsavedWarning(open, { catalog, formulas });
 
   const saveWithFlash = async () => {
     onBusy(true);

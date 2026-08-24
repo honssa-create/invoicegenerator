@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import type { Customer } from '@/lib/types';
 import { ORDER_TYPES } from '@/lib/orders';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY_FORM = { name: '', company_name: '', email: '', phone: '', address: '', ordered: '' };
@@ -15,6 +16,8 @@ export default function CustomersPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+
+  useModalUnsavedWarning(showForm, form);
 
   const loadCustomers = () => {
     fetch('/api/customers')

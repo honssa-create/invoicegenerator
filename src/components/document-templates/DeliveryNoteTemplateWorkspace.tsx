@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import DocumentTemplateShell from '@/components/document-templates/DocumentTemplateShell';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import DeliveryNoteDocument, {
   DEFAULT_DELIVERY_NOTE_PREVIEW,
   type DeliveryNotePreviewModel,
@@ -111,11 +112,18 @@ export default function DeliveryNoteTemplateWorkspace({ variant, readOnly }: Pro
   const [itemQty, setItemQty] = useState(DEFAULT_DELIVERY_NOTE_PREVIEW.items[0]?.qty || '<Qty>');
   const [style, setStyle] = useState<QuotationStyleTemplate>({ ...DEFAULT_QUOTATION_STYLE });
   const [saveMessage, setSaveMessage] = useState('');
+  const [savedStyleSnapshot, setSavedStyleSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = loadQuotationStyleFromStorage(variant);
-    setStyle(saved || { ...DEFAULT_QUOTATION_STYLE });
+    const next = saved || { ...DEFAULT_QUOTATION_STYLE };
+    setStyle(next);
+    setSavedStyleSnapshot(JSON.stringify(next));
   }, [variant]);
+
+  useUnsavedChangesWarning(
+    !readOnly && savedStyleSnapshot !== null && JSON.stringify(style) !== savedStyleSnapshot,
+  );
 
   const setField = useCallback((key: QuotationStyleField, value: string) => {
     setStyle((prev) => ({ ...prev, [key]: value }));
@@ -129,7 +137,9 @@ export default function DeliveryNoteTemplateWorkspace({ variant, readOnly }: Pro
 
   const saveStyle = () => {
     if (readOnly) return;
-    saveQuotationStyleToStorage(variant, normalizeQuotationStyle(style));
+    const normalized = normalizeQuotationStyle(style);
+    saveQuotationStyleToStorage(variant, normalized);
+    setSavedStyleSnapshot(JSON.stringify(normalized));
     setSaveMessage(bi('Layout saved on this device', '樣式已儲存在此裝置'));
     setTimeout(() => setSaveMessage(''), 2500);
   };

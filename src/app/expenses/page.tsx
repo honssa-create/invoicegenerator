@@ -7,6 +7,7 @@ import { StatCard } from '@/components/ui';
 import TagSelect from '@/components/TagSelect';
 import SupplierSelect from '@/components/SupplierSelect';
 import FilterBar from '@/components/FilterBar';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import {
   DEFAULT_OPTIONS,
   OPTION_TYPES,
@@ -106,6 +107,9 @@ export default function ExpensesPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formReceipts, setFormReceipts] = useState<FormReceipt[]>([]);
+
+  useModalUnsavedWarning(showForm, { form, formReceipts });
+
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());

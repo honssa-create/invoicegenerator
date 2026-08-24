@@ -14,6 +14,7 @@ import {
   type TemplateCompanyVariantId,
 } from '@/lib/document-templates';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 
 const META_PLACEHOLDERS = new Set(['(公司地址)', '(電話)', '(稅務編號)']);
 
@@ -251,13 +252,17 @@ export function useDebitNoteNotesTemplate(variant: TemplateCompanyVariantId, rea
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     void fetchNotesDraft(variant)
       .then((next) => {
-        if (!cancelled) setDraft(next);
+        if (!cancelled) {
+          setDraft(next);
+          setSavedSnapshot(JSON.stringify(next));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -266,6 +271,10 @@ export function useDebitNoteNotesTemplate(variant: TemplateCompanyVariantId, rea
       cancelled = true;
     };
   }, [variant]);
+
+  useUnsavedChangesWarning(
+    !readOnly && savedSnapshot !== null && JSON.stringify(draft) !== savedSnapshot,
+  );
 
   const save = useCallback(async () => {
     if (readOnly) return;
@@ -291,6 +300,7 @@ export function useDebitNoteNotesTemplate(variant: TemplateCompanyVariantId, rea
       ? draftFromTemplate(variant, data.template as RentalDocumentTemplate)
       : await fetchNotesDraft(variant);
     setDraft(refreshed);
+    setSavedSnapshot(JSON.stringify(refreshed));
     setSaveMessage(MSG.templateSaved);
     setTimeout(() => setSaveMessage(''), 3000);
   }, [readOnly, draft, variant]);

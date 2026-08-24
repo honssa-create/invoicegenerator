@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { compressImage } from '@/lib/imageCompression';
 import { formReceiptPreviewUrl, utilityMeterPhotoUrl } from '@/lib/image-url';
 import {
@@ -86,6 +87,22 @@ export default function UtilityMeterReadingsPage() {
   const [drafts, setDrafts] = useState<DraftItem[]>(emptyDrafts);
   const [saving, setSaving] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  const editorSnapshot = useMemo(
+    () => ({
+      readingDate,
+      period,
+      notes,
+      drafts: drafts.map((draft) => ({
+        meter_key: draft.meter_key,
+        reading_value: draft.reading_value,
+        photo_path: draft.photo_path,
+        ocr_text: draft.ocr_text,
+      })),
+    }),
+    [readingDate, period, notes, drafts],
+  );
+  useModalUnsavedWarning(editorOpen, editorSnapshot, !readOnly);
 
   const load = useCallback(() => {
     setLoading(true);

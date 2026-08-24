@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import RentPaymentNoticeMatrix from '@/components/RentPaymentNoticeMatrix';
@@ -96,6 +97,10 @@ export default function TenantDetailPage() {
   const [contactSaving, setContactSaving] = useState(false);
   const [contactEditing, setContactEditing] = useState(false);
   const [periodRows, setPeriodRows] = useState<PaymentPeriodLine[]>([]);
+
+  useModalUnsavedWarning(contactEditing, contactForm, !readOnly);
+  useModalUnsavedWarning(paymentModal, { paymentForm, periodRows }, !readOnly);
+  useModalUnsavedWarning(Boolean(allocateModal), allocations, !readOnly);
 
   const load = () => {
     setLoading(true);

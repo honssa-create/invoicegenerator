@@ -10,6 +10,7 @@ import {
   type StockItem,
 } from '@/lib/stocks';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 
 interface ItemForm {
   category: string;
@@ -45,6 +46,13 @@ export default function StocksPage() {
 
   const [stockUpItem, setStockUpItem] = useState<StockItem | null>(null);
   const [stockUpQty, setStockUpQty] = useState('');
+
+  useModalUnsavedWarning(
+    Boolean(editItem),
+    { form: editForm, editIcon: Boolean(editIcon), clearIcon },
+    isAdmin,
+  );
+  useModalUnsavedWarning(showAdd, { form: addForm, addIcon: Boolean(addIcon) }, isAdmin);
 
   const load = () => {
     setLoading(true);

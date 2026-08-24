@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   RESEND_BRAND_LABELS,
   RESEND_UI_BRAND_KEYS,
@@ -12,6 +12,7 @@ import {
   type WooPlatformKey,
 } from '@/lib/integration-settings';
 import { ORDER_TYPES } from '@/lib/orders';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 
 const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
@@ -110,6 +111,13 @@ export default function IntegrationsSettingsPanel({
     nestiee: { api_key: '', from_email: '', order_types: [] },
     cupmoka: { api_key: '', from_email: '', order_types: [] },
   });
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+
+  const currentSnapshot = useMemo(
+    () => JSON.stringify({ woo, qb, yedpay, clickup, sf, resend }),
+    [woo, qb, yedpay, clickup, sf, resend],
+  );
+  useUnsavedChangesWarning(savedSnapshot !== null && savedSnapshot !== currentSnapshot);
 
   const applyMasked = (s: IntegrationSettingsMasked) => {
     setMasked(s);
@@ -145,6 +153,42 @@ export default function IntegrationsSettingsPanel({
       nestiee: { api_key: '', from_email: s.resend.nestiee.from_email, order_types: [...s.resend.nestiee.order_types] },
       cupmoka: { api_key: '', from_email: s.resend.cupmoka.from_email, order_types: [...s.resend.cupmoka.order_types] },
     });
+    setSavedSnapshot(
+      JSON.stringify({
+        woo: {
+          nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '' },
+          honour: { url: s.woocommerce.honour.url, key: '', secret: '' },
+          honour_en: { url: s.woocommerce.honour_en.url, key: '', secret: '' },
+          cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '' },
+        },
+        qb: {
+          client_id: s.quickbooks.client_id,
+          client_secret: '',
+          redirect_uri: s.quickbooks.redirect_uri,
+          environment: s.quickbooks.environment,
+        },
+        yedpay: { user_id: s.yedpay.user_id, access_token: '' },
+        clickup: { list_id: s.clickup.list_id, api_token: '' },
+        sf: {
+          partner_id: s.sf_express.partner_id,
+          checkword: '',
+          monthly_card: s.sf_express.monthly_card,
+          environment: s.sf_express.environment,
+          express_type_id: s.sf_express.express_type_id || '1',
+          pay_method: s.sf_express.pay_method || '1',
+          print_template_code: s.sf_express.print_template_code || SF_EXPRESS_DEFAULT_PRINT_TEMPLATE,
+          sender_company: s.sf_express.sender_company,
+          sender_contact: s.sf_express.sender_contact,
+          sender_tel: s.sf_express.sender_tel,
+          sender_address: s.sf_express.sender_address,
+        },
+        resend: {
+          honour: { api_key: '', from_email: s.resend.honour.from_email, order_types: [...s.resend.honour.order_types] },
+          nestiee: { api_key: '', from_email: s.resend.nestiee.from_email, order_types: [...s.resend.nestiee.order_types] },
+          cupmoka: { api_key: '', from_email: s.resend.cupmoka.from_email, order_types: [...s.resend.cupmoka.order_types] },
+        },
+      }),
+    );
   };
 
   const load = async () => {
@@ -258,15 +302,6 @@ export default function IntegrationsSettingsPanel({
         return;
       }
       applyMasked(data.settings);
-      setQb((prev) => ({ ...prev, client_secret: '' }));
-      setYedpay((prev) => ({ ...prev, access_token: '' }));
-      setClickup((prev) => ({ ...prev, api_token: '' }));
-      setSf((prev) => ({ ...prev, checkword: '' }));
-      setResend((prev) => ({
-        honour: { ...prev.honour, api_key: '' },
-        nestiee: { ...prev.nestiee, api_key: '' },
-        cupmoka: { ...prev.cupmoka, api_key: '' },
-      }));
       onToast('Integration settings saved', 'success');
     } catch {
       onToast('Failed to save integration settings', 'error');

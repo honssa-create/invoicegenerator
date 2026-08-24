@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { useModalUnsavedWarning, useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import {
   PERMISSION_SECTIONS,
   ROLE_LABELS,
@@ -55,6 +56,20 @@ export default function AdminPage() {
   const [deleteUser, setDeleteUser] = useState<AdminUser | null>(null);
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
 
+  const [savedPermissionsSnapshot, setSavedPermissionsSnapshot] = useState<string | null>(null);
+
+  useModalUnsavedWarning(showCreate, createForm);
+  useModalUnsavedWarning(Boolean(editUser), editForm);
+  useModalUnsavedWarning(Boolean(resetUserId), { password: resetPassword });
+  useModalUnsavedWarning(Boolean(deleteUser), { email: deleteConfirmEmail });
+
+  const permissionsDirty =
+    tab === 'permissions' &&
+    matrix !== null &&
+    savedPermissionsSnapshot !== null &&
+    JSON.stringify(matrix) !== savedPermissionsSnapshot;
+  useUnsavedChangesWarning(permissionsDirty);
+
   const adminCount = users.filter((u) => u.role === 'admin').length;
 
   const loadUsers = async () => {
@@ -67,6 +82,7 @@ export default function AdminPage() {
     const res = await fetch('/api/admin/permissions');
     const d = await res.json();
     setMatrix(d.matrix || null);
+    setSavedPermissionsSnapshot(JSON.stringify(d.matrix || null));
     setPermissionsLoaded(true);
   };
 
@@ -214,6 +230,7 @@ export default function AdminPage() {
       return;
     }
     setMatrix(data.matrix);
+    setSavedPermissionsSnapshot(JSON.stringify(data.matrix));
     setToast({ msg: `Saved ${ROLE_LABELS[role]} permissions`, kind: 'success' });
   };
 

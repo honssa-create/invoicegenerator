@@ -9,6 +9,11 @@ import CustomerSelect from '@/components/CustomerSelect';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency, StatusBadge } from '@/components/ui';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
+import {
+  buildInvoiceEditorSnapshot,
+  invoiceSnapshotFromRecord,
+} from '@/lib/document-editor-snapshot';
 import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
 import { invoiceFileUrl } from '@/lib/image-url';
 import { calculateInvoiceTotals } from '@/lib/utils';
@@ -93,6 +98,7 @@ export default function InvoiceDetailPage() {
   const [converting, setConverting] = useState(false);
   const [msg, setMsg] = useState('');
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -137,6 +143,7 @@ export default function InvoiceDetailPage() {
             : [emptyLine()],
         );
         setFiles(inv.files || []);
+        setSavedSnapshot(invoiceSnapshotFromRecord(inv));
       });
   }, [id]);
 
@@ -163,6 +170,61 @@ export default function InvoiceDetailPage() {
       }),
     [items, taxRate, discountType, discountValue, shippingAmount],
   );
+
+  const currentSnapshot = useMemo(
+    () =>
+      buildInvoiceEditorSnapshot({
+        customerId,
+        email,
+        sendLater,
+        issueDate,
+        dueDate,
+        term,
+        taxRate,
+        status,
+        notes,
+        terms,
+        billingAddress,
+        shippingAddress,
+        shipVia,
+        shippingDate,
+        trackingNo,
+        orderNo,
+        receiptDate,
+        currency,
+        discountType,
+        discountValue,
+        shippingAmount,
+        items,
+      }),
+    [
+      customerId,
+      email,
+      sendLater,
+      issueDate,
+      dueDate,
+      term,
+      taxRate,
+      status,
+      notes,
+      terms,
+      billingAddress,
+      shippingAddress,
+      shipVia,
+      shippingDate,
+      trackingNo,
+      orderNo,
+      receiptDate,
+      currency,
+      discountType,
+      discountValue,
+      shippingAmount,
+      items,
+    ],
+  );
+
+  const isDirty = !readOnly && savedSnapshot !== null && savedSnapshot !== currentSnapshot;
+  useUnsavedChangesWarning(isDirty);
 
   const save = async () => {
     setSaving(true);
@@ -198,6 +260,7 @@ export default function InvoiceDetailPage() {
     setSaving(false);
     if (res.ok) {
       setMsg('Saved');
+      setSavedSnapshot(currentSnapshot);
       load();
       setTimeout(() => setMsg(''), 2000);
     } else {

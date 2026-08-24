@@ -18,6 +18,7 @@ import {
   type PrepOrderType,
 } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 
 const STATUS_COLORS: Record<string, string> = {
   not_started: 'bg-gray-100 text-gray-600',
@@ -144,6 +145,8 @@ function KitchenPrepListContent() {
   const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
     PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
   );
+
+  useModalUnsavedWarning(showForm, form);
 
   const load = () =>
     fetch('/api/kitchen-prep')

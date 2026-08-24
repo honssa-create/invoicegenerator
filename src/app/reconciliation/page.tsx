@@ -22,6 +22,7 @@ import {
   type ReconciliationRecord,
 } from '@/lib/reconciliation';
 import { BTN, bi } from '@/lib/ui-labels';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { PAYMENT_SLOTS, normalizePaymentSlot, type PaymentSlot } from '@/lib/orders';
 
 interface MatchCandidate {
@@ -201,6 +202,12 @@ function ReconciliationContent() {
   const linkOrderIdParam = searchParams.get('linkOrderId');
   const recordIdParam = searchParams.get('recordId');
   const matchedOrderIdParam = searchParams.get('matchedOrderId');
+
+  useModalUnsavedWarning(showManual, {
+    manualForm,
+    manualReceiptPath,
+    manualPreview: Boolean(manualPreview),
+  });
 
   useEffect(() => {
     if (!user) return;

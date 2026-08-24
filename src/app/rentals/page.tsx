@@ -7,6 +7,7 @@ import AppLayout from '@/components/AppLayout';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
 import { useAuth } from '@/components/AuthProvider';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import {
   RENTAL_STATUS_BADGE,
   RENTAL_STATUS_LABELS,
@@ -68,6 +69,8 @@ export default function RentalsPage() {
   const [toast, setToast] = useState('');
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
   const [leaseFilter, setLeaseFilter] = useState<LeaseDisplayStatus | 'all'>('all');
+
+  useModalUnsavedWarning(Boolean(unitModal), { unitModal, previousYearsText });
 
   const load = () => {
     setLoading(true);

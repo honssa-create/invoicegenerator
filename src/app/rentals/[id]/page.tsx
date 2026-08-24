@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import TenantSelect from '@/components/TenantSelect';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
+import { useUnsavedChangesWarning, useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import DebitNoteActions from '@/components/DebitNoteActions';
 import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
@@ -196,6 +197,7 @@ function RentalDetailInner() {
   const [unitAddress, setUnitAddress] = useState('');
   const [tenantAddress, setTenantAddress] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
+  const [savedProfileSnapshot, setSavedProfileSnapshot] = useState<string | null>(null);
 
   // utility inputs
   const [baseRentPeriodFrom, setBaseRentPeriodFrom] = useState('');
@@ -325,6 +327,36 @@ function RentalDetailInner() {
           );
           setUnitAddress(d.unit.address || '');
           setTenantAddress(d.unit.tenantAddress || '');
+          setSavedProfileSnapshot(
+            JSON.stringify({
+              tenantName: useLease ? profileLease.tenantName : (d.unit.tenantName || ''),
+              tenantContactName: d.unit.tenantContactName || '',
+              tenantCompanyName: d.unit.tenantCompanyName || '',
+              tenantNotes: d.unit.tenantNotes || '',
+              tenantPhone: useLease ? profileLease.tenantPhone : (d.unit.tenantPhone || ''),
+              tenantEmail: useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''),
+              tenantAddress: d.unit.tenantAddress || '',
+              dueDateDay: String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)),
+              baseRent: String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)),
+              utilityBillingMode: normalizeUtilityBillingMode(d.unit.utilityBillingMode),
+              sharedMeterDeductionUnitIds: [...(d.unit.sharedMeterDeductionUnitIds || [])].sort((a, b) => a - b),
+              billingCompany:
+                d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
+                  ? d.unit.billingCompany
+                  : '',
+              leaseStartDate: useLease
+                ? toFormDate(profileLease.leaseStartDate)
+                : (d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : ''),
+              leaseEndDate: useLease
+                ? toFormDate(profileLease.actualEndDate || profileLease.leaseEndDate)
+                : (d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : ''),
+              depositAmount:
+                (useLease ? profileLease.depositAmount : d.currentLease?.depositAmount) != null
+                  ? String(useLease ? profileLease.depositAmount : d.currentLease.depositAmount)
+                  : '',
+              unitAddress: d.unit.address || '',
+            }),
+          );
           const rec = d.currentRecord;
           if (rec) {
             const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
@@ -392,6 +424,55 @@ function RentalDetailInner() {
         setTimeout(() => { skipUtilityAutoSaveRef.current = false; }, 200);
       });
   }, [id, period, viewLeaseId]);
+
+  const currentProfileSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        tenantName,
+        tenantContactName,
+        tenantCompanyName,
+        tenantNotes,
+        tenantPhone,
+        tenantEmail,
+        tenantAddress,
+        dueDateDay,
+        baseRent,
+        utilityBillingMode,
+        sharedMeterDeductionUnitIds: [...sharedMeterDeductionUnitIds].sort((a, b) => a - b),
+        billingCompany,
+        leaseStartDate,
+        leaseEndDate,
+        depositAmount,
+        unitAddress,
+      }),
+    [
+      tenantName,
+      tenantContactName,
+      tenantCompanyName,
+      tenantNotes,
+      tenantPhone,
+      tenantEmail,
+      tenantAddress,
+      dueDateDay,
+      baseRent,
+      utilityBillingMode,
+      sharedMeterDeductionUnitIds,
+      billingCompany,
+      leaseStartDate,
+      leaseEndDate,
+      depositAmount,
+      unitAddress,
+    ],
+  );
+
+  const isProfileDirty =
+    !data?.readOnlyLease &&
+    savedProfileSnapshot !== null &&
+    savedProfileSnapshot !== currentProfileSnapshot;
+  useUnsavedChangesWarning(isProfileDirty);
+
+  useModalUnsavedWarning(showPaidModal, { paymentForm, periodRows, paidNote, autoSendReceipt }, !data?.readOnlyLease);
+  useModalUnsavedWarning(showNoteModal, noteText, !data?.readOnlyLease);
 
   /** Persist virtual period card (id=0) before record-id write actions. */
   const ensurePeriodRecord = useCallback(async (): Promise<number | null> => {
@@ -618,6 +699,7 @@ function RentalDetailInner() {
       }),
     });
     setProfileSaving(false);
+    setSavedProfileSnapshot(currentProfileSnapshot);
     setToast('Profile saved');
     load();
   };

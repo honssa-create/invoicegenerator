@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import { compressImage } from '@/lib/imageCompression';
 import { inboundPhotoUrl } from '@/lib/image-url';
 import type { InboundShipment } from '@/lib/inbound';
@@ -49,6 +50,21 @@ export default function InboundPage() {
   const resetForm = () => {
     setWaybill(''); setSender(''); setSenderAddress(''); setReceiverAddress(''); setArrival(today()); setAmount(''); setPhotoPath(''); setPreview(null); setScanMsg('');
   };
+
+  const isFormDirty = useMemo(
+    () =>
+      Boolean(
+        waybill.trim() ||
+          sender.trim() ||
+          senderAddress.trim() ||
+          receiverAddress.trim() ||
+          amount.trim() ||
+          photoPath.trim() ||
+          preview,
+      ),
+    [waybill, sender, senderAddress, receiverAddress, amount, photoPath, preview],
+  );
+  useUnsavedChangesWarning(isFormDirty);
 
   const handlePhoto = async (rawFile: File) => {
     setScanning(true);

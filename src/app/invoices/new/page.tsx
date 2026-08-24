@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import CustomerSelect from '@/components/CustomerSelect';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency } from '@/components/ui';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import { calculateInvoiceTotals } from '@/lib/utils';
 import type { Customer } from '@/lib/types';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -51,6 +52,25 @@ export default function NewInvoicePage() {
   const [error, setError] = useState('');
 
   const totals = calculateInvoiceTotals(items, taxRate);
+
+  const isDirty = useMemo(() => {
+    const hasLineContent = items.some((item) => item.description.trim() || item.product_service.trim());
+    const defaultDue = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const defaultIssue = new Date().toISOString().split('T')[0];
+    return Boolean(
+      customerId ||
+        customerName.trim() ||
+        notes.trim() ||
+        terms !== 'Payment due within 30 days.' ||
+        taxRate !== 0 ||
+        status !== 'draft' ||
+        hasLineContent ||
+        issueDate !== defaultIssue ||
+        dueDate !== defaultDue,
+    );
+  }, [customerId, customerName, notes, terms, taxRate, status, items, issueDate, dueDate]);
+
+  useUnsavedChangesWarning(!readOnly && isDirty);
 
   const updateItem = (index: number, field: keyof LineItem, value: string | number) => {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));

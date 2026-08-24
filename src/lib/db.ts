@@ -780,6 +780,7 @@ async function runBootDataFixes(): Promise<void> {
   await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_company_name TEXT`);
   await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS address TEXT`);
   await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_address TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_notes TEXT`);
   await client().query(
     `CREATE INDEX IF NOT EXISTS idx_customers_user_ordered ON customers(user_id, ordered)`
   );

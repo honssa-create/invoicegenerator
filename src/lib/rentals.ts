@@ -44,6 +44,8 @@ export interface RentalUnit {
   address: string;
   /** Tenant mailing address 租客地址 */
   tenantAddress: string;
+  /** Tenant notes 備註 */
+  tenantNotes: string;
   /** For company_shared_meter: other unit ids whose usage inputs are deducted from the main dial. */
   sharedMeterDeductionUnitIds: number[];
   created_at: string;

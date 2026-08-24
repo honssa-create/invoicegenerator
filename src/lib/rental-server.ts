@@ -94,6 +94,7 @@ interface UnitRow {
   tenant_id: number | null;
   tenant_contact_name?: string | null;
   tenant_company_name?: string | null;
+  tenant_notes?: string | null;
   tenant_phone: string | null; tenant_email: string | null;
   tenant_address?: string | null;
   current_year_rent: number; previous_years_rent_json: string | null;
@@ -146,6 +147,7 @@ function hydrateUnit(row: UnitRow): RentalUnit {
     tenantId: row.tenant_id ?? null,
     tenantContactName: row.tenant_contact_name || '',
     tenantCompanyName: row.tenant_company_name || '',
+    tenantNotes: row.tenant_notes || '',
     tenantPhone: row.tenant_phone || '', tenantEmail: row.tenant_email || '',
     tenantAddress: row.tenant_address || '',
     currentYearRent: row.current_year_rent || 0,
@@ -362,7 +364,14 @@ export async function createRentalUnit(
 
 export async function getRentalUnit(id: number | string, userId: number): Promise<RentalUnit | null> {
   const row = await db.prepare('SELECT * FROM rental_units WHERE id = ? AND user_id = ?').get(id, userId) as UnitRow | undefined;
-  return row ? hydrateUnit(row) : null;
+  if (!row) return null;
+  const unit = hydrateUnit(row);
+  if (!unit.tenantNotes && unit.tenantId) {
+    const tenantRow = await db.prepare('SELECT notes FROM rental_tenants WHERE id = ? AND user_id = ?')
+      .get(unit.tenantId, userId) as { notes: string | null } | undefined;
+    if (tenantRow?.notes) unit.tenantNotes = tenantRow.notes;
+  }
+  return unit;
 }
 
 /** Recalculate base-rent period dates for every billing record when 每月交租日 changes. */
@@ -401,6 +410,9 @@ export async function updateRentalUnit(
   const tenantAddress = vacant
     ? null
     : ((input.tenantAddress ?? existing.tenantAddress) || null);
+  const tenantNotes = vacant
+    ? null
+    : ((input.tenantNotes ?? existing.tenantNotes) || null);
   const tenantPhone = vacant ? null : ((input.tenantPhone ?? existing.tenantPhone) || null);
   const tenantEmail = vacant ? null : ((input.tenantEmail ?? existing.tenantEmail) || null);
   const automationEnabled = vacant
@@ -422,7 +434,7 @@ export async function updateRentalUnit(
   await db.prepare(
     `UPDATE rental_units SET
       unit_name = ?, tenant_name = ?, tenant_contact_name = ?, tenant_company_name = ?,
-      tenant_phone = ?, tenant_email = ?, tenant_address = ?, current_year_rent = ?,
+      tenant_notes = ?, tenant_phone = ?, tenant_email = ?, tenant_address = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
       utility_billing_mode = ?, address = ?, billing_company = ?,
@@ -432,6 +444,7 @@ export async function updateRentalUnit(
   ).run(
     input.unitName ?? existing.unitName, tenantName,
     tenantContactName?.trim() || null, tenantCompanyName?.trim() || null,
+    tenantNotes?.trim() || null,
     tenantPhone, tenantEmail, tenantAddress?.trim() || null,
     Number(input.currentYearRent ?? existing.currentYearRent) || 0,
     JSON.stringify(input.previousYearsRent ?? existing.previousYearsRent),
@@ -469,12 +482,13 @@ export async function updateRentalUnit(
   await ensureUnitTenantLink(updated);
   if (updated.tenantId) {
     await db.prepare(
-      `UPDATE rental_tenants SET contact_name = ?, company_name = ?, address = ?, updated_at = datetime('now')
+      `UPDATE rental_tenants SET contact_name = ?, company_name = ?, address = ?, notes = ?, updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`
     ).run(
       updated.tenantContactName?.trim() || null,
       updated.tenantCompanyName?.trim() || null,
       updated.tenantAddress?.trim() || null,
+      updated.tenantNotes?.trim() || null,
       updated.tenantId,
       userId,
     );

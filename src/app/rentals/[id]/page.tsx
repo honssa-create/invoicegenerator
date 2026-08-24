@@ -176,6 +176,7 @@ function RentalDetailInner() {
   const [tenantName, setTenantName] = useState('');
   const [tenantContactName, setTenantContactName] = useState('');
   const [tenantCompanyName, setTenantCompanyName] = useState('');
+  const [tenantNotes, setTenantNotes] = useState('');
   const [tenantPhone, setTenantPhone] = useState('');
   const [tenantEmail, setTenantEmail] = useState('');
   const [dueDateDay, setDueDateDay] = useState('1');
@@ -293,6 +294,7 @@ function RentalDetailInner() {
           setTenantName(useLease ? profileLease.tenantName : (d.unit.tenantName || ''));
           setTenantContactName(d.unit.tenantContactName || '');
           setTenantCompanyName(d.unit.tenantCompanyName || '');
+          setTenantNotes(d.unit.tenantNotes || '');
           setTenantPhone(useLease ? profileLease.tenantPhone : (d.unit.tenantPhone || ''));
           setTenantEmail(useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''));
           setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
@@ -572,6 +574,7 @@ function RentalDetailInner() {
     setTenantName(t.name);
     setTenantContactName(t.contact_name || '');
     setTenantCompanyName(t.company_name || '');
+    setTenantNotes(t.notes || '');
     setTenantPhone(t.phone || '');
     setTenantEmail(t.email || '');
     setTenantAddress(t.address || '');
@@ -591,6 +594,7 @@ function RentalDetailInner() {
         tenantName: tenantName.trim(),
         tenantContactName: tenantContactName.trim(),
         tenantCompanyName: tenantCompanyName.trim(),
+        tenantNotes: tenantNotes.trim(),
         tenantPhone: tenantPhone.trim(),
         tenantEmail: tenantEmail.trim(),
         tenantAddress: tenantAddress.trim(),
@@ -1081,7 +1085,7 @@ function RentalDetailInner() {
             <input type="email" className={fieldCls} value={tenantEmail} onChange={(e) => setTenantEmail(e.target.value)} placeholder="tenant@email.com" disabled={readOnly} readOnly={readOnly} />
           </div>
           <div className="md:col-span-2 lg:col-span-3">
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">聯絡人姓名</label>
                 <input className={fieldCls} value={tenantContactName} onChange={(e) => setTenantContactName(e.target.value)} disabled={readOnly} readOnly={readOnly} />
@@ -1089,6 +1093,10 @@ function RentalDetailInner() {
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">公司名稱</label>
                 <input className={fieldCls} value={tenantCompanyName} onChange={(e) => setTenantCompanyName(e.target.value)} disabled={readOnly} readOnly={readOnly} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">備註</label>
+                <input className={fieldCls} value={tenantNotes} onChange={(e) => setTenantNotes(e.target.value)} disabled={readOnly} readOnly={readOnly} />
               </div>
             </div>
           </div>

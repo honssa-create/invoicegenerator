@@ -403,6 +403,7 @@ CREATE TABLE IF NOT EXISTS rental_units (
   tenant_name TEXT NOT NULL,
   tenant_contact_name TEXT,
   tenant_company_name TEXT,
+  tenant_notes TEXT,
   tenant_phone TEXT,
   tenant_email TEXT,
   tenant_address TEXT,

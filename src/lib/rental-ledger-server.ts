@@ -239,9 +239,9 @@ export async function updateRentalTenant(
 
   await db.prepare(
     `UPDATE rental_units SET tenant_name = ?, tenant_contact_name = ?, tenant_company_name = ?,
-      tenant_phone = ?, tenant_email = ?, tenant_address = ?, updated_at = datetime('now')
+      tenant_notes = ?, tenant_phone = ?, tenant_email = ?, tenant_address = ?, updated_at = datetime('now')
      WHERE tenant_id = ? AND user_id = ?`
-  ).run(name, contact_name || null, company_name || null, phone, email, address || null, tenantId, userId);
+  ).run(name, contact_name || null, company_name || null, notes, phone, email, address || null, tenantId, userId);
 
   await db.prepare(
     `UPDATE rental_leases SET tenant_name = ?, tenant_phone = ?, tenant_email = ?, updated_at = datetime('now')

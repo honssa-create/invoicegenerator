@@ -31,7 +31,9 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('users');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [matrix, setMatrix] = useState<Record<UserRole, Record<PermissionSection, SectionAccessLevel>> | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [permissionsLoading, setPermissionsLoading] = useState(false);
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -55,25 +57,28 @@ export default function AdminPage() {
 
   const adminCount = users.filter((u) => u.role === 'admin').length;
 
-  const loadUsers = () =>
-    fetch('/api/admin/users')
-      .then((r) => r.json())
-      .then((d) => setUsers(d.users || []));
+  const loadUsers = async () => {
+    const res = await fetch('/api/admin/users');
+    const d = await res.json();
+    setUsers(d.users || []);
+  };
 
-  const loadPermissions = () =>
-    fetch('/api/admin/permissions')
-      .then((r) => r.json())
-      .then((d) => setMatrix(d.matrix || null));
-
-  const load = async () => {
-    setLoading(true);
-    await Promise.all([loadUsers(), loadPermissions()]);
-    setLoading(false);
+  const loadPermissions = async () => {
+    const res = await fetch('/api/admin/permissions');
+    const d = await res.json();
+    setMatrix(d.matrix || null);
+    setPermissionsLoaded(true);
   };
 
   useEffect(() => {
-    load();
+    loadUsers().finally(() => setUsersLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (tab !== 'permissions' || permissionsLoaded) return;
+    setPermissionsLoading(true);
+    loadPermissions().finally(() => setPermissionsLoading(false));
+  }, [tab, permissionsLoaded]);
 
   useEffect(() => {
     if (!toast) return;
@@ -250,7 +255,7 @@ export default function AdminPage() {
         ))}
       </div>
 
-      {loading ? (
+      {tab === 'users' && usersLoading ? (
         <div className="p-12 text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
         </div>
@@ -339,6 +344,10 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : permissionsLoading || !matrix ? (
+        <div className="p-12 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
         </div>
       ) : (
         <div className="space-y-8">

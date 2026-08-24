@@ -47,6 +47,19 @@ async function markDbAuthoritative(userId: number, type: OptionType): Promise<vo
   ).run(userId, type);
 }
 
+async function authoritativeTypes(userId: number): Promise<Set<OptionType>> {
+  const rows = (await db
+    .prepare('SELECT type FROM expense_option_settings WHERE user_id = ? AND db_authoritative = 1')
+    .all(userId)) as { type: string }[];
+  const done = new Set<OptionType>();
+  for (const row of rows) {
+    if (OPTION_TYPES.includes(row.type as OptionType)) {
+      done.add(row.type as OptionType);
+    }
+  }
+  return done;
+}
+
 /** Merged dropdown values for forms. */
 export async function mergedOptions(userId: number, type: OptionType): Promise<string[]> {
   const dbValues = await dbValuesForType(userId, type);
@@ -58,10 +71,14 @@ export async function mergedOptions(userId: number, type: OptionType): Promise<s
 
 /** Ensure built-in defaults exist in DB so settings can edit/delete them per org. */
 export async function ensureOptionsSeeded(userId: number): Promise<void> {
+  const seeded = await authoritativeTypes(userId);
+  if (seeded.size === OPTION_TYPES.length) return;
+
   const insert = db.prepare(
     'INSERT OR IGNORE INTO expense_options (user_id, type, value) VALUES (?, ?, ?)'
   );
   for (const type of OPTION_TYPES) {
+    if (seeded.has(type)) continue;
     for (const value of DEFAULT_OPTIONS[type]) {
       await insert.run(userId, type, value);
     }

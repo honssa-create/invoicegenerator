@@ -103,17 +103,9 @@ export async function getUserRole(userId: number): Promise<UserRole> {
   return 'operator';
 }
 
-export async function getRoleAccessFromDb(
-  role: UserRole,
-): Promise<Record<PermissionSection, SectionAccessLevel>> {
-  if (role === 'admin') return adminAccessMap();
-
-  await ensureRolePermissionRows();
-
-  const rows = await db
-    .prepare('SELECT section, allowed, access_level FROM role_permissions WHERE role = ?')
-    .all(role) as { section: string; allowed: number; access_level: string | null }[];
-
+function rowsToAccessMap(
+  rows: { section: string; allowed: number; access_level: string | null }[],
+): Record<PermissionSection, SectionAccessLevel> {
   const map = emptyAccessMap();
   for (const r of rows) {
     if (!ALL_SECTIONS.includes(r.section as PermissionSection)) continue;
@@ -128,6 +120,40 @@ export async function getRoleAccessFromDb(
   return map;
 }
 
+async function loadRoleAccessFromDb(
+  role: UserRole,
+  rowsEnsured = false,
+): Promise<Record<PermissionSection, SectionAccessLevel>> {
+  if (role === 'admin') return adminAccessMap();
+  if (!rowsEnsured) await ensureRolePermissionRows();
+
+  const rows = (await db
+    .prepare('SELECT section, allowed, access_level FROM role_permissions WHERE role = ?')
+    .all(role)) as { section: string; allowed: number; access_level: string | null }[];
+
+  return rowsToAccessMap(rows);
+}
+
+export async function getRoleAccessFromDb(
+  role: UserRole,
+): Promise<Record<PermissionSection, SectionAccessLevel>> {
+  return loadRoleAccessFromDb(role);
+}
+
+export async function getRolePermissionLists(role: UserRole): Promise<{
+  permissions: PermissionSection[];
+  readOnlySections: PermissionSection[];
+}> {
+  if (role === 'admin') {
+    return { permissions: [...ALL_SECTIONS], readOnlySections: [] };
+  }
+  const map = await getRoleAccessFromDb(role);
+  return {
+    permissions: ALL_SECTIONS.filter((s) => sectionAccessAllowsView(map[s])),
+    readOnlySections: ALL_SECTIONS.filter((s) => map[s] === 'read'),
+  };
+}
+
 /** @deprecated Prefer getRoleAccessFromDb */
 export async function getRolePermissionsFromDb(role: UserRole): Promise<Record<PermissionSection, boolean>> {
   const access = await getRoleAccessFromDb(role);
@@ -137,15 +163,11 @@ export async function getRolePermissionsFromDb(role: UserRole): Promise<Record<P
 }
 
 export async function getPermissionsListForRole(role: UserRole): Promise<PermissionSection[]> {
-  if (role === 'admin') return [...ALL_SECTIONS];
-  const map = await getRoleAccessFromDb(role);
-  return ALL_SECTIONS.filter((s) => sectionAccessAllowsView(map[s]));
+  return (await getRolePermissionLists(role)).permissions;
 }
 
 export async function getReadOnlySectionsForRole(role: UserRole): Promise<PermissionSection[]> {
-  if (role === 'admin') return [];
-  const map = await getRoleAccessFromDb(role);
-  return ALL_SECTIONS.filter((s) => map[s] === 'read');
+  return (await getRolePermissionLists(role)).readOnlySections;
 }
 
 export async function userHasSection(userId: number, section: PermissionSection): Promise<boolean> {
@@ -181,10 +203,14 @@ export type RoleAccessMatrix = Record<UserRole, Record<PermissionSection, Sectio
 
 export async function getPermissionMatrix(): Promise<RoleAccessMatrix> {
   await ensureRolePermissionRows();
+  const [operator, accountant] = await Promise.all([
+    loadRoleAccessFromDb('operator', true),
+    loadRoleAccessFromDb('accountant', true),
+  ]);
   return {
     admin: adminAccessMap(),
-    operator: await getRoleAccessFromDb('operator'),
-    accountant: await getRoleAccessFromDb('accountant'),
+    operator,
+    accountant,
   };
 }
 

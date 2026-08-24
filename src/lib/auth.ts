@@ -3,7 +3,8 @@ import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import db from './db';
 import type { PermissionSection, UserRole } from './permissions';
-import { getPermissionsListForRole, getReadOnlySectionsForRole, getUserRole } from './permissions-server';
+import { USER_ROLES } from './permissions';
+import { getRolePermissionLists } from './permissions-server';
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'invoice-generator-dev-secret-change-in-production'
@@ -43,13 +44,14 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export async function buildSessionPayload(userId: number): Promise<SessionPayload | null> {
-  const row = await db
-    .prepare('SELECT id, email, name, owner_user_id FROM users WHERE id = ?')
-    .get(userId) as { id: number; email: string; name: string; owner_user_id: number | null } | undefined;
+  const row = (await db
+    .prepare('SELECT id, email, name, owner_user_id, role FROM users WHERE id = ?')
+    .get(userId)) as
+    | { id: number; email: string; name: string; owner_user_id: number | null; role: string }
+    | undefined;
   if (!row) return null;
-  const role = await getUserRole(userId);
-  const permissions = await getPermissionsListForRole(role);
-  const readOnlySections = await getReadOnlySectionsForRole(role);
+  const role = USER_ROLES.includes(row.role as UserRole) ? (row.role as UserRole) : 'operator';
+  const { permissions, readOnlySections } = await getRolePermissionLists(role);
   return {
     userId: row.id,
     email: row.email,
@@ -158,8 +160,7 @@ async function hydrateSessionPermissions(session: SessionPayload): Promise<Sessi
   if (session.role === 'admin') {
     return { ...session, readOnlySections: session.readOnlySections ?? [] };
   }
-  const permissions = await getPermissionsListForRole(session.role);
-  const readOnlySections = await getReadOnlySectionsForRole(session.role);
+  const { permissions, readOnlySections } = await getRolePermissionLists(session.role);
   return { ...session, permissions, readOnlySections };
 }
 

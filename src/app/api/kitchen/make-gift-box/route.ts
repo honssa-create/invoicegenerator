@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       boxType: String(body.boxType || ''),
       quantity: Number(body.quantity),
       consumeOverrides,
+      birdNestType: body.birdNestType != null ? String(body.birdNestType) : undefined,
     });
     if (result.error) {
       return NextResponse.json(

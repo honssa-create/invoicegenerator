@@ -12,9 +12,11 @@ import {
   finishedSkuLabel,
   FINISHED_SKUS,
   giftNeedKey,
+  giftBoxBomNeedsBirdNestChoice,
   type MovementDeltas,
   type StockMaps,
 } from './kitchen-bom';
+import { BIRD_NEST_FORMULA_PLACEHOLDER } from './kitchen-prep';
 
 describe('expandGiftBoxBom', () => {
   it('expands 星空金 to 3 big-belly osmanthus per box', () => {
@@ -32,13 +34,14 @@ describe('expandGiftBoxBom', () => {
     ]);
   });
 
-  it('expands 隨心燉 7 using glass jar, 大燕餅 and 冰糖 per portion', () => {
+  it('expands 隨心燉 7 using glass jar, 燕餅 placeholder and 冰糖 per portion', () => {
     const lines = expandGiftBoxBom('sui_xin_7', 1);
     expect(lines).toEqual([
       { kind: 'raw', name: '75g玻璃燉瓶(大肚)', qty: 2 },
-      { kind: 'raw', name: '大燕餅', qty: 11.9 },
+      { kind: 'raw', name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: 11.9 },
       { kind: 'raw', name: '冰糖', qty: 4.2 },
     ]);
+    expect(giftBoxBomNeedsBirdNestChoice(lines)).toBe(true);
   });
 
   it('includes glass jar in all 隨心燉 pack sizes', () => {
@@ -54,7 +57,7 @@ describe('expandGiftBoxBom', () => {
     const lines = expandGiftBoxBom('sui_xin_14', 2);
     expect(lines).toEqual([
       { kind: 'raw', name: '75g玻璃燉瓶(大肚)', qty: 8 },
-      { kind: 'raw', name: '大燕餅', qty: 47.6 },
+      { kind: 'raw', name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: 47.6 },
       { kind: 'raw', name: '冰糖', qty: 16.8 },
     ]);
   });
@@ -62,15 +65,32 @@ describe('expandGiftBoxBom', () => {
   it('applies packaging qty overrides for batch variance', () => {
     const defaults = expandGiftBoxBom('sui_xin_7', 1);
     const { lines, error } = applyBomQtyOverrides(defaults, {
-      [bomLineKey({ kind: 'raw', name: '大燕餅', qty: 0 })]: 12.1,
+      [bomLineKey({ kind: 'raw', name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: 0 })]: 12.1,
       [bomLineKey({ kind: 'raw', name: '冰糖', qty: 0 })]: 4.0,
     });
     expect(error).toBeUndefined();
     expect(lines).toEqual([
       { kind: 'raw', name: '75g玻璃燉瓶(大肚)', qty: 2 },
-      { kind: 'raw', name: '大燕餅', qty: 12.1 },
+      { kind: 'raw', name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: 12.1 },
       { kind: 'raw', name: '冰糖', qty: 4 },
     ]);
+  });
+
+  it('checkBomAgainstStock resolves 燕餅 to selected bird nest stock', () => {
+    const lines = expandGiftBoxBom('sui_xin_7', 1);
+    const stock = {
+      finished: {},
+      raw: { 大燕餅: 5, 細燕餅: 20, 冰糖: 10, '75g玻璃燉瓶(大肚)': 5 },
+      giftBoxes: {},
+    };
+    const large = checkBomAgainstStock(lines, stock, { birdNestType: 'large' });
+    const small = checkBomAgainstStock(lines, stock, { birdNestType: 'small' });
+    const birdLine = (checks: ReturnType<typeof checkBomAgainstStock>) =>
+      checks.find((c) => c.key === BIRD_NEST_FORMULA_PLACEHOLDER)!;
+    expect(birdLine(large).label).toBe('大燕餅');
+    expect(birdLine(large).enough).toBe(false);
+    expect(birdLine(small).label).toBe('細燕餅');
+    expect(birdLine(small).enough).toBe(true);
   });
 
   it('consumes admin-selected jar size from BOM', () => {
@@ -91,7 +111,7 @@ describe('expandGiftBoxBom', () => {
 
   it('rejects negative packaging overrides', () => {
     const defaults = expandGiftBoxBom('sui_xin_7', 1);
-    const { error } = applyBomQtyOverrides(defaults, { 'raw:大燕餅': -1 });
+    const { error } = applyBomQtyOverrides(defaults, { [`raw:${BIRD_NEST_FORMULA_PLACEHOLDER}`]: -1 });
     expect(error).toMatch(/無效/);
   });
 

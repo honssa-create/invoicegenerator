@@ -26,6 +26,7 @@ export {
   bomLineKey,
   applyBomQtyOverrides,
   normalizeBomQty,
+  giftBoxBomNeedsBirdNestChoice,
   SUI_XIN_YAN_BING_G,
   SUI_XIN_BING_TANG_G,
   giftNeedKey,
@@ -59,7 +60,11 @@ export {
   RESERVE_RAW_MATERIALS,
   giftBoxBomRawOptions,
   giftBoxBomRawSelectOptions,
+  stewFormulaRawSelectOptions,
+  BIRD_NEST_FORMULA_PLACEHOLDER,
 } from './kitchen-catalog';
+
+export { isUntrackedStewIngredient } from './kitchen-prep';
 
 export const GIFT_BOX_TYPES = NESTIEE_GIFT_BOX_TYPES;
 

@@ -4,6 +4,8 @@ import {
   BIRD_NEST_TYPE_LABELS,
   formatPrepIngredientQty,
   STEW_GLASS_BOTTLE_STOCK_NAMES,
+  STEW_WATER_BOIL_SUGAR,
+  STEW_WATER_COLD_SOAK,
   type PrepCalculation,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
@@ -40,6 +42,8 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
       '紅棗',
       '冰糖',
       '片糖',
+      STEW_WATER_BOIL_SUGAR,
+      STEW_WATER_COLD_SOAK,
       ...Object.values(STEW_GLASS_BOTTLE_STOCK_NAMES),
     ];
     const rest = Array.from(names).filter((n) => !preferred.includes(n)).sort();

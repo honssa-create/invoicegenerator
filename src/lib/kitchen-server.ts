@@ -42,7 +42,10 @@ import {
 import {
   aggregateRawNeedsFromPrepOrders,
   bomRawDisplayLabel,
+  isUntrackedStewIngredient,
+  parseBirdNestType,
   resolveRawStockName,
+  type BirdNestType,
   type PrepCapacity,
   type PrepFlavor,
   type PrepOrderType,
@@ -170,7 +173,7 @@ async function ensureRawRow(userId: number, name: string, unit = 'g') {
 async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<StockMaps> {
   const skus = finishedSkusFromCatalog(catalog);
   const skuSet = new Set(skus);
-  const rawDefs = catalog.rawMaterials;
+  const rawDefs = catalog.rawMaterials.filter((m) => !isUntrackedStewIngredient(m.name));
   const giftTypes = catalog.giftBoxTypes;
 
   const [finishedRows, rawRows, giftRows] = await Promise.all([
@@ -507,6 +510,7 @@ export async function getState(userId: number, opts?: { isAdmin?: boolean }): Pr
   }));
 
   const raw = [...catalog.rawMaterials]
+    .filter((m) => !isUntrackedStewIngredient(m.name))
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((m) => ({
       name: m.name,
@@ -625,7 +629,12 @@ function skuLabel(sku: string, catalog: KitchenCatalog): string {
 export async function makeGiftBox(
   ownerId: number,
   actorId: number,
-  input: { boxType: string; quantity: number; consumeOverrides?: Record<string, number> }
+  input: {
+    boxType: string;
+    quantity: number;
+    consumeOverrides?: Record<string, number>;
+    birdNestType?: BirdNestType;
+  }
 ): Promise<{
   error?: string;
   state?: KitchenState;
@@ -639,6 +648,7 @@ export async function makeGiftBox(
   }
   const qty = Math.max(1, Math.floor(Number(input.quantity) || 0));
   if (!qty) return { error: 'Quantity must be at least 1' };
+  const birdNestType = parseBirdNestType(input.birdNestType);
 
   const defaults = expandGiftBoxBom(boxType, qty, formulas.giftBoxBoms);
   const resolved = applyBomQtyOverrides(defaults, input.consumeOverrides);
@@ -656,10 +666,10 @@ export async function makeGiftBox(
         );
       }
     } else {
-      const stockName = resolveRawStockName(line.name);
+      const stockName = resolveRawStockName(line.name, birdNestType);
       if ((stock.raw[stockName] || 0) < line.qty) {
         rawShort.push(
-          `原料不足：${bomRawDisplayLabel(line.name)}（需要 ${line.qty}，現有 ${stock.raw[stockName] || 0}）`
+          `原料不足：${bomRawDisplayLabel(line.name, birdNestType)}（需要 ${line.qty}，現有 ${stock.raw[stockName] || 0}）`
         );
       }
     }
@@ -681,7 +691,7 @@ export async function makeGiftBox(
       .map((l) => ({ sku: l.sku, delta: -l.qty })),
     rawDeltas: lines
       .filter((l): l is { kind: 'raw'; name: string; qty: number } => l.kind === 'raw')
-      .map((l) => ({ name: resolveRawStockName(l.name), delta: -l.qty })),
+      .map((l) => ({ name: resolveRawStockName(l.name, birdNestType), delta: -l.qty })),
     fulfillments: [],
   };
 
@@ -690,7 +700,7 @@ export async function makeGiftBox(
     summaryParts.push(
       l.kind === 'finished'
         ? `−${l.qty} ${skuLabel(l.sku, catalog)}`
-        : `−${l.qty} ${bomRawDisplayLabel(l.name)}`
+        : `−${l.qty} ${bomRawDisplayLabel(l.name, birdNestType)}`
     );
   }
 
@@ -700,7 +710,7 @@ export async function makeGiftBox(
       ownerId,
       actorId,
       'make_gift_box',
-      { summary: summaryParts.join('\n'), deltas, boxType, quantity: qty },
+      { summary: summaryParts.join('\n'), deltas, boxType, quantity: qty, birdNestType },
       null
     );
   });
@@ -1014,6 +1024,7 @@ export async function addFinishedFromStewing(
   }
 
   for (const d of input.rawConsume || []) {
+    if (isUntrackedStewIngredient(d.name)) continue;
     if (!allowedRaw.has(d.name)) return { error: `Unknown raw material: ${d.name}` };
     const qty = Number(d.qty);
     if (!Number.isFinite(qty) || qty <= 0) continue;

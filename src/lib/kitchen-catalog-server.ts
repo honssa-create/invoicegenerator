@@ -1,11 +1,14 @@
 /** Server-side kitchen catalog load/save (org-scoped in kitchen_settings). */
 
 import db from './db';
+import { isUntrackedStewIngredient } from './kitchen-prep';
 import {
   defaultKitchenCatalogBundle,
   mergeBirdNestCatalogRawMaterials,
   mergeGlassBottleCatalogRawMaterials,
   mergeReserveRawMaterials,
+  mergeStewWaterCatalogRawMaterials,
+  mergeStewWaterFormulaLines,
   mergeSuiXinGiftBoxBoms,
   normalizeCatalogBundle,
   validateKitchenCatalogBundle,
@@ -89,7 +92,31 @@ export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalog
       .run(JSON.stringify(catalog), userId);
   }
 
-  let formulasMerged = mergeSuiXinGiftBoxBoms(formulas);
+  const catalogWithWater = mergeStewWaterCatalogRawMaterials(catalog);
+  if (catalogWithWater !== catalog) {
+    catalog = catalogWithWater;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET catalog_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(catalog), userId);
+  }
+
+  let formulasMerged = mergeStewWaterFormulaLines(formulas);
+  if (JSON.stringify(formulasMerged) !== JSON.stringify(formulas)) {
+    formulas = formulasMerged;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET formulas_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(formulas), userId);
+  }
+
+  formulasMerged = mergeSuiXinGiftBoxBoms(formulas);
   if (JSON.stringify(formulasMerged) !== JSON.stringify(formulas)) {
     formulas = formulasMerged;
     await db
@@ -172,7 +199,7 @@ export async function ensureCatalogStockRows(userId: number, catalog: KitchenCat
       .run(...params);
   }
 
-  const raws = catalog.rawMaterials;
+  const raws = catalog.rawMaterials.filter((m) => !isUntrackedStewIngredient(m.name));
   if (raws.length > 0) {
     const placeholders = raws.map(() => '(?, ?, ?, ?, 0)').join(', ');
     const params = raws.flatMap((m) => [userId, m.name, m.unit, 0]);

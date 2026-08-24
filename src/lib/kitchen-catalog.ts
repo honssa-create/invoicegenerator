@@ -16,6 +16,12 @@ import {
   PREP_CAPACITIES,
   getFormulaLines,
   formulaFromLines,
+  withStewWaterLines,
+  STEW_WATER_BOIL_SUGAR,
+  STEW_WATER_COLD_SOAK,
+  BIRD_NEST_FORMULA_PLACEHOLDER,
+  isStewFormulaCatalogExempt,
+  isUntrackedStewIngredient,
   defaultGiftBoxGlassBottleStockName,
   isGlassBottleFormulaIngredient,
   LEGACY_GLASS_BOTTLE_NAME,
@@ -58,6 +64,12 @@ export const STEW_GLASS_BOTTLE_RAW_MATERIALS: CatalogRawMaterial[] = [
   { name: '45g玻璃燉瓶', unit: '個', sortOrder: 7 },
   { name: '75g玻璃燉瓶(高身)', unit: '個', sortOrder: 8 },
   { name: '75g玻璃燉瓶(大肚)', unit: '個', sortOrder: 9 },
+];
+
+/** Stew water ingredients — grams per bottle in stew formulas. */
+export const STEW_WATER_RAW_MATERIALS: CatalogRawMaterial[] = [
+  { name: STEW_WATER_BOIL_SUGAR, unit: 'g', sortOrder: 10 },
+  { name: STEW_WATER_COLD_SOAK, unit: 'g', sortOrder: 11 },
 ];
 
 /** Spare bird's-nest cake stock — shown separately at the bottom of the raw table (可用 only). */
@@ -108,6 +120,49 @@ export function mergeBirdNestCatalogRawMaterials(catalog: KitchenCatalog): Kitch
   };
 }
 
+/** Append stew water raw rows when missing from a saved catalog. */
+export function mergeStewWaterCatalogRawMaterials(catalog: KitchenCatalog): KitchenCatalog {
+  const existing = new Set(catalog.rawMaterials.map((m) => m.name));
+  const missing = STEW_WATER_RAW_MATERIALS.filter((m) => !existing.has(m.name));
+  if (missing.length === 0) return catalog;
+  return {
+    ...catalog,
+    rawMaterials: [...catalog.rawMaterials, ...missing.map((m) => ({ ...m }))],
+  };
+}
+
+/** Append 水(煮糖) / 水(冷泡) lines to saved stew formulas when missing. */
+export function mergeStewWaterFormulaLines(formulas: KitchenFormulas): KitchenFormulas {
+  const stew = formulas.stewFormulas;
+  if (!stew || typeof stew !== 'object') return formulas;
+
+  let changed = false;
+  const nextStew: StewFormulaMap = {};
+
+  for (const [cap, block] of Object.entries(stew)) {
+    if (!block || typeof block !== 'object') {
+      nextStew[cap] = block;
+      continue;
+    }
+    const nextBlock: Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>> = {};
+    for (const flavor of ['osmanthus', 'red_date', 'rock_sugar'] as PrepFlavor[]) {
+      const cell = block[flavor];
+      if (cell == null) {
+        nextBlock[flavor] = cell === null ? null : cell;
+        continue;
+      }
+      const lines = getFormulaLines(cell, flavor);
+      const merged = withStewWaterLines(lines, flavor);
+      if (merged.length !== lines.length) changed = true;
+      nextBlock[flavor] = formulaFromLines(merged);
+    }
+    nextStew[cap] = nextBlock;
+  }
+
+  if (!changed) return formulas;
+  return { ...formulas, stewFormulas: nextStew };
+}
+
 /** Replace legacy 玻璃燉瓶 with capacity-specific jar rows. */
 export function mergeGlassBottleCatalogRawMaterials(catalog: KitchenCatalog): KitchenCatalog {
   const names = new Set(catalog.rawMaterials.map((m) => m.name));
@@ -151,6 +206,14 @@ function normalizeGiftBoxBomGlassLine(line: BomLine): BomLine {
   return line;
 }
 
+/** 隨心燉 BOMs: migrate fixed 大燕餅 → 燕餅 placeholder (packaging picks 大/細). */
+function normalizeSuiXinBirdNestLine(line: BomLine): BomLine {
+  if (line.kind === 'raw' && line.name === '大燕餅') {
+    return { ...line, name: BIRD_NEST_FORMULA_PLACEHOLDER };
+  }
+  return line;
+}
+
 /** Ensure 隨心燉 gift-box BOMs include an editable glass-jar line (migrate legacy 玻璃燉瓶). */
 export function mergeSuiXinGiftBoxBoms(formulas: KitchenFormulas): KitchenFormulas {
   const giftBoxBoms = { ...(formulas.giftBoxBoms || {}) };
@@ -158,7 +221,9 @@ export function mergeSuiXinGiftBoxBoms(formulas: KitchenFormulas): KitchenFormul
 
   for (const boxId of SUI_XIN_GIFT_BOX_IDS) {
     const defaultLines = (GIFT_BOX_BOMS[boxId] || []).map(normalizeGiftBoxBomGlassLine);
-    let lines = (giftBoxBoms[boxId] || []).map(normalizeGiftBoxBomGlassLine);
+    let lines = (giftBoxBoms[boxId] || [])
+      .map(normalizeGiftBoxBomGlassLine)
+      .map(normalizeSuiXinBirdNestLine);
 
     if (lines.length === 0) {
       giftBoxBoms[boxId] = defaultLines.map((l) => ({ ...l }));
@@ -199,10 +264,29 @@ export function giftBoxBomRawOptions(catalog: KitchenCatalog): string[] {
 
 export function giftBoxBomRawSelectOptions(catalog: KitchenCatalog, currentName: string): string[] {
   const base = giftBoxBomRawOptions(catalog);
-  if (currentName && !base.includes(currentName)) {
-    return [currentName, ...base];
+  const withPlaceholder = base.includes(BIRD_NEST_FORMULA_PLACEHOLDER)
+    ? base
+    : [BIRD_NEST_FORMULA_PLACEHOLDER, ...base];
+  if (currentName && !withPlaceholder.includes(currentName)) {
+    return [currentName, ...withPlaceholder];
   }
-  return base;
+  return withPlaceholder;
+}
+
+/** Raw ingredient options for stew formula editor (燕餅 placeholder first). */
+export function stewFormulaRawSelectOptions(catalog: KitchenCatalog, currentName: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (name: string) => {
+    const n = String(name || '').trim();
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+  };
+  push(BIRD_NEST_FORMULA_PLACEHOLDER);
+  for (const m of catalog.rawMaterials) push(m.name);
+  if (currentName) push(currentName);
+  return out;
 }
 
 export interface KitchenCatalogBundle {
@@ -256,6 +340,7 @@ export function defaultKitchenCatalog(): KitchenCatalog {
       { name: '紅棗', unit: 'g', sortOrder: 3 },
       { name: '冰糖', unit: 'g', sortOrder: 4 },
       { name: '片糖', unit: 'g', sortOrder: 5 },
+      ...STEW_WATER_RAW_MATERIALS,
       ...STEW_GLASS_BOTTLE_RAW_MATERIALS,
       ...RESERVE_RAW_MATERIALS,
     ],
@@ -397,7 +482,9 @@ export function validateKitchenCatalogBundle(
         if (!skus.has(line.sku)) return `BOM 引用未知成品：${line.sku}`;
         if (!(Number(line.qty) >= 0)) return `BOM 數量無效：${boxType}`;
       } else if (line.kind === 'raw') {
-        if (!rawNames.has(line.name)) return `BOM 引用未知原料：${line.name}`;
+        if (!rawNames.has(line.name) && !isStewFormulaCatalogExempt(line.name)) {
+          return `BOM 引用未知原料：${line.name}`;
+        }
         if (!(Number(line.qty) >= 0)) return `BOM 數量無效：${boxType}`;
       } else {
         return `無效 BOM kind：${boxType}`;
@@ -413,7 +500,7 @@ export function validateKitchenCatalogBundle(
       const lines = getFormulaLines(cell, flavor);
       for (const l of lines) {
         if (!(Number(l.qty) >= 0)) return `燉製配方數量無效：${cap}/${flavor}`;
-        if (l.qty > 0 && !rawNames.has(l.name)) {
+        if (l.qty > 0 && !rawNames.has(l.name) && !isStewFormulaCatalogExempt(l.name)) {
           return `燉製配方引用未知原料：${cap}/${flavor} → ${l.name}`;
         }
       }

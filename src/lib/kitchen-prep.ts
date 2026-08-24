@@ -32,8 +32,19 @@ export const BIRD_NEST_TYPE_LABELS: Record<BirdNestType, string> = {
 /** Formula line names that represent bird-nest grams (resolved at calc time). */
 export const BIRD_NEST_FORMULA_NAMES = ['燕餅', '大燕餅', '細燕餅'] as const;
 
+/** Placeholder in stew formulas — resolved per prep order to 大燕餅 or 細燕餅. */
+export const BIRD_NEST_FORMULA_PLACEHOLDER = '燕餅';
+
 export function isBirdNestFormulaIngredient(name: string): boolean {
   return (BIRD_NEST_FORMULA_NAMES as readonly string[]).includes(name);
+}
+
+/** Stew formula ingredient allowed without a row in the raw-materials catalog. */
+export function isStewFormulaCatalogExempt(name: string): boolean {
+  const n = String(name || '').trim();
+  if (n === BIRD_NEST_FORMULA_PLACEHOLDER) return true;
+  if (isUntrackedStewIngredient(n)) return true;
+  return false;
 }
 
 export function birdNestMaterialName(type: BirdNestType): string {
@@ -80,13 +91,17 @@ export function isGlassBottleFormulaIngredient(name: string): boolean {
   return Object.values(STEW_GLASS_BOTTLE_STOCK_NAMES).includes(name);
 }
 
-export function resolveRawStockName(name: string): string {
+export function resolveRawStockName(name: string, birdNestType: BirdNestType = 'large'): string {
   if (name === LEGACY_GLASS_BOTTLE_NAME) return defaultGiftBoxGlassBottleStockName();
+  if (name === BIRD_NEST_FORMULA_PLACEHOLDER) return birdNestMaterialName(birdNestType);
   return name;
 }
 
-export function bomRawDisplayLabel(name: string): string {
+export function bomRawDisplayLabel(name: string, birdNestType?: BirdNestType): string {
   if (name === LEGACY_GLASS_BOTTLE_NAME) return defaultGiftBoxGlassBottleStockName();
+  if (name === BIRD_NEST_FORMULA_PLACEHOLDER && birdNestType) {
+    return birdNestMaterialName(birdNestType);
+  }
   return name;
 }
 
@@ -228,7 +243,7 @@ export function defaultStewSlotIngredients(flavor: PrepFlavor): {
   };
 }
 
-/** Normalize any formula shape into a variable ingredient list (qty > 0 only). */
+/** Normalize any formula shape into a variable ingredient list. */
 export function getFormulaLines(
   formula: FlavorFormulaPerBottle | null | undefined,
   flavor: PrepFlavor = 'osmanthus'
@@ -240,7 +255,7 @@ export function getFormulaLines(
         name: String(l?.name || '').trim(),
         qty: Math.max(0, Number(l?.qty) || 0),
       }))
-      .filter((l) => l.name && l.qty > 0);
+      .filter((l) => l.name);
   }
 
   const d = defaultStewSlotIngredients(flavor);
@@ -293,6 +308,37 @@ function line(name: string, qty: number): StewIngredientLine {
   return { name, qty };
 }
 
+/** Stew water ingredients (grams per bottle). */
+export const STEW_WATER_BOIL_SUGAR = '水(煮糖)';
+export const STEW_WATER_COLD_SOAK = '水(冷泡)';
+
+const UNTRACKED_STEW_INGREDIENTS = new Set([STEW_WATER_BOIL_SUGAR, STEW_WATER_COLD_SOAK]);
+
+/** Prep formula lines that are not tracked in kitchen raw inventory. */
+export function isUntrackedStewIngredient(name: string): boolean {
+  return UNTRACKED_STEW_INGREDIENTS.has(String(name || '').trim());
+}
+
+/** Append standard water lines when missing (used by defaults and catalog merge). */
+export function withStewWaterLines(
+  lines: StewIngredientLine[],
+  flavor: PrepFlavor
+): StewIngredientLine[] {
+  const names = new Set(lines.map((l) => l.name));
+  const out = [...lines];
+  if (!names.has(STEW_WATER_BOIL_SUGAR)) {
+    out.push(line(STEW_WATER_BOIL_SUGAR, 0));
+  }
+  if (flavor === 'osmanthus' && !names.has(STEW_WATER_COLD_SOAK)) {
+    out.push(line(STEW_WATER_COLD_SOAK, 0));
+  }
+  return out;
+}
+
+function stewFormula(flavor: PrepFlavor, ...ingredients: StewIngredientLine[]): FlavorFormulaPerBottle {
+  return formulaFromLines(withStewWaterLines(ingredients, flavor));
+}
+
 /**
  * Configuration dictionary: capacity → flavor → per-bottle formula (variable ingredient lines).
  */
@@ -300,48 +346,54 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
   Record<PrepCapacity, Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>>>
 > = {
   '25g': {
-    osmanthus: formulaFromLines([
+    osmanthus: stewFormula(
+      'osmanthus',
       line('燕餅', 0.4),
       line('桂花', 0.072),
-      line('片糖', 2.79),
-    ]),
+      line('片糖', 2.79)
+    ),
     red_date: null,
-    rock_sugar: formulaFromLines([line('燕餅', 0.4), line('冰糖', 1.98)]),
+    rock_sugar: stewFormula('rock_sugar', line('燕餅', 0.4), line('冰糖', 1.98)),
   },
   '45g': {
-    osmanthus: formulaFromLines([
+    osmanthus: stewFormula(
+      'osmanthus',
       line('燕餅', 0.8),
       line('桂花', 0.13),
-      line('片糖', 5.03),
-    ]),
-    red_date: formulaFromLines([
+      line('片糖', 5.03)
+    ),
+    red_date: stewFormula(
+      'red_date',
       line('燕餅', 0.8),
       line('紅棗', 1.8),
-      line('冰糖', 3.57),
-    ]),
-    rock_sugar: formulaFromLines([line('燕餅', 0.8), line('冰糖', 3.57)]),
+      line('冰糖', 3.57)
+    ),
+    rock_sugar: stewFormula('rock_sugar', line('燕餅', 0.8), line('冰糖', 3.57)),
   },
   '75g': {
-    osmanthus: formulaFromLines([
+    osmanthus: stewFormula(
+      'osmanthus',
       line('燕餅', 1.7),
       line('桂花', 0.191),
-      line('片糖', 7.64),
-    ]),
-    red_date: formulaFromLines([
+      line('片糖', 7.64)
+    ),
+    red_date: stewFormula(
+      'red_date',
       line('燕餅', 1.7),
       line('紅棗', 0.191),
-      line('冰糖', 5.41),
-    ]),
-    rock_sugar: formulaFromLines([line('燕餅', 1.75), line('冰糖', 54.1)]),
+      line('冰糖', 5.41)
+    ),
+    rock_sugar: stewFormula('rock_sugar', line('燕餅', 1.75), line('冰糖', 54.1)),
   },
   '75g_big_belly': {
-    osmanthus: formulaFromLines([
+    osmanthus: stewFormula(
+      'osmanthus',
       line('燕餅', 2.1),
       line('桂花', 0.191),
-      line('片糖', 7.64),
-    ]),
+      line('片糖', 7.64)
+    ),
     red_date: null,
-    rock_sugar: formulaFromLines([line('燕餅', 2.1), line('冰糖', 54.1)]),
+    rock_sugar: stewFormula('rock_sugar', line('燕餅', 2.1), line('冰糖', 54.1)),
   },
 };
 
@@ -708,10 +760,9 @@ export function computeStewingRawNeeds(
     const birdNestType = birdNestSelections?.[s.flavor] ?? 'large';
     for (const l of getFormulaLines(formula, s.flavor)) {
       if (isGlassBottleFormulaIngredient(l.name)) continue;
-      add(
-        resolveFormulaIngredientName(l.name, birdNestType, capacity),
-        round2(qty * l.qty)
-      );
+      const resolved = resolveFormulaIngredientName(l.name, birdNestType, capacity);
+      if (isUntrackedStewIngredient(resolved)) continue;
+      add(resolved, round2(qty * l.qty));
     }
     add(stewGlassBottleName(capacity), qty);
   }

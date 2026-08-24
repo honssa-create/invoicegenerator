@@ -11,6 +11,7 @@ import {
   giftBoxQtyKey,
   uniqueCatalogId,
   mergeSuiXinGiftBoxBoms,
+  mergeStewWaterFormulaLines,
   giftBoxBomRawOptions,
 } from './kitchen-catalog';
 import { expandGiftBoxBom, GIFT_BOX_BOMS } from './kitchen-bom';
@@ -20,6 +21,9 @@ import {
   getFormulaLines,
   formulaFromLines,
   CAPACITY_FLAVOR_FORMULAS,
+  STEW_WATER_BOIL_SUGAR,
+  STEW_WATER_COLD_SOAK,
+  BIRD_NEST_FORMULA_PLACEHOLDER,
 } from './kitchen-prep';
 
 describe('kitchen catalog defaults', () => {
@@ -27,6 +31,9 @@ describe('kitchen catalog defaults', () => {
     const catalog = defaultKitchenCatalog();
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('大燕餅');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('細燕餅');
+    expect(catalog.rawMaterials.map((m) => m.name)).toContain(STEW_WATER_BOIL_SUGAR);
+    expect(catalog.rawMaterials.map((m) => m.name)).toContain(STEW_WATER_COLD_SOAK);
+    expect(catalog.rawMaterials.find((m) => m.name === STEW_WATER_BOIL_SUGAR)?.unit).toBe('g');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('25g玻璃燉瓶');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('75g玻璃燉瓶(大肚)');
     expect(catalog.giftBoxTypes.length).toBeGreaterThanOrEqual(9);
@@ -52,6 +59,22 @@ describe('kitchen catalog defaults', () => {
     expect(getStewFlavorFormula('25g', 'red_date', formulas.stewFormulas)).toBeNull();
     const lines = getFormulaLines(getStewFlavorFormula('45g', 'osmanthus', formulas.stewFormulas), 'osmanthus');
     expect(lines.find((l) => l.name === '燕餅')?.qty).toBe(0.8);
+    expect(lines.some((l) => l.name === STEW_WATER_BOIL_SUGAR)).toBe(true);
+    expect(lines.some((l) => l.name === STEW_WATER_COLD_SOAK)).toBe(true);
+  });
+
+  it('mergeStewWaterFormulaLines adds water lines to saved stew formulas', () => {
+    const formulas = defaultKitchenFormulas();
+    const cell = formulas.stewFormulas['45g']!.rock_sugar!;
+    formulas.stewFormulas['45g']!.rock_sugar = formulaFromLines(
+      getFormulaLines(cell, 'rock_sugar').filter(
+        (l) => l.name !== STEW_WATER_BOIL_SUGAR && l.name !== STEW_WATER_COLD_SOAK
+      )
+    );
+    const merged = mergeStewWaterFormulaLines(formulas);
+    const lines = getFormulaLines(merged.stewFormulas['45g']!.rock_sugar!, 'rock_sugar');
+    expect(lines.some((l) => l.name === STEW_WATER_BOIL_SUGAR)).toBe(true);
+    expect(lines.some((l) => l.name === STEW_WATER_COLD_SOAK)).toBe(false);
   });
 
   it('mergeSuiXinGiftBoxBoms adds glass jar and migrates legacy name', () => {
@@ -63,6 +86,7 @@ describe('kitchen catalog defaults', () => {
     ];
     const merged = mergeSuiXinGiftBoxBoms(formulas);
     expect(merged.giftBoxBoms.sui_xin_7![0].name).toBe('75g玻璃燉瓶(大肚)');
+    expect(merged.giftBoxBoms.sui_xin_7!.some((l) => l.kind === 'raw' && l.name === BIRD_NEST_FORMULA_PLACEHOLDER)).toBe(true);
 
     formulas.giftBoxBoms.sui_xin_14 = [
       { kind: 'raw', name: '大燕餅', qty: 23.8 },
@@ -83,6 +107,11 @@ describe('kitchen catalog defaults', () => {
       '75g玻璃燉瓶(高身)',
       '75g玻璃燉瓶(大肚)',
     ]);
+  });
+
+  it('validate accepts default stew formulas with 燕餅 placeholder', () => {
+    const bundle = defaultKitchenCatalogBundle();
+    expect(validateKitchenCatalogBundle(bundle.catalog, bundle.formulas)).toBeNull();
   });
 
   it('validate rejects BOM referencing unknown raw', () => {
@@ -182,6 +211,19 @@ describe('stew variable ingredient lines', () => {
     expect(lines.find((l) => l.name === '桂花')).toBeUndefined();
     expect(lines.find((l) => l.name === '45g玻璃燉瓶')?.qty).toBe(4);
     expect(lines).toHaveLength(3);
+  });
+
+  it('does not include untracked stew water in raw needs', () => {
+    const custom = structuredClone(CAPACITY_FLAVOR_FORMULAS);
+    custom['45g']!.osmanthus = formulaFromLines([
+      { name: '燕餅', qty: 0.8 },
+      { name: STEW_WATER_BOIL_SUGAR, qty: 50 },
+      { name: STEW_WATER_COLD_SOAK, qty: 30 },
+    ]);
+    const lines = computeStewingRawNeeds('45g', [{ flavor: 'osmanthus', qty: 2 }], custom);
+    expect(lines.find((l) => l.name === STEW_WATER_BOIL_SUGAR)).toBeUndefined();
+    expect(lines.find((l) => l.name === STEW_WATER_COLD_SOAK)).toBeUndefined();
+    expect(lines.find((l) => l.name === '大燕餅')?.qty).toBeCloseTo(1.6, 5);
   });
 
   it('sanitize migrates legacy slot formulas to lines', () => {

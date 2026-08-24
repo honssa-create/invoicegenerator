@@ -1,11 +1,12 @@
 /** Gift-box bill of materials and stock-delta helpers (client-safe). */
 
-import type { PrepCapacity, PrepFlavor } from './kitchen-prep';
+import type { PrepCapacity, PrepFlavor, BirdNestType } from './kitchen-prep';
 import {
   isGlassBottleFormulaIngredient,
   defaultGiftBoxGlassBottleStockName,
   resolveRawStockName,
   bomRawDisplayLabel,
+  BIRD_NEST_FORMULA_PLACEHOLDER,
 } from './kitchen-prep';
 
 export { resolveRawStockName, bomRawDisplayLabel, isGlassBottleFormulaIngredient, LEGACY_GLASS_BOTTLE_NAME } from './kitchen-prep';
@@ -82,7 +83,7 @@ function suiXinRawBom(portions: number): BomLine[] {
   if (stewBottles > 0) {
     lines.push({ kind: 'raw', name: defaultGiftBoxGlassBottleStockName(), qty: stewBottles });
   }
-  lines.push({ kind: 'raw', name: '大燕餅', qty: round3(portions * SUI_XIN_YAN_BING_G) });
+  lines.push({ kind: 'raw', name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: round3(portions * SUI_XIN_YAN_BING_G) });
   lines.push({ kind: 'raw', name: '冰糖', qty: round3(portions * SUI_XIN_BING_TANG_G) });
   return lines;
 }
@@ -109,6 +110,11 @@ export const GIFT_BOX_BOMS: Record<string, BomLine[]> = {
 
 export function bomLineKey(line: BomLine): string {
   return line.kind === 'finished' ? `finished:${line.sku}` : `raw:${line.name}`;
+}
+
+/** Gift-box BOM includes 燕餅 placeholder — user picks 大/細燕餅 when packaging. */
+export function giftBoxBomNeedsBirdNestChoice(lines: BomLine[]): boolean {
+  return lines.some((l) => l.kind === 'raw' && l.name === BIRD_NEST_FORMULA_PLACEHOLDER);
 }
 
 export function expandGiftBoxBom(
@@ -210,7 +216,12 @@ export interface StockCheckLine {
   enough: boolean;
 }
 
-export function checkBomAgainstStock(lines: BomLine[], stock: StockMaps): StockCheckLine[] {
+export function checkBomAgainstStock(
+  lines: BomLine[],
+  stock: StockMaps,
+  opts?: { birdNestType?: BirdNestType }
+): StockCheckLine[] {
+  const birdNestType = opts?.birdNestType ?? 'large';
   return lines.map((line) => {
     if (line.kind === 'finished') {
       const have = stock.finished[line.sku] ?? 0;
@@ -223,12 +234,12 @@ export function checkBomAgainstStock(lines: BomLine[], stock: StockMaps): StockC
         enough: have >= line.qty,
       };
     }
-    const stockName = resolveRawStockName(line.name);
+    const stockName = resolveRawStockName(line.name, birdNestType);
     const have = stock.raw[stockName] ?? 0;
     return {
       kind: 'raw' as const,
       key: line.name,
-      label: bomRawDisplayLabel(line.name),
+      label: bomRawDisplayLabel(line.name, birdNestType),
       need: line.qty,
       have,
       enough: have >= line.qty,

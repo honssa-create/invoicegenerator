@@ -10,7 +10,10 @@ import {
   uniqueCatalogId,
   finishedSkusFromCatalog,
   giftBoxBomRawSelectOptions,
+  stewFormulaRawSelectOptions,
+  BIRD_NEST_FORMULA_PLACEHOLDER,
   isReserveRawMaterial,
+  isUntrackedStewIngredient,
   type CatalogRawMaterial,
 } from '@/lib/kitchen';
 import { FINISHED_FLAVORS } from '@/lib/kitchen-bom';
@@ -82,8 +85,11 @@ export default function KitchenAdminPanel({
   const skus = finishedSkusFromCatalog(catalog);
   const rawNames = catalog.rawMaterials.map((m) => m.name);
   const giftBoxRawOptions = (currentName: string) => giftBoxBomRawSelectOptions(catalog, currentName);
+  const stewRawOptions = (currentName: string) => stewFormulaRawSelectOptions(catalog, currentName);
   const rawMaterialRows = catalog.rawMaterials.map((material, index) => ({ material, index }));
-  const regularRawRows = rawMaterialRows.filter(({ material }) => !isReserveRawMaterial(material.name));
+  const regularRawRows = rawMaterialRows.filter(
+    ({ material }) => !isReserveRawMaterial(material.name) && !isUntrackedStewIngredient(material.name)
+  );
   const reserveRawRows = rawMaterialRows.filter(({ material }) => isReserveRawMaterial(material.name));
 
   const updateRawMaterial = (index: number, patch: Partial<CatalogRawMaterial>) => {
@@ -539,7 +545,7 @@ export default function KitchenAdminPanel({
                       const editLines: StewIngredientLine[] =
                         enabled && Array.isArray(cell?.lines)
                           ? cell!.lines!.map((l) => ({
-                              name: String(l.name || '').trim() || (rawNames[0] || ''),
+                              name: String(l.name || '').trim() || BIRD_NEST_FORMULA_PLACEHOLDER,
                               qty: Math.max(0, Number(l.qty) || 0),
                             }))
                           : enabled
@@ -573,7 +579,7 @@ export default function KitchenAdminPanel({
                               onChange={(e) =>
                                 setCell(
                                   e.target.checked
-                                    ? formulaFromLines([{ name: rawNames[0] || '燕餅', qty: 0 }])
+                                    ? formulaFromLines([{ name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: 0 }])
                                     : null
                                 )
                               }
@@ -598,12 +604,12 @@ export default function KitchenAdminPanel({
                                       setLines(next);
                                     }}
                                   >
-                                    {rawNames.map((n) => (
+                                    {stewRawOptions(line.name).map((n) => (
                                       <option key={n} value={n}>
                                         {n}
                                       </option>
                                     ))}
-                                    {line.name && !rawNames.includes(line.name) ? (
+                                    {line.name && !stewRawOptions(line.name).includes(line.name) ? (
                                       <option value={line.name}>{line.name}</option>
                                     ) : null}
                                   </select>
@@ -636,7 +642,7 @@ export default function KitchenAdminPanel({
                                 type="button"
                                 className={`${btnLink} self-center`}
                                 onClick={() =>
-                                  setLines([...editLines, { name: rawNames[0] || '', qty: 0 }])
+                                  setLines([...editLines, { name: BIRD_NEST_FORMULA_PLACEHOLDER, qty: 0 }])
                                 }
                               >
                                 +

@@ -18,16 +18,18 @@ import {
   finishedSkuLabel,
   bomLineKey,
   normalizeBomQty,
+  giftBoxBomNeedsBirdNestChoice,
   SUI_XIN_YAN_BING_G,
   SUI_XIN_BING_TANG_G,
   activeGiftBoxTypes,
   isReserveRawMaterial,
+  isUntrackedStewIngredient,
   type KitchenAction,
   type KitchenState,
   type KitchenOpenOrder,
   type KitchenNeedLine,
 } from '@/lib/kitchen';
-import { resolveRawStockName, defaultGiftBoxGlassBottleStockName } from '@/lib/kitchen-prep';
+import { resolveRawStockName, defaultGiftBoxGlassBottleStockName, BIRD_NEST_TYPES, BIRD_NEST_TYPE_LABELS, type BirdNestType } from '@/lib/kitchen-prep';
 import { type StockMaps } from '@/lib/kitchen-bom';
 import { buildKitchenPrepCreateHref, type PrepCapacity } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -121,6 +123,7 @@ export default function KitchenPage() {
   // 包裝禮盒
   const [giftType, setGiftType] = useState('star_gold');
   const [giftQty, setGiftQty] = useState(1);
+  const [giftBirdNestType, setGiftBirdNestType] = useState<BirdNestType>('large');
   const [giftOrderId, setGiftOrderId] = useState<number | null>(null);
   /** Packaging consume overrides (bomLineKey → input string). Reset when type/qty change. */
   const [packageConsume, setPackageConsume] = useState<Record<string, string>>({});
@@ -349,8 +352,12 @@ export default function KitchenPage() {
   }, [giftBomLines, packageConsume]);
 
   const giftChecks = useMemo(
-    () => checkBomAgainstStock(effectiveGiftBomLines, availableStockMaps),
-    [effectiveGiftBomLines, availableStockMaps]
+    () => checkBomAgainstStock(effectiveGiftBomLines, availableStockMaps, { birdNestType: giftBirdNestType }),
+    [effectiveGiftBomLines, availableStockMaps, giftBirdNestType]
+  );
+  const giftNeedsBirdNestChoice = useMemo(
+    () => giftBoxBomNeedsBirdNestChoice(giftBomLines),
+    [giftBomLines]
   );
   const giftPackageOk = bomIsSufficient(giftChecks);
   const giftAllocateOk =
@@ -557,7 +564,7 @@ export default function KitchenPage() {
           boxType: giftType,
           quantity: giftQty,
           orderId: giftOrderId,
-          ...(giftOrderId ? {} : { consumeOverrides }),
+          ...(giftOrderId ? {} : { consumeOverrides, birdNestType: giftBirdNestType }),
         }),
       });
       const data = await res.json();
@@ -589,7 +596,7 @@ export default function KitchenPage() {
       const res = await fetch('/api/kitchen/make-gift-box', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boxType, quantity: topUp }),
+        body: JSON.stringify({ boxType, quantity: topUp, birdNestType: giftBirdNestType }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -939,7 +946,7 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {state.raw.filter((r) => !isReserveRawMaterial(r.name) && r.name !== '燕餅' && r.name !== '玻璃燉瓶').map((r) => {
+                {state.raw.filter((r) => !isReserveRawMaterial(r.name) && !isUntrackedStewIngredient(r.name) && r.name !== '燕餅' && r.name !== '玻璃燉瓶').map((r) => {
                   const have = availableStockMaps.raw[r.name] ?? r.quantity;
                   const needed = r.needed;
                   const available = have - needed;
@@ -1316,6 +1323,30 @@ export default function KitchenPage() {
                 {giftOrderId && (
                   <p className="text-xs text-gray-500 mb-3">連結訂單 #{giftOrderId}</p>
                 )}
+                {!giftOrderId && giftNeedsBirdNestChoice && (
+                  <div className="mb-4">
+                    <label className="block text-sm text-gray-600 mb-1.5">燕餅類型 Bird&apos;s-nest type</label>
+                    <div className="flex gap-2">
+                      {BIRD_NEST_TYPES.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setGiftBirdNestType(t)}
+                          className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                            giftBirdNestType === t
+                              ? 'border-brand-600 bg-brand-50 text-brand-800'
+                              : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          {BIRD_NEST_TYPE_LABELS[t]}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      配方使用燕餅時，包裝前選擇扣減大燕餅或細燕餅庫存。
+                    </p>
+                  </div>
+                )}
                 {giftOrderId ? (
                   <div className="border rounded-lg p-3 mb-4 space-y-2 text-sm">
                     <div className="font-medium text-gray-700">從已包裝禮盒庫存扣除</div>
@@ -1338,8 +1369,9 @@ export default function KitchenPage() {
                     <div className="font-medium text-gray-700">消耗（包裝用成品樽/原料）</div>
                     {giftType.startsWith('sui_xin') && (
                       <p className="text-xs text-gray-500">
-                        預設換算：每份頂級乾燕餅 = {SUI_XIN_YAN_BING_G}g 大燕餅、每份燕窩冰糖 ={' '}
+                        預設換算：每份頂級乾燕餅 = {SUI_XIN_YAN_BING_G}g 燕餅、每份燕窩冰糖 ={' '}
                         {SUI_XIN_BING_TANG_G}g 冰糖；玻璃燉瓶 = {defaultGiftBoxGlassBottleStockName()}。
+                        {giftNeedsBirdNestChoice ? ' 選擇燕餅類型後扣減對應庫存。' : ''}
                         可因批次誤差調整實際消耗。
                       </p>
                     )}
@@ -1349,7 +1381,7 @@ export default function KitchenPage() {
                     {giftChecks.map((c) => {
                       const unit =
                         c.kind === 'raw'
-                          ? rawMaterials.find((m) => m.name === resolveRawStockName(c.key))?.unit || 'g'
+                          ? rawMaterials.find((m) => m.name === resolveRawStockName(c.key, giftBirdNestType))?.unit || 'g'
                           : '個';
                       const lineKey =
                         c.kind === 'finished' ? `finished:${c.key}` : `raw:${c.key}`;

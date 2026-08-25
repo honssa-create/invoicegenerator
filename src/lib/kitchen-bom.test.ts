@@ -102,6 +102,15 @@ describe('expandGiftBoxBom', () => {
     ]);
   });
 
+  it('expands 花月禮盒 to 75g tall one of each flavor', () => {
+    const lines = expandGiftBoxBom('hua_yue', 2);
+    expect(lines).toEqual([
+      { kind: 'finished', sku: finishedSku('75g', 'rock_sugar'), qty: 2 },
+      { kind: 'finished', sku: finishedSku('75g', 'osmanthus'), qty: 2 },
+      { kind: 'finished', sku: finishedSku('75g', 'red_date'), qty: 2 },
+    ]);
+  });
+
   it('checkBomAgainstStock resolves 燕餅 to selected bird nest stock', () => {
     const lines = expandGiftBoxBom('sui_xin_7', 1);
     const stock = {

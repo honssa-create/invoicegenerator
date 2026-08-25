@@ -37,7 +37,7 @@ describe('kitchen catalog defaults', () => {
     expect(catalog.rawMaterials.find((m) => m.name === STEW_WATER_BOIL_SUGAR)?.unit).toBe('g');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('25g玻璃燉瓶');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('75g玻璃燉瓶(大肚)');
-    expect(catalog.giftBoxTypes.length).toBeGreaterThanOrEqual(12);
+    expect(catalog.giftBoxTypes.length).toBeGreaterThanOrEqual(13);
     expect(finishedSkusFromCatalog(catalog)).toHaveLength(12);
     expect(giftBoxQtyKey('star_gold')).toBe('nestiee_gift_qty_star_gold');
   });

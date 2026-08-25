@@ -1082,6 +1082,7 @@ export const NESTIEE_GIFT_BOX_TYPES: { id: string; label: string; qtyKey: string
   { id: 'qiu_yan_fei_yue', label: '秋燕飛躍', qtyKey: 'nestiee_gift_qty_qiu_yan_fei_yue' },
   { id: 'rou_run_share_box', label: '柔潤分享時光盒', qtyKey: 'nestiee_gift_qty_rou_run_share_box' },
   { id: 'trial_set', label: 'Trial Set', qtyKey: 'nestiee_gift_qty_trial_set' },
+  { id: 'hua_yue', label: '花月禮盒', qtyKey: 'nestiee_gift_qty_hua_yue' },
 ];
 
 /** Auto-map Woo line + EPO options → 所需禮盒 qty keys. */

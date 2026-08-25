@@ -121,6 +121,11 @@ export const GIFT_BOX_BOMS: Record<string, BomLine[]> = {
     { kind: 'finished', sku: finishedSku('45g', 'osmanthus'), qty: 1 },
     { kind: 'finished', sku: finishedSku('45g', 'red_date'), qty: 1 },
   ],
+  hua_yue: [
+    { kind: 'finished', sku: finishedSku('75g', 'rock_sugar'), qty: 1 },
+    { kind: 'finished', sku: finishedSku('75g', 'osmanthus'), qty: 1 },
+    { kind: 'finished', sku: finishedSku('75g', 'red_date'), qty: 1 },
+  ],
 };
 
 export function bomLineKey(line: BomLine): string {

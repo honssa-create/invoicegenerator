@@ -20,7 +20,7 @@ import {
 } from './kitchen-catalog';
 
 /** Bump when merge helpers change so existing DBs re-run once. */
-export const KITCHEN_CATALOG_MERGE_VERSION = '2026-08-v2';
+export const KITCHEN_CATALOG_MERGE_VERSION = '2026-08-v3';
 
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;

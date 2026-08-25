@@ -1,11 +1,12 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
+import NestieeProcessingDashboard from '@/components/NestieeProcessingDashboard';
 import {
   ORDER_TYPES,
   STATUS_COLORS,
@@ -20,7 +21,17 @@ import {
   summarizeOrderDashboard,
   type Order,
 } from '@/lib/orders';
+import {
+  isNestieeOrdersFilter,
+  type NestieeProcessingDemand,
+} from '@/lib/nestiee-order-demand';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+
+const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
+  giftBoxes: [],
+  bottles: [],
+  processingOrderCount: 0,
+};
 
 const OrdersBoard = dynamic(() => import('@/components/OrdersBoard'), { ssr: false });
 const OrdersCalendar = dynamic(() => import('@/components/OrdersCalendar'), { ssr: false });
@@ -69,15 +80,40 @@ function OrdersPageContent() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [nestieeDemand, setNestieeDemand] = useState<NestieeProcessingDemand>(EMPTY_NESTIEE_DEMAND);
+  const [nestieeDemandLoading, setNestieeDemandLoading] = useState(false);
+
+  const isNestieeFilter = isNestieeOrdersFilter(orderType);
+
+  const loadNestieeDemand = useCallback(() => {
+    if (!isNestieeOrdersFilter(orderType)) return;
+    setNestieeDemandLoading(true);
+    fetch('/api/orders/nestiee-processing-demand')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.demand) setNestieeDemand(d.demand);
+      })
+      .catch(() => {
+        /* keep previous */
+      })
+      .finally(() => setNestieeDemandLoading(false));
+  }, [orderType]);
 
   const load = () => {
     setLoading(true);
     fetch('/api/orders')
       .then((r) => r.json())
       .then((d) => setOrders(d.orders || []))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        loadNestieeDemand();
+      });
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    loadNestieeDemand();
+  }, [loadNestieeDemand]);
 
   // Sidebar type shortcuts: /orders?type=<exact order type>
   useEffect(() => {
@@ -332,6 +368,7 @@ function OrdersPageContent() {
         }
         return false;
       }
+      loadNestieeDemand();
       return true;
     } catch {
       setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prevStatus } : o)));
@@ -371,6 +408,7 @@ function OrdersPageContent() {
       + results.filter((r) => r.status === 'rejected').length;
     const succeeded = targets.length - failed;
     setBulkUpdating(false);
+    loadNestieeDemand();
     if (failed === 0) {
       clearOrderSelection();
     } else if (succeeded > 0) {
@@ -495,6 +533,13 @@ function OrdersPageContent() {
           </select>
         </div>
       </FilterBar>
+
+      {isNestieeFilter && (
+        <NestieeProcessingDashboard
+          demand={nestieeDemand}
+          loading={loading || nestieeDemandLoading}
+        />
+      )}
 
       {view === 'board' ? (
         loading ? (

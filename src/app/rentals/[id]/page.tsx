@@ -1174,6 +1174,13 @@ function RentalDetailInner() {
                 >
                   Tenant Ledger 租客
                 </Link>
+                <button
+                  type="button"
+                  onClick={openPaidModal}
+                  className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700"
+                >
+                  ✓ Record Payment 記錄收款
+                </button>
                 <DebitNoteActions
                   tenantId={unit.tenantId}
                   unitId={unit.id}

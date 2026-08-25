@@ -19,7 +19,6 @@ import {
   formatDisplayDate,
   formatDueDayLabel,
   formatMoney,
-  isLeaseFormallyEnded,
   isLeaseStaleEnded,
   isVacantUnitName,
   toFormDate,
@@ -96,11 +95,11 @@ export default function RentalsPage() {
     ? units
     : units.filter((u) => (u.leaseStatus || computeLeaseDisplayStatus(u.currentLease || { leaseEndDate: u.leaseEndDate, actualEndDate: null, status: 'vacant', isCurrent: false })) === leaseFilter);
 
-  /** Master panel shows current occupancy only — archived tenancies live in history table. */
+  /** Master panel lists all portfolio units; only archived leases (is_current=0) move to history. */
   const activePanelUnits = filteredUnits.filter((u) => {
     const lease = u.currentLease;
     if (!lease) return true;
-    return lease.isCurrent && !isLeaseFormallyEnded(lease);
+    return lease.isCurrent;
   });
 
   const tenantGroupKey = (u: Pick<RentalUnit, 'tenantId' | 'tenantName'>) => {

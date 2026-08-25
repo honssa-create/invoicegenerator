@@ -1,14 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { STATUS_COLORS, statusesForOrderType } from '@/lib/orders';
+import { STATUS_COLORS, statusesForOrderType, type PaymentStatusLabel } from '@/lib/orders';
 import { bi } from '@/lib/ui-labels';
 
 export type AccountUser = { id: number; name: string; email: string };
 
+const PAYMENT_STATUS_COLORS: Record<PaymentStatusLabel, string> = {
+  Unpaid: 'bg-red-50 text-red-800',
+  '部分付款 Partly Paid': 'bg-amber-50 text-amber-900',
+  'Full Paid': 'bg-emerald-50 text-emerald-800',
+};
+
 type Props = {
   orderType: string;
   status: string;
+  paymentStatusLabel: PaymentStatusLabel;
   dueDate: string;
   assigneeIds: number[];
   tags: string[];
@@ -57,6 +64,15 @@ function IconCalendar({ className = '' }: { className?: string }) {
   );
 }
 
+function IconPayment({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+      <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
+      <path d="M2.5 10h19" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PropertyLabel({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div className="flex items-center gap-2 min-w-[7.5rem] shrink-0 text-gray-900">
@@ -76,6 +92,7 @@ function initials(name: string): string {
 export default function OrderPropertyBar({
   orderType,
   status,
+  paymentStatusLabel,
   dueDate,
   assigneeIds,
   tags,
@@ -154,6 +171,28 @@ export default function OrderPropertyBar({
           </div>
         </div>
 
+        <div className="flex items-center gap-3 min-w-0">
+          <PropertyLabel icon={<IconPayment className="text-gray-900" />} label={bi('Payment status', '付款狀態')} />
+          <span
+            className={`inline-flex text-xs font-semibold rounded-md px-2.5 py-1.5 ${PAYMENT_STATUS_COLORS[paymentStatusLabel] || 'bg-gray-100 text-gray-700'}`}
+            title={bi('Auto from paid vs due totals', '依已付與應付金額自動計算')}
+          >
+            {paymentStatusLabel}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3 min-w-0">
+          <PropertyLabel icon={<IconCalendar className="text-gray-900" />} label={bi('Receipt date', '收貨日')} />
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => onDueDateChange(e.target.value)}
+            className={`text-sm rounded-md px-2 py-1 outline-none border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${
+              dueDate ? 'text-gray-900' : 'text-gray-400'
+            }`}
+          />
+        </div>
+
         <div className="flex items-center gap-3 min-w-0" ref={assigneesRef}>
           <PropertyLabel icon={<IconPerson className="text-gray-900" />} label={bi('Assignees', '負責人')} />
           <div className="relative min-w-0 flex-1">
@@ -204,19 +243,7 @@ export default function OrderPropertyBar({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 min-w-0">
-          <PropertyLabel icon={<IconCalendar className="text-gray-900" />} label={bi('Receipt date', '收貨日')} />
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => onDueDateChange(e.target.value)}
-            className={`text-sm rounded-md px-2 py-1 outline-none border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${
-              dueDate ? 'text-gray-900' : 'text-gray-400'
-            }`}
-          />
-        </div>
-
-        <div className="flex items-start gap-3 min-w-0" ref={tagsRef}>
+        <div className="flex items-start gap-3 min-w-0 sm:col-span-1" ref={tagsRef}>
           <PropertyLabel icon={<IconTag className="text-gray-900 mt-1" />} label={bi('Tags', '標籤')} />
           <div className="relative min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">

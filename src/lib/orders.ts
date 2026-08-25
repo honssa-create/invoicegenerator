@@ -181,6 +181,70 @@ export function summarizeOrderDashboard(
   return { total: orders.length, unshipped, urgent };
 }
 
+export type OrderListProductLine = { name: string; quantity: string };
+
+/** Product name × quantity rows for the orders list “more info” panel. */
+export function summarizeOrderListProducts(
+  o: Pick<Order, 'fields' | 'description'>,
+): OrderListProductLine[] {
+  const orderType = getOrderType(o);
+  const lines: OrderListProductLine[] = [];
+
+  if (isBadgeOrderType(orderType)) {
+    for (const line of parseHonourLines(o.fields)) {
+      const name = String(line.style ?? '').trim();
+      const quantity = String(line.quantity ?? '').trim();
+      if (!name && !quantity) continue;
+      lines.push({ name: name || '—', quantity: quantity || '—' });
+    }
+    return lines;
+  }
+
+  if (isNestieeOrderType(orderType)) {
+    for (const line of getNestieeLines(o.fields)) {
+      lines.push({ name: line.name, quantity: String(line.quantity) });
+    }
+    return lines;
+  }
+
+  if (isCupmokaOrderType(orderType)) {
+    for (const line of getCupmokaLines(o.fields)) {
+      lines.push({ name: line.name, quantity: String(line.quantity) });
+    }
+    return lines;
+  }
+
+  if (isWeddingGiftOrderType(orderType)) {
+    for (const { key, label } of WEDDING_GIFT_CLIENT_FLAVORS) {
+      const raw = o.fields[key];
+      const quantity = typeof raw === 'string' ? raw.trim() : raw != null ? String(raw) : '';
+      if (!quantity || quantity === '0') continue;
+      lines.push({ name: label, quantity });
+    }
+    return lines;
+  }
+
+  const desc = o.description?.trim();
+  if (desc) return [{ name: desc, quantity: '' }];
+  return [];
+}
+
+/** Payment status label for list/board views (matches Payment Detail derivation). */
+export function orderListPaymentStatus(o: Pick<Order, 'fields' | 'total_amount'>): PaymentStatusLabel {
+  const paid = computeOrderPaidTotal(o.fields);
+  const orderType = getOrderType(o);
+  let due: number | null = null;
+  if (isBadgeOrderType(orderType)) {
+    const total = computeHonourLineTotals(parseHonourLines(o.fields)).totalAmount;
+    if (total > 0) due = total;
+  } else if (isWeddingGiftOrderType(orderType)) {
+    const total = computeWeddingGiftTotal(o.fields);
+    if (total > 0) due = total;
+  }
+  if (due == null && o.total_amount != null && o.total_amount > 0) due = o.total_amount;
+  return derivePaymentStatusLabel(paid, due);
+}
+
 /**
  * Calendar / list date for an order: property-bar `due_date`, falling back to
  * shipment `client_delivery_date` (客人收貨日期) — the two stay linked in the UI.

@@ -1109,6 +1109,7 @@ export default function OrderDetailPage() {
             <OrderPropertyBar
               orderType={orderType}
               status={order.status}
+              paymentStatusLabel={autoStatus}
               dueDate={parseOrderDueDateField(order.fields)}
               assigneeIds={parseAssigneeIds(order.fields)}
               tags={parseOrderTags(order.fields)}

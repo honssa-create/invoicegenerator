@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -14,11 +14,13 @@ import {
   isOrderUnshipped,
   isOrderUrgent,
   orderDueDate,
+  orderListPaymentStatus,
   orderMatchesTypeFilter,
   orderStatusFamily,
   statusKeyForTypeFilter,
   statusesForOrderType,
   summarizeOrderDashboard,
+  summarizeOrderListProducts,
   type Order,
 } from '@/lib/orders';
 import {
@@ -82,6 +84,7 @@ function OrdersPageContent() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [nestieeDemand, setNestieeDemand] = useState<NestieeProcessingDemand>(EMPTY_NESTIEE_DEMAND);
   const [nestieeDemandLoading, setNestieeDemandLoading] = useState(false);
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<number>>(new Set());
 
   const isNestieeFilter = isNestieeOrdersFilter(orderType);
 
@@ -423,7 +426,17 @@ function OrdersPageContent() {
     }
   };
 
+  const toggleExpandedOrder = (id: number) => {
+    setExpandedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
+  const LINE_TABLE_COL_COUNT = 8;
 
   return (
     <>
@@ -660,6 +673,7 @@ function OrdersPageContent() {
             <table className="w-full min-w-[880px]">
               <thead>
                 <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                  <th className="px-2 py-3 w-10" aria-label={bi('More info', '詳細')} />
                   <th className="px-4 py-3 w-12">
                     <input
                       type="checkbox"
@@ -679,37 +693,16 @@ function OrdersPageContent() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {pageRows.map((o) => (
-                  <tr key={o.id} className={`hover:bg-gray-50 ${selectedOrderIds.has(o.id) ? 'bg-brand-50/40' : ''}`}>
-                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedOrderIds.has(o.id)}
-                        onChange={() => toggleSelectOrder(o.id)}
-                        className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-                        aria-label={bi(`Select ${o.reference_number}`, `選取 ${o.reference_number}`)}
-                      />
-                    </td>
-                    <td className="px-6 py-4">
-                      <Link href={`/orders/${o.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
-                        {o.reference_number}
-                      </Link>
-                    </td>
-                    <td className="px-6 py-4">
-                      <Link href={`/orders/${o.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-                        {o.po_number || '—'}
-                      </Link>
-                      {o.name && <p className="mt-0.5 text-xs text-gray-400">{o.name}</p>}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(o) || '—'}</td>
-                    <td className="px-6 py-4">
-                      <OrderLineStatusSelect
-                        order={o}
-                        onChange={(orderId, nextStatus) => { void changeOrderStatus(orderId, nextStatus); }}
-                      />
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{orderDueDate(o) || '—'}</td>
-                    <td className="px-6 py-4 text-sm text-gray-400">{o.created_at?.slice(0, 10)}</td>
-                  </tr>
+                  <OrderLineRow
+                    key={o.id}
+                    order={o}
+                    expanded={expandedOrderIds.has(o.id)}
+                    selected={selectedOrderIds.has(o.id)}
+                    colSpan={LINE_TABLE_COL_COUNT}
+                    onToggleExpand={() => toggleExpandedOrder(o.id)}
+                    onToggleSelect={() => toggleSelectOrder(o.id)}
+                    onStatusChange={(orderId, nextStatus) => { void changeOrderStatus(orderId, nextStatus); }}
+                  />
                 ))}
               </tbody>
             </table>
@@ -747,6 +740,112 @@ function OrdersPageContent() {
         </div>
       )}
     </>
+  );
+}
+
+function OrderLineRow({
+  order,
+  expanded,
+  selected,
+  colSpan,
+  onToggleExpand,
+  onToggleSelect,
+  onStatusChange,
+}: {
+  order: Order;
+  expanded: boolean;
+  selected: boolean;
+  colSpan: number;
+  onToggleExpand: () => void;
+  onToggleSelect: () => void;
+  onStatusChange: (orderId: number, nextStatus: string) => void;
+}) {
+  const products = summarizeOrderListProducts(order);
+  const paymentStatus = orderListPaymentStatus(order);
+  const trackingNo = String(order.fields.tracking_no ?? '').trim();
+  const address = order.shipping_address?.trim() || '';
+
+  return (
+    <Fragment>
+      <tr className={`hover:bg-gray-50 ${selected ? 'bg-brand-50/40' : ''}`}>
+        <td className="px-2 py-4">
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            aria-expanded={expanded}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100 text-xs"
+            title={expanded ? bi('Hide details', '隱藏詳細') : bi('More info', '詳細資料')}
+          >
+            {expanded ? '▾' : '▸'}
+          </button>
+        </td>
+        <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+            aria-label={bi(`Select ${order.reference_number}`, `選取 ${order.reference_number}`)}
+          />
+        </td>
+        <td className="px-6 py-4">
+          <Link href={`/orders/${order.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
+            {order.reference_number}
+          </Link>
+        </td>
+        <td className="px-6 py-4">
+          <Link href={`/orders/${order.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+            {order.po_number || '—'}
+          </Link>
+          {order.name && <p className="mt-0.5 text-xs text-gray-400">{order.name}</p>}
+        </td>
+        <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(order) || '—'}</td>
+        <td className="px-6 py-4">
+          <OrderLineStatusSelect order={order} onChange={onStatusChange} />
+        </td>
+        <td className="px-6 py-4 text-sm text-gray-500">{orderDueDate(order) || '—'}</td>
+        <td className="px-6 py-4 text-sm text-gray-400">{order.created_at?.slice(0, 10)}</td>
+      </tr>
+      {expanded ? (
+        <tr className="bg-gray-50/80">
+          <td colSpan={colSpan} className="px-4 py-3">
+            <div className="rounded-lg border border-gray-200 bg-white p-4 ml-9">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-1">訂購產品</p>
+                  {products.length ? (
+                    <ul className="space-y-1 text-gray-800">
+                      {products.map((line, i) => (
+                        <li key={`${line.name}-${i}`}>
+                          {line.name}
+                          {line.quantity ? (
+                            <span className="text-gray-500"> × {line.quantity}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-gray-400">—</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-1">地址</p>
+                  <p className="text-gray-800 whitespace-pre-wrap">{address || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-1">tracking number</p>
+                  <p className="font-mono text-gray-800 break-all">{trackingNo || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-gray-500 mb-1">payment status</p>
+                  <p className="text-gray-800 font-medium">{paymentStatus}</p>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
   );
 }
 

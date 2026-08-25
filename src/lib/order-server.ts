@@ -123,6 +123,14 @@ const LIST_FIELD_KEYS = [
   'order_type',
   'due_date',
   'client_delivery_date',
+  'honour_lines',
+  'nestiee_lines',
+  'cupmoka_lines',
+  'tracking_no',
+  'payment_status_label',
+  'qty_rock_sugar',
+  'qty_osmanthus',
+  'qty_red_date',
   'payment_amount', 'payment1_amount', 'payment2_amount', 'payment3_amount',
   'payment_date', 'payment_bank', 'payment_method_detail', 'payment_reference',
   'payment_receipt_path', 'payment_verified',
@@ -160,6 +168,14 @@ interface LeanOrderRow {
   f_order_type: string | null;
   f_due_date: string | null;
   f_client_delivery_date: string | null;
+  f_honour_lines: string | null;
+  f_nestiee_lines: string | null;
+  f_cupmoka_lines: string | null;
+  f_tracking_no: string | null;
+  f_payment_status_label: string | null;
+  f_qty_rock_sugar: string | null;
+  f_qty_osmanthus: string | null;
+  f_qty_red_date: string | null;
   f_payment_amount: string | null;
   f_payment1_amount: string | null;
   f_payment2_amount: string | null;
@@ -197,6 +213,14 @@ function leanRowToOrder(row: LeanOrderRow): Order {
   set('order_type', row.f_order_type);
   set('due_date', row.f_due_date);
   set('client_delivery_date', row.f_client_delivery_date);
+  set('honour_lines', row.f_honour_lines);
+  set('nestiee_lines', row.f_nestiee_lines);
+  set('cupmoka_lines', row.f_cupmoka_lines);
+  set('tracking_no', row.f_tracking_no);
+  set('payment_status_label', row.f_payment_status_label);
+  set('qty_rock_sugar', row.f_qty_rock_sugar);
+  set('qty_osmanthus', row.f_qty_osmanthus);
+  set('qty_red_date', row.f_qty_red_date);
   set('payment_amount', row.f_payment_amount);
   set('payment1_amount', row.f_payment1_amount);
   set('payment2_amount', row.f_payment2_amount);

@@ -233,7 +233,7 @@ export function mapCupmokaWooStatus(status: string): string {
   }
 }
 
-/** Manufacturing Woo drafts (honour/cupmoka) must not enter the Order Hub. Nestiee imports drafts. */
+/** Woo checkout drafts (draft / wc-draft / checkout-draft) must not enter the Order Hub. */
 export function isWooDraftOrder(status: string | null | undefined): boolean {
   const normalized = String(status || '').trim().toLowerCase();
   return normalized === 'draft' || normalized === 'wc-draft' || normalized === 'checkout-draft';

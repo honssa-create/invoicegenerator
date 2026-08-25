@@ -90,11 +90,8 @@ export async function ingestWooOrders(
         return day >= dateRange.dateFrom && day <= dateRange.dateTo;
       })
     : orders;
-  // Nestiee imports checkout drafts; honour/cupmoka still skip them.
-  const rows =
-    platform === 'nestiee'
-      ? dateRows
-      : dateRows.filter((order) => !isWooDraftOrder(order.status));
+  // Nestiee and cupmoka skip Woo checkout drafts; honour stores already did too.
+  const rows = dateRows.filter((order) => !isWooDraftOrder(order.status));
   result.fetched = dateRows.length;
   result.skipped += dateRows.length - rows.length;
   const syncedAt = new Date().toISOString();

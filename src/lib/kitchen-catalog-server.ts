@@ -9,6 +9,7 @@ import {
   mergeReserveRawMaterials,
   mergeStewWaterCatalogRawMaterials,
   mergeStewWaterFormulaLines,
+  mergeCatalogGiftBoxTypes,
   mergeSuiXinGiftBoxBoms,
   normalizeCatalogBundle,
   validateKitchenCatalogBundle,
@@ -19,7 +20,7 @@ import {
 } from './kitchen-catalog';
 
 /** Bump when merge helpers change so existing DBs re-run once. */
-export const KITCHEN_CATALOG_MERGE_VERSION = '2026-08-v1';
+export const KITCHEN_CATALOG_MERGE_VERSION = '2026-08-v2';
 
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -123,6 +124,22 @@ async function runCatalogMerges(
          WHERE user_id = ?`
       )
       .run(JSON.stringify(formulas), userId);
+  }
+
+  const mergedBundle = mergeCatalogGiftBoxTypes({ catalog, formulas });
+  if (
+    JSON.stringify(mergedBundle.catalog) !== JSON.stringify(catalog) ||
+    JSON.stringify(mergedBundle.formulas) !== JSON.stringify(formulas)
+  ) {
+    catalog = mergedBundle.catalog;
+    formulas = mergedBundle.formulas;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET catalog_json = ?, formulas_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(catalog), JSON.stringify(formulas), userId);
   }
 
   if (!opts.hasCatalog || !opts.hasFormulas) {

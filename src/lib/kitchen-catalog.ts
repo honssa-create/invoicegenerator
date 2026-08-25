@@ -214,6 +214,35 @@ function normalizeSuiXinBirdNestLine(line: BomLine): BomLine {
   return line;
 }
 
+/** Append gift-box types / BOMs from code defaults when missing in a saved catalog. */
+export function mergeCatalogGiftBoxTypes(bundle: KitchenCatalogBundle): KitchenCatalogBundle {
+  const defaults = defaultKitchenCatalogBundle();
+  const existingIds = new Set(bundle.catalog.giftBoxTypes.map((g) => g.id));
+  const missingTypes = defaults.catalog.giftBoxTypes.filter((g) => !existingIds.has(g.id));
+
+  const giftBoxBoms = { ...bundle.formulas.giftBoxBoms };
+  let bomsChanged = false;
+  for (const [id, lines] of Object.entries(defaults.formulas.giftBoxBoms)) {
+    if (!giftBoxBoms[id]) {
+      giftBoxBoms[id] = structuredClone(lines);
+      bomsChanged = true;
+    }
+  }
+
+  if (missingTypes.length === 0 && !bomsChanged) return bundle;
+
+  return {
+    catalog: {
+      ...bundle.catalog,
+      giftBoxTypes:
+        missingTypes.length > 0
+          ? [...bundle.catalog.giftBoxTypes, ...missingTypes]
+          : bundle.catalog.giftBoxTypes,
+    },
+    formulas: bomsChanged ? { ...bundle.formulas, giftBoxBoms } : bundle.formulas,
+  };
+}
+
 /** Ensure 隨心燉 gift-box BOMs include an editable glass-jar line (migrate legacy 玻璃燉瓶). */
 export function mergeSuiXinGiftBoxBoms(formulas: KitchenFormulas): KitchenFormulas {
   const giftBoxBoms = { ...(formulas.giftBoxBoms || {}) };

@@ -106,6 +106,21 @@ export const GIFT_BOX_BOMS: Record<string, BomLine[]> = {
   sui_xin_7: suiXinRawBom(7),
   sui_xin_14: suiXinRawBom(14),
   sui_xin_18: suiXinRawBom(18),
+  // 75g 高身樽 finished bottles
+  qiu_yan_fei_yue: [
+    { kind: 'finished', sku: finishedSku('75g', 'rock_sugar'), qty: 2 },
+    { kind: 'finished', sku: finishedSku('75g', 'osmanthus'), qty: 3 },
+    { kind: 'finished', sku: finishedSku('75g', 'red_date'), qty: 3 },
+  ],
+  rou_run_share_box: [
+    { kind: 'finished', sku: finishedSku('45g', 'rock_sugar'), qty: 3 },
+    { kind: 'finished', sku: finishedSku('45g', 'osmanthus'), qty: 3 },
+  ],
+  trial_set: [
+    { kind: 'finished', sku: finishedSku('45g', 'rock_sugar'), qty: 1 },
+    { kind: 'finished', sku: finishedSku('45g', 'osmanthus'), qty: 1 },
+    { kind: 'finished', sku: finishedSku('45g', 'red_date'), qty: 1 },
+  ],
 };
 
 export function bomLineKey(line: BomLine): string {

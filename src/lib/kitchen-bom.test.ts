@@ -76,6 +76,32 @@ describe('expandGiftBoxBom', () => {
     ]);
   });
 
+  it('expands 秋燕飛躍 to 75g tall bottles: 2 rock sugar + 3 osmanthus + 3 red date', () => {
+    const lines = expandGiftBoxBom('qiu_yan_fei_yue', 1);
+    expect(lines).toEqual([
+      { kind: 'finished', sku: finishedSku('75g', 'rock_sugar'), qty: 2 },
+      { kind: 'finished', sku: finishedSku('75g', 'osmanthus'), qty: 3 },
+      { kind: 'finished', sku: finishedSku('75g', 'red_date'), qty: 3 },
+    ]);
+  });
+
+  it('expands 柔潤分享時光盒 to 45g rock sugar ×3 + osmanthus ×3', () => {
+    const lines = expandGiftBoxBom('rou_run_share_box', 2);
+    expect(lines).toEqual([
+      { kind: 'finished', sku: finishedSku('45g', 'rock_sugar'), qty: 6 },
+      { kind: 'finished', sku: finishedSku('45g', 'osmanthus'), qty: 6 },
+    ]);
+  });
+
+  it('expands Trial Set to 45g one of each flavor', () => {
+    const lines = expandGiftBoxBom('trial_set', 3);
+    expect(lines).toEqual([
+      { kind: 'finished', sku: finishedSku('45g', 'rock_sugar'), qty: 3 },
+      { kind: 'finished', sku: finishedSku('45g', 'osmanthus'), qty: 3 },
+      { kind: 'finished', sku: finishedSku('45g', 'red_date'), qty: 3 },
+    ]);
+  });
+
   it('checkBomAgainstStock resolves 燕餅 to selected bird nest stock', () => {
     const lines = expandGiftBoxBom('sui_xin_7', 1);
     const stock = {

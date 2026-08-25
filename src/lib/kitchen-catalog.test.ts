@@ -10,6 +10,7 @@ import {
   getStewFlavorFormula,
   giftBoxQtyKey,
   uniqueCatalogId,
+  mergeCatalogGiftBoxTypes,
   mergeSuiXinGiftBoxBoms,
   mergeStewWaterFormulaLines,
   giftBoxBomRawOptions,
@@ -36,7 +37,7 @@ describe('kitchen catalog defaults', () => {
     expect(catalog.rawMaterials.find((m) => m.name === STEW_WATER_BOIL_SUGAR)?.unit).toBe('g');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('25g玻璃燉瓶');
     expect(catalog.rawMaterials.map((m) => m.name)).toContain('75g玻璃燉瓶(大肚)');
-    expect(catalog.giftBoxTypes.length).toBeGreaterThanOrEqual(9);
+    expect(catalog.giftBoxTypes.length).toBeGreaterThanOrEqual(12);
     expect(finishedSkusFromCatalog(catalog)).toHaveLength(12);
     expect(giftBoxQtyKey('star_gold')).toBe('nestiee_gift_qty_star_gold');
   });
@@ -75,6 +76,23 @@ describe('kitchen catalog defaults', () => {
     const lines = getFormulaLines(merged.stewFormulas['45g']!.rock_sugar!, 'rock_sugar');
     expect(lines.some((l) => l.name === STEW_WATER_BOIL_SUGAR)).toBe(true);
     expect(lines.some((l) => l.name === STEW_WATER_COLD_SOAK)).toBe(false);
+  });
+
+  it('mergeCatalogGiftBoxTypes appends missing default gift boxes and BOMs', () => {
+    const bundle = defaultKitchenCatalogBundle();
+    bundle.catalog.giftBoxTypes = bundle.catalog.giftBoxTypes.filter(
+      (g) => !['qiu_yan_fei_yue', 'rou_run_share_box', 'trial_set'].includes(g.id)
+    );
+    delete bundle.formulas.giftBoxBoms.qiu_yan_fei_yue;
+    delete bundle.formulas.giftBoxBoms.rou_run_share_box;
+    delete bundle.formulas.giftBoxBoms.trial_set;
+
+    const merged = mergeCatalogGiftBoxTypes(bundle);
+    expect(merged.catalog.giftBoxTypes.map((g) => g.id)).toContain('qiu_yan_fei_yue');
+    expect(merged.catalog.giftBoxTypes.map((g) => g.id)).toContain('rou_run_share_box');
+    expect(merged.catalog.giftBoxTypes.map((g) => g.id)).toContain('trial_set');
+    expect(merged.formulas.giftBoxBoms.qiu_yan_fei_yue).toEqual(GIFT_BOX_BOMS.qiu_yan_fei_yue);
+    expect(merged.formulas.giftBoxBoms.trial_set).toEqual(GIFT_BOX_BOMS.trial_set);
   });
 
   it('mergeSuiXinGiftBoxBoms adds glass jar and migrates legacy name', () => {

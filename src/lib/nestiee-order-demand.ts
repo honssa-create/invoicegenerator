@@ -1,7 +1,7 @@
 /** Client-safe Nestiee production demand rollup for processing orders. */
 
 import { expandGiftBoxBom, finishedSku, GIFT_BOX_BOMS, type BomLine } from './kitchen-bom';
-import { getOrderType, isNestieeOrderType } from './orders';
+import { isNestieeOrderType, orderTypeFromFields } from './orders';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 
@@ -72,7 +72,8 @@ export function summarizeNestieeProcessingDemand(
   let processingOrderCount = 0;
 
   for (const order of orders) {
-    if (!isNestieeOrderType(getOrderType(order))) continue;
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
     if (order.status !== NESTIEE_PROCESSING_STATUS) continue;
     processingOrderCount += 1;
 

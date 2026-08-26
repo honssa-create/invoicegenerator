@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { orderToDeliveryNotePreview } from './delivery-note-print';
+import { invoiceToDeliveryNotePreview, orderToDeliveryNotePreview } from './delivery-note-print';
 import type { Order } from './orders';
+import type { InvoiceWithDetails } from './types';
 
 function minimalOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -72,5 +73,33 @@ describe('orderToDeliveryNotePreview', () => {
     expect(model.items).toHaveLength(2);
     expect(model.items[0]).toMatchObject({ name: 'Acrylic A', description: 'Finish A', qty: '50' });
     expect(model.items[1]).toMatchObject({ name: 'Acrylic B', description: 'Finish B', qty: '20' });
+  });
+});
+
+describe('invoiceToDeliveryNotePreview', () => {
+  it('maps invoice addresses, numbers, and line items', () => {
+    const model = invoiceToDeliveryNotePreview({
+      invoice_number: '00000012',
+      order_no: 'PO-9',
+      issue_date: '2026-03-01',
+      shipping_date: '2026-03-10',
+      billing_address: 'Bill To',
+      shipping_address: 'Ship To',
+      notes: 'Handle with care',
+      items: [
+        {
+          product_service: 'Badge',
+          description: 'Gold finish',
+          quantity: 40,
+        },
+      ],
+    } as InvoiceWithDetails);
+
+    expect(model.invoiceNo).toBe('00000012');
+    expect(model.orderNo).toBe('PO-9');
+    expect(model.billingAddress).toBe('Bill To');
+    expect(model.shippingAddress).toBe('Ship To');
+    expect(model.message).toBe('Handle with care');
+    expect(model.items).toEqual([{ name: 'Badge', description: 'Gold finish', qty: '40' }]);
   });
 });

@@ -16,8 +16,10 @@ import {
   loadQuotationStyleFromStorage,
   type QuotationStyleTemplate,
 } from '@/lib/quotation-style';
+import PrintDownloadActions from '@/components/PrintDownloadActions';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import type { InvoiceWithDetails } from '@/lib/types';
-import { BTN, bi } from '@/lib/ui-labels';
+import { bi } from '@/lib/ui-labels';
 
 interface Business {
   name: string;
@@ -216,12 +218,7 @@ export default function InvoicePrintPage() {
               })}
             </div>
           ) : null}
-          <button
-            onClick={() => window.print()}
-            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
-          >
-            {BTN.printPdf}
-          </button>
+          <PrintDownloadActions filename={displayInvoiceNumber(invoice.invoice_number)} />
         </div>
       </div>
 

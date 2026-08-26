@@ -30,7 +30,7 @@ import type {
 } from '@/lib/types';
 import { orderTitle } from '@/lib/orders';
 import { displayInvoiceNumber } from '@/lib/record-numbering-core';
-import { BTN, MSG, bi } from '@/lib/ui-labels';
+import { BTN, bi } from '@/lib/ui-labels';
 
 interface LineItem {
   product_service: string;
@@ -84,8 +84,6 @@ export default function InvoiceDetailPage() {
   const [items, setItems] = useState<LineItem[]>([emptyLine()]);
   const [files, setFiles] = useState<InvoiceFile[]>([]);
   const [saving, setSaving] = useState(false);
-  const [duplicating, setDuplicating] = useState(false);
-  const [converting, setConverting] = useState(false);
   const [msg, setMsg] = useState('');
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
@@ -287,57 +285,6 @@ export default function InvoiceDetailPage() {
     load();
   };
 
-  const duplicate = async () => {
-    setDuplicating(true);
-    await save();
-    try {
-      const res = await fetch(`/api/invoices/${id}/duplicate`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) {
-        setToast({ text: data.error || bi('Failed to duplicate invoice', '複製發票失敗'), kind: 'error' });
-        setTimeout(() => setToast(null), 5000);
-        return;
-      }
-      setToast({
-        text: bi(
-          `Duplicated as ${displayInvoiceNumber(data.invoice_number)}`,
-          `已複製為 ${displayInvoiceNumber(data.invoice_number)}`,
-        ),
-        kind: 'success',
-      });
-      setTimeout(() => router.push(`/invoices/${data.id}`), 800);
-    } catch {
-      setToast({ text: bi('Failed to duplicate invoice', '複製發票失敗'), kind: 'error' });
-      setTimeout(() => setToast(null), 5000);
-    } finally {
-      setDuplicating(false);
-    }
-  };
-
-  const convertToOrder = async () => {
-    setConverting(true);
-    await save();
-    try {
-      const res = await fetch(`/api/invoices/${id}/convert`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: 'order' }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setToast({ text: data.error || MSG.conversionFailed, kind: 'error' });
-        setTimeout(() => setToast(null), 5000);
-        return;
-      }
-      router.push(`/orders/${data.id}`);
-    } catch {
-      setToast({ text: MSG.conversionFailed, kind: 'error' });
-      setTimeout(() => setToast(null), 5000);
-    } finally {
-      setConverting(false);
-    }
-  };
-
   const del = async () => {
     if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
@@ -407,6 +354,12 @@ export default function InvoiceDetailPage() {
           >
             🧾 {bi('Generate PDF', '產生 PDF')}
           </Link>
+          <Link
+            href={`/invoices/${id}/delivery-note`}
+            className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
+          >
+            🚚 {bi('Generate Delivery Note', '產生出貨單')}
+          </Link>
           {status === 'paid' && (
             <Link
               href={`/invoices/${id}/receipt`}
@@ -417,24 +370,6 @@ export default function InvoiceDetailPage() {
           )}
           {!readOnly && (
             <>
-              <button
-                onClick={duplicate}
-                disabled={duplicating}
-                className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              >
-                {duplicating
-                  ? bi('Duplicating…', '複製中…')
-                  : `📄 ${bi('Duplicate', '複製發票')}`}
-              </button>
-              <button
-                onClick={convertToOrder}
-                disabled={converting}
-                className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50"
-              >
-                {converting
-                  ? bi('Converting…', '轉換中…')
-                  : `→ ${bi('Convert to Order', '轉換為訂單')}`}
-              </button>
               <button
                 onClick={save}
                 disabled={saving}

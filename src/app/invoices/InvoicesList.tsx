@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import FilterBar from '@/components/FilterBar';
 import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
@@ -64,6 +64,7 @@ function PaginationBar({
 }
 
 export default function InvoicesList() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { isSectionReadOnly } = useAuth();
   const readOnly = isSectionReadOnly('invoices');
@@ -77,6 +78,7 @@ export default function InvoicesList() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [page, setPage] = useState(1);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
 
   const loadInvoices = () => {
     setLoading(true);
@@ -162,6 +164,23 @@ export default function InvoicesList() {
     if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     setInvoices((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  const handleDuplicate = async (id: number) => {
+    setDuplicatingId(id);
+    try {
+      const res = await fetch(`/api/invoices/${id}/duplicate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || bi('Failed to duplicate invoice', '複製發票失敗'));
+        return;
+      }
+      router.push(`/invoices/${data.id}`);
+    } catch {
+      alert(bi('Failed to duplicate invoice', '複製發票失敗'));
+    } finally {
+      setDuplicatingId(null);
+    }
   };
 
   const clearFilters = () => {
@@ -280,20 +299,40 @@ export default function InvoicesList() {
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.due_date)}</td>
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(inv.total)}</td>
                   <td className="px-6 py-4"><StatusBadge status={inv.status} /></td>
-                  <td className="px-6 py-4 text-sm space-x-3">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.view}</Link>
-                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">{BTN.print}</Link>
-                    {inv.status === 'paid' && (
-                      <Link
-                        href={`/invoices/${inv.id}/receipt`}
-                        className="text-gray-600 hover:text-gray-800 font-medium"
-                      >
-                        {bi('Receipt', '收據')}
-                      </Link>
-                    )}
-                    {!readOnly && (
-                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button>
-                    )}
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex flex-col items-start gap-1">
+                      <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.view}</Link>
+                      <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">{BTN.print}</Link>
+                      {inv.status === 'paid' && (
+                        <Link
+                          href={`/invoices/${inv.id}/receipt`}
+                          className="text-gray-600 hover:text-gray-800 font-medium"
+                        >
+                          {bi('Receipt', '收據')}
+                        </Link>
+                      )}
+                      {!readOnly && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleDuplicate(inv.id)}
+                            disabled={duplicatingId === inv.id}
+                            className="text-gray-600 hover:text-gray-800 font-medium disabled:opacity-50"
+                          >
+                            {duplicatingId === inv.id
+                              ? bi('Duplicating…', '複製中…')
+                              : bi('Duplicate', '複製')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(inv.id)}
+                            className="text-red-600 hover:text-red-700 font-medium"
+                          >
+                            {BTN.delete}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

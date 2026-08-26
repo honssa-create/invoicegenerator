@@ -20,6 +20,8 @@ export const BTN = {
   print: bi('Print', '列印'),
   printPdf: bi('Print / Save as PDF', '列印 / 儲存為 PDF'),
   printSavePdf: bi('Print / Save PDF', '列印 / 儲存 PDF'),
+  downloadPdf: bi('Download PDF', '下載 PDF'),
+  downloadingPdf: bi('Downloading…', '下載中…'),
   export: bi('Export', '匯出'),
   exportExcel: bi('Export to Excel', '匯出 Excel'),
   exportCsv: bi('Export CSV', '匯出 CSV'),

@@ -3,27 +3,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import FormalQuotationDocument from '@/components/FormalQuotationDocument';
-import { invoiceToReceiptPreview } from '@/lib/invoice-print';
+import DeliveryNoteDocument from '@/components/DeliveryNoteDocument';
+import PrintDownloadActions from '@/components/PrintDownloadActions';
+import { invoiceToDeliveryNotePreview } from '@/lib/delivery-note-print';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import {
   DEFAULT_QUOTATION_STYLE,
   loadQuotationStyleFromStorage,
   type QuotationStyleTemplate,
 } from '@/lib/quotation-style';
-import PrintDownloadActions from '@/components/PrintDownloadActions';
-import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import type { InvoiceWithDetails } from '@/lib/types';
 import { bi } from '@/lib/ui-labels';
 
-interface Business {
-  name: string;
-  company_name: string | null;
-  email: string;
-}
-
 type PdfChopMode = 'chop' | 'no-chop';
 
-const PDF_CHOP_STORAGE_KEY = 'invoice-pdf-chop';
+const PDF_CHOP_STORAGE_KEY = 'delivery-note-pdf-chop';
 
 const PDF_CHOP_OPTIONS: { id: PdfChopMode; label: string }[] = [
   { id: 'chop', label: bi('Chop', '公司章') },
@@ -41,23 +35,16 @@ function loadPdfChop(): PdfChopMode {
   return 'chop';
 }
 
-export default function InvoiceReceiptPage() {
+export default function InvoiceDeliveryNotePage() {
   const { id } = useParams();
   const [invoice, setInvoice] = useState<InvoiceWithDetails | null>(null);
-  const [business, setBusiness] = useState<Business | null>(null);
   const [style, setStyle] = useState<QuotationStyleTemplate>(DEFAULT_QUOTATION_STYLE);
   const [chopMode, setChopMode] = useState<PdfChopMode>('chop');
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     fetch(`/api/invoices/${id}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setInvoice(d.invoice || null);
-        setBusiness(d.business || null);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setInvoice(d?.invoice || null));
   }, [id]);
 
   useEffect(() => {
@@ -74,55 +61,25 @@ export default function InvoiceReceiptPage() {
     }
   };
 
-  const isPaid = invoice?.status === 'paid';
-
   useEffect(() => {
-    if (!invoice || !isPaid) return;
-    const key = `invoice-receipt-logged-${id}`;
+    if (!invoice) return;
+    const key = `invoice-dn-logged-${id}`;
     if (sessionStorage.getItem(key)) return;
     sessionStorage.setItem(key, '1');
     fetch('/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'invoice', id, body: '🧾 Generated receipt PDF / print view' }),
+      body: JSON.stringify({ type: 'invoice', id, body: '🚚 Generated delivery note (出貨單)' }),
     }).catch(() => {});
-  }, [invoice, id, isPaid]);
+  }, [invoice, id]);
 
   const model = useMemo(
-    () => (invoice && isPaid ? invoiceToReceiptPreview(invoice, business) : null),
-    [invoice, business, isPaid],
+    () => (invoice ? invoiceToDeliveryNotePreview(invoice) : null),
+    [invoice],
   );
+  const showChop = chopMode === 'chop';
 
-  if (!loaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
-      </div>
-    );
-  }
-
-  if (!invoice || !isPaid) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center px-6">
-        <div className="max-w-md text-center">
-          <p className="text-gray-700 text-sm">
-            {bi(
-              'A receipt can only be generated for paid invoices.',
-              '只有已付款的發票可以產生收據。',
-            )}
-          </p>
-          <Link
-            href={`/invoices/${id}`}
-            className="inline-block mt-4 text-sm text-brand-600 hover:text-brand-700 font-medium"
-          >
-            ← {bi('Back to invoice', '返回發票')}
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (!model) {
+  if (!invoice || !model) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
@@ -162,26 +119,13 @@ export default function InvoiceReceiptPage() {
             })}
           </div>
           <PrintDownloadActions
-            filename={`${displayInvoiceNumber(invoice.invoice_number)} receipt`}
+            filename={`${displayInvoiceNumber(invoice.invoice_number)} delivery note`}
           />
         </div>
       </div>
 
       <div className="py-8 print:py-0">
-        <FormalQuotationDocument
-          model={model}
-          style={style}
-          printMode
-          showSum
-          showSignature
-          showChop={chopMode === 'chop'}
-          showAcceptedBy={false}
-          documentTitle="RECEIPT"
-          numberLabel="Invoice No."
-          dateLabel="RECEIPT DATE"
-          billingLabel="To"
-          remarksMode="plain"
-        />
+        <DeliveryNoteDocument model={model} style={style} printMode showChop={showChop} />
       </div>
     </div>
   );

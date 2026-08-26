@@ -11,8 +11,15 @@ import {
   composeProductionNotePng,
   DEFAULT_TEXT_OFFSET,
   downloadBlob,
+  formatProductionNoteShipDate,
+  isoFromProductionNoteShipDate,
+  MAX_FONT_SCALE,
+  MIN_FONT_SCALE,
+  normalizeTextColor,
   prefillProductionNote,
+  PRODUCTION_NOTE_COLOR_SWATCHES,
   PRODUCTION_NOTE_FILENAME,
+  clampFontScale,
   type ProductionNoteFields,
   type ProductionNoteTextOffset,
 } from '@/lib/production-note';
@@ -87,7 +94,7 @@ export default function ProductionNotePage() {
   const selectExisting = (file: OrderFile) => {
     revokeLocal();
     setEffect({ kind: 'file', file, src: orderFileUrl(file) });
-    setTextOffset(DEFAULT_TEXT_OFFSET);
+    setTextOffset((s) => ({ ...s, x: DEFAULT_TEXT_OFFSET.x, y: DEFAULT_TEXT_OFFSET.y }));
     setMsg('');
   };
 
@@ -105,7 +112,7 @@ export default function ProductionNotePage() {
       const src = URL.createObjectURL(file);
       localBlobRef.current = src;
       setEffect({ kind: 'local', src, name: file.name || 'effect.png' });
-      setTextOffset(DEFAULT_TEXT_OFFSET);
+      setTextOffset((s) => ({ ...s, x: DEFAULT_TEXT_OFFSET.x, y: DEFAULT_TEXT_OFFSET.y }));
       setMsg('');
 
       // Also add to order attachments so it appears in the picker afterwards
@@ -302,12 +309,56 @@ export default function ProductionNotePage() {
           <label className="block space-y-1.5">
             <span className="text-sm font-medium text-gray-700">{bi('Ship date', '寄出日子')}</span>
             <input
-              value={fields.shipDate}
-              onChange={(e) => setField('shipDate', e.target.value)}
+              type="date"
+              value={isoFromProductionNoteShipDate(fields.shipDate)}
+              onChange={(e) => setField('shipDate', formatProductionNoteShipDate(e.target.value))}
               className={softInput}
-              placeholder="7月13日寄出"
             />
           </label>
+
+          <div className="space-y-3 pt-2 border-t border-dashed border-gray-200">
+            <p className="text-sm font-medium text-gray-700">{bi('Text style', '文字樣式')}</p>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-gray-500">{bi('Size', '大小')}</span>
+              <input
+                type="range"
+                min={MIN_FONT_SCALE}
+                max={MAX_FONT_SCALE}
+                step={0.002}
+                value={clampFontScale(textOffset.fontScale)}
+                onChange={(e) =>
+                  setTextOffset({ ...textOffset, fontScale: Number(e.target.value) })
+                }
+                className="w-full accent-brand-600"
+              />
+            </label>
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-gray-500">{bi('Color', '顏色')}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="color"
+                  value={normalizeTextColor(textOffset.color)}
+                  onChange={(e) => setTextOffset({ ...textOffset, color: e.target.value })}
+                  className="h-9 w-12 cursor-pointer rounded border border-gray-200 bg-white p-0.5"
+                  aria-label={bi('Text color', '文字顏色')}
+                />
+                {PRODUCTION_NOTE_COLOR_SWATCHES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setTextOffset({ ...textOffset, color: c })}
+                    className={`h-8 w-8 rounded-full border shadow-sm ${
+                      normalizeTextColor(textOffset.color) === normalizeTextColor(c)
+                        ? 'ring-2 ring-brand-500 ring-offset-1'
+                        : 'border-gray-200'
+                    }`}
+                    style={{ backgroundColor: c }}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
 
           <div className="space-y-2 pt-2 border-t border-dashed border-gray-200">
             <div className="flex items-center justify-between gap-2">

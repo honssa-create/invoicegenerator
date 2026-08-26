@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Order } from './orders';
 import {
   clampTextOffset,
+  DEFAULT_FONT_SCALE,
+  DEFAULT_TEXT_COLOR,
   DEFAULT_TEXT_OFFSET,
   fieldStr,
+  formatProductionNoteShipDate,
+  isoFromProductionNoteShipDate,
+  isLightTextColor,
+  clampFontScale,
+  MAX_FONT_SCALE,
+  MIN_FONT_SCALE,
+  normalizeTextColor,
   prefillProductionNote,
   productionNoteTextLines,
   type ProductionNoteFields,
@@ -118,7 +127,29 @@ describe('prefillProductionNote', () => {
     const note = prefillProductionNote(order);
     expect(note.details).toBe('card craft, 金, 磁扣');
     expect(note.price).toBe('4.2');
-    expect(note.shipDate).toBe('1/1/26');
+    expect(note.shipDate).toBe('1月1日寄出');
+  });
+
+  it('formats ISO supplier ship date as M月D日寄出', () => {
+    const order = baseOrder({
+      fields: { supplier_ship_date: '2026-07-13' },
+    });
+    expect(prefillProductionNote(order).shipDate).toBe('7月13日寄出');
+  });
+});
+
+describe('formatProductionNoteShipDate', () => {
+  it('formats ISO and DMY as M月D日寄出', () => {
+    expect(formatProductionNoteShipDate('2026-07-13')).toBe('7月13日寄出');
+    expect(formatProductionNoteShipDate('1/1/26')).toBe('1月1日寄出');
+    expect(formatProductionNoteShipDate('7月13日寄出')).toBe('7月13日寄出');
+    expect(formatProductionNoteShipDate('')).toBe('');
+  });
+
+  it('parses Chinese label back to ISO for the date picker', () => {
+    const y = new Date().getFullYear();
+    expect(isoFromProductionNoteShipDate('7月13日寄出')).toBe(`${y}-07-13`);
+    expect(isoFromProductionNoteShipDate('2026-07-13')).toBe('2026-07-13');
   });
 });
 
@@ -140,6 +171,18 @@ describe('productionNoteTextLines', () => {
     ]);
   });
 
+  it('formats ISO ship dates on the note', () => {
+    expect(
+      productionNoteTextLines({
+        po: '',
+        details: '',
+        quantity: '',
+        price: '',
+        shipDate: '2026-07-13',
+      })
+    ).toEqual(['7月13日寄出']);
+  });
+
   it('does not append 個 when already present', () => {
     expect(
       productionNoteTextLines({
@@ -159,9 +202,25 @@ describe('clampTextOffset', () => {
   });
 
   it('clamps negative and oversized values', () => {
-    expect(clampTextOffset({ x: -1, y: -0.5 })).toEqual({ x: 0, y: 0 });
+    expect(clampTextOffset({ x: -1, y: -0.5 })).toMatchObject({ x: 0, y: 0 });
     const clamped = clampTextOffset({ x: 2, y: 2 });
     expect(clamped.x).toBeLessThanOrEqual(1);
     expect(clamped.y).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('clampFontScale / text color', () => {
+  it('clamps font scale to a usable range', () => {
+    expect(clampFontScale(0.028)).toBe(0.028);
+    expect(clampFontScale(0)).toBe(MIN_FONT_SCALE);
+    expect(clampFontScale(9)).toBe(MAX_FONT_SCALE);
+    expect(clampFontScale(undefined)).toBe(DEFAULT_FONT_SCALE);
+  });
+
+  it('normalizes hex colors and classifies lightness', () => {
+    expect(normalizeTextColor('#FFF')).toBe('#ffffff');
+    expect(normalizeTextColor('nope')).toBe(DEFAULT_TEXT_COLOR);
+    expect(isLightTextColor('#ffffff')).toBe(true);
+    expect(isLightTextColor('#000000')).toBe(false);
   });
 });

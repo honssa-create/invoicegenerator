@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  clampFontScale,
   clampTextOffset,
+  isLightTextColor,
+  normalizeTextColor,
   productionNoteTextLines,
   type ProductionNoteFields,
   type ProductionNoteTextOffset,
@@ -16,8 +19,8 @@ interface Props {
 }
 
 /**
- * Live preview: effect image as full background + draggable white text block.
- * Position is stored as fractions of the image size.
+ * Live preview: effect image as full background + draggable / resizable text block.
+ * Position and font scale are stored as fractions of the image size.
  */
 export default function ProductionNotePreview({
   imageSrc,
@@ -34,10 +37,19 @@ export default function ProductionNotePreview({
     originX: number;
     originY: number;
   } | null>(null);
+  const resizeRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startWidth: number;
+    originScale: number;
+  } | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [stageWidth, setStageWidth] = useState(0);
 
   const lines = productionNoteTextLines(fields);
+  const fontScale = clampFontScale(textOffset.fontScale);
+  const color = normalizeTextColor(textOffset.color);
+  const light = isLightTextColor(color);
 
   useEffect(() => {
     setNatural(null);
@@ -54,7 +66,7 @@ export default function ProductionNotePreview({
 
   const previewFontPx =
     natural && stageWidth > 0
-      ? Math.max(11, Math.round(Math.min(natural.w, natural.h) * 0.028 * (stageWidth / natural.w)))
+      ? Math.max(8, Math.round(Math.min(natural.w, natural.h) * fontScale * (stageWidth / natural.w)))
       : 14;
 
   const measureBlockFrac = useCallback(() => {
@@ -71,6 +83,7 @@ export default function ProductionNotePreview({
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!imageSrc || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('[data-resize-handle]')) return;
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = {
@@ -83,6 +96,16 @@ export default function ProductionNotePreview({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    const resize = resizeRef.current;
+    if (resize && resize.pointerId === e.pointerId) {
+      const startW = resize.startWidth || 1;
+      const nextW = Math.max(16, startW + (e.clientX - resize.startClientX));
+      onTextOffsetChange({
+        ...textOffset,
+        fontScale: clampFontScale(resize.originScale * (nextW / startW)),
+      });
+      return;
+    }
     const drag = dragRef.current;
     const stage = stageRef.current;
     if (!drag || drag.pointerId !== e.pointerId || !stage) return;
@@ -93,7 +116,7 @@ export default function ProductionNotePreview({
     const frac = measureBlockFrac();
     onTextOffsetChange(
       clampTextOffset(
-        { x: drag.originX + dx, y: drag.originY + dy },
+        { ...textOffset, x: drag.originX + dx, y: drag.originY + dy },
         frac.w,
         frac.h
       )
@@ -102,6 +125,20 @@ export default function ProductionNotePreview({
 
   const endDrag = (e: React.PointerEvent) => {
     if (dragRef.current?.pointerId === e.pointerId) dragRef.current = null;
+    if (resizeRef.current?.pointerId === e.pointerId) resizeRef.current = null;
+  };
+
+  const onResizePointerDown = (e: React.PointerEvent) => {
+    if (!imageSrc || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    resizeRef.current = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startWidth: textRef.current?.offsetWidth || 1,
+      originScale: fontScale,
+    };
   };
 
   if (!imageSrc) {
@@ -130,7 +167,7 @@ export default function ProductionNotePreview({
           <div
             ref={textRef}
             role="group"
-            aria-label="Production note text — drag to reposition"
+            aria-label="Production note text — drag to reposition, corner to resize"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
@@ -139,8 +176,8 @@ export default function ProductionNotePreview({
             style={{
               left: `${textOffset.x * 100}%`,
               top: `${textOffset.y * 100}%`,
-              color: '#fff',
-              textShadow: '0 1px 3px rgba(0,0,0,0.65)',
+              color,
+              textShadow: light ? '0 1px 3px rgba(0,0,0,0.65)' : '0 1px 3px rgba(255,255,255,0.75)',
               fontWeight: 600,
               fontSize: previewFontPx,
               lineHeight: 1.45,
@@ -152,11 +189,21 @@ export default function ProductionNotePreview({
             {lines.map((line) => (
               <div key={line}>{line}</div>
             ))}
+            <button
+              type="button"
+              data-resize-handle
+              aria-label="Resize text"
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              className="absolute -right-1.5 -bottom-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-[2px] border-2 border-white bg-brand-600 shadow touch-none"
+            />
           </div>
         )}
       </div>
       <p className="absolute bottom-2 right-2 rounded bg-black/50 px-2 py-0.5 text-[10px] text-white/90 pointer-events-none">
-        Drag text to adjust
+        Drag to move · corner to resize
       </p>
     </div>
   );

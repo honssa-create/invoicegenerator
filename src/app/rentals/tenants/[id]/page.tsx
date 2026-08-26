@@ -29,6 +29,8 @@ import {
   formatDisplayDate,
   formatMoney,
   formatUtilityAmount,
+  isoFromDisplayDate,
+  toFormDate,
   todayFormDate,
   RENTAL_PAYMENT_METHODS,
   RENTAL_PAYMENT_METHOD_LABELS,
@@ -841,7 +843,12 @@ export default function TenantDetailPage() {
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-gray-500">Paid Date 交租日</label>
-                  <input className={inp} value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} placeholder="DD/MM/YYYY" />
+                  <input
+                    type="date"
+                    className={inp}
+                    value={isoFromDisplayDate(paymentForm.paymentDate) || ''}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: toFormDate(e.target.value) })}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Total Amount 收款總額</label>

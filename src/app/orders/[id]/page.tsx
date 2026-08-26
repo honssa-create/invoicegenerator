@@ -68,6 +68,7 @@ import {
   parseAssigneeIds,
   parseOrderTags,
   parseOrderDueDateField,
+  normalizeOrderDueDate,
   serializeAssigneeIds,
   serializeOrderTags,
   orderTitle,
@@ -1631,10 +1632,17 @@ export default function OrderDetailPage() {
                             {labeled(
                               '寄出日期',
                               <input
-                                value={sup.supplier_ship_date}
+                                type="date"
+                                value={normalizeOrderDueDate(sup.supplier_ship_date) || ''}
                                 onChange={(e) => updateSup({ supplier_ship_date: e.target.value }, false)}
-                                onBlur={(e) => updateSup({ supplier_ship_date: e.target.value }, true)}
-                                placeholder="e.g. 15/1/26"
+                                onBlur={(e) => {
+                                  const v = e.target.value;
+                                  // Preserve unparseable legacy free-text until a real date is chosen.
+                                  if (!v && !normalizeOrderDueDate(sup.supplier_ship_date) && sup.supplier_ship_date) {
+                                    return;
+                                  }
+                                  updateSup({ supplier_ship_date: v }, true);
+                                }}
                                 className={softInput}
                               />
                             )}

@@ -1,11 +1,12 @@
 /**
  * Honour / honour-en production note (生產單): prefill helpers + canvas compose.
- * Effect image is the full background; only white order texts are overlaid.
+ * Effect image is the full background; order texts are overlaid (position, size, color).
  */
 
 import {
   computeHonourLineTotals,
   firstHonourProductLine,
+  normalizeOrderDueDate,
   parseHonourLines,
   parseHonourSuppliers,
   type Order,
@@ -18,9 +19,54 @@ export interface ProductionNoteTextOffset {
   x: number;
   /** Fraction of image height (0–1), top-left of text block. */
   y: number;
+  /** Font size as a fraction of min(image width, height). */
+  fontScale?: number;
+  /** CSS hex color for overlay text. */
+  color?: string;
 }
 
-export const DEFAULT_TEXT_OFFSET: ProductionNoteTextOffset = { x: 0.04, y: 0.06 };
+export const DEFAULT_FONT_SCALE = 0.028;
+export const MIN_FONT_SCALE = 0.012;
+export const MAX_FONT_SCALE = 0.12;
+export const DEFAULT_TEXT_COLOR = '#000000';
+
+export const DEFAULT_TEXT_OFFSET: ProductionNoteTextOffset = {
+  x: 0.04,
+  y: 0.06,
+  fontScale: DEFAULT_FONT_SCALE,
+  color: DEFAULT_TEXT_COLOR,
+};
+
+export const PRODUCTION_NOTE_COLOR_SWATCHES = [
+  '#000000',
+  '#ffffff',
+  '#c9a227',
+  '#dc2626',
+  '#1d4ed8',
+] as const;
+
+export function clampFontScale(scale: number | null | undefined): number {
+  if (scale == null || !Number.isFinite(scale)) return DEFAULT_FONT_SCALE;
+  return Math.min(MAX_FONT_SCALE, Math.max(MIN_FONT_SCALE, scale));
+}
+
+export function normalizeTextColor(color: string | null | undefined): string {
+  const s = String(color || '').trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+    return `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`.toLowerCase();
+  }
+  return DEFAULT_TEXT_COLOR;
+}
+
+/** True when the fill is light enough to need a dark drop shadow. */
+export function isLightTextColor(color: string | null | undefined): boolean {
+  const hex = normalizeTextColor(color);
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55;
+}
 
 export interface ProductionNoteFields {
   po: string;
@@ -34,6 +80,34 @@ export function fieldStr(fields: Record<string, string | boolean>, key: string):
   const v = fields[key];
   if (typeof v === 'boolean') return v ? 'yes' : '';
   return String(v ?? '').trim();
+}
+
+/** Parse ISO / DMY / `M月D日寄出` → YYYY-MM-DD for a date input. */
+export function isoFromProductionNoteShipDate(raw: string | null | undefined): string {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const cn = s.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (cn) {
+    const month = Number(cn[1]);
+    const day = Number(cn[2]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const y = new Date().getFullYear();
+      return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  return normalizeOrderDueDate(s) || '';
+}
+
+/** Calendar / stored date → print label `M月D日寄出`. */
+export function formatProductionNoteShipDate(raw: string | null | undefined): string {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const iso = isoFromProductionNoteShipDate(s);
+  if (!iso) return s;
+  const month = Number(iso.slice(5, 7));
+  const day = Number(iso.slice(8, 10));
+  if (!month || !day) return s;
+  return `${month}月${day}日寄出`;
 }
 
 /** Build initial form values from an honour / honour-en order. */
@@ -79,7 +153,9 @@ export function prefillProductionNote(order: Order): ProductionNoteFields {
     details,
     quantity: qty,
     price: firstSup?.supplier_price || fieldStr(f, 'supplier_price'),
-    shipDate: firstSup?.supplier_ship_date || fieldStr(f, 'supplier_ship_date'),
+    shipDate: formatProductionNoteShipDate(
+      firstSup?.supplier_ship_date || fieldStr(f, 'supplier_ship_date')
+    ),
   };
 }
 
@@ -94,7 +170,8 @@ export function productionNoteTextLines(fields: ProductionNoteFields): string[] 
     lines.push(/個\s*$/.test(q) ? `數量 : ${q}` : `數量 : ${q}個`);
   }
   if (fields.price.trim()) lines.push(`價錢 : ${fields.price.trim()}`);
-  if (fields.shipDate.trim()) lines.push(fields.shipDate.trim());
+  const ship = formatProductionNoteShipDate(fields.shipDate);
+  if (ship) lines.push(ship);
   return lines;
 }
 
@@ -104,8 +181,11 @@ export function clampTextOffset(
   blockHeightFrac = 0.22
 ): ProductionNoteTextOffset {
   return {
+    ...offset,
     x: Math.min(Math.max(offset.x, 0), Math.max(0, 1 - blockWidthFrac * 0.25)),
     y: Math.min(Math.max(offset.y, 0), Math.max(0, 1 - blockHeightFrac * 0.25)),
+    fontScale: clampFontScale(offset.fontScale),
+    color: normalizeTextColor(offset.color),
   };
 }
 
@@ -140,7 +220,7 @@ export interface ComposeProductionNoteOpts {
 }
 
 /**
- * Draw effect image full-bleed and overlay white text at the given normalized offset.
+ * Draw effect image full-bleed and overlay text at the given offset, scale, and color.
  * Returns a PNG blob suitable for download / upload.
  */
 export async function composeProductionNotePng(opts: ComposeProductionNoteOpts): Promise<Blob> {
@@ -166,15 +246,17 @@ export async function composeProductionNotePng(opts: ComposeProductionNoteOpts):
     const lines = productionNoteTextLines(opts.fields);
     if (lines.length) {
       const offset = clampTextOffset(opts.textOffset || DEFAULT_TEXT_OFFSET);
-      const fontSize = Math.max(18, Math.round(Math.min(w, h) * 0.028));
+      const fontScale = clampFontScale(offset.fontScale);
+      const color = normalizeTextColor(offset.color);
+      const fontSize = Math.max(18, Math.round(Math.min(w, h) * fontScale));
       const lineHeight = Math.round(fontSize * 1.45);
       const x = offset.x * w;
       let y = offset.y * h + fontSize;
 
       ctx.font = `600 ${fontSize}px "Helvetica Neue", Helvetica, Arial, "PingFang HK", "PingFang TC", "Noto Sans TC", sans-serif`;
       ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.fillStyle = color;
+      ctx.shadowColor = isLightTextColor(color) ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.75)';
       ctx.shadowBlur = Math.max(2, Math.round(fontSize * 0.15));
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = Math.max(1, Math.round(fontSize * 0.06));

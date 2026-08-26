@@ -890,7 +890,8 @@ function migrateCraftOntoSuppliers(
 /**
  * Parse honour_suppliers JSON. Seeds Supplier-1 from legacy flat fields when empty.
  * Pads to at least `minCount` (default: product line count) without shrinking.
- * Migrates craft/packaging from product lines onto empty cards.
+ * Migrates craft/packaging from product lines onto empty cards only when seeding
+ * (no persisted JSON) or onto newly padded slots — never re-fills a card the user cleared.
  */
 export function parseHonourSuppliers(
   fields: Record<string, string | boolean>,
@@ -898,11 +899,13 @@ export function parseHonourSuppliers(
 ): HonourSupplierItem[] {
   const minCount = Math.max(1, opts?.minCount ?? 1);
   let suppliers: HonourSupplierItem[] = [];
+  let fromPersisted = false;
   const raw = fields.honour_suppliers;
   if (typeof raw === 'string' && raw.trim()) {
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed) && parsed.length > 0) {
+        fromPersisted = true;
         suppliers = parsed.map((row) => {
           const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
           return normalizeHonourSupplierRow(r);
@@ -917,7 +920,8 @@ export function parseHonourSuppliers(
     const hasAny = Object.values(legacy).some(Boolean);
     suppliers = [hasAny ? legacy : emptyHonourSupplier()];
   } else {
-    // Fill empty first card from legacy flats (one-time migration aid).
+    // Fill empty first-card commercial fields from legacy flats.
+    // Craft/pack/multi fields stay as stored (including '') so clears stick.
     const legacy = seedLegacySupplier(fields, opts?.cartonCountCore);
     if (Object.values(legacy).some(Boolean)) {
       const first = suppliers[0];
@@ -926,21 +930,29 @@ export function parseHonourSuppliers(
         supplier_price: first.supplier_price || legacy.supplier_price,
         mould_print_fee: first.mould_print_fee || legacy.mould_print_fee,
         supplier_qty: first.supplier_qty || legacy.supplier_qty,
-        supplier_pack: first.supplier_pack || legacy.supplier_pack,
+        supplier_pack: first.supplier_pack,
         supplier_ship_date: first.supplier_ship_date || legacy.supplier_ship_date,
         carton_count: first.carton_count || legacy.carton_count,
-        card_size: first.card_size || legacy.card_size,
-        craft: first.craft || legacy.craft,
-        plating_color: first.plating_color || legacy.plating_color,
-        clasp: first.clasp || legacy.clasp,
+        card_size: first.card_size,
+        craft: first.craft,
+        plating_color: first.plating_color,
+        clasp: first.clasp,
         extra_actions: first.extra_actions || legacy.extra_actions,
-        internal_pack: first.internal_pack || legacy.internal_pack,
-        pack_required: first.pack_required || legacy.pack_required,
+        internal_pack: first.internal_pack,
+        pack_required: first.pack_required,
       };
     }
   }
+  const persistedCount = suppliers.length;
   suppliers = ensureHonourSupplierCount(suppliers, minCount);
-  return migrateCraftOntoSuppliers(suppliers, fields, opts?.productLines);
+  if (!fromPersisted) {
+    return migrateCraftOntoSuppliers(suppliers, fields, opts?.productLines);
+  }
+  if (suppliers.length > persistedCount) {
+    const migrated = migrateCraftOntoSuppliers(suppliers, fields, opts?.productLines);
+    return suppliers.map((sup, i) => (i < persistedCount ? sup : migrated[i]));
+  }
+  return suppliers;
 }
 
 /** Grow-only pad to minCount; never shrink. */

@@ -133,6 +133,9 @@ export default function OrderDetailPage() {
   const bigDaySavedOnChangeRef = useRef<string | null>(null);
   const patchQueueRef = useRef(Promise.resolve());
   const updatedAtRef = useRef('');
+  /** Monotonic seq so an older PATCH response cannot wipe newer local edits. */
+  const patchSeqRef = useRef(0);
+  const patchesInFlightRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,9 +189,11 @@ export default function OrderDetailPage() {
   }, []);
 
   const refetchOrder = useCallback(() => {
+    if (patchesInFlightRef.current > 0) return;
     fetch(`/api/orders/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
+        if (patchesInFlightRef.current > 0) return;
         const o = d?.order || null;
         if (!o) return;
         setOrder(o);
@@ -232,6 +237,8 @@ export default function OrderDetailPage() {
     linked_invoice_id?: string | number | null;
     linked_quotation_id?: string | number | null;
   }) => {
+    const seq = ++patchSeqRef.current;
+    patchesInFlightRef.current += 1;
     // Keep UI in sync immediately so a later server response can't briefly wipe autofills.
     if (payload.fields && Object.keys(payload.fields).length) {
       setOrder((o) =>
@@ -247,35 +254,44 @@ export default function OrderDetailPage() {
       );
     }
     patchQueueRef.current = patchQueueRef.current.then(async () => {
-      const res = await fetch(`/api/orders/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...payload,
-          expected_updated_at: updatedAtRef.current || undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.order) {
-        setOrder(data.order);
-        bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
-        updatedAtRef.current = data.order.updated_at || '';
-        return;
-      }
-      if (res.status === 409) {
-        if (data.order) {
-          setOrder(data.order);
-          bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
-          updatedAtRef.current = data.order.updated_at || '';
-        } else {
-          refetchOrder();
-        }
-        setQuoteToast({
-          text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH),
-          kind: 'error',
+      try {
+        const res = await fetch(`/api/orders/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...payload,
+            expected_updated_at: updatedAtRef.current || undefined,
+          }),
         });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.order) {
+          updatedAtRef.current = data.order.updated_at || '';
+          // Skip full replace when a newer local patch already updated the UI.
+          if (seq === patchSeqRef.current) {
+            setOrder(data.order);
+            bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
+          }
+          return;
+        }
+        if (res.status === 409) {
+          if (data.order) {
+            setOrder(data.order);
+            bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
+            updatedAtRef.current = data.order.updated_at || '';
+          } else {
+            refetchOrder();
+          }
+          setQuoteToast({
+            text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH),
+            kind: 'error',
+          });
+        }
+      } catch {
+        /* network / parse errors — keep optimistic local state */
+      } finally {
+        patchesInFlightRef.current = Math.max(0, patchesInFlightRef.current - 1);
       }
-    }).catch(() => {});
+    });
   };
 
   const convertToQuotation = async () => {
@@ -851,36 +867,39 @@ export default function OrderDetailPage() {
     });
   };
 
-  const setHonourSuppliersLocal = (suppliers: HonourSupplierItem[]) => {
-    const derived = honourSuppliersDerivedFields(suppliers);
-    const firstCarton = suppliers[0]?.carton_count ?? '';
-    setOrder((prev) =>
-      prev
-        ? {
-            ...prev,
-            fields: { ...prev.fields, ...derived },
-            carton_count: firstCarton,
-          }
-        : prev
-    );
-  };
-
-  const commitHonourSuppliers = (suppliers: HonourSupplierItem[]) => {
-    const derived = honourSuppliersDerivedFields(suppliers);
-    const firstCarton = suppliers[0]?.carton_count ?? '';
-    setOrder((prev) =>
-      prev
-        ? {
-            ...prev,
-            fields: { ...prev.fields, ...derived },
-            carton_count: firstCarton,
-          }
-        : prev
-    );
-    patch({
-      fields: derived,
-      core: { carton_count: firstCarton },
+  /** Apply supplier-card edits from latest order state (avoids stale rapid-click overwrites). */
+  const applyHonourSuppliers = (
+    updater: (suppliers: HonourSupplierItem[]) => HonourSupplierItem[],
+    commit: boolean,
+  ) => {
+    let toCommit: HonourSupplierItem[] | null = null;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const orderType = String(prev.fields.order_type ?? '');
+      if (!isBadgeOrderType(orderType)) return prev;
+      const lines = parseHonourLines(prev.fields);
+      const current = parseHonourSuppliers(prev.fields, {
+        minCount: honourProductLineCount(lines),
+        cartonCountCore: prev.carton_count,
+        productLines: lines,
+      });
+      const next = updater(current);
+      const derived = honourSuppliersDerivedFields(next);
+      const firstCarton = next[0]?.carton_count ?? '';
+      if (commit) toCommit = next;
+      return {
+        ...prev,
+        fields: { ...prev.fields, ...derived },
+        carton_count: firstCarton,
+      };
     });
+    if (commit && toCommit) {
+      const derived = honourSuppliersDerivedFields(toCommit);
+      patch({
+        fields: derived,
+        core: { carton_count: toCommit[0]?.carton_count ?? '' },
+      });
+    }
   };
 
   const syncWeddingGiftTotalAmount = (fieldsPatch: Record<string, string> = {}) => {
@@ -1499,7 +1518,9 @@ export default function OrderDetailPage() {
                     </h3>
                     <button
                       type="button"
-                      onClick={() => commitHonourSuppliers([...honourSuppliers, emptyHonourSupplier()])}
+                      onClick={() =>
+                        applyHonourSuppliers((list) => [...list, emptyHonourSupplier()], true)
+                      }
                       className="text-sm font-medium text-brand-600 hover:text-brand-700"
                     >
                       + Add more
@@ -1508,10 +1529,17 @@ export default function OrderDetailPage() {
                   <div className="space-y-5">
                     {honourSuppliers.map((sup, sIndex) => {
                       const updateSup = (patchSup: Partial<HonourSupplierItem>, commit: boolean) => {
-                        const next = honourSuppliers.map((s, i) => (i === sIndex ? { ...s, ...patchSup } : s));
-                        if (commit) commitHonourSuppliers(next);
-                        else setHonourSuppliersLocal(next);
+                        applyHonourSuppliers(
+                          (list) => list.map((s, i) => (i === sIndex ? { ...s, ...patchSup } : s)),
+                          commit,
+                        );
                       };
+                      const multiLocal = (key: keyof HonourSupplierItem, catalog: readonly string[]) => ({
+                        onChange: (vals: string[]) =>
+                          updateSup({ [key]: joinHonourMultiValue(vals, catalog) } as Partial<HonourSupplierItem>, false),
+                        onCommit: (vals: string[]) =>
+                          updateSup({ [key]: joinHonourMultiValue(vals, catalog) } as Partial<HonourSupplierItem>, true),
+                      });
                       return (
                         <div
                           key={`supplier-${sIndex}`}
@@ -1525,7 +1553,10 @@ export default function OrderDetailPage() {
                               type="button"
                               disabled={honourSuppliers.length <= 1}
                               onClick={() =>
-                                commitHonourSuppliers(honourSuppliers.filter((_, i) => i !== sIndex))
+                                applyHonourSuppliers(
+                                  (list) => list.filter((_, i) => i !== sIndex),
+                                  true,
+                                )
                               }
                               className="text-sm text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed"
                             >
@@ -1593,12 +1624,7 @@ export default function OrderDetailPage() {
                               <MultiChoiceSelect
                                 values={parseHonourMultiValue(sup.supplier_pack)}
                                 options={HONOUR_PACK_REQUIRED_OPTIONS}
-                                onChange={(vals) =>
-                                  updateSup(
-                                    { supplier_pack: joinHonourMultiValue(vals, HONOUR_PACK_REQUIRED_OPTIONS) },
-                                    true
-                                  )
-                                }
+                                {...multiLocal('supplier_pack', HONOUR_PACK_REQUIRED_OPTIONS)}
                                 placeholder="選擇交貨包裝…"
                               />
                             )}
@@ -1643,9 +1669,7 @@ export default function OrderDetailPage() {
                                 <MultiChoiceSelect
                                   values={parseHonourMultiValue(sup.craft)}
                                   options={HONOUR_CRAFT_OPTIONS}
-                                  onChange={(vals) =>
-                                    updateSup({ craft: joinHonourMultiValue(vals, HONOUR_CRAFT_OPTIONS) }, true)
-                                  }
+                                  {...multiLocal('craft', HONOUR_CRAFT_OPTIONS)}
                                   placeholder="選擇加工工藝…"
                                 />
                               )}
@@ -1654,12 +1678,7 @@ export default function OrderDetailPage() {
                                 <MultiChoiceSelect
                                   values={parseHonourMultiValue(sup.plating_color)}
                                   options={HONOUR_PLATING_OPTIONS}
-                                  onChange={(vals) =>
-                                    updateSup(
-                                      { plating_color: joinHonourMultiValue(vals, HONOUR_PLATING_OPTIONS) },
-                                      true
-                                    )
-                                  }
+                                  {...multiLocal('plating_color', HONOUR_PLATING_OPTIONS)}
                                   placeholder="選擇電鍍色…"
                                 />
                               )}
@@ -1668,9 +1687,7 @@ export default function OrderDetailPage() {
                                 <MultiChoiceSelect
                                   values={parseHonourMultiValue(sup.clasp)}
                                   options={HONOUR_CLASP_OPTIONS}
-                                  onChange={(vals) =>
-                                    updateSup({ clasp: joinHonourMultiValue(vals, HONOUR_CLASP_OPTIONS) }, true)
-                                  }
+                                  {...multiLocal('clasp', HONOUR_CLASP_OPTIONS)}
                                   placeholder="選擇背扣…"
                                 />
                               )}
@@ -1713,12 +1730,7 @@ export default function OrderDetailPage() {
                                 <MultiChoiceSelect
                                   values={parseHonourMultiValue(sup.pack_required)}
                                   options={HONOUR_PACK_REQUIRED_OPTIONS}
-                                  onChange={(vals) =>
-                                    updateSup(
-                                      { pack_required: joinHonourMultiValue(vals, HONOUR_PACK_REQUIRED_OPTIONS) },
-                                      true
-                                    )
-                                  }
+                                  {...multiLocal('pack_required', HONOUR_PACK_REQUIRED_OPTIONS)}
                                   placeholder="選擇出貨包裝…"
                                 />
                               )}

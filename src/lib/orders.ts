@@ -1233,7 +1233,8 @@ function parseNestieeStarGiftBoxQtysFromName(
 
 function parseNestieeHuaYueQtyFromName(name: string): number | null {
   const n = nestieeNameForGiftMatch(name);
-  const m = n.match(/花月禮盒\s*·\s*([一二三四五六七八])\s*盒/);
+  if (!n.includes('花月禮盒')) return null;
+  const m = n.match(/([一二三四五六七八])\s*盒/);
   if (!m) return null;
   return NESTIEE_HUA_YUE_CN_QTY[m[1]] ?? null;
 }
@@ -1249,7 +1250,7 @@ function parseNestieeTrialSetQtyFromName(name: string): number | null {
 /**
  * Derive 所需禮盒 quantities from Nestiee Woo lines.
  * - 星空禮盒 name suffixes → 星空銀 / 星空金
- * - 花月禮盒 · 一…八盒 → 花月禮盒
+ * - 花月禮盒 + 一…八盒 (anywhere in the name) → 花月禮盒
  * - Trial Set + optional Arabic digit → Trial Set
  * - 金銀套裝 + 只選單味 + 金/銀盒 → 紅色金 / 紅色銀
  * - Dearest Moment 單盒/雙盒/兩味 → 粉紅心意 桂花 / 紅棗

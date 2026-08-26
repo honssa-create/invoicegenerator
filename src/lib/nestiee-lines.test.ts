@@ -424,19 +424,22 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
     });
   });
 
-  it('maps 花月禮盒 · 一…八盒 using Chinese numerals', () => {
+  it('maps 花月禮盒 when 一…八盒 appears anywhere in the name', () => {
     expect(
       computeNestieeGiftBoxQtysFromLines([
         { name: '花月禮盒 ‧ 三盒', quantity: 1, unit_price: 1, line_total: 1 },
         { name: '花月禮盒 · 二盒', quantity: 2, unit_price: 1, line_total: 2 },
         { name: '花月禮盒 ‧ 八盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '六盒裝 · 即食燕窩花月禮盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '花月禮盒 即食燕窩 - 四盒', quantity: 1, unit_price: 1, line_total: 1 },
         { name: '花月禮盒 ‧ 兩盒', quantity: 1, unit_price: 1, line_total: 1 },
         { name: '花月禮盒 ‧ 九盒', quantity: 1, unit_price: 1, line_total: 1 },
         { name: '花月禮盒 ‧ 十盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '三盒 即食燕窩', quantity: 1, unit_price: 1, line_total: 1 },
       ])
     ).toEqual({
       ...emptyAutoQtys,
-      nestiee_gift_qty_hua_yue: 3 + 2 * 2 + 8,
+      nestiee_gift_qty_hua_yue: 3 + 2 * 2 + 8 + 6 + 4,
     });
   });
 

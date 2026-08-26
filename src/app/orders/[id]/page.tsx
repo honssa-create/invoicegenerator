@@ -280,9 +280,14 @@ export default function OrderDetailPage() {
             text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH),
             kind: 'error',
           });
+        } else if (!res.ok) {
+          setQuoteToast({
+            text: (data as { error?: string }).error || MSG.saveFailed,
+            kind: 'error',
+          });
         }
       } catch {
-        /* network / parse errors — keep optimistic local state */
+        setQuoteToast({ text: MSG.saveFailed, kind: 'error' });
       } finally {
         patchesInFlightRef.current = Math.max(0, patchesInFlightRef.current - 1);
       }
@@ -578,12 +583,16 @@ export default function OrderDetailPage() {
     String(order.fields.payment3_enabled ?? '').trim() === 'true';
 
   const applyAmountAndStatus = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount', value: string) => {
-    const fields: Record<string, string> = { [key]: value };
-    if (key === 'payment_amount') fields.payment1_amount = value;
-    const nextFields = { ...order.fields, ...fields };
-    const paid = computeOrderPaidTotal(nextFields);
-    fields.payment_status_label = derivePaymentStatusLabel(paid, dueTotal);
-    setFieldLocal('payment_status_label', fields.payment_status_label);
+    let fields: Record<string, string> = {};
+    setOrder((prev) => {
+      if (!prev) return prev;
+      fields = { [key]: value };
+      if (key === 'payment_amount') fields.payment1_amount = value;
+      const nextFields = { ...prev.fields, ...fields };
+      const paid = computeOrderPaidTotal(nextFields);
+      fields.payment_status_label = derivePaymentStatusLabel(paid, dueTotal);
+      return { ...prev, fields: { ...prev.fields, ...fields } };
+    });
     patch({ fields });
   };
   const paymentAmountInput = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount') => (
@@ -670,55 +679,35 @@ export default function OrderDetailPage() {
   );
   const bn = computeBirdNestTotals(order.fields);
 
-  const setHonourLinesLocal = (lines: HonourLineItem[]) => {
-    const derived = honourLinesDerivedFields(lines);
-    const { totalAmount } = computeHonourLineTotals(lines);
-    // Grow supplier cards when product count increases (never auto-shrink).
-    const productCount = honourProductLineCount(lines);
-    const currentSuppliers = parseHonourSuppliers(order.fields, {
-      minCount: 1,
-      cartonCountCore: order.carton_count,
-      productLines: lines,
-    });
-    const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
-    const supplierDerived =
-      padded.length !== currentSuppliers.length ? honourSuppliersDerivedFields(padded) : {};
-    setOrder((prev) =>
-      prev
-        ? {
-            ...prev,
-            fields: { ...prev.fields, ...derived, ...supplierDerived },
-            total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
-          }
-        : prev
-    );
-  };
-
   const commitHonourLines = (lines: HonourLineItem[]) => {
-    const derived = honourLinesDerivedFields(lines);
-    const { totalAmount } = computeHonourLineTotals(lines);
-    const productCount = honourProductLineCount(lines);
-    const currentSuppliers = parseHonourSuppliers(order.fields, {
-      minCount: 1,
-      cartonCountCore: order.carton_count,
-      productLines: lines,
+    let patchPayload: {
+      fields: Record<string, string>;
+      core?: { total_amount: number };
+    } | null = null;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const derived = honourLinesDerivedFields(lines);
+      const { totalAmount } = computeHonourLineTotals(lines);
+      const productCount = honourProductLineCount(lines);
+      const currentSuppliers = parseHonourSuppliers(prev.fields, {
+        minCount: 1,
+        cartonCountCore: prev.carton_count,
+        productLines: lines,
+      });
+      const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
+      const supplierDerived =
+        padded.length !== currentSuppliers.length ? honourSuppliersDerivedFields(padded) : {};
+      patchPayload = {
+        fields: { ...derived, ...supplierDerived },
+        ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
+      };
+      return {
+        ...prev,
+        fields: { ...prev.fields, ...derived, ...supplierDerived },
+        total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
+      };
     });
-    const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
-    const supplierDerived =
-      padded.length !== currentSuppliers.length ? honourSuppliersDerivedFields(padded) : {};
-    setOrder((prev) =>
-      prev
-        ? {
-            ...prev,
-            fields: { ...prev.fields, ...derived, ...supplierDerived },
-            total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
-          }
-        : prev
-    );
-    patch({
-      fields: { ...derived, ...supplierDerived },
-      ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
-    });
+    if (patchPayload) patch(patchPayload);
   };
 
   const commitCupmokaLines = (lines: CupmokaLineItem[]) => {
@@ -779,36 +768,43 @@ export default function OrderDetailPage() {
   };
 
   const syncWeddingGiftTotalAmount = (fieldsPatch: Record<string, string> = {}) => {
-    const nextFields = { ...order.fields, ...fieldsPatch };
-    const total = computeWeddingGiftTotal(nextFields);
-    if (total > 0) {
-      setOrder((prev) => (prev ? { ...prev, total_amount: total } : prev));
-      patch({ fields: fieldsPatch, core: { total_amount: total } });
-    } else if (Object.keys(fieldsPatch).length) {
-      patch({ fields: fieldsPatch });
-    }
+    let patchPayload: { fields: Record<string, string>; core?: { total_amount: number } } | null = null;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const nextFields = { ...prev.fields, ...fieldsPatch };
+      const total = computeWeddingGiftTotal(nextFields);
+      patchPayload =
+        total > 0
+          ? { fields: fieldsPatch, core: { total_amount: total } }
+          : Object.keys(fieldsPatch).length
+            ? { fields: fieldsPatch }
+            : null;
+      return total > 0 ? { ...prev, total_amount: total } : prev;
+    });
+    if (patchPayload) patch(patchPayload);
   };
 
   /** Recalc 材料 + 包裝 from capacity / flavor qtys; keeps fields editable afterward. */
   const syncWeddingGiftDerived = (fieldsPatch: Record<string, string> = {}) => {
-    const nextFields = { ...order.fields, ...fieldsPatch };
-    const materials = computeWeddingGiftMaterials(nextFields);
-    const packing = computeWeddingGiftPacking(nextFields);
-    const derived = { ...fieldsPatch, ...materials, ...packing };
-    const total = computeWeddingGiftTotal(nextFields);
+    let patchPayload: { fields: Record<string, string>; core?: { total_amount: number } } | null = null;
     setOrder((prev) => {
       if (!prev) return prev;
+      const nextFields = { ...prev.fields, ...fieldsPatch };
+      const materials = computeWeddingGiftMaterials(nextFields);
+      const packing = computeWeddingGiftPacking(nextFields);
+      const derived = { ...fieldsPatch, ...materials, ...packing };
+      const total = computeWeddingGiftTotal(nextFields);
+      patchPayload =
+        total > 0
+          ? { fields: derived, core: { total_amount: total } }
+          : { fields: derived };
       return {
         ...prev,
         fields: { ...prev.fields, ...derived },
         ...(total > 0 ? { total_amount: total } : {}),
       };
     });
-    if (total > 0) {
-      patch({ fields: derived, core: { total_amount: total } });
-    } else {
-      patch({ fields: derived });
-    }
+    if (patchPayload) patch(patchPayload);
   };
 
   /** Apply pasted 即食燕窩回禮 confirmation → core + fields + derived materials/packing. */
@@ -1257,9 +1253,34 @@ export default function OrderDetailPage() {
                           const productIndex =
                             honourLines.slice(0, index + 1).filter((l) => !isHonourShippingLine(l)).length;
                           const updateLine = (patchLine: Partial<HonourLineItem>, commit: boolean) => {
-                            const next = honourLines.map((l, i) => (i === index ? { ...l, ...patchLine } : l));
-                            if (commit) commitHonourLines(next);
-                            else setHonourLinesLocal(next);
+                            let nextLines: HonourLineItem[] | undefined;
+                            setOrder((prev) => {
+                              if (!prev) return prev;
+                              const current = parseHonourLines(prev.fields);
+                              nextLines = current.map((l, i) =>
+                                i === index ? { ...l, ...patchLine } : l,
+                              );
+                              if (commit) return prev;
+                              const derived = honourLinesDerivedFields(nextLines);
+                              const { totalAmount } = computeHonourLineTotals(nextLines);
+                              const productCount = honourProductLineCount(nextLines);
+                              const currentSuppliers = parseHonourSuppliers(prev.fields, {
+                                minCount: honourProductLineCount(nextLines),
+                                cartonCountCore: prev.carton_count,
+                                productLines: nextLines,
+                              });
+                              const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
+                              const supplierDerived =
+                                padded.length !== currentSuppliers.length
+                                  ? honourSuppliersDerivedFields(padded)
+                                  : {};
+                              return {
+                                ...prev,
+                                fields: { ...prev.fields, ...derived, ...supplierDerived },
+                                total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
+                              };
+                            });
+                            if (commit && nextLines) commitHonourLines(nextLines);
                           };
                           const compactInput =
                             'w-full px-2 py-1.5 border border-gray-200 rounded text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
@@ -1958,22 +1979,27 @@ export default function OrderDetailPage() {
                     );
                   }
                   const updateLine = (index: number, patchLine: Partial<CupmokaLineItem>, commit = false) => {
-                    const next = cupmokaLines.map((line, i) => {
-                      if (i !== index) return line;
-                      const merged = { ...line, ...patchLine };
-                      const qty = Number(merged.quantity) || 0;
-                      const unit = Number(merged.unit_price) || 0;
-                      if (patchLine.quantity != null || patchLine.unit_price != null) {
-                        merged.line_total = Math.round(qty * unit * 100) / 100;
-                      }
-                      return merged;
+                    let toCommit: CupmokaLineItem[] | undefined;
+                    setOrder((prev) => {
+                      if (!prev) return prev;
+                      const current = getCupmokaLines(prev.fields);
+                      const next = current.map((line, i) => {
+                        if (i !== index) return line;
+                        const merged = { ...line, ...patchLine };
+                        const qty = Number(merged.quantity) || 0;
+                        const unit = Number(merged.unit_price) || 0;
+                        if (patchLine.quantity != null || patchLine.unit_price != null) {
+                          merged.line_total = Math.round(qty * unit * 100) / 100;
+                        }
+                        return merged;
+                      });
+                      if (commit) toCommit = next;
+                      return {
+                        ...prev,
+                        fields: { ...prev.fields, cupmoka_lines: JSON.stringify(next) },
+                      };
                     });
-                    setOrder((prev) =>
-                      prev
-                        ? { ...prev, fields: { ...prev.fields, cupmoka_lines: JSON.stringify(next) } }
-                        : prev
-                    );
-                    if (commit) commitCupmokaLines(next);
+                    if (toCommit) commitCupmokaLines(toCommit);
                   };
                   return (
                     <div className="overflow-x-auto rounded-xl border border-gray-200">

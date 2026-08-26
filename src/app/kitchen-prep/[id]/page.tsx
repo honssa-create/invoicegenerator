@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -41,6 +41,8 @@ export default function KitchenPrepDetailPage() {
   const [capacityOptions, setCapacityOptions] = useState<{ id: string; label: string }[]>(
     PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
   );
+  const patchQueueRef = useRef(Promise.resolve());
+  const patchSeqRef = useRef(0);
 
   const load = () =>
     fetch(`/api/kitchen-prep/${id}`)
@@ -70,19 +72,32 @@ export default function KitchenPrepDetailPage() {
       .catch(() => undefined);
   }, []);
 
-  const patch = async (body: Record<string, unknown>) => {
+  const patch = (body: Record<string, unknown>) => {
+    const seq = ++patchSeqRef.current;
     setSaving(true);
     setError('');
-    const res = await fetch(`/api/kitchen-prep/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    patchQueueRef.current = patchQueueRef.current.then(async () => {
+      try {
+        const res = await fetch(`/api/kitchen-prep/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError((d as { error?: string }).error || MSG.saveFailed);
+          return;
+        }
+        if (seq === patchSeqRef.current && d.order) {
+          setOrder(d.order);
+          setCalc(d.calculation);
+        }
+      } catch {
+        setError(MSG.saveFailed);
+      } finally {
+        if (seq === patchSeqRef.current) setSaving(false);
+      }
     });
-    const d = await res.json();
-    setSaving(false);
-    if (!res.ok) { setError(d.error || MSG.saveFailed); return; }
-    setOrder(d.order);
-    setCalc(d.calculation);
   };
 
   const remove = async () => {
@@ -158,8 +173,15 @@ export default function KitchenPrepDetailPage() {
             min="0"
             disabled={disabled}
             value={order[orderKey]}
-            onChange={(e) => setOrder({ ...order, [orderKey]: Number(e.target.value) || 0 })}
-            onBlur={() => patch({ [orderKey]: order[orderKey] })}
+            onChange={(e) => {
+              const v = Number(e.target.value) || 0;
+              setOrder((o) => (o ? { ...o, [orderKey]: v } : o));
+            }}
+            onBlur={(e) => {
+              const v = Number(e.target.value) || 0;
+              setOrder((o) => (o ? { ...o, [orderKey]: v } : o));
+              patch({ [orderKey]: v });
+            }}
             className={`${input} text-lg font-semibold ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
           />
         </div>
@@ -170,8 +192,20 @@ export default function KitchenPrepDetailPage() {
             min="0"
             disabled={disabled}
             value={resolveActualQty(order[orderKey], order[actualKey])}
-            onChange={(e) => setOrder({ ...order, [actualKey]: Number(e.target.value) || 0 })}
-            onBlur={() => patch({ [actualKey]: resolveActualQty(order[orderKey], order[actualKey]) })}
+            onChange={(e) => {
+              const v = Number(e.target.value) || 0;
+              setOrder((o) => (o ? { ...o, [actualKey]: v } : o));
+            }}
+            onBlur={(e) => {
+              const typed = Number(e.target.value) || 0;
+              let resolved = typed;
+              setOrder((o) => {
+                if (!o) return o;
+                resolved = resolveActualQty(o[orderKey], typed);
+                return { ...o, [actualKey]: resolved };
+              });
+              patch({ [actualKey]: resolved });
+            }}
             className={`${input} text-lg font-semibold text-brand-800 ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
           />
         </div>
@@ -183,7 +217,7 @@ export default function KitchenPrepDetailPage() {
           value={order[birdNestKey]}
           onChange={(e) => {
             const v = e.target.value as BirdNestType;
-            setOrder({ ...order, [birdNestKey]: v });
+            setOrder((o) => (o ? { ...o, [birdNestKey]: v } : o));
             patch({ [birdNestKey]: v });
           }}
           className={`${input} ${disabled ? 'bg-gray-100 text-gray-400' : ''}`}
@@ -261,11 +295,28 @@ export default function KitchenPrepDetailPage() {
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Stewing Date 燉製日期</label>
-            <input type="date" value={order.stewing_date} onChange={(e) => setOrder({ ...order, stewing_date: e.target.value })} onBlur={() => patch({ stewing_date: order.stewing_date })} className={input} />
+            <input
+              type="date"
+              value={order.stewing_date}
+              onChange={(e) => {
+                const v = e.target.value;
+                setOrder((o) => (o ? { ...o, stewing_date: v } : o));
+              }}
+              onBlur={(e) => patch({ stewing_date: e.target.value })}
+              className={input}
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Order Type 訂單類型</label>
-            <select value={order.order_type} onChange={(e) => { const v = e.target.value as PrepOrder['order_type']; setOrder({ ...order, order_type: v }); patch({ order_type: v }); }} className={input}>
+            <select
+              value={order.order_type}
+              onChange={(e) => {
+                const v = e.target.value as PrepOrder['order_type'];
+                setOrder((o) => (o ? { ...o, order_type: v } : o));
+                patch({ order_type: v });
+              }}
+              className={input}
+            >
               {PREP_ORDER_TYPES.map((t) => <option key={t} value={t}>{PREP_ORDER_TYPE_LABELS[t]}</option>)}
             </select>
           </div>
@@ -275,10 +326,11 @@ export default function KitchenPrepDetailPage() {
               value={order.capacity}
               onChange={(e) => {
                 const v = e.target.value as PrepOrder['capacity'];
-                const upd: Partial<PrepOrder> = { capacity: v };
-                if (!isRedDateAllowed(v)) upd.qty_red_date = 0;
-                setOrder({ ...order, ...upd });
-                patch({ capacity: v, qty_red_date: upd.qty_red_date ?? order.qty_red_date });
+                const clearRed = !isRedDateAllowed(v);
+                setOrder((o) =>
+                  o ? { ...o, capacity: v, ...(clearRed ? { qty_red_date: 0 } : {}) } : o
+                );
+                patch({ capacity: v, ...(clearRed ? { qty_red_date: 0 } : {}) });
               }}
               className={input}
             >
@@ -291,7 +343,15 @@ export default function KitchenPrepDetailPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
-            <select value={order.status} onChange={(e) => { const v = e.target.value as PrepOrder['status']; setOrder({ ...order, status: v }); patch({ status: v }); }} className={input}>
+            <select
+              value={order.status}
+              onChange={(e) => {
+                const v = e.target.value as PrepOrder['status'];
+                setOrder((o) => (o ? { ...o, status: v } : o));
+                patch({ status: v });
+              }}
+              className={input}
+            >
               {PREP_STATUSES.map((s) => <option key={s} value={s}>{PREP_STATUS_LABELS[s]}</option>)}
             </select>
           </div>

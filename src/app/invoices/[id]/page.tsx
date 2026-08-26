@@ -352,13 +352,13 @@ export default function InvoiceDetailPage() {
             href={`/invoices/${id}/print`}
             className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
           >
-            🧾 {bi('Generate PDF', '產生 PDF')}
+            🧾 {bi('Invoice Preview', '預覽')}
           </Link>
           <Link
             href={`/invoices/${id}/delivery-note`}
             className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50"
           >
-            🚚 {bi('Generate Delivery Note', '產生出貨單')}
+            🚚 {bi('Delivery Note', '送貨單')}
           </Link>
           {status === 'paid' && (
             <Link

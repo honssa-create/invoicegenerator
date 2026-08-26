@@ -127,8 +127,13 @@ export default function FormalQuotationDocument({
   const cssVars = quotationStyleToCssVars(style);
   const items = model.items.length ? model.items : DEFAULT_QUOTATION_PREVIEW.items;
   const signName = model.companySignName || six[0] || 'Honour Label Limited';
-  const hasRemarksBlock = Boolean(model.message) || model.remarks.length > 0;
-  const showBottom = hasRemarksBlock || showSum;
+  /** Invoice/receipt: payment text sits beside the chop, same as deposit/balance. */
+  const paySignLayout = remarksMode === 'plain' && showSignature && !showAcceptedBy;
+  const paymentInstructions = remarksMode === 'plain' ? model.remarks.join('\n') : '';
+  const hasTopLeftBlock = paySignLayout
+    ? Boolean(model.message)
+    : Boolean(model.message) || model.remarks.length > 0;
+  const showBottom = hasTopLeftBlock || showSum;
   const pageRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const pageCount = useA4PrintPageCount(pageRef, bodyRef);
@@ -238,16 +243,19 @@ export default function FormalQuotationDocument({
 
       {showBottom ? (
         <section
-          className={`mb-10 ${showSum && hasRemarksBlock ? 'grid grid-cols-[1.4fr_1fr] gap-6' : ''}`}
+          className={`mb-10 ${showSum && hasTopLeftBlock ? 'grid grid-cols-[1.4fr_1fr] gap-6' : ''}`}
         >
-          {hasRemarksBlock ? (
+          {hasTopLeftBlock ? (
             <div>
               {model.message ? (
-                <p className="quo-field m-0 mb-4 muted whitespace-pre-wrap" style={{ minHeight: '1.5em' }}>
+                <p
+                  className={`quo-field m-0 muted whitespace-pre-wrap ${!paySignLayout && model.remarks.length > 0 ? 'mb-4' : ''}`}
+                  style={{ minHeight: '1.5em' }}
+                >
                   {model.message}
                 </p>
               ) : null}
-              {model.remarks.length > 0 ? (
+              {!paySignLayout && model.remarks.length > 0 ? (
                 remarksMode === 'plain' ? (
                   <p className="quo-payment-text m-0 whitespace-pre-wrap">
                     {model.remarks.join('\n')}
@@ -266,7 +274,7 @@ export default function FormalQuotationDocument({
             </div>
           ) : null}
           {showSum ? (
-            <div className={!hasRemarksBlock ? 'ml-auto' : undefined}>
+            <div className={!hasTopLeftBlock ? 'ml-auto' : undefined}>
               <table className="w-full max-w-[260px] ml-auto">
                 <tbody>
                   <tr>
@@ -302,13 +310,28 @@ export default function FormalQuotationDocument({
             </div>
             <div className="quo-sign-left-fill" aria-hidden="true" />
             <hr className="quo-sign-accept-line" />
-            <hr className="quo-sign-auth-line-slot" />
             <p className="quo-sign-auth-label-slot">Authorized Signature</p>
           </footer>
         ) : showAcceptedBy ? (
           <footer className="quo-sign-accept-only">
             <p className="quo-sign-accept-label">Accepted by &amp; Date</p>
             <hr className="quo-sign-accept-line" />
+          </footer>
+        ) : paySignLayout ? (
+          <footer className="quo-footer-pay-sign">
+            <div>
+              {paymentInstructions ? (
+                <p className="quo-payment-text m-0 whitespace-pre-wrap text-left">
+                  {paymentInstructions}
+                </p>
+              ) : null}
+            </div>
+            <div aria-hidden="true" />
+            <HonourLabelSignatureBlock
+              signName={signName}
+              chopSrc={model.chopSrc}
+              showChop={showChop}
+            />
           </footer>
         ) : (
           <footer className="quo-sign-only">

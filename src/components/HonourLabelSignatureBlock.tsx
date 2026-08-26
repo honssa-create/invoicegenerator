@@ -6,7 +6,7 @@ export default function HonourLabelSignatureBlock({
   signName = 'Honour Label Limited',
   chopSrc = '/company-chop.png',
   showChop = true,
-  /** Omit line + label when the parent footer grid places them (accept + sign layout). */
+  /** Omit the Authorized Signature label when the parent footer grid places it. */
   hideAuth = false,
 }: {
   signName?: string;
@@ -25,10 +25,7 @@ export default function HonourLabelSignatureBlock({
         <div className="quo-sign-chop-space" aria-hidden="true" />
       )}
       {!hideAuth ? (
-        <>
-          <hr className="quo-sign-auth-line" />
-          <p className="quo-sign-auth-label">Authorized Signature</p>
-        </>
+        <p className="quo-sign-auth-label">Authorized Signature</p>
       ) : null}
     </div>
   );

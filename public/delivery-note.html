@@ -366,7 +366,7 @@
       margin: 0 0 8px 55.5pt;
     }
     .quo-sign-auth-label {
-      margin: 0;
+      margin: 12px 0 0;
       padding-left: 55.5pt;
       font-size: var(--quo-signature-size);
       line-height: var(--quo-line-height);
@@ -495,16 +495,16 @@
         <div class="quo-party">
           <p class="quo-party-label">INVOICE TO</p>
           <div class="quo-party-body" contenteditable="true" spellcheck="false">&lt;BillingAddress&gt;</div>
-          <p class="quo-order-no">
-            <span class="quo-order-no-k">Order No</span>
-            <span class="quo-order-no-v" contenteditable="true">&lt;custom1&gt;</span>
-          </p>
         </div>
         <div class="quo-party">
           <p class="quo-party-label">SHIP TO</p>
           <div class="quo-party-body" contenteditable="true" spellcheck="false">&lt;ShippingAddress&gt;</div>
         </div>
         <div class="quo-meta-block">
+          <p class="quo-meta-row">
+            <span class="quo-meta-k">ORDER NO</span>
+            <span class="quo-meta-v" contenteditable="true">&lt;custom1&gt;</span>
+          </p>
           <p class="quo-meta-row">
             <span class="quo-meta-k">INVOICE NO</span>
             <span class="quo-meta-v" data-placeholder="refnumber" contenteditable="true">&lt;refnumber&gt;</span>
@@ -547,7 +547,6 @@
           <p class="quo-sign-behalf-line">For and on behalf of</p>
           <p class="quo-sign-company">Honour Label Limited</p>
           <div class="quo-sign-space" aria-hidden="true"></div>
-          <hr class="quo-sign-auth-line" />
           <p class="quo-sign-auth-label">Authorized Signature</p>
         </div>
       </footer>

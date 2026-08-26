@@ -235,6 +235,7 @@ export default function InvoicePrintPage() {
             showSum
             showSignature
             showChop={showChop}
+            showAcceptedBy={false}
             documentTitle="INVOICE"
             numberLabel="Invoice No."
             remarksMode="plain"

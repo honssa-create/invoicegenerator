@@ -224,6 +224,7 @@ export default function InvoiceTemplateWorkspace({ variant, readOnly }: Props) {
         showSum
         showSignature
         showChop={showChop}
+        showAcceptedBy={false}
         documentTitle="INVOICE"
         numberLabel="Invoice No."
         remarksMode="plain"

@@ -196,7 +196,7 @@ export const QUOTATION_DOCUMENT_CSS = `
     margin: 12px 0 8px 55.5pt;
   }
   .quo-preview-page .quo-sign-auth-label {
-    margin: 0;
+    margin: 12px 0 0;
     padding-left: 55.5pt;
     font-size: var(--quo-signature-size);
     line-height: var(--quo-line-height);

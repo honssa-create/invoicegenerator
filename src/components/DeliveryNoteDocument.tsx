@@ -125,16 +125,16 @@ export default function DeliveryNoteDocument({
         <div>
           <p className="label">Invoice To</p>
           <p className="quo-field whitespace-pre-wrap m-0">{model.billingAddress || '—'}</p>
-          <p className="m-0 mt-3">
-            <span className="quo-order-no-k">Order No</span>
-            <span>{model.orderNo || '—'}</span>
-          </p>
         </div>
         <div>
           <p className="label">Ship To</p>
           <p className="quo-field whitespace-pre-wrap m-0">{model.shippingAddress || '—'}</p>
         </div>
         <div className="quo-meta-block">
+          <p className="quo-meta-row">
+            <span className="quo-meta-k">Order No</span>
+            <span className="quo-meta-v">{model.orderNo || '—'}</span>
+          </p>
           <p className="quo-meta-row">
             <span className="quo-meta-k">Invoice No</span>
             <span className="quo-meta-v">{model.invoiceNo || '—'}</span>

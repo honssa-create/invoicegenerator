@@ -40,6 +40,7 @@ import {
   isOrderShipped,
   mapWeddingCapacityToPrep,
 } from './orders';
+import { kitchenShortagesFromNeeds, type KitchenShortage } from './kitchen-ship-allocate';
 import {
   aggregateRawNeedsFromPrepOrders,
   bomRawDisplayLabel,
@@ -880,6 +881,95 @@ export async function makeReturnGift(
   });
 
   return { state: await getState(ownerId) };
+}
+
+export type AllocateRemainingResult =
+  | { ok: true; allocated: boolean; summary?: string }
+  | { ok: false; shortages: KitchenShortage[] };
+
+/**
+ * Deduct remaining Nestiee gift boxes / 回禮 bottles for an order.
+ * No writes when stock is short. No-op for other order types or fully allocated orders.
+ */
+export async function tryAllocateRemainingForOrder(
+  ownerId: number,
+  actorId: number,
+  orderId: number,
+): Promise<AllocateRemainingResult> {
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
+
+  const order = (await db
+    .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .get(orderId, ownerId)) as OrderRow | undefined;
+  if (!order) return { ok: true, allocated: false };
+
+  const fields = parseFields(order.fields_json);
+  const ot = orderTypeOf(fields);
+  const fulfillments = await loadFulfillments(ownerId);
+
+  let kind: 'nestiee' | 'return_gift' | null = null;
+  let needs: KitchenNeedLine[] = [];
+  if (ot === NESTIEE_ORDER_TYPE) {
+    kind = 'nestiee';
+    needs = nestieeNeeds(order, fields, fulfillments, catalog.giftBoxTypes);
+  } else if (ot === WEDDING_GIFT_ORDER_TYPE) {
+    kind = 'return_gift';
+    needs = returnGiftNeeds(order, fields, fulfillments, catalog);
+  } else {
+    return { ok: true, allocated: false };
+  }
+
+  const remaining = needs.filter((n) => n.remaining > 0);
+  if (remaining.length === 0) return { ok: true, allocated: false };
+
+  const stockLines = remaining.map((n) => {
+    let label = n.label;
+    if (n.needKey.startsWith('gift:')) label = giftBoxLabel(n.needKey.slice(5), catalog);
+    else if (n.needKey.startsWith('bottle:')) label = skuLabel(n.needKey.slice(7), catalog);
+    return { needKey: n.needKey, remaining: n.remaining, label };
+  });
+
+  const stock = await loadStockMaps(ownerId, catalog);
+  const shortages = kitchenShortagesFromNeeds(stockLines, stock);
+  if (shortages.length > 0) return { ok: false, shortages };
+
+  const giftBoxDeltas: MovementDeltas['giftBoxDeltas'] = [];
+  const finishedDeltas: MovementDeltas['finishedDeltas'] = [];
+  const fulRows: MovementDeltas['fulfillments'] = [];
+  const summaryLines = [`PO# ${order.po_number || orderId}`, 'auto-allocated on ship'];
+
+  for (const n of remaining) {
+    if (kind === 'nestiee' && n.needKey.startsWith('gift:')) {
+      const boxType = n.needKey.slice(5);
+      giftBoxDeltas.push({ boxType, delta: -n.remaining });
+      fulRows.push({ orderId, needKey: n.needKey, qty: n.remaining });
+      summaryLines.push(`−${giftBoxLabel(boxType, catalog)} ${n.remaining}`);
+    } else if (kind === 'return_gift' && n.needKey.startsWith('bottle:')) {
+      const sku = n.needKey.slice(7);
+      finishedDeltas.push({ sku, delta: -n.remaining });
+      fulRows.push({ orderId, needKey: n.needKey, qty: n.remaining });
+      summaryLines.push(`−${skuLabel(sku, catalog)} ${n.remaining}`);
+    }
+  }
+
+  if (fulRows.length === 0) return { ok: true, allocated: false };
+
+  const deltas: MovementDeltas = {
+    giftBoxDeltas,
+    finishedDeltas,
+    rawDeltas: [],
+    fulfillments: fulRows,
+  };
+  const summary = summaryLines.join('\n');
+  const action: KitchenAction = kind === 'nestiee' ? 'allocate_gift_box' : 'make_return_gift';
+
+  await db.transaction(async () => {
+    await applyDeltas(ownerId, deltas, catalog);
+    await insertMovement(ownerId, actorId, action, { summary, deltas }, orderId);
+  });
+
+  return { ok: true, allocated: true, summary };
 }
 
 export async function restockRaw(

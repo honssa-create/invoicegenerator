@@ -6,8 +6,9 @@ import { getOrder, logActivity } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
-import { isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
+import { isOrderShipped, isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
+import { tryAllocateRemainingForOrder } from '@/lib/kitchen-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 import { cleanupReplacedOrderPaymentReceipts } from '@/lib/stored-file-cleanup';
@@ -91,6 +92,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const fields: Record<string, unknown> = body.fields || {};
     const linkedInvoiceId = body.linked_invoice_id;
     const linkedQuotationId = body.linked_quotation_id;
+    const skipKitchenAllocation = body.skip_kitchen_allocation === true;
 
     const setClauses: string[] = [];
     const values: unknown[] = [];
@@ -116,6 +118,33 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       values.push(JSON.stringify(mergedFields));
       setClauses.push('order_type = ?');
       values.push(orderTypeFromFields(mergedFields));
+    }
+
+    let kitchenAllocatedSummary: string | undefined;
+    if ('status' in core && typeof core.status === 'string' && core.status && core.status !== existing.status) {
+      let fieldsForShip: Record<string, unknown> = {};
+      try {
+        fieldsForShip = existing.fields_json ? JSON.parse(existing.fields_json) : {};
+      } catch {
+        fieldsForShip = {};
+      }
+      if (mergedFields) fieldsForShip = mergedFields;
+      const wasShipped = isOrderShipped({ status: existing.status, fields: fieldsForShip });
+      const willBeShipped = isOrderShipped({ status: core.status, fields: fieldsForShip });
+      if (!wasShipped && willBeShipped && !skipKitchenAllocation) {
+        const alloc = await tryAllocateRemainingForOrder(ownerId, session.userId, Number(params.id));
+        if (!alloc.ok) {
+          return NextResponse.json(
+            {
+              kitchen_shortage: true,
+              shortages: alloc.shortages,
+              error: 'Kitchen stock is not enough to auto-allocate',
+            },
+            { status: 409 },
+          );
+        }
+        if (alloc.allocated) kitchenAllocatedSummary = alloc.summary;
+      }
     }
 
     if (setClauses.length) {
@@ -202,6 +231,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     if ('status' in core && core.status && core.status !== existing.status) {
       await logActivity(params.id, session.userId, 'activity', session.name, `changed status to ${core.status}`);
+      if (kitchenAllocatedSummary) {
+        await logActivity(
+          params.id,
+          session.userId,
+          'activity',
+          session.name,
+          `auto-allocated kitchen stock on ship`,
+        );
+      }
     }
 
     const shouldSyncPrep = Object.keys(fields).some((k) => PREP_SYNC_FIELD_KEYS.has(k));

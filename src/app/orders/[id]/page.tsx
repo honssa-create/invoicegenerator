@@ -84,6 +84,10 @@ import { displayInvoiceNumber, displayQuotationNumber } from '@/lib/record-numbe
 import type { Customer } from '@/lib/types';
 import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
+import {
+  formatKitchenShortageConfirm,
+  parseKitchenShortageResponse,
+} from '@/lib/kitchen-ship-allocate';
 
 interface InvoiceOption {
   id: number;
@@ -231,7 +235,8 @@ export default function OrderDetailPage() {
     fields?: Record<string, unknown>;
     linked_invoice_id?: string | number | null;
     linked_quotation_id?: string | number | null;
-  }) => {
+    skip_kitchen_allocation?: boolean;
+  }, opts?: { revertStatusTo?: string }) => {
     const seq = ++patchSeqRef.current;
     patchesInFlightRef.current += 1;
     // Keep UI in sync immediately so a later server response can't briefly wipe autofills.
@@ -268,6 +273,16 @@ export default function OrderDetailPage() {
           }
           return;
         }
+        const shortages = parseKitchenShortageResponse(data);
+        if (res.status === 409 && shortages) {
+          const shipAnyway = window.confirm(formatKitchenShortageConfirm(shortages));
+          if (shipAnyway) {
+            patch({ ...payload, skip_kitchen_allocation: true }, opts);
+          } else if (opts?.revertStatusTo != null) {
+            setCoreLocal('status', opts.revertStatusTo);
+          }
+          return;
+        }
         if (res.status === 409) {
           if (data.order) {
             setOrder(data.order);
@@ -281,12 +296,14 @@ export default function OrderDetailPage() {
             kind: 'error',
           });
         } else if (!res.ok) {
+          if (opts?.revertStatusTo != null) setCoreLocal('status', opts.revertStatusTo);
           setQuoteToast({
             text: (data as { error?: string }).error || MSG.saveFailed,
             kind: 'error',
           });
         }
       } catch {
+        if (opts?.revertStatusTo != null) setCoreLocal('status', opts.revertStatusTo);
         setQuoteToast({ text: MSG.saveFailed, kind: 'error' });
       } finally {
         patchesInFlightRef.current = Math.max(0, patchesInFlightRef.current - 1);
@@ -1007,8 +1024,9 @@ export default function OrderDetailPage() {
               users={accountUsers}
               tagSuggestions={tagSuggestions}
               onStatusChange={(next) => {
+                const prev = order.status;
                 setCoreLocal('status', next);
-                patch({ core: { status: next } });
+                patch({ core: { status: next } }, { revertStatusTo: prev });
               }}
               onDueDateChange={(next) => {
                 commitLinkedDeliveryDates(next);

@@ -32,6 +32,11 @@ import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { orderFileUrl } from '@/lib/image-url';
 import { ListThumb } from '@/components/EntityAttachments';
+import {
+  formatKitchenShortageConfirm,
+  parseKitchenShortageResponse,
+  type KitchenShortage,
+} from '@/lib/kitchen-ship-allocate';
 
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
   giftBoxes: [],
@@ -435,39 +440,54 @@ function OrdersPageContent() {
     orderId: number,
     nextStatus: string,
     prevStatus: string,
-    opts?: { quiet?: boolean },
-  ): Promise<boolean> => {
+    opts?: { quiet?: boolean; skipKitchenAllocation?: boolean },
+  ): Promise<{ ok: boolean; shortages?: KitchenShortage[] }> => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ core: { status: nextStatus } }),
+        body: JSON.stringify({
+          core: { status: nextStatus },
+          ...(opts?.skipKitchenAllocation ? { skip_kitchen_allocation: true } : {}),
+        }),
       });
       if (!res.ok) {
         setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prevStatus } : o)));
+        const data = await res.json().catch(() => ({}));
+        const shortages = parseKitchenShortageResponse(data);
+        if (shortages) return { ok: false, shortages };
         if (!opts?.quiet) {
-          const data = await res.json().catch(() => ({}));
           setBoardError(data.error || bi('Failed to update status', '無法更新狀態'));
         }
-        return false;
+        return { ok: false };
       }
       loadNestieeDemand();
-      return true;
+      return { ok: true };
     } catch {
       setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: prevStatus } : o)));
       if (!opts?.quiet) {
         setBoardError(bi('Failed to update status', '無法更新狀態'));
       }
-      return false;
+      return { ok: false };
     }
   };
+
+  const confirmShipWithoutAllocate = (shortages: KitchenShortage[]): boolean =>
+    window.confirm(formatKitchenShortageConfirm(shortages));
 
   const changeOrderStatus = async (orderId: number, nextStatus: string): Promise<boolean> => {
     const prev = orders.find((o) => o.id === orderId)?.status;
     if (prev == null || prev === nextStatus) return true;
     setBoardError('');
     setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
-    return patchOrderStatus(orderId, nextStatus, prev);
+    const result = await patchOrderStatus(orderId, nextStatus, prev);
+    if (result.ok) return true;
+    if (result.shortages && confirmShipWithoutAllocate(result.shortages)) {
+      setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
+      const retry = await patchOrderStatus(orderId, nextStatus, prev, { skipKitchenAllocation: true });
+      return retry.ok;
+    }
+    return false;
   };
 
   const bulkChangeOrderStatus = async () => {
@@ -484,12 +504,43 @@ function OrdersPageContent() {
     setOrders((list) =>
       list.map((o) => (targetIds.includes(o.id) ? { ...o, status: bulkStatus } : o)),
     );
-    const results = await Promise.allSettled(
+    const results = await Promise.all(
       targets.map((o) => patchOrderStatus(o.id, bulkStatus, prevById.get(o.id) || o.status, { quiet: true })),
     );
-    const failed = results.filter((r) => r.status === 'fulfilled' && r.value === false).length
-      + results.filter((r) => r.status === 'rejected').length;
-    const succeeded = targets.length - failed;
+    const shortageById: { id: number; prev: string; shortages: KitchenShortage[] }[] = [];
+    let otherFailed = 0;
+    let succeeded = 0;
+    results.forEach((r, i) => {
+      const orderId = targets[i].id;
+      if (r.ok) {
+        succeeded += 1;
+        return;
+      }
+      if (r.shortages) {
+        shortageById.push({ id: orderId, prev: prevById.get(orderId) || targets[i].status, shortages: r.shortages });
+      } else {
+        otherFailed += 1;
+      }
+    });
+    if (shortageById.length) {
+      const merged: KitchenShortage[] = [];
+      for (const row of shortageById) merged.push(...row.shortages);
+      if (confirmShipWithoutAllocate(merged)) {
+        const retries = await Promise.all(
+          shortageById.map((row) => {
+            setOrders((list) => list.map((o) => (o.id === row.id ? { ...o, status: bulkStatus } : o)));
+            return patchOrderStatus(row.id, bulkStatus, row.prev, { quiet: true, skipKitchenAllocation: true });
+          }),
+        );
+        for (const r of retries) {
+          if (r.ok) succeeded += 1;
+          else otherFailed += 1;
+        }
+      } else {
+        otherFailed += shortageById.length;
+      }
+    }
+    const failed = targets.length - succeeded;
     setBulkUpdating(false);
     loadNestieeDemand();
     if (failed === 0) {
@@ -501,7 +552,7 @@ function OrdersPageContent() {
           `已更新 ${succeeded} 張訂單；${failed} 張失敗。`,
         ),
       );
-    } else {
+    } else if (otherFailed > 0) {
       setBoardError(bi('Failed to update selected orders', '無法更新所選訂單'));
     }
   };

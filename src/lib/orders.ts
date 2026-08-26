@@ -1173,10 +1173,18 @@ export const NESTIEE_GIFT_BOX_TYPES: { id: string; label: string; qtyKey: string
   { id: 'hua_yue', label: '花月禮盒', qtyKey: 'nestiee_gift_qty_hua_yue' },
 ];
 
-/** Auto-map Woo line + EPO options → 所需禮盒 qty keys. */
-const NESTIEE_STAR_BOX_NAME = '🌕⚪星空禮盒 · 即食燕窩';
-const NESTIEE_STAR_SILVER_OPTION = '⚪冰糖原味【最勁典】';
-const NESTIEE_STAR_GOLD_OPTION = '🌻 桂花味【花香餘韻】';
+/** Auto-map Woo line name / EPO options → 所需禮盒 qty keys. */
+const NESTIEE_STAR_BOX_NAME_CORE = '星空禮盒 · 即食燕窩';
+const NESTIEE_HUA_YUE_CN_QTY: Record<string, number> = {
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+};
 
 const NESTIEE_RED_BOX_NAME = '即食燕窩心意禮盒 ‧ 金銀套裝';
 const NESTIEE_RED_BOX_NAME_ALT = '即食燕窩心意禮盒 · 金銀套裝';
@@ -1199,9 +1207,50 @@ function normalizeNestieeMatchText(text: string): string {
     .trim();
 }
 
+function stripNestieeEmojis(text: string): string {
+  return text.replace(/\p{Extended_Pictographic}/gu, '').replace(/[\uFE0F\u200D]/g, '');
+}
+
+function nestieeNameForGiftMatch(name: string): string {
+  return normalizeNestieeMatchText(stripNestieeEmojis(name));
+}
+
+function parseNestieeStarGiftBoxQtysFromName(
+  name: string
+): { gold: number; silver: number } | null {
+  const n = nestieeNameForGiftMatch(name);
+  if (!n.includes(NESTIEE_STAR_BOX_NAME_CORE)) return null;
+  const mixed = n.match(/(\d+)\s*盒[\s\S]*?(\d+)\s*金\s*(\d+)\s*銀/);
+  if (mixed) {
+    return { gold: Number(mixed[2]) || 0, silver: Number(mixed[3]) || 0 };
+  }
+  const gold = n.match(/金[\s\S]*?·[\s\S]*?桂花[\s\S]*?(\d+)[\s\S]*?盒/);
+  if (gold) return { gold: Number(gold[1]) || 0, silver: 0 };
+  const silver = n.match(/銀[\s\S]*?·[\s\S]*?冰糖[\s\S]*?(\d+)[\s\S]*?盒/);
+  if (silver) return { gold: 0, silver: Number(silver[1]) || 0 };
+  return { gold: 0, silver: 0 };
+}
+
+function parseNestieeHuaYueQtyFromName(name: string): number | null {
+  const n = nestieeNameForGiftMatch(name);
+  const m = n.match(/花月禮盒\s*·\s*([一二三四五六七八])\s*盒/);
+  if (!m) return null;
+  return NESTIEE_HUA_YUE_CN_QTY[m[1]] ?? null;
+}
+
+function parseNestieeTrialSetQtyFromName(name: string): number | null {
+  const n = nestieeNameForGiftMatch(name);
+  if (!n.includes('Trial Set')) return null;
+  const m = n.match(/\d+/);
+  const parsed = m ? Number(m[0]) : 1;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
 /**
  * Derive 所需禮盒 quantities from Nestiee Woo lines.
- * - 星空禮盒 + first EPO flavour → 星空銀 / 星空金
+ * - 星空禮盒 name suffixes → 星空銀 / 星空金
+ * - 花月禮盒 · 一…八盒 → 花月禮盒
+ * - Trial Set + optional Arabic digit → Trial Set
  * - 金銀套裝 + 只選單味 + 金/銀盒 → 紅色金 / 紅色銀
  * - Dearest Moment 單盒/雙盒/兩味 → 粉紅心意 桂花 / 紅棗
  */
@@ -1215,10 +1264,9 @@ export function computeNestieeGiftBoxQtysFromLines(
     nestiee_gift_qty_red_silver: 0,
     nestiee_gift_qty_pink_osmanthus: 0,
     nestiee_gift_qty_pink_red_date: 0,
+    nestiee_gift_qty_hua_yue: 0,
+    nestiee_gift_qty_trial_set: 0,
   };
-  const starName = normalizeNestieeMatchText(NESTIEE_STAR_BOX_NAME);
-  const silverOpt = normalizeNestieeMatchText(NESTIEE_STAR_SILVER_OPTION);
-  const goldOpt = normalizeNestieeMatchText(NESTIEE_STAR_GOLD_OPTION);
   const redNames = new Set([
     normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME),
     normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME_ALT),
@@ -1243,9 +1291,22 @@ export function computeNestieeGiftBoxQtysFromLines(
     const firstOpt = normalizeNestieeMatchText(line.options?.[0]?.value || '');
     const secondOpt = normalizeNestieeMatchText(line.options?.[1]?.value || '');
 
-    if (name === starName) {
-      if (firstOpt === silverOpt) qtys.nestiee_gift_qty_star_silver += qty;
-      else if (firstOpt === goldOpt) qtys.nestiee_gift_qty_star_gold += qty;
+    const trialQty = parseNestieeTrialSetQtyFromName(line.name);
+    if (trialQty != null) {
+      qtys.nestiee_gift_qty_trial_set += trialQty * qty;
+      continue;
+    }
+
+    const huaYueQty = parseNestieeHuaYueQtyFromName(line.name);
+    if (huaYueQty != null) {
+      qtys.nestiee_gift_qty_hua_yue += huaYueQty * qty;
+      continue;
+    }
+
+    const starQtys = parseNestieeStarGiftBoxQtysFromName(line.name);
+    if (starQtys) {
+      qtys.nestiee_gift_qty_star_gold += starQtys.gold * qty;
+      qtys.nestiee_gift_qty_star_silver += starQtys.silver * qty;
       continue;
     }
 

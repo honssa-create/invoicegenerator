@@ -378,38 +378,78 @@ describe('resolveOrderAddressesForQuotation', () => {
 });
 
 describe('computeNestieeGiftBoxQtysFromLines', () => {
-  it('maps 星空禮盒 ice-sugar option to 星空銀 and osmanthus to 星空金', () => {
+  const emptyAutoQtys = {
+    nestiee_gift_qty_star_gold: 0,
+    nestiee_gift_qty_star_silver: 0,
+    nestiee_gift_qty_red_gold: 0,
+    nestiee_gift_qty_red_silver: 0,
+    nestiee_gift_qty_pink_osmanthus: 0,
+    nestiee_gift_qty_pink_red_date: 0,
+    nestiee_gift_qty_hua_yue: 0,
+    nestiee_gift_qty_trial_set: 0,
+  };
+
+  it('maps 星空禮盒 name suffixes to 星空金 / 星空銀', () => {
     expect(
       computeNestieeGiftBoxQtysFromLines([
         {
-          name: '🌕⚪星空禮盒 · 即食燕窩',
+          name: '🌕⚪星空禮盒 · 即食燕窩 - 3盒2金1銀',
           quantity: 2,
           unit_price: 100,
           line_total: 200,
-          options: [{ label: '口味', value: '⚪冰糖原味【最勁典】', price: 0 }],
         },
         {
-          name: '🌕⚪星空禮盒 · 即食燕窩',
-          quantity: 3,
+          name: '星空禮盒 · 即食燕窩 - 金-‧-桂花-1-盒',
+          quantity: 1,
           unit_price: 100,
-          line_total: 300,
-          options: [{ label: '口味', value: '🌻 桂花味【花香餘韻】', price: 0 }],
+          line_total: 100,
         },
         {
-          name: '其他產品',
+          name: '星空禮盒 · 即食燕窩 - 銀‧冰糖 2盒',
+          quantity: 1,
+          unit_price: 100,
+          line_total: 100,
+        },
+        {
+          name: '其他產品 - 金-‧-桂花-9-盒',
           quantity: 9,
           unit_price: 1,
           line_total: 9,
-          options: [{ label: '口味', value: '⚪冰糖原味【最勁典】', price: 0 }],
         },
       ])
     ).toEqual({
-      nestiee_gift_qty_star_gold: 3,
-      nestiee_gift_qty_star_silver: 2,
-      nestiee_gift_qty_red_gold: 0,
-      nestiee_gift_qty_red_silver: 0,
-      nestiee_gift_qty_pink_osmanthus: 0,
-      nestiee_gift_qty_pink_red_date: 0,
+      ...emptyAutoQtys,
+      nestiee_gift_qty_star_gold: 2 * 2 + 1,
+      nestiee_gift_qty_star_silver: 1 * 2 + 2,
+    });
+  });
+
+  it('maps 花月禮盒 · 一…八盒 using Chinese numerals', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        { name: '花月禮盒 ‧ 三盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '花月禮盒 · 二盒', quantity: 2, unit_price: 1, line_total: 2 },
+        { name: '花月禮盒 ‧ 八盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '花月禮盒 ‧ 兩盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '花月禮盒 ‧ 九盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '花月禮盒 ‧ 十盒', quantity: 1, unit_price: 1, line_total: 1 },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 3 + 2 * 2 + 8,
+    });
+  });
+
+  it('maps Trial Set using the first Arabic digit, defaulting to 1', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        { name: 'Trial Set', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: 'Trial Set 3', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '3 x Trial Set', quantity: 2, unit_price: 1, line_total: 2 },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_trial_set: 1 + 3 + 3 * 2,
     });
   });
 
@@ -438,12 +478,9 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
         },
       ])
     ).toEqual({
-      nestiee_gift_qty_star_gold: 0,
-      nestiee_gift_qty_star_silver: 0,
+      ...emptyAutoQtys,
       nestiee_gift_qty_red_gold: 1,
       nestiee_gift_qty_red_silver: 4,
-      nestiee_gift_qty_pink_osmanthus: 0,
-      nestiee_gift_qty_pink_red_date: 0,
     });
   });
 
@@ -492,10 +529,7 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
         },
       ])
     ).toEqual({
-      nestiee_gift_qty_star_gold: 0,
-      nestiee_gift_qty_star_silver: 0,
-      nestiee_gift_qty_red_gold: 0,
-      nestiee_gift_qty_red_silver: 0,
+      ...emptyAutoQtys,
       nestiee_gift_qty_pink_osmanthus: 1 + 2 + 1,
       nestiee_gift_qty_pink_red_date: 1 + 1,
     });
@@ -505,11 +539,10 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
 describe('applyNestieeGiftBoxAutoQtys', () => {
   const lines = [
     {
-      name: '🌕⚪星空禮盒 · 即食燕窩',
+      name: '🌕⚪星空禮盒 · 即食燕窩 - 銀‧冰糖 1盒',
       quantity: 2,
       unit_price: 100,
       line_total: 200,
-      options: [{ label: '口味', value: '⚪冰糖原味【最勁典】', price: 0 }],
     },
   ];
 
@@ -522,6 +555,8 @@ describe('applyNestieeGiftBoxAutoQtys', () => {
     expect(fields.nestiee_gift_qty_red_silver).toBe('0');
     expect(fields.nestiee_gift_qty_pink_osmanthus).toBe('0');
     expect(fields.nestiee_gift_qty_pink_red_date).toBe('0');
+    expect(fields.nestiee_gift_qty_hua_yue).toBe('0');
+    expect(fields.nestiee_gift_qty_trial_set).toBe('0');
   });
 
   it('skips qty keys marked manual on re-import', () => {
@@ -536,6 +571,8 @@ describe('applyNestieeGiftBoxAutoQtys', () => {
     expect(fields.nestiee_gift_qty_red_silver).toBe('0');
     expect(fields.nestiee_gift_qty_pink_osmanthus).toBe('0');
     expect(fields.nestiee_gift_qty_pink_red_date).toBe('0');
+    expect(fields.nestiee_gift_qty_hua_yue).toBe('0');
+    expect(fields.nestiee_gift_qty_trial_set).toBe('0');
   });
 });
 
@@ -588,11 +625,10 @@ describe('normalizeOrderShippingMethod', () => {
 
 describe('appendNestieeShippingLine', () => {
   const product = {
-    name: '🌕⚪星空禮盒 · 即食燕窩',
+    name: '🌕⚪星空禮盒 · 即食燕窩 - 銀‧冰糖 1盒',
     quantity: 1,
     unit_price: 344,
     line_total: 344,
-    options: [{ label: '口味', value: '⚪冰糖原味【最勁典】', price: 0 }],
   };
 
   it('appends Shipping when total > 0', () => {
@@ -623,6 +659,8 @@ describe('appendNestieeShippingLine', () => {
       nestiee_gift_qty_red_silver: 0,
       nestiee_gift_qty_pink_osmanthus: 0,
       nestiee_gift_qty_pink_red_date: 0,
+      nestiee_gift_qty_hua_yue: 0,
+      nestiee_gift_qty_trial_set: 0,
     });
   });
 });

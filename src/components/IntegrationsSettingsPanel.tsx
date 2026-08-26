@@ -357,7 +357,8 @@ export default function IntegrationsSettingsPanel({
                     className={`${inputCls} mt-1`}
                   />
                   <p className="text-xs text-gray-400 mt-1">
-                    Website address only — e.g. <code className="text-gray-500">https://nestiee.com.hk</code> (not an email).
+                    Store root — e.g. <code className="text-gray-500">https://nestiee.com.hk</code> or{' '}
+                    <code className="text-gray-500">https://honour.com.hk/en</code> for a subdirectory site (not an email).
                   </p>
                 </div>
                 <div>

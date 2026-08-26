@@ -16,6 +16,28 @@ describe('normalizeWooStoreUrl', () => {
     });
   });
 
+  it('preserves subdirectory store paths like /en', () => {
+    expect(normalizeWooStoreUrl('https://honour.com.hk/en')).toEqual({
+      ok: true,
+      url: 'https://honour.com.hk/en',
+    });
+    expect(normalizeWooStoreUrl('https://honour.com.hk/en/')).toEqual({
+      ok: true,
+      url: 'https://honour.com.hk/en',
+    });
+  });
+
+  it('strips accidental wp-json / wp-admin suffixes from the path', () => {
+    expect(normalizeWooStoreUrl('https://honour.com.hk/en/wp-json/wc/v3')).toEqual({
+      ok: true,
+      url: 'https://honour.com.hk/en',
+    });
+    expect(normalizeWooStoreUrl('https://honour.com.hk/wp-admin')).toEqual({
+      ok: true,
+      url: 'https://honour.com.hk',
+    });
+  });
+
   it('rejects email-like values', () => {
     const result = normalizeWooStoreUrl('vanessa@honour.com.hk');
     expect(result.ok).toBe(false);

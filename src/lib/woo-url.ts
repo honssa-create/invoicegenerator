@@ -28,7 +28,12 @@ export function normalizeWooStoreUrl(raw: string): WooUrlResult {
     if (!parsed.hostname || parsed.hostname.includes('@')) {
       return { ok: false, error: 'Invalid store URL hostname' };
     }
-    return { ok: true, url: `${parsed.protocol}//${parsed.host}` };
+    // Keep subdirectory installs (e.g. https://honour.com.hk/en) but drop
+    // trailing slash and accidental /wp-json or /wp-admin suffixes.
+    let path = parsed.pathname.replace(/\/+$/, '') || '';
+    path = path.replace(/\/wp-json(\/.*)?$/i, '').replace(/\/wp-admin(\/.*)?$/i, '');
+    path = path.replace(/\/+$/, '');
+    return { ok: true, url: `${parsed.protocol}//${parsed.host}${path}` };
   } catch {
     return {
       ok: false,

@@ -17,6 +17,7 @@ import {
   orderListPaymentStatus,
   orderMatchesTypeFilter,
   orderStatusFamily,
+  orderThumbnailFile,
   statusKeyForTypeFilter,
   statusesForOrderType,
   summarizeOrderDashboard,
@@ -29,6 +30,8 @@ import {
 } from '@/lib/nestiee-order-demand';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { orderFileUrl } from '@/lib/image-url';
+import { ListThumb } from '@/components/EntityAttachments';
 
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
   giftBoxes: [],
@@ -513,7 +516,7 @@ function OrdersPageContent() {
   };
 
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
-  const LINE_TABLE_COL_COUNT = 8;
+  const LINE_TABLE_COL_COUNT = 9;
 
   return (
     <>
@@ -760,6 +763,7 @@ function OrdersPageContent() {
                       aria-label={bi('Select all on page', '全選本頁')}
                     />
                   </th>
+                  <th className="px-3 py-3 w-14">{bi('Thumb', '封面')}</th>
                   {sortTh('reference', bi('Reference Number', '參考編號'))}
                   {sortTh('order', bi('Order Number', '訂單號碼'))}
                   {sortTh('type', bi('Order Type', '訂單類型'))}
@@ -867,6 +871,12 @@ function OrderLineRow({
               `選取 ${displayOrderNumber(order.po_number) || order.reference_number}`,
             )}
           />
+        </td>
+        <td className="px-3 py-4">
+          {(() => {
+            const thumb = orderThumbnailFile(order.files, order.fields);
+            return <ListThumb src={thumb ? orderFileUrl(thumb) : null} alt="" />;
+          })()}
         </td>
         <td className="px-6 py-4">
           <Link href={`/orders/${order.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">

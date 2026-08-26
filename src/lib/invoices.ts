@@ -2,6 +2,7 @@ import db from './db';
 import { allocateGlobalRecordNumber } from './record-numbering';
 import type { InvoiceFile, InvoiceItem, InvoiceWithDetails } from './types';
 import { calculateInvoiceTotals } from './utils';
+import { loadFilesGrouped } from './attachment-server';
 
 /** Reserve the next office-wide 8-digit invoice number. */
 export async function generateInvoiceNumber(_userId?: number): Promise<string> {
@@ -80,6 +81,7 @@ export async function getInvoiceWithDetails(invoiceId: number | string, userId: 
     term: (invoice.term as string) || 'NET30',
     items,
     files,
+    thumbnail_file_id: invoice.thumbnail_file_id != null ? Number(invoice.thumbnail_file_id) || null : null,
     subtotal,
     discount_amount: discountAmount,
     tax_amount: taxAmount,
@@ -139,6 +141,8 @@ export async function listInvoices(
     itemsByInvoice.set(item.invoice_id, list);
   }
 
+  const filesByInvoice = await loadFilesGrouped('invoice_id', ids);
+
   return rows.map((invoice) => {
     const id = Number(invoice.id);
     const items = itemsByInvoice.get(id) || [];
@@ -162,7 +166,8 @@ export async function listInvoices(
       send_later: Boolean(Number(invoice.send_later) || 0),
       term: (invoice.term as string) || 'NET30',
       items: [],
-      files: [],
+      files: filesByInvoice.get(id) || [],
+      thumbnail_file_id: invoice.thumbnail_file_id != null ? Number(invoice.thumbnail_file_id) || null : null,
       subtotal,
       discount_amount: discountAmount,
       tax_amount: taxAmount,

@@ -5,12 +5,7 @@ import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getDataOwnerId } from '@/lib/org-server';
 import { imageResponseForStoredPath } from '@/lib/stored-image';
 import { trashOrderFile } from '@/lib/trash';
-
-function contentDispositionAttachment(filename: string): string {
-  const safe = filename.replace(/["\\\r\n]/g, '_') || 'download';
-  const encoded = encodeURIComponent(safe);
-  return `attachment; filename="${safe}"; filename*=UTF-8''${encoded}`;
-}
+import { contentDispositionAttachment, sanitizeOriginalName } from '@/lib/attachment-server';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -69,7 +64,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
   }
   // Keep display name filesystem-safe-ish; strip path separators / control chars.
-  const name = raw.replace(/[/\\:\0\r\n]/g, '_').slice(0, 200);
+  const name = sanitizeOriginalName(raw);
   if (!name) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
   }

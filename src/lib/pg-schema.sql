@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   shipping_amount DOUBLE PRECISION DEFAULT 0,
   term TEXT DEFAULT 'NET30',
   deposit_amount DOUBLE PRECISION,
+  thumbnail_file_id INTEGER,
   UNIQUE (user_id, invoice_number)
 );
 
@@ -214,12 +215,15 @@ CREATE TABLE IF NOT EXISTS quotations (
   currency TEXT DEFAULT 'HKD',
   discount_type TEXT DEFAULT 'percent',
   discount_value DOUBLE PRECISION DEFAULT 0,
-  shipping_amount DOUBLE PRECISION DEFAULT 0
+  shipping_amount DOUBLE PRECISION DEFAULT 0,
+  thumbnail_file_id INTEGER
 );
 
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS external_invoice_number TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS quotation_id INTEGER;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deposit_amount DOUBLE PRECISION;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER;
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS reference_number TEXT;
 
 CREATE TABLE IF NOT EXISTS quotation_items (

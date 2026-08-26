@@ -15,6 +15,9 @@ import {
 } from '@/lib/quotations';
 import { displayQuotationNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { quotationFileUrl } from '@/lib/image-url';
+import { pickThumbnailFile } from '@/lib/attachment-files';
+import { ListThumb } from '@/components/EntityAttachments';
 
 type SortKey = 'number' | 'customer' | 'date' | 'amount' | 'status';
 const PAGE_SIZE = 50;
@@ -252,6 +255,7 @@ export default function QuotationsPage() {
               <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                    <th className="px-4 py-3 w-14">{bi('Thumb', '封面')}</th>
                     {sortTh('number', bi('Quote #', '報價編號'))}
                     {sortTh('customer', bi('Customer', '客戶'))}
                     {sortTh('date', bi('Issue Date', '開立日期'))}
@@ -262,6 +266,12 @@ export default function QuotationsPage() {
                 <tbody className="divide-y divide-gray-100">
                   {pageRows.map((q) => (
                     <tr key={q.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-4">
+                        {(() => {
+                          const thumb = pickThumbnailFile(q.files || [], q.thumbnail_file_id);
+                          return <ListThumb src={thumb ? quotationFileUrl(thumb) : null} alt="" />;
+                        })()}
+                      </td>
                       <td className="px-6 py-4">
                         <Link
                           href={`/quotations/${q.id}`}

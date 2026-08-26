@@ -1,6 +1,7 @@
 import db from './db';
 import { allocateGlobalRecordNumber } from './record-numbering';
 import { calculateQuotationTotals, type QuotationFile, type QuotationItem, type QuotationWithDetails } from './quotations';
+import { loadFilesGrouped } from './attachment-server';
 
 /** Reserve the next office-wide 8-digit quotation number. */
 export async function generateQuoteNumber(_userId?: number): Promise<string> {
@@ -73,6 +74,7 @@ export async function getQuotationWithDetails(
     send_later: Boolean(Number(quotation.send_later) || 0),
     items,
     files,
+    thumbnail_file_id: quotation.thumbnail_file_id != null ? Number(quotation.thumbnail_file_id) || null : null,
     subtotal,
     discount_amount: discountAmount,
     tax_amount: taxAmount,
@@ -144,6 +146,7 @@ export async function listQuotations(
     po_number: string | null;
   }>;
   const linkedByQuote = new Map(linkedRows.map((r) => [r.quotation_id, r]));
+  const filesByQuote = await loadFilesGrouped('quotation_id', ids);
 
   return rows.map((quotation) => {
     const id = Number(quotation.id);
@@ -164,7 +167,8 @@ export async function listQuotations(
       currency: (quotation.currency as string) || 'HKD',
       send_later: Boolean(Number(quotation.send_later) || 0),
       items: [],
-      files: [],
+      files: filesByQuote.get(id) || [],
+      thumbnail_file_id: quotation.thumbnail_file_id != null ? Number(quotation.thumbnail_file_id) || null : null,
       subtotal,
       discount_amount: discountAmount,
       tax_amount: taxAmount,

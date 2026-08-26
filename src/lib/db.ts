@@ -841,6 +841,8 @@ async function runBootDataFixes(): Promise<void> {
 
   await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS quotation_id INTEGER`);
   await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deposit_amount DOUBLE PRECISION`);
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER`);
+  await client().query(`ALTER TABLE quotations ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER`);
   await client().query(`
     CREATE INDEX IF NOT EXISTS idx_invoices_quotation ON invoices(quotation_id)
     WHERE quotation_id IS NOT NULL

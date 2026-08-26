@@ -41,6 +41,7 @@ export interface Invoice {
   discount_value: number;
   shipping_amount: number;
   deposit_amount: number | null;
+  thumbnail_file_id: number | null;
   term: string | null;
   created_at: string;
   updated_at: string;

@@ -8,6 +8,7 @@ import {
 } from '@/lib/kitchen-prep';
 import { addCalendarDays } from '@/lib/wedding-gift-confirmation';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
+import { pickThumbnailFile } from '@/lib/attachment-files';
 
 export interface CoreColumns {
   po_number: string;
@@ -1034,37 +1035,14 @@ export interface OrderFile {
   original_name: string | null;
 }
 
-const ORDER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)(?:$|[?#])/i;
-
-/** True when a stored order attachment is a displayable raster image. */
-export function isOrderImageFile(file: {
-  path?: string | null;
-  original_name?: string | null;
-}): boolean {
-  return (
-    ORDER_IMAGE_EXT_RE.test(file.original_name || '') ||
-    ORDER_IMAGE_EXT_RE.test(file.path || '')
-  );
-}
+export { isAttachmentImage as isOrderImageFile } from './attachment-files';
 
 /** Board/cover image: prefer fields.thumbnail_file_id when it points at an image, else first image. */
 export function orderThumbnailFile(
   files: OrderFile[],
   fields?: Record<string, string | boolean> | null,
 ): OrderFile | null {
-  if (!files.length) return null;
-  const raw = fields?.thumbnail_file_id;
-  const preferredId =
-    typeof raw === 'number'
-      ? raw
-      : typeof raw === 'string' && raw.trim()
-        ? Number(raw.trim())
-        : NaN;
-  if (Number.isFinite(preferredId) && preferredId > 0) {
-    const preferred = files.find((f) => f.id === preferredId && isOrderImageFile(f));
-    if (preferred) return preferred;
-  }
-  return files.find(isOrderImageFile) || null;
+  return pickThumbnailFile(files, fields?.thumbnail_file_id);
 }
 
 export interface OrderActivity {

@@ -42,6 +42,7 @@ export interface QuotationWithDetails {
   discount_type: QuotationDiscountType;
   discount_value: number;
   shipping_amount: number;
+  thumbnail_file_id: number | null;
   created_at: string;
   updated_at: string;
   customer_name: string | null;

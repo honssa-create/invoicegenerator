@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -14,6 +14,7 @@ import {
   quotationSnapshotFromRecord,
 } from '@/lib/document-editor-snapshot';
 import { quotationFileUrl } from '@/lib/image-url';
+import EntityAttachments from '@/components/EntityAttachments';
 import {
   calculateQuotationTotals,
   QUOTATION_STATUSES,
@@ -41,18 +42,6 @@ const emptyLine = (): LineItem => ({
   quantity: 1,
   unit_price: 0,
 });
-
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function isImageName(name: string | null | undefined): boolean {
-  return /\.(png|jpe?g|gif|webp)$/i.test(name || '');
-}
 
 export default function QuotationDetailPage() {
   const { id } = useParams();
@@ -83,14 +72,12 @@ export default function QuotationDetailPage() {
   const [shippingAmount, setShippingAmount] = useState(0);
   const [items, setItems] = useState<LineItem[]>([emptyLine()]);
   const [files, setFiles] = useState<QuotationFile[]>([]);
-  const [uploadMsg, setUploadMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [copying, setCopying] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
     fetch(`/api/quotations/${id}`)
@@ -201,45 +188,6 @@ export default function QuotationDetailPage() {
 
   const isDirty = !readOnly && savedSnapshot !== null && savedSnapshot !== currentSnapshot;
   useUnsavedChangesWarning(isDirty);
-
-  const uploadFiles = async (list: FileList) => {
-    if (readOnly) return;
-    const selected = Array.from(list);
-    const tooBig = selected.find((f) => f.size > MAX_ATTACHMENT_BYTES);
-    if (tooBig) {
-      setUploadMsg(
-        bi(
-          `“${tooBig.name}” is over 20 MB (${formatFileSize(tooBig.size)})`,
-          `「${tooBig.name}」超過 20 MB（${formatFileSize(tooBig.size)}）`,
-        ),
-      );
-      return;
-    }
-    if (!selected.length) return;
-
-    setUploadMsg(bi(`Uploading ${selected.length} file(s)…`, `正在上傳 ${selected.length} 個檔案…`));
-    const fd = new FormData();
-    selected.forEach((f) => fd.append('file', f));
-    try {
-      const res = await fetch(`/api/quotations/${id}/files`, { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) {
-        setUploadMsg(data.error || MSG.uploadFailed);
-        return;
-      }
-      setFiles(data.files || []);
-      setUploadMsg(bi('Uploaded', '已上傳'));
-      setTimeout(() => setUploadMsg(''), 2000);
-    } catch {
-      setUploadMsg(MSG.uploadFailed);
-    }
-  };
-
-  const deleteFile = async (fileId: number) => {
-    if (readOnly) return;
-    const res = await fetch(`/api/quotation-files/${fileId}`, { method: 'DELETE' });
-    if (res.ok) setFiles((prev) => prev.filter((f) => f.id !== fileId));
-  };
 
   const save = async () => {
     setSaving(true);
@@ -763,99 +711,28 @@ export default function QuotationDetailPage() {
             </div>
           </div>
 
-          {/* Attachments */}
           <div className="border-t border-gray-100 p-5">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900">
-                  {bi('Attachments', '附件')}
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {bi('Any file type · max 20 MB each', '任意檔案類型 · 每個上限 20 MB')}
-                </p>
-                {uploadMsg && <p className="text-xs text-brand-700 mt-1">{uploadMsg}</p>}
-              </div>
-              {!readOnly && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-sm text-brand-600 hover:text-brand-700 font-medium shrink-0"
-                  >
-                    + {bi('Attach files', '附加檔案')}
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files?.length) void uploadFiles(e.target.files);
-                      e.target.value = '';
-                    }}
-                  />
-                </>
-              )}
-            </div>
-
-            {files.length === 0 ? (
-              <div
-                onClick={() => !readOnly && fileInputRef.current?.click()}
-                className={`border-2 border-dashed border-gray-300 rounded-xl p-6 text-center text-gray-400 text-sm ${
-                  readOnly ? '' : 'cursor-pointer hover:border-brand-400 hover:bg-brand-50/40'
-                }`}
-              >
-                {bi('No attachments yet', '尚無附件')}
-                {!readOnly && (
-                  <span className="block mt-1 text-xs">
-                    {bi('Click to upload (under 20 MB each)', '點擊上傳（每個不超過 20 MB）')}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <ul className="space-y-2">
-                {files.map((f) => {
-                  const url = quotationFileUrl(f);
-                  const name = f.original_name || `File #${f.id}`;
-                  return (
-                    <li
-                      key={f.id}
-                      className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2"
-                    >
-                      {isImageName(f.original_name) ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={url}
-                          alt={name}
-                          className="h-10 w-10 rounded object-cover border border-gray-200 shrink-0 bg-white"
-                        />
-                      ) : (
-                        <span className="h-10 w-10 rounded bg-white border border-gray-200 flex items-center justify-center text-gray-400 text-xs shrink-0">
-                          FILE
-                        </span>
-                      )}
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex-1 min-w-0 text-sm text-brand-700 hover:underline truncate"
-                      >
-                        {name}
-                      </a>
-                      {!readOnly && (
-                        <button
-                          type="button"
-                          onClick={() => void deleteFile(f.id)}
-                          className="text-xs text-red-600 hover:text-red-700 shrink-0"
-                        >
-                          {BTN.delete}
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <EntityAttachments
+              title={bi('Attachments', '附件')}
+              subtitle={bi('Images are compressed; heavy PDFs become page images', '圖片會壓縮；大型 PDF 會轉成頁面圖片')}
+              files={files}
+              fileUrl={quotationFileUrl}
+              uploadUrl={`/api/quotations/${id}/files`}
+              fileApiBase="/api/quotation-files"
+              thumbnailFileId={quote.thumbnail_file_id}
+              readOnly={readOnly}
+              onFilesChange={setFiles}
+              onSetThumbnail={(fileId) => {
+                if (fileId) {
+                  void fetch(`/api/quotation-files/${fileId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ set_thumbnail: true }),
+                  });
+                }
+                setQuote((q) => (q ? { ...q, thumbnail_file_id: fileId } : q));
+              }}
+            />
           </div>
         </div>
 

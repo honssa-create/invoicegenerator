@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -26,6 +26,7 @@ import { DEFAULT_OPTIONS } from '@/lib/expenses';
 import { mergeSupplierLists } from '@/lib/expense-suppliers';
 import { compressImage } from '@/lib/imageCompression';
 import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
+import EntityAttachments from '@/components/EntityAttachments';
 import {
   ORDER_SHIPPING_METHODS,
   ORDER_TYPES,
@@ -73,7 +74,6 @@ import {
   serializeOrderTags,
   orderTitle,
   isBadgeOrderType,
-  isOrderImageFile,
   isWeddingGiftOrderType,
   type HonourLineItem,
   type HonourSupplierItem,
@@ -107,10 +107,6 @@ export default function OrderDetailPage() {
   const [quotations, setQuotations] = useState<QuotationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
-  const renameCancelledRef = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const payment1InputRef = useRef<HTMLInputElement>(null);
   const payment2InputRef = useRef<HTMLInputElement>(null);
   const payment3InputRef = useRef<HTMLInputElement>(null);
@@ -367,153 +363,6 @@ export default function OrderDetailPage() {
   const commitLinkedDeliveryDates = (next: string) => {
     setLinkedDeliveryDatesLocal(next);
     patch({ fields: { due_date: next, client_delivery_date: next } });
-  };
-
-  const [uploadMsg, setUploadMsg] = useState('');
-  const uploadFiles = async (files: FileList | File[]) => {
-    const list = Array.from(files);
-    if (!list.length) return;
-    setUploadMsg('Optimising files…');
-    // Compress images (≤1600px JPEG) and convert heavy PDFs (>2MB) into compressed
-    // JPEG page images so we store a lightweight image array, never the raw monster PDF.
-    const prepared: File[] = [];
-    for (const f of list) {
-      try {
-        if (f.type === 'application/pdf') {
-          setUploadMsg(`Compressing PDF “${f.name}” pages…`);
-          const { compressPdfToImages } = await import('@/lib/pdfCompression');
-          const pages = await compressPdfToImages(f);
-          prepared.push(...pages);
-        } else if (f.type.startsWith('image/')) {
-          const c = await compressImage(f, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg' });
-          prepared.push(c.file);
-        } else {
-          prepared.push(f);
-        }
-      } catch {
-        prepared.push(f);
-      }
-    }
-    if (!prepared.length) { setUploadMsg(''); return; }
-
-    setUploadMsg(`Uploading ${prepared.length} file(s)…`);
-    const fd = new FormData();
-    prepared.forEach((f) => fd.append('file', f));
-    const res = await fetch(`/api/orders/${id}/files`, { method: 'POST', body: fd });
-    if (res.ok) {
-      const data = await res.json();
-      setOrder((o) => (o ? { ...o, files: data.files } : o));
-    }
-    setUploadMsg('');
-  };
-
-  const onDesignProofsDrop = (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const files = e.dataTransfer.files;
-    if (files?.length) void uploadFiles(files);
-  };
-
-  const deleteFile = async (fileId: number) => {
-    const res = await fetch(`/api/order-files/${fileId}`, { method: 'DELETE' });
-    if (!res.ok) return;
-    setOrder((o) => {
-      if (!o) return o;
-      const nextFiles = o.files.filter((f) => f.id !== fileId);
-      const thumbId = String(o.fields.thumbnail_file_id ?? '');
-      if (thumbId && Number(thumbId) === fileId) {
-        const { thumbnail_file_id: _removed, ...restFields } = o.fields;
-        return { ...o, files: nextFiles, fields: restFields };
-      }
-      return { ...o, files: nextFiles };
-    });
-    const thumbId = String(order?.fields.thumbnail_file_id ?? '');
-    if (thumbId && Number(thumbId) === fileId) {
-      patch({ fields: { thumbnail_file_id: '' } });
-    }
-  };
-
-  const setThumbnailFile = (fileId: number) => {
-    if (!order) return;
-    const file = order.files.find((f) => f.id === fileId);
-    if (!file || !isOrderImageFile(file)) return;
-    const current = String(order.fields.thumbnail_file_id ?? '');
-    if (current === String(fileId)) return;
-    setOrder((o) =>
-      o ? { ...o, fields: { ...o.fields, thumbnail_file_id: String(fileId) } } : o
-    );
-    patch({ fields: { thumbnail_file_id: String(fileId) } });
-  };
-
-  const downloadFile = async (f: { id: number; path: string; original_name: string | null }) => {
-    try {
-      const res = await fetch(`${orderFileUrl(f)}?download=1`);
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = f.original_name || `order-file-${f.id}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const startRenameFile = (f: { id: number; original_name: string | null }) => {
-    renameCancelledRef.current = false;
-    setRenamingFileId(f.id);
-    setRenameDraft(f.original_name || `Image #${f.id}`);
-  };
-
-  const cancelRenameFile = () => {
-    renameCancelledRef.current = true;
-    setRenamingFileId(null);
-    setRenameDraft('');
-  };
-
-  const saveRenameFile = async (fileId: number) => {
-    if (renameCancelledRef.current) {
-      renameCancelledRef.current = false;
-      setRenamingFileId(null);
-      setRenameDraft('');
-      return;
-    }
-    const name = renameDraft.trim();
-    if (!name) {
-      setRenamingFileId(null);
-      setRenameDraft('');
-      return;
-    }
-    const current = order?.files.find((f) => f.id === fileId);
-    if (current && (current.original_name || '').trim() === name) {
-      setRenamingFileId(null);
-      setRenameDraft('');
-      return;
-    }
-    const res = await fetch(`/api/order-files/${fileId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ original_name: name }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.file) {
-        setOrder((o) =>
-          o
-            ? {
-                ...o,
-                files: o.files.map((f) => (f.id === fileId ? { ...f, original_name: data.file.original_name } : f)),
-              }
-            : o
-        );
-      }
-    }
-    setRenamingFileId(null);
-    setRenameDraft('');
   };
 
   const handlePaymentReceipt = async (rawFile: File, slot: 1 | 2 | 3) => {
@@ -2418,155 +2267,30 @@ export default function OrderDetailPage() {
             )}
           </section>
 
-          {/* Visual assets / image grid */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-semibold text-gray-900">Design Proofs 設計圖 / Image Preview</h2>
-                {uploadMsg && <p className="text-xs text-brand-700 mt-0.5">{uploadMsg}</p>}
-              </div>
-              <button onClick={() => fileInputRef.current?.click()} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ {bi('Upload files', '上傳檔案')}</button>
-              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
-            </div>
-            {order.files.length === 0 ? (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                onDrop={onDesignProofsDrop}
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400 text-sm cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
-              >
-                {bi('Drop any file here, or click to upload', '拖放任意檔案到此處，或點擊上傳')}
-                <span className="block text-[11px] mt-1 text-gray-400">
-                  {bi('Images are compressed; heavy PDFs become page images', '圖片會壓縮；大型 PDF 會轉成頁面圖片')}
-                </span>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  onDrop={onDesignProofsDrop}
-                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  className="border-2 border-dashed border-gray-200 rounded-xl px-4 py-3 text-center text-xs text-gray-400 cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
-                >
-                  {bi('Drop more files here, or click to upload', '拖放更多檔案到此處，或點擊上傳')}
-                </div>
-              <ul className="space-y-2">
-                {(() => {
-                  const imageFiles = order.files.filter(isOrderImageFile);
-                  const imageCount = imageFiles.length;
-                  const thumbId = Number(order.fields.thumbnail_file_id);
-                  const effectiveThumbId =
-                    Number.isFinite(thumbId) && thumbId > 0 && imageFiles.some((f) => f.id === thumbId)
-                      ? thumbId
-                      : imageFiles[0]?.id;
-                  return order.files.map((f) => {
-                  const url = orderFileUrl(f);
-                  const name = f.original_name || `File #${f.id}`;
-                  const renaming = renamingFileId === f.id;
-                  const isImage = isOrderImageFile(f);
-                  const isThumb = isImage && f.id === effectiveThumbId;
-                  return (
-                    <li
-                      key={f.id}
-                      className={`flex items-center gap-3 rounded-lg border bg-gray-50/80 px-3 py-2 ${
-                        isThumb ? 'border-brand-300 ring-1 ring-brand-200' : 'border-gray-200'
-                      }`}
-                    >
-                      {isImage ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={url}
-                          alt={name}
-                          onClick={() => setLightbox(url)}
-                          className="h-14 w-14 rounded-md object-cover border border-gray-200 shrink-0 bg-white cursor-zoom-in hover:ring-2 hover:ring-brand-400"
-                        />
-                      ) : (
-                        <span className="h-14 w-14 rounded-md bg-white border border-gray-200 flex items-center justify-center text-gray-400 text-xs font-medium shrink-0">
-                          FILE
-                        </span>
-                      )}
-                      {renaming ? (
-                        <input
-                          autoFocus
-                          value={renameDraft}
-                          onChange={(e) => setRenameDraft(e.target.value)}
-                          onBlur={() => saveRenameFile(f.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              (e.target as HTMLInputElement).blur();
-                            } else if (e.key === 'Escape') {
-                              e.preventDefault();
-                              cancelRenameFile();
-                            }
-                          }}
-                          className="flex-1 min-w-0 rounded-md border border-brand-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                          aria-label={bi('Rename file', '重新命名檔案')}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => (isImage ? setLightbox(url) : void downloadFile(f))}
-                          onDoubleClick={(e) => {
-                            e.preventDefault();
-                            startRenameFile(f);
-                          }}
-                          className="flex-1 min-w-0 text-left text-sm text-brand-700 hover:underline truncate"
-                          title={bi('Double-click to rename', '雙擊重新命名')}
-                        >
-                          {name}
-                        </button>
-                      )}
-                      {!renaming && isImage && imageCount > 1 && (
-                        isThumb ? (
-                          <span className="text-[11px] font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-md px-2 py-1 shrink-0">
-                            {bi('Thumbnail', '封面')}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setThumbnailFile(f.id)}
-                            className="text-xs text-gray-600 hover:text-brand-700 font-medium shrink-0 px-2 py-1"
-                            title={bi('Use this image on the board card', '在看板卡片上使用此圖片')}
-                          >
-                            {bi('Set thumbnail', '設為封面')}
-                          </button>
-                        )
-                      )}
-                      {!renaming && (
-                        <button
-                          type="button"
-                          onClick={() => startRenameFile(f)}
-                          className="text-xs text-gray-600 hover:text-gray-800 font-medium shrink-0 px-2 py-1"
-                        >
-                          {bi('Rename', '重新命名')}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => downloadFile(f)}
-                        className="text-xs text-brand-600 hover:text-brand-700 font-medium shrink-0 px-2 py-1"
-                      >
-                        {bi('Download', '下載')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteFile(f.id)}
-                        className="text-xs text-red-600 hover:text-red-700 font-medium shrink-0 px-2 py-1"
-                        aria-label="Delete file"
-                      >
-                        {bi('Delete', '刪除')}
-                      </button>
-                    </li>
-                  );
-                  });
-                })()}
-              </ul>
-              </div>
-            )}
-          </div>
+          <EntityAttachments
+            className="bg-white rounded-xl border border-gray-200 p-6"
+            title="Design Proofs 設計圖 / Image Preview"
+            files={order.files}
+            fileUrl={orderFileUrl}
+            uploadUrl={`/api/orders/${id}/files`}
+            fileApiBase="/api/order-files"
+            thumbnailFileId={order.fields.thumbnail_file_id}
+            onFilesChange={(files) => setOrder((o) => (o ? { ...o, files } : o))}
+            onSetThumbnail={(fileId) => {
+              setOrder((o) =>
+                o
+                  ? {
+                      ...o,
+                      fields: {
+                        ...o.fields,
+                        thumbnail_file_id: fileId ? String(fileId) : '',
+                      },
+                    }
+                  : o
+              );
+              patch({ fields: { thumbnail_file_id: fileId ? String(fileId) : '' } });
+            }}
+          />
         </div>
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}
@@ -2578,7 +2302,7 @@ export default function OrderDetailPage() {
       {lightbox && (
         <div onClick={() => setLightbox(null)} className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 cursor-zoom-out">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="Proof" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
+          <img src={lightbox} alt="" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
         </div>
       )}
 

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
 import { resolveHubOwnerUserId } from '@/lib/hub-server';
-import { syncAllWooStores, syncQuickBooksInvoices, isQuickBooksConnected } from '@/lib/hub-sync';
+import { syncAllWooStores, syncQuickBooksInvoices, syncClickUpTasks, isQuickBooksConnected } from '@/lib/hub-sync';
+import { clickupConfigured } from '@/lib/integration-settings-server';
 import { getWooStoreConfigs } from '@/lib/woocommerce';
 
 async function runHubSyncForOwner(ownerId: number) {
@@ -10,6 +11,7 @@ async function runHubSyncForOwner(ownerId: number) {
     user_id: number;
     woocommerce?: Awaited<ReturnType<typeof syncAllWooStores>>;
     quickbooks?: Awaited<ReturnType<typeof syncQuickBooksInvoices>>;
+    clickup?: Awaited<ReturnType<typeof syncClickUpTasks>>;
     errors: string[];
   } = { user_id: ownerId, errors: [] };
 
@@ -26,6 +28,14 @@ async function runHubSyncForOwner(ownerId: number) {
       result.quickbooks = await syncQuickBooksInvoices(ownerId);
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : 'QuickBooks sync failed');
+    }
+  }
+
+  if (await clickupConfigured(ownerId)) {
+    try {
+      result.clickup = await syncClickUpTasks(ownerId);
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : 'ClickUp sync failed');
     }
   }
 

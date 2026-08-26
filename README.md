@@ -74,7 +74,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `RESEND_API_KEY_CUPMOKA` / `RESEND_FROM_EMAIL_CUPMOKA` | Optional env overlay for Cupmoka Resend | _(unset)_ |
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
 | `CRON_SECRET` | Bearer token for external schedulers: `/api/cron/payment-reminders`, `/api/cron/hub-sync`, and other `/api/cron/*` routes | _(unset)_ |
-| `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |
+| `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks / ClickUp integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |
 | `RECEIPTS_DIR` | Local/volume receipt image folder (use `/data/receipts` on Railway with a volume) | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
 | `R2_ACCESS_KEY_ID` | R2 access key | _(unset)_ |
@@ -130,7 +130,7 @@ This repo includes `railpack.json` and `railway.json` so Railpack detects **Node
 
 ## Order Hub auto-sync
 
-Incremental WooCommerce (and QuickBooks, if connected) import runs via `GET|POST /api/cron/hub-sync` with `Authorization: Bearer $CRON_SECRET`. The app pulls from the store using Railway’s **static outbound IPv4** addresses — allowlist **all** of them on the webstore host / CDN / WAF if API access is IP-restricted.
+Incremental WooCommerce, QuickBooks (if connected), and ClickUp (if API token + List ID are set) import runs via `GET|POST /api/cron/hub-sync` with `Authorization: Bearer $CRON_SECRET`. The app pulls from the store using Railway’s **static outbound IPv4** addresses — allowlist **all** of them on the webstore host / CDN / WAF if API access is IP-restricted.
 
 **Railway**
 1. Set `CRON_SECRET` (and optional `HUB_OWNER_USER_ID`).

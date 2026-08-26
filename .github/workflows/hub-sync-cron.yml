@@ -2,7 +2,7 @@ name: Hub sync cron
 
 on:
   schedule:
-    # Every 15 minutes — Railway pulls WooCommerce (and QuickBooks if connected).
+    # Every 15 minutes — Railway pulls WooCommerce, QuickBooks, and ClickUp when connected.
     - cron: '*/15 * * * *'
   workflow_dispatch:
 

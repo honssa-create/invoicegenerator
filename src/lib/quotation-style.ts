@@ -33,7 +33,7 @@ export interface QuotationStyleTemplate {
 export const DEFAULT_QUOTATION_STYLE: QuotationStyleTemplate = {
   fontFamily: "Arial, 'Microsoft JhengHei', 'PingFang TC', sans-serif",
   fontSize: '10pt',
-  lineHeight: '1',
+  lineHeight: '1.2',
   colorText: '#404040',
   colorMuted: '#808080',
   colorLabel: '#B8B8B8',

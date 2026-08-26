@@ -3,6 +3,9 @@ import {
   DOCUMENT_NUMBER_RE,
   ORDER_REFERENCE_RE,
   assignLegacyDocumentNumbers,
+  displayInvoiceNumber,
+  displayOrderNumber,
+  displayQuotationNumber,
   formatDocumentNumber,
   formatOrderReference,
   parseNumericDocumentNumber,
@@ -19,6 +22,14 @@ describe('record numbering', () => {
     expect(formatDocumentNumber(1)).toBe('00000001');
     expect(formatDocumentNumber(1_001_001)).toBe('01001001');
     expect(DOCUMENT_NUMBER_RE.test('01001001')).toBe(true);
+  });
+
+  it('prefixes type names when displaying record numbers', () => {
+    expect(displayInvoiceNumber('00000001')).toBe('Invoice 00000001');
+    expect(displayQuotationNumber('00000001')).toBe('Quotation 00000001');
+    expect(displayOrderNumber('H3326')).toBe('Order H3326');
+    expect(displayInvoiceNumber('Invoice 00000009')).toBe('Invoice 00000009');
+    expect(displayQuotationNumber('')).toBe('');
   });
 
   it('rejects invalid and exhausted serials', () => {

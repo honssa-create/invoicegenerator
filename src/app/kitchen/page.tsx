@@ -35,6 +35,7 @@ import { resolveRawStockName, defaultGiftBoxGlassBottleStockName, BIRD_NEST_TYPE
 import { type StockMaps } from '@/lib/kitchen-bom';
 import { buildKitchenPrepCreateHref, type PrepCapacity } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 
 type Modal = 'gift' | 'return' | 'restock' | null;
 
@@ -1173,7 +1174,7 @@ export default function KitchenPage() {
                         >
                           {o.referenceNumber}
                         </Link>
-                        {o.poNumber && <span className="ml-2 text-xs text-gray-400">PO# {o.poNumber}</span>}
+                        {o.poNumber && <span className="ml-2 text-xs text-gray-400">{displayOrderNumber(o.poNumber)}</span>}
                       </div>
                       {o.fullyFulfilled && (
                         <span className="text-xs font-normal text-green-700">已完成</span>
@@ -1521,7 +1522,7 @@ export default function KitchenPage() {
                   <option value="">—</option>
                   {returnOrders.map((o) => (
                     <option key={o.id} value={o.id}>
-                      {o.referenceNumber}{o.poNumber ? ` · PO# ${o.poNumber}` : ''}
+                      {o.referenceNumber}{o.poNumber ? ` · ${displayOrderNumber(o.poNumber)}` : ''}
                     </option>
                   ))}
                 </select>

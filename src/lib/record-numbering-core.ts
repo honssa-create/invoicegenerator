@@ -38,6 +38,37 @@ export function formatDocumentNumber(serial: number): string {
   return String(serial).padStart(8, '0');
 }
 
+export const RECORD_TYPE_DISPLAY_NAME: Record<GlobalRecordType, string> = {
+  order: 'Order',
+  quotation: 'Quotation',
+  invoice: 'Invoice',
+};
+
+/** Prefix the type name for UI display. Stored values stay unprefixed. */
+export function displayRecordNumber(
+  recordType: GlobalRecordType,
+  value: string | null | undefined,
+): string {
+  const number = String(value || '').trim();
+  if (!number) return '';
+  const name = RECORD_TYPE_DISPLAY_NAME[recordType];
+  const prefix = `${name} `;
+  if (number.toLowerCase().startsWith(prefix.toLowerCase())) return number;
+  return `${prefix}${number}`;
+}
+
+export function displayInvoiceNumber(value: string | null | undefined): string {
+  return displayRecordNumber('invoice', value);
+}
+
+export function displayQuotationNumber(value: string | null | undefined): string {
+  return displayRecordNumber('quotation', value);
+}
+
+export function displayOrderNumber(value: string | null | undefined): string {
+  return displayRecordNumber('order', value);
+}
+
 /**
  * Preserve the first occurrence of each valid numeric legacy value. Collisions
  * and non-numeric values are assigned monotonically above the legacy maximum.

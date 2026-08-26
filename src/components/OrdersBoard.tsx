@@ -15,6 +15,7 @@ import {
 } from '@/lib/orders';
 import { orderFileUrl } from '@/lib/image-url';
 import { formatCurrency } from '@/lib/utils';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { bi } from '@/lib/ui-labels';
 
 type Props = {
@@ -30,8 +31,8 @@ const COLUMN_CARD_CAP = 40;
 function cardTitle(o: Order): string {
   const po = o.po_number?.trim();
   const name = o.name?.trim();
-  if (po && name) return `${po} — ${name}`;
-  if (po) return po;
+  if (po && name) return `${displayOrderNumber(po)} — ${name}`;
+  if (po) return displayOrderNumber(po);
   if (name) return name;
   return o.reference_number;
 }

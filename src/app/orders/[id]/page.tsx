@@ -79,6 +79,7 @@ import {
   type CupmokaLineItem,
   type Order,
 } from '@/lib/orders';
+import { displayInvoiceNumber, displayQuotationNumber } from '@/lib/record-numbering-core';
 import type { Customer } from '@/lib/types';
 import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
@@ -318,7 +319,7 @@ export default function OrderDetailPage() {
         setQuoteToast({ text: 'Failed to convert order — no quotation id returned', kind: 'error' });
         return;
       }
-      setQuoteToast({ text: `Created quotation ${data.quote_number}`, kind: 'success' });
+      setQuoteToast({ text: `Created ${displayQuotationNumber(data.quote_number)}`, kind: 'success' });
       const orderRes = await fetch(`/api/orders/${id}`);
       const orderData = await orderRes.json();
       if (orderData.order) {
@@ -1178,7 +1179,7 @@ export default function OrderDetailPage() {
                 <div className="space-y-2">
                   {order.linked_quotation ? (
                     <Link href={`/quotations/${order.linked_quotation.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
-                      🔗 {order.linked_quotation.quote_number} · {order.linked_quotation.status}
+                      🔗 {displayQuotationNumber(order.linked_quotation.quote_number)} · {order.linked_quotation.status}
                     </Link>
                   ) : (
                     <p className="text-sm text-gray-400">No quotation linked.</p>
@@ -1189,7 +1190,7 @@ export default function OrderDetailPage() {
                     className={softInput}
                   >
                     <option value="">— Not linked —</option>
-                    {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
+                    {quotations.map((q) => <option key={q.id} value={q.id}>{displayQuotationNumber(q.quote_number)} · {q.status}</option>)}
                   </select>
                 </div>
               )}
@@ -1198,7 +1199,7 @@ export default function OrderDetailPage() {
                 <div className="space-y-2">
                   {order.linked_invoice ? (
                     <Link href={`/invoices/${order.linked_invoice.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
-                      🔗 {order.linked_invoice.invoice_number} · {order.linked_invoice.status}
+                      🔗 {displayInvoiceNumber(order.linked_invoice.invoice_number)} · {order.linked_invoice.status}
                     </Link>
                   ) : (
                     <p className="text-sm text-gray-400">No invoice linked.</p>
@@ -1209,7 +1210,7 @@ export default function OrderDetailPage() {
                     className={softInput}
                   >
                     <option value="">— Not linked —</option>
-                    {invoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoice_number} · {inv.status}</option>)}
+                    {invoices.map((inv) => <option key={inv.id} value={inv.id}>{displayInvoiceNumber(inv.invoice_number)} · {inv.status}</option>)}
                   </select>
                 </div>
               )}

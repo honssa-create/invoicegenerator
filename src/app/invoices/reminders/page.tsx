@@ -6,6 +6,7 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { ReminderCandidate, ReminderType } from '@/lib/payment-reminders';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import { bi } from '@/lib/ui-labels';
 
 const hintCls = 'text-[11px] text-gray-400 mt-0.5';
@@ -119,14 +120,17 @@ export default function InvoiceRemindersPage() {
       }
       if (data.sent) {
         showToast(
-          bi(`Sent reminder for ${data.invoice_number} to ${data.to}`, `已向 ${data.to} 發送 ${data.invoice_number} 催款`),
+          bi(
+            `Sent reminder for ${displayInvoiceNumber(data.invoice_number)} to ${data.to}`,
+            `已向 ${data.to} 發送 ${displayInvoiceNumber(data.invoice_number)} 催款`,
+          ),
           'success',
         );
       } else {
         showToast(
           bi(
-            `Reminder for ${data.invoice_number} logged (no email provider configured)`,
-            `${data.invoice_number} 催款已記錄（未設定電郵服務）`,
+            `Reminder for ${displayInvoiceNumber(data.invoice_number)} logged (no email provider configured)`,
+            `${displayInvoiceNumber(data.invoice_number)} 催款已記錄（未設定電郵服務）`,
           ),
           'success',
         );
@@ -236,7 +240,7 @@ export default function InvoiceRemindersPage() {
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-sm text-gray-900">{c.invoice_number}</span>
+                        <span className="font-semibold text-sm text-gray-900">{displayInvoiceNumber(c.invoice_number)}</span>
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${typeBadgeClass(c.type)}`}>
                           {typeLabel(c.type)}
                         </span>
@@ -266,7 +270,7 @@ export default function InvoiceRemindersPage() {
                         href={`/invoices/${selected.id}`}
                         className="text-lg font-semibold text-brand-700 hover:underline"
                       >
-                        {selected.invoice_number}
+                        {displayInvoiceNumber(selected.invoice_number)}
                       </Link>
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${typeBadgeClass(selected.type)}`}>
                         {typeLabel(selected.type)}

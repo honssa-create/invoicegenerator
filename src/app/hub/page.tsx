@@ -16,6 +16,7 @@ import {
   type HubSyncResult,
 } from '@/lib/hub';
 import { fetchWooOrdersInBrowser } from '@/lib/woocommerce-client';
+import { displayInvoiceNumber, displayOrderNumber } from '@/lib/record-numbering-core';
 
 interface HubResponse {
   orders: HubOrderRow[];
@@ -494,7 +495,7 @@ function OrderHubContent() {
                       {r.reference_number}
                     </Link>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {r.po_number || r.system_order_no || 'No PO#'}
+                      {displayOrderNumber(r.po_number) || r.system_order_no || 'No PO#'}
                     </p>
                   </td>
                   <td className="px-4 py-3">
@@ -511,7 +512,7 @@ function OrderHubContent() {
                     {r.linked_invoice_id ? (
                       <div>
                         <Link href={`/invoices/${r.linked_invoice_id}`} className="text-brand-600 hover:text-brand-700">
-                          {r.linked_invoice_number}
+                          {displayInvoiceNumber(r.linked_invoice_number)}
                         </Link>
                         {r.linked_external_invoice_number && (
                           <p className="text-xs text-gray-400 mt-0.5">

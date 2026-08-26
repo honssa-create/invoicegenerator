@@ -8,6 +8,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type SortKey = 'number' | 'customer' | 'date' | 'due' | 'amount' | 'status';
@@ -262,7 +263,7 @@ export default function InvoicesList() {
               {pageRows.map((inv) => (
                 <tr key={inv.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{inv.invoice_number}</Link>
+                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{displayInvoiceNumber(inv.invoice_number)}</Link>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700">{inv.customer_name}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.issue_date)}</td>

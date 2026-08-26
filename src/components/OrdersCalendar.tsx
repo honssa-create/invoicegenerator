@@ -9,6 +9,7 @@ import {
   orderDueDate,
   type Order,
 } from '@/lib/orders';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { bi } from '@/lib/ui-labels';
 
 type Props = {
@@ -18,8 +19,8 @@ type Props = {
 function cardTitle(o: Order): string {
   const po = o.po_number?.trim();
   const name = o.name?.trim();
-  if (po && name) return `${po} — ${name}`;
-  if (po) return po;
+  if (po && name) return `${displayOrderNumber(po)} — ${name}`;
+  if (po) return displayOrderNumber(po);
   if (name) return name;
   return o.reference_number;
 }

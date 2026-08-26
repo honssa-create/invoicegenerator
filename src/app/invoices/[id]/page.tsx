@@ -28,6 +28,7 @@ import type {
   LinkedOrderSummary,
 } from '@/lib/types';
 import { orderTitle } from '@/lib/orders';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface LineItem {
@@ -311,7 +312,10 @@ export default function InvoiceDetailPage() {
         return;
       }
       setToast({
-        text: bi(`Duplicated as ${data.invoice_number}`, `已複製為 ${data.invoice_number}`),
+        text: bi(
+          `Duplicated as ${displayInvoiceNumber(data.invoice_number)}`,
+          `已複製為 ${displayInvoiceNumber(data.invoice_number)}`,
+        ),
         kind: 'success',
       });
       setTimeout(() => router.push(`/invoices/${data.id}`), 800);
@@ -439,7 +443,7 @@ export default function InvoiceDetailPage() {
             ← {bi('Back to invoices', '返回發票列表')}
           </Link>
           <div className="flex items-center gap-3 mt-2 flex-wrap">
-            <h1 className="page-title">{invoice.invoice_number}</h1>
+            <h1 className="page-title">{displayInvoiceNumber(invoice.invoice_number)}</h1>
             <StatusBadge status={status} />
           </div>
           {invoice.external_invoice_number && (

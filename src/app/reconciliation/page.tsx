@@ -22,6 +22,7 @@ import {
   type ReconciliationRecord,
 } from '@/lib/reconciliation';
 import { BTN, bi } from '@/lib/ui-labels';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { PAYMENT_SLOTS, normalizePaymentSlot, type PaymentSlot } from '@/lib/orders';
 
@@ -599,7 +600,7 @@ function ReconciliationContent() {
     }
     setLinkRecordId(null);
     setSelectedInvoiceId('');
-    setMessage(`Record #${linkRecordId} linked & approved → ${d.record?.invoice_number || 'invoice'}`);
+    setMessage(`Record #${linkRecordId} linked & approved → ${displayInvoiceNumber(d.record?.invoice_number) || 'invoice'}`);
     load();
   };
 
@@ -723,10 +724,10 @@ function ReconciliationContent() {
           <span className="text-gray-400">Invoice:</span>{' '}
           {invoiceId && invoiceNo ? (
             <Link href={`/invoices/${invoiceId}`} className="font-mono text-brand-600 hover:text-brand-700">
-              {invoiceNo}
+              {displayInvoiceNumber(invoiceNo)}
             </Link>
           ) : invoiceNo ? (
-            <span className="font-mono text-gray-700">{invoiceNo}</span>
+            <span className="font-mono text-gray-700">{displayInvoiceNumber(invoiceNo)}</span>
           ) : (
             <span className="text-gray-400">—</span>
           )}
@@ -868,7 +869,7 @@ function ReconciliationContent() {
                     {r.candidates.map((c) => (
                       <li key={`${c.order_id}-${c.invoice_id ?? 'x'}`} className="font-mono text-xs">
                         {c.order_no || `#${c.order_id}`}
-                        {c.invoice_number ? ` · ${c.invoice_number}` : ''}
+                        {c.invoice_number ? ` · ${displayInvoiceNumber(c.invoice_number)}` : ''}
                         {c.amount != null ? ` · ${formatMoney(c.amount)}` : ''}
                         {c.customer_name ? ` · ${c.customer_name}` : ''}
                       </li>
@@ -1343,7 +1344,7 @@ function ReconciliationContent() {
               <option value="">Select invoice…</option>
               {filteredCandidates.map((c) => (
                 <option key={c.invoice_id!} value={c.invoice_id!}>
-                  {c.invoice_number}
+                  {displayInvoiceNumber(c.invoice_number)}
                   {c.order_no ? ` · ${c.order_no}` : ''}
                   {c.invoice_total != null ? ` · ${formatMoney(c.invoice_total)}` : ''}
                   {c.customer_name ? ` · ${c.customer_name}` : ''}

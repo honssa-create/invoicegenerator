@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { orderPaymentReceiptUrl } from '@/lib/image-url';
 import type { PaymentSlot } from '@/lib/orders';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface Entry {
@@ -12,6 +13,7 @@ interface Entry {
   payment_slot: PaymentSlot;
   installment_label: string;
   order_ref: string;
+  po_number?: string;
   title: string;
   customer: string;
   order_type: string;
@@ -158,7 +160,7 @@ export default function AccountingTable() {
                           href={`/orders/${entry.order_id}`}
                           className="text-brand-600 hover:text-brand-700 font-medium font-mono"
                         >
-                          {entry.order_ref}
+                          {displayOrderNumber(entry.po_number) || entry.order_ref}
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{entry.installment_label}</td>

@@ -25,6 +25,7 @@ import {
 } from '@/lib/quotations';
 import { formatCustomerPartyBlockFromCustomer } from '@/lib/customer-party';
 import type { Customer } from '@/lib/types';
+import { displayInvoiceNumber, displayOrderNumber, displayQuotationNumber } from '@/lib/record-numbering-core';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface LineItem {
@@ -345,7 +346,10 @@ export default function QuotationDetailPage() {
         return;
       }
       setToast({
-        text: bi(`Duplicated as ${data.quote_number}`, `已複製為 ${data.quote_number}`),
+        text: bi(
+          `Duplicated as ${displayQuotationNumber(data.quote_number)}`,
+          `已複製為 ${displayQuotationNumber(data.quote_number)}`,
+        ),
         kind: 'success',
       });
       setTimeout(() => router.push(`/quotations/${data.id}`), 800);
@@ -403,7 +407,7 @@ export default function QuotationDetailPage() {
             ← {bi('Back to quotations', '返回報價單')}
           </Link>
           <div className="flex items-center gap-3 mt-2 flex-wrap">
-            <h1 className="page-title">{quote.quote_number}</h1>
+            <h1 className="page-title">{displayQuotationNumber(quote.quote_number)}</h1>
             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[status]}`}>
               {QUOTATION_STATUS_FORM_LABEL[status as keyof typeof QUOTATION_STATUS_FORM_LABEL] || status}
             </span>
@@ -413,8 +417,8 @@ export default function QuotationDetailPage() {
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-medium hover:bg-teal-100"
               >
                 🔗{' '}
-                {quote.linked_order.reference_number ||
-                  quote.linked_order.po_number ||
+                {displayOrderNumber(quote.linked_order.po_number) ||
+                  quote.linked_order.reference_number ||
                   `#${quote.linked_order.id}`}
               </Link>
             )}
@@ -423,7 +427,7 @@ export default function QuotationDetailPage() {
                 href={`/invoices/${quote.linked_invoice.id}`}
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100"
               >
-                🔗 {quote.linked_invoice.invoice_number} · {quote.linked_invoice.status}
+                🔗 {displayInvoiceNumber(quote.linked_invoice.invoice_number)} · {quote.linked_invoice.status}
               </Link>
             )}
           </div>

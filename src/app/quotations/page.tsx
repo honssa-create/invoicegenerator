@@ -13,6 +13,7 @@ import {
   QUOTATION_STATUS_COLORS,
   type QuotationWithDetails,
 } from '@/lib/quotations';
+import { displayQuotationNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 type SortKey = 'number' | 'customer' | 'date' | 'amount' | 'status';
@@ -266,7 +267,7 @@ export default function QuotationsPage() {
                           href={`/quotations/${q.id}`}
                           className="text-brand-600 hover:text-brand-700 font-medium text-sm"
                         >
-                          {q.quote_number}
+                          {displayQuotationNumber(q.quote_number)}
                         </Link>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">{q.customer_name || '—'}</td>

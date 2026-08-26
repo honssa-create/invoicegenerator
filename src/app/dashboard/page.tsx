@@ -7,6 +7,7 @@ import { StatCard, StatusBadge, formatCurrency } from '@/components/ui';
 import { formatMoney } from '@/lib/expenses';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 interface DashboardData {
@@ -115,7 +116,7 @@ export default function DashboardPage() {
                 <tr key={inv.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-                      {inv.invoice_number}
+                      {displayInvoiceNumber(inv.invoice_number)}
                     </Link>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700">{inv.customer_name}</td>

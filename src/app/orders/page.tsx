@@ -27,6 +27,7 @@ import {
   isNestieeOrdersFilter,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
@@ -785,7 +786,10 @@ function OrderLineRow({
             checked={selected}
             onChange={onToggleSelect}
             className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-            aria-label={bi(`Select ${order.reference_number}`, `選取 ${order.reference_number}`)}
+            aria-label={bi(
+              `Select ${displayOrderNumber(order.po_number) || order.reference_number}`,
+              `選取 ${displayOrderNumber(order.po_number) || order.reference_number}`,
+            )}
           />
         </td>
         <td className="px-6 py-4">
@@ -795,7 +799,7 @@ function OrderLineRow({
         </td>
         <td className="px-6 py-4">
           <Link href={`/orders/${order.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-            {order.po_number || '—'}
+            {displayOrderNumber(order.po_number) || '—'}
           </Link>
           {order.name && <p className="mt-0.5 text-xs text-gray-400">{order.name}</p>}
         </td>

@@ -9,6 +9,9 @@ import {
   DOCUMENT_NUMBER_RE,
   ORDER_REFERENCE_RE,
   allocateGlobalRecordNumber,
+  displayInvoiceNumber,
+  displayOrderNumber,
+  displayQuotationNumber,
 } from './record-numbering';
 import {
   TRASH_RETENTION_DAYS,
@@ -349,7 +352,7 @@ export async function trashInvoice(userId: number, invoiceId: number): Promise<b
   if (!invoice) return false;
   const items = await db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(invoiceId) as Row[];
   const files = await db.prepare('SELECT * FROM invoice_files WHERE invoice_id = ?').all(invoiceId) as Row[];
-  const label = String(invoice.invoice_number || `Invoice #${invoiceId}`);
+  const label = displayInvoiceNumber(String(invoice.invoice_number || '')) || `Invoice #${invoiceId}`;
   const summary = [invoice.issue_date, invoice.status].filter(Boolean).join(' · ') || null;
 
   await db.transaction(async () => {
@@ -376,7 +379,10 @@ export async function trashOrder(userId: number, orderId: number): Promise<boole
   const order = await db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, userId) as Row | undefined;
   if (!order) return false;
   const files = await db.prepare('SELECT * FROM order_files WHERE order_id = ?').all(orderId) as Row[];
-  const label = String(order.reference_number || `Order #${orderId}`);
+  const label =
+    displayOrderNumber(String(order.po_number || '')) ||
+    String(order.reference_number || '') ||
+    `Order #${orderId}`;
   const summary = [order.po_number, order.name, order.status].filter(Boolean).join(' · ') || null;
 
   await db.transaction(async () => {
@@ -391,7 +397,7 @@ export async function trashQuotation(userId: number, quotationId: number): Promi
   if (!quotation) return false;
   const items = await db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ?').all(quotationId) as Row[];
   const files = await db.prepare('SELECT * FROM quotation_files WHERE quotation_id = ?').all(quotationId) as Row[];
-  const label = String(quotation.quote_number || `Quotation #${quotationId}`);
+  const label = displayQuotationNumber(String(quotation.quote_number || '')) || `Quotation #${quotationId}`;
   const summary = [quotation.issue_date, quotation.status].filter(Boolean).join(' · ') || null;
 
   await db.transaction(async () => {

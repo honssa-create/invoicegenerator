@@ -5,6 +5,7 @@ import { listOrdersSummary } from '@/lib/order-server';
 import type { LedgerEntry } from '@/lib/cashflow';
 import { orderPaymentReceiptUrl, otherIncomeReceiptUrl } from '@/lib/image-url';
 import { getDataOwnerId } from '@/lib/org-server';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
       kind: 'product',
       date,
       category: 'Product Sale',
-      ref: o.reference_number,
+      ref: displayOrderNumber(o.po_number) || o.reference_number,
       account: (o.fields.payment_bank as string) || '',
       amount: amt,
       receiptUrl: orderPaymentReceiptUrl(o.id, o.fields.payment_receipt_path as string | undefined),

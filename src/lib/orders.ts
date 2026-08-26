@@ -7,6 +7,7 @@ import {
   type PrepFlavor,
 } from '@/lib/kitchen-prep';
 import { addCalendarDays } from '@/lib/wedding-gift-confirmation';
+import { displayOrderNumber } from '@/lib/record-numbering-core';
 
 export interface CoreColumns {
   po_number: string;
@@ -2317,6 +2318,7 @@ export interface AccountingPaymentEntry {
   payment_slot: PaymentSlot;
   installment_label: string;
   order_ref: string;
+  po_number: string;
   title: string;
   customer: string;
   order_type: string;
@@ -2336,6 +2338,7 @@ export function expandOrderToPaymentEntries(
   order: {
     id: number;
     reference_number: string;
+    po_number?: string | null;
     name: string | null;
     fields: Record<string, string | boolean>;
   },
@@ -2354,6 +2357,7 @@ export function expandOrderToPaymentEntries(
       payment_slot: slot,
       installment_label: shortLabel,
       order_ref: order.reference_number,
+      po_number: (order.po_number || '').trim(),
       title: meta.title,
       customer: order.name || '',
       order_type: String(order.fields.order_type || ''),
@@ -2685,5 +2689,8 @@ export function orderTitle(o: {
   name?: string | null;
   description?: string | null;
 }): string {
-  return [o.reference_number, o.po_number, o.name, o.description].filter(Boolean).join(' - ') || 'Untitled order';
+  return (
+    [o.reference_number, displayOrderNumber(o.po_number), o.name, o.description].filter(Boolean).join(' - ') ||
+    'Untitled order'
+  );
 }

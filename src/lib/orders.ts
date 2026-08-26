@@ -1208,7 +1208,9 @@ function normalizeNestieeMatchText(text: string): string {
 }
 
 function stripNestieeEmojis(text: string): string {
-  return text.replace(/\p{Extended_Pictographic}/gu, '').replace(/[\uFE0F\u200D]/g, '');
+  return text
+    .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+    .replace(/[\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]/g, '');
 }
 
 function nestieeNameForGiftMatch(name: string): string {

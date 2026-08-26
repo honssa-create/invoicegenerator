@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -41,7 +41,45 @@ const OrdersCalendar = dynamic(() => import('@/components/OrdersCalendar'), { ss
 
 type SortKey = 'reference' | 'order' | 'type' | 'status' | 'delivery' | 'created';
 type DashFocus = 'all' | 'unshipped' | 'urgent';
+type OrdersView = 'line' | 'board' | 'calendar';
 const PAGE_SIZE = 50;
+const ORDERS_LIST_UI_KEY = 'orders-list-ui';
+const SORT_KEYS: SortKey[] = ['reference', 'order', 'type', 'status', 'delivery', 'created'];
+const VIEWS: OrdersView[] = ['line', 'board', 'calendar'];
+const DASH_FOCUSES: DashFocus[] = ['all', 'unshipped', 'urgent'];
+
+type OrdersListUiState = {
+  view: OrdersView;
+  dateStart: string;
+  dateEnd: string;
+  orderType: string;
+  status: string;
+  search: string;
+  sort: { key: SortKey; dir: 'asc' | 'desc' };
+  dashFocus: DashFocus;
+  page: number;
+};
+
+function readOrdersListUi(): Partial<OrdersListUiState> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(ORDERS_LIST_UI_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<OrdersListUiState>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeOrdersListUi(state: OrdersListUiState) {
+  try {
+    sessionStorage.setItem(ORDERS_LIST_UI_KEY, JSON.stringify(state));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 export default function OrdersPage() {
   return (
@@ -64,22 +102,41 @@ export default function OrdersPage() {
 function OrdersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const savedUi = useMemo(() => readOrdersListUi(), []);
+  const urlType = searchParams.get('type');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [creatingStatus, setCreatingStatus] = useState<string | null>(null);
   const [createError, setCreateError] = useState('');
 
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [orderType, setOrderType] = useState('');
-  const [status, setStatus] = useState('');
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'reference', dir: 'desc' });
-  const [view, setView] = useState<'line' | 'board' | 'calendar'>('line');
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [orderType, setOrderType] = useState(() =>
+    urlType != null ? urlType.trim() : (savedUi?.orderType ?? '')
+  );
+  const [status, setStatus] = useState(savedUi?.status ?? '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && SORT_KEYS.includes(key) && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'reference', dir: 'desc' };
+  });
+  const [view, setView] = useState<OrdersView>(() =>
+    savedUi?.view && VIEWS.includes(savedUi.view) ? savedUi.view : 'line'
+  );
   const [boardError, setBoardError] = useState('');
-  const [page, setPage] = useState(1);
-  const [dashFocus, setDashFocus] = useState<DashFocus>('all');
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const [dashFocus, setDashFocus] = useState<DashFocus>(() =>
+    savedUi?.dashFocus && DASH_FOCUSES.includes(savedUi.dashFocus) ? savedUi.dashFocus : 'all'
+  );
+  const skipPageResetRef = useRef(true);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
@@ -119,11 +176,26 @@ function OrdersPageContent() {
     loadNestieeDemand();
   }, [loadNestieeDemand]);
 
-  // Sidebar type shortcuts: /orders?type=<exact order type>
+  // Sidebar type shortcuts: /orders?type=<exact order type> wins over the last saved type.
   useEffect(() => {
-    const raw = searchParams.get('type')?.trim() || '';
-    setOrderType(raw);
+    const raw = searchParams.get('type');
+    if (raw == null) return;
+    setOrderType(raw.trim());
   }, [searchParams]);
+
+  useEffect(() => {
+    writeOrdersListUi({
+      view,
+      dateStart,
+      dateEnd,
+      orderType,
+      status,
+      search,
+      sort,
+      dashFocus,
+      page,
+    });
+  }, [view, dateStart, dateEnd, orderType, status, search, sort, dashFocus, page]);
 
   const setOrderTypeAndUrl = (value: string) => {
     setOrderType(value);
@@ -254,6 +326,10 @@ function OrdersPageContent() {
   };
 
   useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus]);
 

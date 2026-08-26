@@ -73,6 +73,7 @@ import {
   serializeOrderTags,
   orderTitle,
   isBadgeOrderType,
+  isOrderImageFile,
   isWeddingGiftOrderType,
   type HonourLineItem,
   type HonourSupplierItem,
@@ -94,10 +95,6 @@ interface QuotationOption {
   id: number;
   quote_number: string;
   status: string;
-}
-
-function isImageName(name: string | null | undefined): boolean {
-  return /\.(png|jpe?g|gif|webp)$/i.test(name || '');
 }
 
 export default function OrderDetailPage() {
@@ -419,7 +416,33 @@ export default function OrderDetailPage() {
 
   const deleteFile = async (fileId: number) => {
     const res = await fetch(`/api/order-files/${fileId}`, { method: 'DELETE' });
-    if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
+    if (!res.ok) return;
+    setOrder((o) => {
+      if (!o) return o;
+      const nextFiles = o.files.filter((f) => f.id !== fileId);
+      const thumbId = String(o.fields.thumbnail_file_id ?? '');
+      if (thumbId && Number(thumbId) === fileId) {
+        const { thumbnail_file_id: _removed, ...restFields } = o.fields;
+        return { ...o, files: nextFiles, fields: restFields };
+      }
+      return { ...o, files: nextFiles };
+    });
+    const thumbId = String(order?.fields.thumbnail_file_id ?? '');
+    if (thumbId && Number(thumbId) === fileId) {
+      patch({ fields: { thumbnail_file_id: '' } });
+    }
+  };
+
+  const setThumbnailFile = (fileId: number) => {
+    if (!order) return;
+    const file = order.files.find((f) => f.id === fileId);
+    if (!file || !isOrderImageFile(file)) return;
+    const current = String(order.fields.thumbnail_file_id ?? '');
+    if (current === String(fileId)) return;
+    setOrder((o) =>
+      o ? { ...o, fields: { ...o.fields, thumbnail_file_id: String(fileId) } } : o
+    );
+    patch({ fields: { thumbnail_file_id: String(fileId) } });
   };
 
   const downloadFile = async (f: { id: number; path: string; original_name: string | null }) => {
@@ -874,7 +897,9 @@ export default function OrderDetailPage() {
     updater: (suppliers: HonourSupplierItem[]) => HonourSupplierItem[],
     commit: boolean,
   ) => {
-    let toCommit: HonourSupplierItem[] | null = null;
+    // Declared without a null initializer so TS does not permanently narrow to `null`
+    // (assignments inside setState updaters are invisible to control-flow analysis).
+    let toCommit: HonourSupplierItem[] | undefined;
     setOrder((prev) => {
       if (!prev) return prev;
       const orderType = String(prev.fields.order_type ?? '');
@@ -895,7 +920,7 @@ export default function OrderDetailPage() {
         carton_count: firstCarton,
       };
     });
-    if (commit && toCommit) {
+    if (toCommit) {
       const derived = honourSuppliersDerivedFields(toCommit);
       patch({
         fields: derived,
@@ -2428,15 +2453,26 @@ export default function OrderDetailPage() {
                   {bi('Drop more files here, or click to upload', '拖放更多檔案到此處，或點擊上傳')}
                 </div>
               <ul className="space-y-2">
-                {order.files.map((f) => {
+                {(() => {
+                  const imageFiles = order.files.filter(isOrderImageFile);
+                  const imageCount = imageFiles.length;
+                  const thumbId = Number(order.fields.thumbnail_file_id);
+                  const effectiveThumbId =
+                    Number.isFinite(thumbId) && thumbId > 0 && imageFiles.some((f) => f.id === thumbId)
+                      ? thumbId
+                      : imageFiles[0]?.id;
+                  return order.files.map((f) => {
                   const url = orderFileUrl(f);
                   const name = f.original_name || `File #${f.id}`;
                   const renaming = renamingFileId === f.id;
-                  const isImage = isImageName(f.original_name);
+                  const isImage = isOrderImageFile(f);
+                  const isThumb = isImage && f.id === effectiveThumbId;
                   return (
                     <li
                       key={f.id}
-                      className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2"
+                      className={`flex items-center gap-3 rounded-lg border bg-gray-50/80 px-3 py-2 ${
+                        isThumb ? 'border-brand-300 ring-1 ring-brand-200' : 'border-gray-200'
+                      }`}
                     >
                       {isImage ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -2483,6 +2519,22 @@ export default function OrderDetailPage() {
                           {name}
                         </button>
                       )}
+                      {!renaming && isImage && imageCount > 1 && (
+                        isThumb ? (
+                          <span className="text-[11px] font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-md px-2 py-1 shrink-0">
+                            {bi('Thumbnail', '封面')}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setThumbnailFile(f.id)}
+                            className="text-xs text-gray-600 hover:text-brand-700 font-medium shrink-0 px-2 py-1"
+                            title={bi('Use this image on the board card', '在看板卡片上使用此圖片')}
+                          >
+                            {bi('Set thumbnail', '設為封面')}
+                          </button>
+                        )
+                      )}
                       {!renaming && (
                         <button
                           type="button"
@@ -2505,11 +2557,12 @@ export default function OrderDetailPage() {
                         className="text-xs text-red-600 hover:text-red-700 font-medium shrink-0 px-2 py-1"
                         aria-label="Delete file"
                       >
-                        {BTN.delete}
+                        {bi('Delete', '刪除')}
                       </button>
                     </li>
                   );
-                })}
+                  });
+                })()}
               </ul>
               </div>
             )}

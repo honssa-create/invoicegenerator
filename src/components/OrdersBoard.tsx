@@ -11,6 +11,7 @@ import {
   computeOrderPaidTotal,
   getOrderType,
   orderDueDate,
+  orderThumbnailFile,
   type Order,
 } from '@/lib/orders';
 import { orderFileUrl } from '@/lib/image-url';
@@ -109,7 +110,7 @@ function OrderCard({
   onDragEnd: () => void;
 }) {
   const router = useRouter();
-  const thumb = order.files.find((f) => /\.(png|jpe?g|gif|webp)$/i.test(f.original_name || '')) || null;
+  const thumb = orderThumbnailFile(order.files, order.fields);
   const orderType = getOrderType(order);
   const paid = computeOrderPaidTotal(order.fields || {});
   const meta = formatMetaLine(order);

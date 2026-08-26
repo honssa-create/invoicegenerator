@@ -131,6 +131,7 @@ const LIST_FIELD_KEYS = [
   'qty_rock_sugar',
   'qty_osmanthus',
   'qty_red_date',
+  'thumbnail_file_id',
   'payment_amount', 'payment1_amount', 'payment2_amount', 'payment3_amount',
   'payment_date', 'payment_bank', 'payment_method_detail', 'payment_reference',
   'payment_receipt_path', 'payment_verified',
@@ -176,6 +177,7 @@ interface LeanOrderRow {
   f_qty_rock_sugar: string | null;
   f_qty_osmanthus: string | null;
   f_qty_red_date: string | null;
+  f_thumbnail_file_id: string | null;
   f_payment_amount: string | null;
   f_payment1_amount: string | null;
   f_payment2_amount: string | null;
@@ -221,6 +223,7 @@ function leanRowToOrder(row: LeanOrderRow): Order {
   set('qty_rock_sugar', row.f_qty_rock_sugar);
   set('qty_osmanthus', row.f_qty_osmanthus);
   set('qty_red_date', row.f_qty_red_date);
+  set('thumbnail_file_id', row.f_thumbnail_file_id);
   set('payment_amount', row.f_payment_amount);
   set('payment1_amount', row.f_payment1_amount);
   set('payment2_amount', row.f_payment2_amount);
@@ -275,7 +278,34 @@ export type ListOrdersSummaryOpts = {
   paymentMonth?: string;
   /** Only orders that have any primary payment field set (accounting ledger). */
   withPaymentFields?: boolean;
+  /** Attach order_files (board thumbnails + attachment counts). Off for accounting/cashflow. */
+  includeFiles?: boolean;
 };
+
+/** Batch-load design-proof attachments for a lean order list (one query). */
+async function attachOrderFiles(orders: Order[]): Promise<Order[]> {
+  if (!orders.length) return orders;
+  const ids = orders.map((o) => o.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = (await db
+    .prepare(
+      `SELECT id, order_id, path, original_name FROM order_files
+       WHERE order_id IN (${placeholders}) ORDER BY id`
+    )
+    .all(...ids)) as Array<{ id: number; order_id: number; path: string; original_name: string | null }>;
+
+  const map = new Map<number, Order['files']>();
+  for (const r of rows) {
+    const list = map.get(r.order_id);
+    const file = { id: r.id, path: r.path, original_name: r.original_name };
+    if (list) list.push(file);
+    else map.set(r.order_id, [file]);
+  }
+  for (const o of orders) {
+    o.files = map.get(o.id) || [];
+  }
+  return orders;
+}
 
 /**
  * Lean list for table/board/accounting/cashflow: core columns + list field keys via jsonb,
@@ -338,7 +368,9 @@ export async function listOrdersSummary(
     )
     .all(...params)) as LeanOrderRow[];
 
-  return rows.map(leanRowToOrder);
+  const orders = rows.map(leanRowToOrder);
+  if (opts.includeFiles) return attachOrderFiles(orders);
+  return orders;
 }
 
 /** Dropdown options for linking orders to invoices (id + labels only). */

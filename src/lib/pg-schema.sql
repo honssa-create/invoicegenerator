@@ -167,7 +167,8 @@ CREATE TABLE IF NOT EXISTS orders (
   system_order_no TEXT,
   reference_number TEXT,
   total_amount DOUBLE PRECISION,
-  order_type TEXT
+  order_type TEXT,
+  attended_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS order_files (

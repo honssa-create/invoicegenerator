@@ -3,6 +3,7 @@ import {
   isOrderShipped,
   isOrderUnshipped,
   isOrderUrgent,
+  isUnattendedImportedOrder,
   summarizeOrderDashboard,
 } from './orders';
 
@@ -48,5 +49,13 @@ describe('order dashboard helpers', () => {
       { today },
     );
     expect(counts).toEqual({ total: 3, unshipped: 2, urgent: 1 });
+  });
+
+  it('flags imported orders until attended_at is set', () => {
+    expect(isUnattendedImportedOrder({ source_platform: 'nestiee', attended_at: null })).toBe(true);
+    expect(isUnattendedImportedOrder({ source_platform: 'honour', attended_at: '' })).toBe(true);
+    expect(isUnattendedImportedOrder({ source_platform: 'nestiee', attended_at: '2026-08-27 14:00:00' })).toBe(false);
+    expect(isUnattendedImportedOrder({ source_platform: 'manual', attended_at: null })).toBe(false);
+    expect(isUnattendedImportedOrder({ attended_at: null })).toBe(false);
   });
 });

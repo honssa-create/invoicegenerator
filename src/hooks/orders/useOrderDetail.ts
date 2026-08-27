@@ -9,7 +9,7 @@ import {
   formatKitchenShortageConfirm,
   parseKitchenShortageResponse,
 } from '@/lib/kitchen-ship-allocate';
-import { NESTIEE_GIFT_BOX_TYPES, type Order } from '@/lib/orders';
+import { isUnattendedImportedOrder, NESTIEE_GIFT_BOX_TYPES, type Order } from '@/lib/orders';
 import type { OrderDetailPatchPayload } from '@/components/orders/order-detail-types';
 import { MSG, bi } from '@/lib/ui-labels';
 
@@ -44,6 +44,7 @@ export function useOrderDetail(orderId: string) {
   const updatedAtRef = useRef('');
   const patchSeqRef = useRef(0);
   const patchesInFlightRef = useRef(0);
+  const attendPostedForRef = useRef<string | null>(null);
 
   const setCoreLocal = useCallback((col: string, value: unknown) => {
     setOrder((o) => (o ? ({ ...o, [col]: value } as Order) : o));
@@ -145,6 +146,7 @@ export function useOrderDetail(orderId: string) {
   );
 
   useEffect(() => {
+    attendPostedForRef.current = null;
     let cancelled = false;
     setLoading(true);
     fetch(`/api/orders/${orderId}`)
@@ -166,6 +168,24 @@ export function useOrderDetail(orderId: string) {
       cancelled = true;
     };
   }, [orderId]);
+
+  useEffect(() => {
+    if (!order || String(order.id) !== orderId) return;
+    if (!isUnattendedImportedOrder(order)) return;
+    if (attendPostedForRef.current === orderId) return;
+    attendPostedForRef.current = orderId;
+    let cancelled = false;
+    fetch(`/api/orders/${orderId}/attend`, { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.attended_at) return;
+        setOrder((o) => (o ? { ...o, attended_at: d.attended_at as string } : o));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, order]);
 
   useEffect(() => {
     let cancelled = false;

@@ -20,6 +20,7 @@ import {
   orderThumbnailFile,
   statusKeyForTypeFilter,
   statusesForOrderType,
+  isUnattendedImportedOrder,
   summarizeOrderDashboard,
   summarizeOrderListProducts,
   type Order,
@@ -926,9 +927,16 @@ function OrderLineRow({
           })()}
         </td>
         <td className="px-6 py-4">
-          <Link href={`/orders/${order.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
-            {order.reference_number}
-          </Link>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Link href={`/orders/${order.id}`} className="font-mono text-brand-600 hover:text-brand-700 font-medium text-sm">
+              {order.reference_number}
+            </Link>
+            {isUnattendedImportedOrder(order) ? (
+              <span className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 px-2 py-0.5 text-[10px] font-medium">
+                {bi('New import', '未跟進')}
+              </span>
+            ) : null}
+          </div>
         </td>
         <td className="px-6 py-4">
           <Link href={`/orders/${order.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">

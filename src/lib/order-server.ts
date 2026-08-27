@@ -24,6 +24,8 @@ interface OrderRow {
   fields_json: string | null;
   created_at: string;
   updated_at: string;
+  source_platform: string | null;
+  attended_at: string | null;
 }
 
 async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
@@ -100,6 +102,8 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
     linked_quotation: linkedQuotation,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    source_platform: row.source_platform || 'manual',
+    attended_at: row.attended_at || null,
   };
 }
 
@@ -166,6 +170,8 @@ interface LeanOrderRow {
   total_amount: number | null;
   created_at: string;
   updated_at: string;
+  source_platform: string | null;
+  attended_at: string | null;
   f_order_type: string | null;
   f_due_date: string | null;
   f_client_delivery_date: string | null;
@@ -270,6 +276,8 @@ function leanRowToOrder(row: LeanOrderRow): Order {
     linked_quotation: null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    source_platform: row.source_platform || 'manual',
+    attended_at: row.attended_at || null,
   };
 }
 
@@ -355,6 +363,7 @@ export async function listOrdersSummary(
       `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
               o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
               o.quotation_id, o.total_amount, o.created_at, o.updated_at,
+              o.source_platform, o.attended_at,
               ${LIST_FIELD_SQL}
        FROM orders o
        LEFT JOIN LATERAL (

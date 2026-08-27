@@ -10,6 +10,7 @@ import {
   STATUS_DOT_COLORS,
   computeOrderPaidTotal,
   getOrderType,
+  isUnattendedImportedOrder,
   orderDueDate,
   orderThumbnailFile,
   type Order,
@@ -150,7 +151,14 @@ function OrderCard({
         </div>
       )}
       <div className="p-3 space-y-1.5">
-        <h3 className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{cardTitle(order)}</h3>
+        <div className="flex flex-wrap items-start gap-1.5">
+          <h3 className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2 min-w-0 flex-1">{cardTitle(order)}</h3>
+          {isUnattendedImportedOrder(order) ? (
+            <span className="inline-flex shrink-0 items-center rounded-full bg-violet-100 text-violet-800 px-2 py-0.5 text-[10px] font-medium">
+              {bi('New import', '未跟進')}
+            </span>
+          ) : null}
+        </div>
         {(orderType || paid > 0) && (
           <p className="text-xs text-gray-500 truncate">
             {[orderType || null, paid > 0 ? formatCurrency(paid) : null].filter(Boolean).join(' · ')}

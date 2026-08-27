@@ -60,6 +60,8 @@ function sampleOrder(overrides: Partial<Order> = {}): Order {
     created_at: '',
     updated_at: '',
     ...overrides,
+    source_platform: overrides.source_platform ?? 'manual',
+    attended_at: overrides.attended_at ?? null,
   };
 }
 

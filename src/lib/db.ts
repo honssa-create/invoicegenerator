@@ -874,6 +874,23 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('orders_order_type_column_v1') ON CONFLICT DO NOTHING`
     );
   }
+
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS attended_at TEXT`);
+  const migAttended = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_attended_at_backfill_v1'`
+  );
+  if (!migAttended.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET attended_at = COALESCE(NULLIF(TRIM(created_at), ''), to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
+      WHERE attended_at IS NULL
+        AND source_platform IS NOT NULL
+        AND source_platform <> 'manual'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_attended_at_backfill_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 }
 
 export async function ensureSchema(): Promise<void> {

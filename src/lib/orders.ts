@@ -169,6 +169,15 @@ export type OrderDashboardCounts = {
   urgent: number;
 };
 
+/** Hub-imported order that nobody has opened on the detail page yet. */
+export function isUnattendedImportedOrder(order: {
+  source_platform?: string | null;
+  attended_at?: string | null;
+}): boolean {
+  const platform = (order.source_platform || 'manual').trim();
+  return platform !== 'manual' && !order.attended_at;
+}
+
 /** Counts for the orders list dashboard cards. */
 export function summarizeOrderDashboard(
   orders: Array<{ status?: string; fields?: Record<string, unknown> }>,
@@ -1079,6 +1088,8 @@ export interface Order extends CoreColumns {
   linked_quotation: LinkedQuotation | null;
   created_at: string;
   updated_at: string;
+  source_platform: string;
+  attended_at: string | null;
 }
 
 // Dynamic Order Type + the bird's-nest reactive production formulas.

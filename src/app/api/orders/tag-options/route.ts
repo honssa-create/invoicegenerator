@@ -23,7 +23,7 @@ export async function GET(request: Request) {
        WHERE user_id = ?
          AND fields_json IS NOT NULL
          AND btrim(fields_json) <> ''
-         AND fields_json::jsonb ? 'tags'`
+         AND jsonb_exists(fields_json::jsonb, 'tags')`
     )
     .all(ownerId)) as Array<{ tags: unknown }>;
 

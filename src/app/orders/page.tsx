@@ -92,6 +92,7 @@ function OrdersPageContent() {
   const searchParams = useSearchParams();
   const savedUi = useMemo(() => readListUi<OrdersListUiState>(ORDERS_LIST_UI_KEY), []);
   const urlType = searchParams.get('type');
+  const urlStatus = searchParams.get('status');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -103,7 +104,9 @@ function OrdersPageContent() {
   const [orderType, setOrderType] = useState(() =>
     urlType != null ? urlType.trim() : (savedUi?.orderType ?? '')
   );
-  const [status, setStatus] = useState(savedUi?.status ?? '');
+  const [status, setStatus] = useState(() =>
+    urlStatus != null ? urlStatus.trim() : (savedUi?.status ?? '')
+  );
   const [search, setSearch] = useState(savedUi?.search ?? '');
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
     const key = savedUi?.sort?.key;
@@ -165,10 +168,13 @@ function OrdersPageContent() {
   }, [loadNestieeDemand]);
 
   // Sidebar type shortcuts: /orders?type=<exact order type> wins over the last saved type.
+  // Nestiee shortcut also passes status=processing.
   useEffect(() => {
     const raw = searchParams.get('type');
     if (raw == null) return;
     setOrderType(raw.trim());
+    const statusRaw = searchParams.get('status');
+    if (statusRaw != null) setStatus(statusRaw.trim());
   }, [searchParams]);
 
   useEffect(() => {
@@ -190,6 +196,16 @@ function OrdersPageContent() {
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set('type', value);
     else params.delete('type');
+    params.delete('status');
+    const qs = params.toString();
+    router.replace(qs ? `/orders?${qs}` : '/orders', { scroll: false });
+  };
+
+  const setStatusAndUrl = (value: string) => {
+    setStatus(value);
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set('status', value);
+    else params.delete('status');
     const qs = params.toString();
     router.replace(qs ? `/orders?${qs}` : '/orders', { scroll: false });
   };
@@ -651,7 +667,7 @@ function OrdersPageContent() {
         </div>
         <div className="flex flex-col">
           <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+          <select value={status} onChange={(e) => setStatusAndUrl(e.target.value)} className={selectCls}>
             <option value="">{BTN.all}</option>
             {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>

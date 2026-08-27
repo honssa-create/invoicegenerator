@@ -111,16 +111,21 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
                       : 'hidden group-hover:block'
                   }`}
                 >
-                  {ORDER_NAV_TYPE_FILTERS.map((f) => (
-                    <Link
-                      key={f.param}
-                      href={`/orders?type=${encodeURIComponent(f.param)}`}
-                      onClick={handleNav}
-                      className="block rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-brand-50 hover:text-brand-700"
-                    >
-                      {f.label}
-                    </Link>
-                  ))}
+                  {ORDER_NAV_TYPE_FILTERS.map((f) => {
+                    const params = new URLSearchParams();
+                    params.set('type', f.param);
+                    if ('status' in f && f.status) params.set('status', f.status);
+                    return (
+                      <Link
+                        key={f.param}
+                        href={`/orders?${params.toString()}`}
+                        onClick={handleNav}
+                        className="block rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-brand-50 hover:text-brand-700"
+                      >
+                        {f.label}
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             );

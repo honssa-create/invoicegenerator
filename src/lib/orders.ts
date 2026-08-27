@@ -1095,7 +1095,7 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 export const ORDER_NAV_TYPE_FILTERS = [
   { param: 'honour訂製', label: 'honour訂單' },
   { param: '燕窩回禮燉製', label: '燕窩回禮' },
-  { param: 'Nestiee 燕窩訂單', label: '燕窩訂單' },
+  { param: 'Nestiee 燕窩訂單', label: '燕窩訂單', status: 'processing' },
 ] as const;
 
 export type OrderNavTypeParam = (typeof ORDER_NAV_TYPE_FILTERS)[number]['param'];

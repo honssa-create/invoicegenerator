@@ -1,40 +1,32 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from 'react';
+import { useRef, useState, Suspense } from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import TenantSelect from '@/components/TenantSelect';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
-import { useUnsavedChangesWarning, useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import DebitNoteActions from '@/components/DebitNoteActions';
-import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import UtilityBillingPicker from '@/components/UtilityBillingPicker';
-import ElectricityMeterCalculator from '@/components/ElectricityMeterCalculator';
-import WaterMeterCalculator from '@/components/WaterMeterCalculator';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
 import RentalPaymentLedgerTable from '@/components/RentalPaymentLedgerTable';
-import PaymentPeriodTable, {
-  emptyPaymentPeriodLine,
-  sumPaymentPeriodLine,
-  sumPaymentPeriodLines,
-  type PaymentPeriodLine,
-} from '@/components/PaymentPeriodTable';
-import { compressImage } from '@/lib/imageCompression';
+import RentalUtilitiesBillingSection from '@/components/rentals/sections/RentalUtilitiesBillingSection';
+import { useRentalUnitDetail } from '@/hooks/rentals/useRentalUnitDetail';
 import {
-  RENTAL_STATUS_BADGE,
-  RENTAL_STATUS_LABELS,
-  RENTAL_PAYMENT_METHODS,
-  RENTAL_PAYMENT_METHOD_LABELS,
-  addBillingMonths,
-  calculateBasicRentPeriod,
-  chargeOutstanding,
+  periodDateInputProps,
+  RENTAL_DETAIL_INPUT_CLS,
+} from '@/lib/rental-unit-detail-shared';
+
+const RentalInvoiceModal = dynamic(() => import('@/components/rentals/RentalInvoiceModal'), { loading: () => null });
+const RentalPaidModal = dynamic(() => import('@/components/rentals/RentalPaidModal'), { loading: () => null });
+const RentalEndContractModal = dynamic(() => import('@/components/rentals/RentalEndContractModal'), { loading: () => null });
+const RentalNoteModal = dynamic(() => import('@/components/rentals/RentalNoteModal'), { loading: () => null });
+import {
   computeLeaseDisplayStatus,
-  currentBillingPeriod,
   daysRemaining,
-  displayRentalStatus,
   displayRentalStatusForUnit,
   isLeaseFormallyEnded,
   isLeaseStaleEnded,
@@ -44,119 +36,20 @@ import {
   formatDueDayLabel,
   formatDisplayDate,
   formatMoney,
-  formatUtilityAmount,
-  baseRentLineLabel,
   fromFormDate,
-  isoFromDisplayDate,
   outstandingBalance,
-  toFormDate,
-  todayFormDate,
-  utilityLineLabel,
-  calcElectricityFeeForFormula,
-  calcWaterFeeFromMeter,
   DEBIT_NOTE_COMPANY_CHOICES,
   debitNoteCompanyForUnit,
   buildDebitNotePaymentInstructionsText,
   debitNoteDueDate,
   formatDueDateChinese,
   resolveUnitBillingCompany,
-  type DebitNoteCompanyId,
-  resolveElectricityFormula,
-  normalizeUtilityBillingMode,
   formatBillingPeriodLabel,
-  meterDataFromInputs,
   pastLeaseStatusLabel,
-  unitHasWaterMeterFormula,
-  waterMeterDataFromInputs,
   isVacantUnitName,
-  hydrateOtherUnitUsagesFromLegacy,
+  type DebitNoteCompanyId,
   type DebitNotePaymentTemplateId,
-  type RentRecord,
-  type RentalActivityLog,
-  type RentalChargeItem,
-  type RentalChargeType,
-  type RentalLease,
-  type RentalLeaseDocument,
-  type RentalPaymentReceipt,
-  type RentalPaymentWithAllocations,
-  type RentalTenant,
-  type RentalUnit,
-  type RentalUnitWithRecord,
-  type UnitLeasePaymentLedgerRow,
-  type UtilityBillingMode,
 } from '@/lib/rentals';
-
-interface DetailPayload {
-  unit: RentalUnit;
-  currentRecord: RentRecord | null;
-  chargeItems?: RentalChargeItem[];
-  history: RentRecord[];
-  paymentLedger?: UnitLeasePaymentLedgerRow[];
-  outstandingCharges?: RentalChargeItem[];
-  activities: RentalActivityLog[];
-  latestReceipt: RentalPaymentReceipt | null;
-  paymentHistory?: RentalPaymentWithAllocations[];
-  currentLease?: RentalLease | null;
-  viewingLease?: RentalLease | null;
-  displayLease?: RentalLease | null;
-  readOnlyLease?: boolean;
-  isHistoricalView?: boolean;
-  leaseHistory?: RentalLease[];
-  leaseDocuments?: RentalLeaseDocument[];
-  suggestedPrevElectricityReading?: number | null;
-  suggestedPrevWaterReading?: number | null;
-  portfolioUnits?: { id: number; unitName: string }[];
-  sharedMeterDeductionUnits?: { id: number; unitName: string }[];
-}
-
-interface UtilitySnapshot {
-  baseRentPeriodFrom: string;
-  baseRentPeriodTo: string;
-  waterFee: string;
-  waterPeriodFrom: string;
-  waterPeriodTo: string;
-  electricityFee: string;
-  electricityPeriodFrom: string;
-  electricityPeriodTo: string;
-  meterPrevReading: string;
-  meterCurrReading: string;
-  otherUnitUsages: Record<string, string>;
-  meterRatePerUnit: string;
-  waterMeterPrev: string;
-  waterMeterCurr: string;
-  waterMeterRate: string;
-  utilityNote: string;
-}
-
-function chargeTypeTotal(
-  charges: RentalChargeItem[],
-  billingPeriod: string,
-  chargeType: RentalChargeType,
-): number {
-  return charges
-    .filter((c) => c.billingPeriod === billingPeriod && c.chargeType === chargeType)
-    .reduce((s, c) => s + chargeOutstanding(c), 0);
-}
-
-function formatBreakdownAmount(amount: number): string {
-  return amount > 0 ? String(amount) : '';
-}
-
-function periodDateInputProps(
-  value: string,
-  onChange: (v: string) => void,
-  className: string,
-  readOnly?: boolean,
-) {
-  return {
-    type: 'date' as const,
-    value: isoFromDisplayDate(value) || '',
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(toFormDate(e.target.value)),
-    className,
-    disabled: readOnly,
-    readOnly,
-  };
-}
 
 export default function RentalDetailPage() {
   return (
@@ -175,56 +68,98 @@ function RentalDetailInner() {
   const id = params.id as string;
   const viewLeaseId = sp.get('leaseId');
 
-  const [period, setPeriod] = useState(sp.get('period') || currentBillingPeriod());
-  const [data, setData] = useState<DetailPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // profile inputs
-  const [tenantName, setTenantName] = useState('');
-  const [tenantContactName, setTenantContactName] = useState('');
-  const [tenantCompanyName, setTenantCompanyName] = useState('');
-  const [tenantNotes, setTenantNotes] = useState('');
-  const [tenantPhone, setTenantPhone] = useState('');
-  const [tenantEmail, setTenantEmail] = useState('');
-  const [dueDateDay, setDueDateDay] = useState('1');
-  const [baseRent, setBaseRent] = useState('');
-  const [utilityBillingMode, setUtilityBillingMode] = useState<UtilityBillingMode>('company_shared_meter');
-  const [sharedMeterDeductionUnitIds, setSharedMeterDeductionUnitIds] = useState<number[]>([]);
-  const [billingCompany, setBillingCompany] = useState<DebitNoteCompanyId | ''>('');
-  const [leaseStartDate, setLeaseStartDate] = useState('');
-  const [leaseEndDate, setLeaseEndDate] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
-  const [unitAddress, setUnitAddress] = useState('');
-  const [tenantAddress, setTenantAddress] = useState('');
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [savedProfileSnapshot, setSavedProfileSnapshot] = useState<string | null>(null);
-
-  // utility inputs
-  const [baseRentPeriodFrom, setBaseRentPeriodFrom] = useState('');
-  const [baseRentPeriodTo, setBaseRentPeriodTo] = useState('');
-  const [waterFee, setWaterFee] = useState('');
-  const [waterPeriodFrom, setWaterPeriodFrom] = useState('');
-  const [waterPeriodTo, setWaterPeriodTo] = useState('');
-  const [electricityFee, setElectricityFee] = useState('');
-  const [electricityPeriodFrom, setElectricityPeriodFrom] = useState('');
-  const [electricityPeriodTo, setElectricityPeriodTo] = useState('');
-  const [meterPrevReading, setMeterPrevReading] = useState('');
-  const [meterCurrReading, setMeterCurrReading] = useState('');
-  const [otherUnitUsages, setOtherUnitUsages] = useState<Record<string, string>>({});
-  const [meterRatePerUnit, setMeterRatePerUnit] = useState('');
-  const [waterMeterPrev, setWaterMeterPrev] = useState('');
-  const [waterMeterCurr, setWaterMeterCurr] = useState('');
-  const [waterMeterRate, setWaterMeterRate] = useState('');
-  const [suggestedPrevReading, setSuggestedPrevReading] = useState<number | null>(null);
-  const [suggestedPrevWaterReading, setSuggestedPrevWaterReading] = useState<number | null>(null);
-  const [utilityNote, setUtilityNote] = useState('');
-  const [utilitySaveState, setUtilitySaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [utilityCanUndo, setUtilityCanUndo] = useState(false);
-  const skipUtilityAutoSaveRef = useRef(true);
-  const utilitySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastCommittedUtilityRef = useRef<UtilitySnapshot | null>(null);
-  const undoUtilitySnapshotRef = useRef<UtilitySnapshot | null>(null);
-  const skipUndoCaptureRef = useRef(false);
+  const {
+    period,
+    setPeriod,
+    data,
+    loading,
+    load,
+    ensurePeriodRecord,
+    tenantName,
+    setTenantName,
+    tenantContactName,
+    setTenantContactName,
+    tenantCompanyName,
+    setTenantCompanyName,
+    tenantNotes,
+    setTenantNotes,
+    tenantPhone,
+    setTenantPhone,
+    tenantEmail,
+    setTenantEmail,
+    dueDateDay,
+    setDueDateDay,
+    baseRent,
+    setBaseRent,
+    utilityBillingMode,
+    setUtilityBillingMode,
+    sharedMeterDeductionUnitIds,
+    setSharedMeterDeductionUnitIds,
+    billingCompany,
+    setBillingCompany,
+    leaseStartDate,
+    setLeaseStartDate,
+    leaseEndDate,
+    setLeaseEndDate,
+    depositAmount,
+    setDepositAmount,
+    unitAddress,
+    setUnitAddress,
+    tenantAddress,
+    setTenantAddress,
+    profileSaving,
+    applyTenantFromList,
+    addNewTenantName,
+    saveProfile: persistProfile,
+    baseRentPeriodFrom,
+    setBaseRentPeriodFrom,
+    baseRentPeriodTo,
+    setBaseRentPeriodTo,
+    waterFee,
+    setWaterFee,
+    waterPeriodFrom,
+    setWaterPeriodFrom,
+    waterPeriodTo,
+    setWaterPeriodTo,
+    electricityFee,
+    setElectricityFee,
+    electricityPeriodFrom,
+    setElectricityPeriodFrom,
+    electricityPeriodTo,
+    setElectricityPeriodTo,
+    meterPrevReading,
+    setMeterPrevReading,
+    meterCurrReading,
+    setMeterCurrReading,
+    otherUnitUsages,
+    setOtherUnitUsages,
+    meterRatePerUnit,
+    setMeterRatePerUnit,
+    waterMeterPrev,
+    setWaterMeterPrev,
+    waterMeterCurr,
+    setWaterMeterCurr,
+    waterMeterRate,
+    setWaterMeterRate,
+    suggestedPrevReading,
+    suggestedPrevWaterReading,
+    utilityNote,
+    setUtilityNote,
+    utilitySaveState,
+    utilityCanUndo,
+    showUtilityFees,
+    electricityFormula,
+    waterMeterFormula,
+    calcBasicRentPeriod,
+    buildUtilityPayload,
+    undoUtilitySave,
+    liveElectricityFee,
+    liveWaterFee,
+  } = useRentalUnitDetail({
+    unitId: id,
+    initialPeriod: sp.get('period') || undefined,
+    viewLeaseId,
+  });
 
   // invoice modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -237,49 +172,12 @@ function RentalDetailInner() {
 
   // paid modal
   const [showPaidModal, setShowPaidModal] = useState(false);
-  const [periodRows, setPeriodRows] = useState<PaymentPeriodLine[]>([]);
-  const [paymentForm, setPaymentForm] = useState({
-    paymentDate: todayFormDate(),
-    amount: '',
-    method: '',
-    reference: '',
-    notes: '',
-  });
-  const [autoSendReceipt, setAutoSendReceipt] = useState(false);
-  const [paidNote, setPaidNote] = useState('');
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [ocrResult, setOcrResult] = useState<{ extracted: { amount: number | null; method: string | null; transfer_date: string | null; receiving_account: string | null }; matched: boolean } | null>(null);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const receiptInputRef = useRef<HTMLInputElement>(null);
-  const skipPeriodRecalcRef = useRef(true);
-
-  const billingYearMonth = () => {
-    const [year, month] = period.split('-').map(Number);
-    return { year, monthIndex: month - 1 };
-  };
-
-  const calcBasicRentPeriod = (rentPaymentDay: number) => {
-    const { year, monthIndex } = billingYearMonth();
-    return calculateBasicRentPeriod(rentPaymentDay, year, monthIndex);
-  };
 
   // activity note modal
   const [showNoteModal, setShowNoteModal] = useState(false);
-  const [noteText, setNoteText] = useState('');
 
   // end contract modal
   const [showEndContractModal, setShowEndContractModal] = useState(false);
-  const [endContractForm, setEndContractForm] = useState({
-    actualEndDate: todayFormDate(),
-    depositRefund: '',
-    depositDeductions: '',
-    endNotes: '',
-    startNew: false,
-    newTenantName: '',
-    newLeaseStart: todayFormDate(),
-    newLeaseEnd: '',
-    newBaseRent: '',
-  });
   const [leaseDocUploading, setLeaseDocUploading] = useState(false);
   const leaseDocInputRef = useRef<HTMLInputElement>(null);
 
@@ -287,421 +185,9 @@ function RentalDetailInner() {
   const [deletingPaymentId, setDeletingPaymentId] = useState<number | null>(null);
   const [toast, setToast] = useState('');
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setUtilityCanUndo(false);
-    skipPeriodRecalcRef.current = true;
-    skipUtilityAutoSaveRef.current = true;
-    fetch(`/api/rentals/units/${id}?period=${period}${viewLeaseId ? `&leaseId=${viewLeaseId}` : ''}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) {
-          setData(d);
-          const profileLease = d.displayLease as RentalLease | null | undefined;
-          const useLease = d.isHistoricalView && profileLease;
-          setTenantName(useLease ? profileLease.tenantName : (d.unit.tenantName || ''));
-          setTenantContactName(d.unit.tenantContactName || '');
-          setTenantCompanyName(d.unit.tenantCompanyName || '');
-          setTenantNotes(d.unit.tenantNotes || '');
-          setTenantPhone(useLease ? profileLease.tenantPhone : (d.unit.tenantPhone || ''));
-          setTenantEmail(useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''));
-          setDueDateDay(String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)));
-          setBaseRent(String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)));
-          setUtilityBillingMode(normalizeUtilityBillingMode(d.unit.utilityBillingMode));
-          setSharedMeterDeductionUnitIds(d.unit.sharedMeterDeductionUnitIds || []);
-          setBillingCompany(
-            d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
-              ? d.unit.billingCompany
-              : '',
-          );
-          setLeaseStartDate(useLease
-            ? toFormDate(profileLease.leaseStartDate)
-            : (d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : ''));
-          setLeaseEndDate(useLease
-            ? toFormDate(profileLease.actualEndDate || profileLease.leaseEndDate)
-            : (d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : ''));
-          setDepositAmount(
-            (useLease ? profileLease.depositAmount : d.currentLease?.depositAmount) != null
-              ? String(useLease ? profileLease.depositAmount : d.currentLease.depositAmount)
-              : '',
-          );
-          setUnitAddress(d.unit.address || '');
-          setTenantAddress(d.unit.tenantAddress || '');
-          setSavedProfileSnapshot(
-            JSON.stringify({
-              tenantName: useLease ? profileLease.tenantName : (d.unit.tenantName || ''),
-              tenantContactName: d.unit.tenantContactName || '',
-              tenantCompanyName: d.unit.tenantCompanyName || '',
-              tenantNotes: d.unit.tenantNotes || '',
-              tenantPhone: useLease ? profileLease.tenantPhone : (d.unit.tenantPhone || ''),
-              tenantEmail: useLease ? profileLease.tenantEmail : (d.unit.tenantEmail || ''),
-              tenantAddress: d.unit.tenantAddress || '',
-              dueDateDay: String(useLease ? profileLease.dueDateDay : (d.unit.dueDateDay || 1)),
-              baseRent: String(useLease ? profileLease.baseRent : (d.currentRecord?.baseRent ?? d.unit.currentYearRent ?? 0)),
-              utilityBillingMode: normalizeUtilityBillingMode(d.unit.utilityBillingMode),
-              sharedMeterDeductionUnitIds: [...(d.unit.sharedMeterDeductionUnitIds || [])].sort((a, b) => a - b),
-              billingCompany:
-                d.unit.billingCompany === 'label' || d.unit.billingCompany === 'elite'
-                  ? d.unit.billingCompany
-                  : '',
-              leaseStartDate: useLease
-                ? toFormDate(profileLease.leaseStartDate)
-                : (d.unit.leaseStartDate ? toFormDate(d.unit.leaseStartDate) : ''),
-              leaseEndDate: useLease
-                ? toFormDate(profileLease.actualEndDate || profileLease.leaseEndDate)
-                : (d.unit.leaseEndDate ? toFormDate(d.unit.leaseEndDate) : ''),
-              depositAmount:
-                (useLease ? profileLease.depositAmount : d.currentLease?.depositAmount) != null
-                  ? String(useLease ? profileLease.depositAmount : d.currentLease.depositAmount)
-                  : '',
-              unitAddress: d.unit.address || '',
-            }),
-          );
-          const rec = d.currentRecord;
-          if (rec) {
-            const calc = calcBasicRentPeriod(Number(d.unit.dueDateDay) || 1);
-            setBaseRentPeriodFrom(rec.baseRentPeriodFrom ? toFormDate(rec.baseRentPeriodFrom) : calc.periodFrom);
-            setBaseRentPeriodTo(rec.baseRentPeriodTo ? toFormDate(rec.baseRentPeriodTo) : calc.periodTo);
-            setWaterFee(String(rec.waterFee || 0));
-            setWaterPeriodFrom(toFormDate(rec.waterPeriodFrom));
-            setWaterPeriodTo(toFormDate(rec.waterPeriodTo));
-            setElectricityFee(String(rec.electricityFee || 0));
-            setElectricityPeriodFrom(toFormDate(rec.electricityPeriodFrom));
-            setElectricityPeriodTo(toFormDate(rec.electricityPeriodTo));
-            const deductionMeta = (d.sharedMeterDeductionUnits || []) as { id: number; unitName: string }[];
-            const meterRaw = rec.electricityMeter;
-            const meter = meterRaw
-              ? hydrateOtherUnitUsagesFromLegacy(meterRaw, deductionMeta)
-              : null;
-            setMeterPrevReading(meter?.prevReading != null ? String(meter.prevReading) : '');
-            setMeterCurrReading(meter?.currReading != null ? String(meter.currReading) : '');
-            const usageStrings: Record<string, string> = {};
-            for (const u of deductionMeta) {
-              const v = meter?.otherUnitUsages?.[String(u.id)];
-              usageStrings[String(u.id)] = v != null && Number.isFinite(v) ? String(v) : '';
-            }
-            setOtherUnitUsages(usageStrings);
-            setMeterRatePerUnit(meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '');
-            setSuggestedPrevReading(d.suggestedPrevElectricityReading ?? null);
-            setSuggestedPrevWaterReading(d.suggestedPrevWaterReading ?? null);
-            const waterMeter = rec.waterMeter;
-            setWaterMeterPrev(waterMeter?.prevReading != null ? String(waterMeter.prevReading) : '');
-            setWaterMeterCurr(waterMeter?.currReading != null ? String(waterMeter.currReading) : '');
-            setWaterMeterRate(waterMeter?.ratePerUnit != null ? String(waterMeter.ratePerUnit) : '');
-            if (!waterMeter?.prevReading && d.suggestedPrevWaterReading != null) {
-              setWaterMeterPrev(String(d.suggestedPrevWaterReading));
-            }
-            if (!meter?.prevReading && d.suggestedPrevElectricityReading != null) {
-              setMeterPrevReading(String(d.suggestedPrevElectricityReading));
-            }
-            setUtilityNote(rec.customInvoiceNote || '');
-            setAutoSendReceipt(d.unit.autoSendReceiptEmail);
-            lastCommittedUtilityRef.current = {
-              baseRentPeriodFrom: rec.baseRentPeriodFrom ? toFormDate(rec.baseRentPeriodFrom) : calc.periodFrom,
-              baseRentPeriodTo: rec.baseRentPeriodTo ? toFormDate(rec.baseRentPeriodTo) : calc.periodTo,
-              waterFee: String(rec.waterFee || 0),
-              waterPeriodFrom: toFormDate(rec.waterPeriodFrom),
-              waterPeriodTo: toFormDate(rec.waterPeriodTo),
-              electricityFee: String(rec.electricityFee || 0),
-              electricityPeriodFrom: toFormDate(rec.electricityPeriodFrom),
-              electricityPeriodTo: toFormDate(rec.electricityPeriodTo),
-              meterPrevReading: meter?.prevReading != null ? String(meter.prevReading) : (d.suggestedPrevElectricityReading != null ? String(d.suggestedPrevElectricityReading) : ''),
-              meterCurrReading: meter?.currReading != null ? String(meter.currReading) : '',
-              otherUnitUsages: { ...usageStrings },
-              meterRatePerUnit: meter?.ratePerUnit != null ? String(meter.ratePerUnit) : '',
-              waterMeterPrev: waterMeter?.prevReading != null ? String(waterMeter.prevReading) : (d.suggestedPrevWaterReading != null ? String(d.suggestedPrevWaterReading) : ''),
-              waterMeterCurr: waterMeter?.currReading != null ? String(waterMeter.currReading) : '',
-              waterMeterRate: waterMeter?.ratePerUnit != null ? String(waterMeter.ratePerUnit) : '',
-              utilityNote: rec.customInvoiceNote || '',
-            };
-            undoUtilitySnapshotRef.current = null;
-          }
-        }
-      })
-      .finally(() => {
-        skipPeriodRecalcRef.current = false;
-        setLoading(false);
-        setTimeout(() => { skipUtilityAutoSaveRef.current = false; }, 200);
-      });
-  }, [id, period, viewLeaseId]);
-
-  const currentProfileSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        tenantName,
-        tenantContactName,
-        tenantCompanyName,
-        tenantNotes,
-        tenantPhone,
-        tenantEmail,
-        tenantAddress,
-        dueDateDay,
-        baseRent,
-        utilityBillingMode,
-        sharedMeterDeductionUnitIds: [...sharedMeterDeductionUnitIds].sort((a, b) => a - b),
-        billingCompany,
-        leaseStartDate,
-        leaseEndDate,
-        depositAmount,
-        unitAddress,
-      }),
-    [
-      tenantName,
-      tenantContactName,
-      tenantCompanyName,
-      tenantNotes,
-      tenantPhone,
-      tenantEmail,
-      tenantAddress,
-      dueDateDay,
-      baseRent,
-      utilityBillingMode,
-      sharedMeterDeductionUnitIds,
-      billingCompany,
-      leaseStartDate,
-      leaseEndDate,
-      depositAmount,
-      unitAddress,
-    ],
-  );
-
-  const isProfileDirty =
-    !data?.readOnlyLease &&
-    savedProfileSnapshot !== null &&
-    savedProfileSnapshot !== currentProfileSnapshot;
-  useUnsavedChangesWarning(isProfileDirty);
-
-  useModalUnsavedWarning(showPaidModal, { paymentForm, periodRows, paidNote, autoSendReceipt }, !data?.readOnlyLease);
-  useModalUnsavedWarning(showNoteModal, noteText, !data?.readOnlyLease);
-
-  /** Persist virtual period card (id=0) before record-id write actions. */
-  const ensurePeriodRecord = useCallback(async (): Promise<number | null> => {
-    const existing = data?.currentRecord?.id;
-    if (existing && existing > 0) return existing;
-    const res = await fetch(
-      `/api/rentals/units/${id}/ensure-period?period=${encodeURIComponent(period)}`,
-      { method: 'POST' },
-    );
-    if (!res.ok) return null;
-    const body = await res.json();
-    const record = body.record as RentRecord | undefined;
-    if (!record?.id) return null;
-    setData((prev) => (prev ? { ...prev, currentRecord: record } : prev));
-    return record.id;
-  }, [data?.currentRecord?.id, id, period]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Reactive base-rent period: recalc whenever 每月交租日 or billing month changes
-  useEffect(() => {
-    if (skipPeriodRecalcRef.current) return;
-    const calc = calcBasicRentPeriod(Number(dueDateDay) || 1);
-    setBaseRentPeriodFrom(calc.periodFrom);
-    setBaseRentPeriodTo(calc.periodTo);
-  }, [dueDateDay, period]);
-
-  const showUtilityFees = utilityBillingMode !== 'tenant_pays';
-  const electricityFormula = data?.unit && showUtilityFees
-    ? resolveElectricityFormula(data.unit.unitName, utilityBillingMode)
-    : null;
-  const waterMeterFormula = data?.unit && showUtilityFees
-    ? unitHasWaterMeterFormula(data.unit.unitName)
-    : false;
-
-  useEffect(() => {
-    if (!waterMeterFormula) return;
-    const meter = waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate);
-    const fee = calcWaterFeeFromMeter(meter);
-    setWaterFee(fee > 0 || meter.currReading != null ? String(fee) : '');
-  }, [waterMeterFormula, waterMeterPrev, waterMeterCurr, waterMeterRate]);
-
-  useEffect(() => {
-    if (!electricityFormula) return;
-    const meter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
-      otherUnitUsages,
-    });
-    const fee = calcElectricityFeeForFormula(electricityFormula, meter);
-    const hasInput = [meterPrevReading, meterCurrReading, meterRatePerUnit].some((v) => v.trim() !== '');
-    setElectricityFee(hasInput ? String(fee) : '');
-  }, [electricityFormula, meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit]);
-
-  const inp = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
-
-  const captureUtilitySnapshot = useCallback((): UtilitySnapshot => ({
-    baseRentPeriodFrom,
-    baseRentPeriodTo,
-    waterFee,
-    waterPeriodFrom,
-    waterPeriodTo,
-    electricityFee,
-    electricityPeriodFrom,
-    electricityPeriodTo,
-    meterPrevReading,
-    meterCurrReading,
-    otherUnitUsages: { ...otherUnitUsages },
-    meterRatePerUnit,
-    waterMeterPrev,
-    waterMeterCurr,
-    waterMeterRate,
-    utilityNote,
-  }), [
-    baseRentPeriodFrom, baseRentPeriodTo, waterFee, waterPeriodFrom, waterPeriodTo,
-    electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit,
-    waterMeterPrev, waterMeterCurr, waterMeterRate, utilityNote,
-  ]);
-
-  const applyUtilitySnapshot = useCallback((snap: UtilitySnapshot) => {
-    setBaseRentPeriodFrom(snap.baseRentPeriodFrom);
-    setBaseRentPeriodTo(snap.baseRentPeriodTo);
-    setWaterFee(snap.waterFee);
-    setWaterPeriodFrom(snap.waterPeriodFrom);
-    setWaterPeriodTo(snap.waterPeriodTo);
-    setElectricityFee(snap.electricityFee);
-    setElectricityPeriodFrom(snap.electricityPeriodFrom);
-    setElectricityPeriodTo(snap.electricityPeriodTo);
-    setMeterPrevReading(snap.meterPrevReading);
-    setMeterCurrReading(snap.meterCurrReading);
-    setOtherUnitUsages({ ...snap.otherUnitUsages });
-    setMeterRatePerUnit(snap.meterRatePerUnit);
-    setWaterMeterPrev(snap.waterMeterPrev);
-    setWaterMeterCurr(snap.waterMeterCurr);
-    setWaterMeterRate(snap.waterMeterRate);
-    setUtilityNote(snap.utilityNote);
-  }, []);
-
-  const buildUtilityPayload = useCallback((snap?: UtilitySnapshot) => {
-    const s = snap ?? captureUtilitySnapshot();
-    const payload: Record<string, unknown> = {
-      baseRentPeriodFrom: fromFormDate(s.baseRentPeriodFrom),
-      baseRentPeriodTo: fromFormDate(s.baseRentPeriodTo),
-      waterFee: Number(s.waterFee),
-      electricityFee: Number(s.electricityFee),
-      waterPeriodFrom: fromFormDate(s.waterPeriodFrom),
-      waterPeriodTo: fromFormDate(s.waterPeriodTo),
-      electricityPeriodFrom: fromFormDate(s.electricityPeriodFrom),
-      electricityPeriodTo: fromFormDate(s.electricityPeriodTo),
-      customInvoiceNote: s.utilityNote || null,
-    };
-    if (electricityFormula) {
-      payload.electricityMeter = meterDataFromInputs(
-        s.meterPrevReading, s.meterCurrReading, s.meterRatePerUnit,
-        { otherUnitUsages: s.otherUnitUsages },
-      );
-    }
-    if (waterMeterFormula) {
-      payload.waterMeter = waterMeterDataFromInputs(s.waterMeterPrev, s.waterMeterCurr, s.waterMeterRate);
-    }
-    return payload;
-  }, [captureUtilitySnapshot, electricityFormula, waterMeterFormula]);
-
-  const saveUtilities = useCallback(async (opts?: { reload?: boolean; snapshot?: UtilitySnapshot; skipUndo?: boolean }) => {
-    let recordId = data?.currentRecord?.id;
-    if (!recordId || recordId <= 0) {
-      recordId = (await ensurePeriodRecord()) || 0;
-      if (!recordId) return false;
-    }
-    if (!opts?.skipUndo && !skipUndoCaptureRef.current && lastCommittedUtilityRef.current) {
-      undoUtilitySnapshotRef.current = lastCommittedUtilityRef.current;
-      setUtilityCanUndo(true);
-    }
-    setUtilitySaveState('saving');
-    const res = await fetch(`/api/rentals/records/${recordId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildUtilityPayload(opts?.snapshot)),
-    });
-    skipUndoCaptureRef.current = false;
-    if (!res.ok) {
-      setUtilitySaveState('error');
-      return false;
-    }
-    const { record } = await res.json();
-    setData((prev) => (prev ? { ...prev, currentRecord: record } : prev));
-    lastCommittedUtilityRef.current = opts?.snapshot ?? captureUtilitySnapshot();
-    setUtilitySaveState('saved');
-    if (opts?.reload) load();
-    else window.setTimeout(() => setUtilitySaveState('idle'), 2000);
-    return true;
-  }, [data?.currentRecord?.id, buildUtilityPayload, captureUtilitySnapshot, load, ensurePeriodRecord]);
-
-  const undoUtilitySave = useCallback(async () => {
-    const snap = undoUtilitySnapshotRef.current;
-    if (!snap) return;
-    setUtilityCanUndo(false);
-    undoUtilitySnapshotRef.current = null;
-    skipUndoCaptureRef.current = true;
-    skipUtilityAutoSaveRef.current = true;
-    applyUtilitySnapshot(snap);
-    await saveUtilities({ snapshot: snap, skipUndo: true });
-    window.setTimeout(() => { skipUtilityAutoSaveRef.current = false; }, 200);
-  }, [applyUtilitySnapshot, saveUtilities]);
-
-  useEffect(() => {
-    if (skipUtilityAutoSaveRef.current || !data?.currentRecord || data.readOnlyLease) return;
-    if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
-    utilitySaveTimerRef.current = setTimeout(() => {
-      void saveUtilities();
-    }, 600);
-    return () => {
-      if (utilitySaveTimerRef.current) clearTimeout(utilitySaveTimerRef.current);
-    };
-  }, [
-    data?.currentRecord?.id,
-    saveUtilities,
-    baseRentPeriodFrom, baseRentPeriodTo,
-    waterFee, waterPeriodFrom, waterPeriodTo,
-    electricityFee, electricityPeriodFrom, electricityPeriodTo,
-    meterPrevReading, meterCurrReading, otherUnitUsages, meterRatePerUnit,
-    waterMeterPrev, waterMeterCurr, waterMeterRate,
-    utilityNote,
-  ]);
-
-  const applyTenantFromList = (t: RentalTenant) => {
-    setTenantName(t.name);
-    setTenantContactName(t.contact_name || '');
-    setTenantCompanyName(t.company_name || '');
-    setTenantNotes(t.notes || '');
-    setTenantPhone(t.phone || '');
-    setTenantEmail(t.email || '');
-    setTenantAddress(t.address || '');
-  };
-
-  const addNewTenantName = (name: string) => {
-    setTenantName(name);
-  };
-
   const saveProfile = async () => {
-    if (data?.readOnlyLease) return;
-    setProfileSaving(true);
-    await fetch(`/api/rentals/units/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantName: tenantName.trim(),
-        tenantContactName: tenantContactName.trim(),
-        tenantCompanyName: tenantCompanyName.trim(),
-        tenantNotes: tenantNotes.trim(),
-        tenantPhone: tenantPhone.trim(),
-        tenantEmail: tenantEmail.trim(),
-        tenantAddress: tenantAddress.trim(),
-        dueDateDay: Number(dueDateDay) || 1,
-        currentYearRent: Number(baseRent) || 0,
-        utilityBillingMode,
-        sharedMeterDeductionUnitIds: utilityBillingMode === 'company_shared_meter'
-          ? sharedMeterDeductionUnitIds
-          : [],
-        billingCompany: billingCompany || null,
-        leaseStartDate: fromFormDate(leaseStartDate),
-        leaseEndDate: fromFormDate(leaseEndDate),
-        depositAmount: Number(depositAmount) || 0,
-        address: unitAddress.trim(),
-      }),
-    });
-    setProfileSaving(false);
-    setSavedProfileSnapshot(currentProfileSnapshot);
-    setToast('Profile saved');
-    load();
+    const ok = await persistProfile();
+    if (ok) setToast('Profile saved');
   };
 
   const sendInvoice = async () => {
@@ -745,175 +231,9 @@ function RentalDetailInner() {
     load();
   };
 
-  const handleReceiptUpload = async (file: File) => {
-    setOcrResult(null);
-    setOcrLoading(true);
-    let f = file;
-    try {
-      const c = await compressImage(file, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg', quality: 0.65 });
-      f = c.file;
-    } catch { /* use original */ }
-    setReceiptFile(f);
-
-    if (!data?.currentRecord) { setOcrLoading(false); return; }
-    const recordId = await ensurePeriodRecord();
-    if (!recordId) { setOcrLoading(false); return; }
-    const fd = new FormData();
-    fd.append('receipt', f);
-    const res = await fetch(`/api/rentals/records/${recordId}/receipt-scan`, { method: 'POST', body: fd });
-    const d = await res.json();
-    setOcrLoading(false);
-    if (res.ok) {
-      setOcrResult({ extracted: d.extracted, matched: d.matched });
-      if (d.extracted?.transfer_date) {
-        setPaymentForm((f) => ({ ...f, paymentDate: toFormDate(d.extracted.transfer_date) }));
-      }
-      if (d.extracted?.amount) {
-        setPaymentForm((f) => ({ ...f, amount: String(d.extracted.amount) }));
-      }
-    }
-  };
-
-  const applyPeriodRows = (rows: PaymentPeriodLine[]) => {
-    setPeriodRows(rows);
-    setPaymentForm((f) => ({ ...f, amount: String(sumPaymentPeriodLines(rows) || '') }));
-  };
-
-  const buildOutstandingPeriodRows = (): PaymentPeriodLine[] => {
-    if (!data) return [];
-    const seen = new Set<string>();
-    const rows: PaymentPeriodLine[] = [];
-    const charges = [...(data.outstandingCharges || [])]
-      .filter((c) => chargeOutstanding(c) > 0)
-      .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod));
-    for (const c of charges) {
-      if (seen.has(c.billingPeriod)) continue;
-      seen.add(c.billingPeriod);
-      rows.push({
-        unitId: data.unit.id,
-        billingPeriod: c.billingPeriod,
-        rent: formatBreakdownAmount(chargeTypeTotal(charges, c.billingPeriod, 'rent')),
-        electricity: formatBreakdownAmount(chargeTypeTotal(charges, c.billingPeriod, 'electricity')),
-        water: formatBreakdownAmount(chargeTypeTotal(charges, c.billingPeriod, 'water')),
-      });
-    }
-    return rows;
-  };
-
   const openPaidModal = () => {
     if (!data?.unit.tenantId || data.readOnlyLease || data.isHistoricalView) return;
-    const outstanding = buildOutstandingPeriodRows();
-    const rows = outstanding.length ? outstanding : [emptyPaymentPeriodLine({
-      unitId: data.unit.id,
-      billingPeriod: period,
-    })];
-    setPeriodRows(rows);
-    setPaymentForm({
-      paymentDate: todayFormDate(),
-      amount: String(sumPaymentPeriodLines(rows) || ''),
-      method: '',
-      reference: '',
-      notes: '',
-    });
-    setPaidNote('');
     setShowPaidModal(true);
-    setOcrResult(null);
-    setReceiptFile(null);
-  };
-
-  const startPaymentPeriod = () => {
-    if (!data) return currentBillingPeriod();
-    const periods = (data.outstandingCharges || [])
-      .filter((c) => chargeOutstanding(c) > 0)
-      .map((c) => c.billingPeriod)
-      .sort();
-    return periods[0] || period;
-  };
-
-  const monthlyRentForUnit = () => {
-    if (data?.unit.currentYearRent) return data.unit.currentYearRent;
-    const hist = data?.paymentLedger?.find((h) => h.baseRent > 0);
-    return hist?.baseRent || Number(baseRent) || 0;
-  };
-
-  const fillOutstandingPeriodRows = () => {
-    const rows = buildOutstandingPeriodRows();
-    applyPeriodRows(rows.length ? rows : [emptyPaymentPeriodLine({
-      unitId: data?.unit.id,
-      billingPeriod: startPaymentPeriod(),
-    })]);
-  };
-
-  const fillAdvanceMonths = (months: number) => {
-    if (!data) return;
-    const rows: PaymentPeriodLine[] = [];
-    let p = startPaymentPeriod();
-    const rent = monthlyRentForUnit();
-    for (let i = 0; i < months; i += 1) {
-      rows.push({
-        unitId: data.unit.id,
-        billingPeriod: p,
-        rent: rent ? String(rent) : '',
-        electricity: '',
-        water: '',
-      });
-      p = addBillingMonths(p, 1);
-    }
-    applyPeriodRows(rows);
-  };
-
-  const confirmPaid = async () => {
-    if (!data?.unit.tenantId) return;
-    const amount = Number(paymentForm.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setToast('Enter a valid payment amount 請輸入有效收款金額');
-      return;
-    }
-
-    const body: Record<string, unknown> = {
-      tenantId: data.unit.tenantId,
-      paymentDate: fromFormDate(paymentForm.paymentDate),
-      amount,
-      method: paymentForm.method || null,
-      reference: paymentForm.reference || null,
-      notes: paidNote || paymentForm.notes || null,
-      unitIds: [data.unit.id],
-    };
-
-    const periodAllocations = periodRows
-      .filter((r) => r.billingPeriod && sumPaymentPeriodLine(r) > 0)
-      .map((r) => ({
-        unitId: data.unit.id,
-        billingPeriod: r.billingPeriod,
-        rent: Number(r.rent) || undefined,
-        electricity: Number(r.electricity) || undefined,
-        water: Number(r.water) || undefined,
-      }));
-    if (periodAllocations.length) {
-      body.periodAllocations = periodAllocations;
-    } else {
-      body.autoAllocate = true;
-    }
-
-    setBusy(true);
-    const res = await fetch('/api/rentals/payments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    setBusy(false);
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setToast(d.error || 'Failed to record payment');
-      return;
-    }
-    setToast('Payment recorded — outstanding balance updated 收款已記錄');
-    setShowPaidModal(false);
-    setPeriodRows([]);
-    setPaymentForm({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
-    setOcrResult(null);
-    setReceiptFile(null);
-    load();
   };
 
   const handleDeletePayment = async (paymentId: number) => {
@@ -933,54 +253,6 @@ function RentalDetailInner() {
     } finally {
       setDeletingPaymentId(null);
     }
-  };
-
-  const logNote = async () => {
-    if (!noteText.trim()) return;
-    setBusy(true);
-    await fetch(`/api/rentals/units/${id}/activities`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'Note Added', note: noteText }),
-    });
-    setBusy(false);
-    setShowNoteModal(false);
-    setNoteText('');
-    load();
-  };
-
-  const submitEndContract = async () => {
-    setBusy(true);
-    const body: Record<string, unknown> = {
-      actualEndDate: fromFormDate(endContractForm.actualEndDate),
-      depositRefund: endContractForm.depositRefund ? Number(endContractForm.depositRefund) : undefined,
-      depositDeductions: endContractForm.depositDeductions ? Number(endContractForm.depositDeductions) : undefined,
-      endNotes: endContractForm.endNotes || undefined,
-      forceEnd: true,
-    };
-    if (endContractForm.startNew && endContractForm.newTenantName.trim()) {
-      body.startNewLease = {
-        tenantName: endContractForm.newTenantName.trim(),
-        leaseStartDate: fromFormDate(endContractForm.newLeaseStart),
-        leaseEndDate: fromFormDate(endContractForm.newLeaseEnd),
-        baseRent: Number(endContractForm.newBaseRent) || Number(baseRent) || 0,
-        dueDateDay: Number(dueDateDay) || 1,
-      };
-    }
-    const res = await fetch(`/api/rentals/units/${id}/end-contract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const d = await res.json();
-      setToast(d.error || 'Failed to end contract');
-      return;
-    }
-    setShowEndContractModal(false);
-    setToast(endContractForm.startNew ? 'Contract ended — new lease started' : 'Contract ended');
-    load();
   };
 
   const deleteLeaseRecord = async (leaseId: number, tenantLabel: string, e: React.MouseEvent) => {
@@ -1047,6 +319,7 @@ function RentalDetailInner() {
   const balance = rec ? outstandingBalance(rec) : 0;
   const hasPersistedRecord = Boolean(rec && !isVirtualRentRecord(rec));
   const readOnly = Boolean(readOnlyLease);
+  const inp = RENTAL_DETAIL_INPUT_CLS;
   const fieldCls = readOnly
     ? 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-100 text-gray-600 cursor-not-allowed'
     : inp;
@@ -1060,15 +333,6 @@ function RentalDetailInner() {
   const contractEnded = readOnly || formallyEnded || staleEnded;
   const autoRentPeriod = calcBasicRentPeriod(Number(dueDateDay) || 1);
   const previousTenants = (leaseHistory || []).filter((l) => !l.isCurrent);
-  const liveElectricityMeter = meterDataFromInputs(meterPrevReading, meterCurrReading, meterRatePerUnit, {
-    otherUnitUsages,
-  });
-  const liveElectricityFee = electricityFormula
-    ? calcElectricityFeeForFormula(electricityFormula, liveElectricityMeter)
-    : Number(electricityFee) || rec?.electricityFee || 0;
-  const liveWaterFee = waterMeterFormula
-    ? calcWaterFeeFromMeter(waterMeterDataFromInputs(waterMeterPrev, waterMeterCurr, waterMeterRate))
-    : Number(waterFee) || rec?.waterFee || 0;
   const liveMonthTotal = (Number(baseRent) || rec?.baseRent || 0) + liveWaterFee + liveElectricityFee;
 
   return (
@@ -1151,16 +415,7 @@ function RentalDetailInner() {
             {currentLease?.isCurrent && !formallyEnded && !isHistoricalView && (
               <button
                 type="button"
-                onClick={() => {
-                  setEndContractForm((f) => ({
-                    ...f,
-                    actualEndDate: todayFormDate(),
-                    newTenantName: '',
-                    newLeaseEnd: '',
-                    newBaseRent: String(unit.currentYearRent || ''),
-                  }));
-                  setShowEndContractModal(true);
-                }}
+                onClick={() => setShowEndContractModal(true)}
                 className="px-3 py-2 text-sm border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
               >
                 完約 End Contract
@@ -1365,198 +620,62 @@ function RentalDetailInner() {
         <div className="space-y-6">
           {/* Utility / billing for current month */}
           {!isHistoricalView && (
-          <div className={`bg-white rounded-2xl border border-gray-200 p-6 ${readOnly ? 'opacity-90' : ''}`}>
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
-              <div>
-                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">水電費紀錄與帳單</p>
-                <h2 className="text-lg font-semibold text-gray-900">Utilities & Billing — {period}</h2>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 mb-4">
-              {readOnly ? 'Contract ended — billing locked 合約已完結，不可編輯' : 'Changes auto-save as you type. Use Undo 復原 if you made a mistake.'}
-            </p>
-            {rec ? (
-              <>
-                {/* Base Rent */}
-                <div className="rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-4">
-                  <p className="text-sm font-semibold text-brand-800 mb-3">基本租金 Base Rent</p>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                      <div className="px-3 py-2.5 rounded-lg bg-white border border-gray-200 text-sm font-semibold">{formatMoney(Number(baseRent) || rec.baseRent)}</div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                      <input {...periodDateInputProps(baseRentPeriodFrom, setBaseRentPeriodFrom, fieldCls, readOnly)} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                      <input {...periodDateInputProps(baseRentPeriodTo, setBaseRentPeriodTo, fieldCls, readOnly)} />
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-2">
-                    Amount locked to lease base rent · Auto ({formatDueDayLabel(Number(dueDateDay) || 1)}): {autoRentPeriod.formattedRange}
-                  </p>
-                </div>
-
-                {/* Electricity */}
-                {showUtilityFees && (
-                <div className="rounded-xl border border-yellow-100 bg-yellow-50/40 p-4 mb-4">
-                  <p className="text-sm font-semibold text-yellow-800 mb-3">電費 Electricity Fee</p>
-                  {electricityFormula ? (
-                    <>
-                      <p className="text-xs text-yellow-700/80 mb-3">
-                        {electricityFormula === '213a'
-                          ? '大分錶分拆: 實用電度數 = (今次 − 前次) − 其他單位；電費 = 實用電度數 × 每度電費'
-                          : '獨立分錶: 電費 = (今次 − 前次) × 每度電費'}
-                      </p>
-                      <div className="grid md:grid-cols-3 gap-3 mb-4">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                          <div className="px-3 py-2.5 rounded-lg bg-white border border-yellow-200 text-sm font-semibold text-yellow-900">
-                            {formatMoney(liveElectricityFee)}
-                          </div>
-                        </div>
-                      </div>
-                      <ElectricityMeterCalculator
-                        formula={electricityFormula}
-                        prevReading={meterPrevReading}
-                        currReading={meterCurrReading}
-                        ratePerUnit={meterRatePerUnit}
-                        deductionUnits={data?.sharedMeterDeductionUnits || []}
-                        otherUnitUsages={otherUnitUsages}
-                        onPrevReading={setMeterPrevReading}
-                        onCurrReading={setMeterCurrReading}
-                        onRatePerUnit={setMeterRatePerUnit}
-                        onOtherUnitUsage={(unitId, value) => {
-                          setOtherUnitUsages((prev) => ({ ...prev, [String(unitId)]: value }));
-                        }}
-                        suggestedPrevReading={suggestedPrevReading}
-                        inpClassName={fieldCls}
-                        readOnly={readOnly}
-                      />
-                      <div className="grid md:grid-cols-2 gap-3 mt-4">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input {...periodDateInputProps(electricityPeriodFrom, setElectricityPeriodFrom, inp, readOnly)} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input {...periodDateInputProps(electricityPeriodTo, setElectricityPeriodTo, inp, readOnly)} />
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="grid md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={electricityFee} onChange={(e) => setElectricityFee(e.target.value)} className={inp} placeholder="0 → shows /" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input {...periodDateInputProps(electricityPeriodFrom, setElectricityPeriodFrom, inp, readOnly)} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input {...periodDateInputProps(electricityPeriodTo, setElectricityPeriodTo, inp, readOnly)} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-                )}
-
-                {/* Water */}
-                {showUtilityFees && (
-                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 mb-4">
-                  <p className="text-sm font-semibold text-blue-800 mb-3">水費 Water Fee</p>
-                  {waterMeterFormula ? (
-                    <>
-                      <p className="text-xs text-blue-700/80 mb-3">213A formula: 用水度數 = 今次錶數 − 前次錶數</p>
-                      <WaterMeterCalculator
-                        prevReading={waterMeterPrev}
-                        currReading={waterMeterCurr}
-                        ratePerUnit={waterMeterRate}
-                        onPrevReading={setWaterMeterPrev}
-                        onCurrReading={setWaterMeterCurr}
-                        onRatePerUnit={setWaterMeterRate}
-                        suggestedPrevReading={suggestedPrevWaterReading}
-                        inpClassName={fieldCls}
-                        readOnly={readOnly}
-                      />
-                      <div className="grid md:grid-cols-2 gap-3 mt-4">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                          <input {...periodDateInputProps(waterPeriodFrom, setWaterPeriodFrom, inp, readOnly)} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                          <input {...periodDateInputProps(waterPeriodTo, setWaterPeriodTo, inp, readOnly)} />
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="grid md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Amount 金額</label>
-                        <input type="number" min={0} value={waterFee} onChange={(e) => setWaterFee(e.target.value)} className={inp} placeholder="0 → shows /" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Period From 計費起始</label>
-                        <input {...periodDateInputProps(waterPeriodFrom, setWaterPeriodFrom, inp, readOnly)} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Period To 計費結束</label>
-                        <input {...periodDateInputProps(waterPeriodTo, setWaterPeriodTo, inp, readOnly)} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-                )}
-                <div className="flex items-end gap-4">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Invoice note (optional)', '發票備註（選填）')}</label>
-                    <input className={inp} value={utilityNote} onChange={(e) => setUtilityNote(e.target.value)} placeholder="e.g. Water meter 1234" />
-                  </div>
-                  <div className="flex flex-col items-end gap-1 pb-2.5 min-w-[5.5rem]">
-                    <p className="text-xs text-gray-500 whitespace-nowrap text-right">
-                      {utilitySaveState === 'saving' && 'Saving… 儲存中'}
-                      {utilitySaveState === 'saved' && <span className="text-green-600">Saved ✓ 已儲存</span>}
-                      {utilitySaveState === 'error' && <span className="text-red-600">{MSG.saveFailed}</span>}
-                    </p>
-                    {utilityCanUndo && (
-                      <button
-                        type="button"
-                        onClick={() => void undoUtilitySave()}
-                        className="text-xs text-brand-600 font-medium hover:underline"
-                      >
-                        Undo 復原
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-4 rounded-xl border-2 border-brand-100 bg-brand-50 p-4 flex items-center justify-between flex-wrap gap-3">
-                  <div>
-                    <p className="text-xs text-gray-500">Total this month</p>
-                    <p className="text-3xl font-bold text-brand-700">{formatMoney(liveMonthTotal)}</p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Rent {formatMoney(Number(baseRent) || rec.baseRent)} + Water {formatUtilityAmount(liveWaterFee)} + Elec {formatUtilityAmount(liveElectricityFee)}
-                    </p>
-                    {rec.amountPaid > 0 && (
-                      <p className="text-sm text-green-700 mt-2 font-medium">
-                        Paid {formatMoney(rec.amountPaid)}
-                        {balance > 0 && <span className="text-orange-700"> · Outstanding {formatMoney(balance)}</span>}
-                      </p>
-                    )}
-                  </div>
-                  <span className={`px-3 py-1.5 rounded-full text-sm font-semibold ${RENTAL_STATUS_BADGE[recStatus]}`}>
-                    {RENTAL_STATUS_LABELS[recStatus]}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-gray-400">{MSG.noRecordForPeriod}</p>
-            )}
-          </div>
+            <RentalUtilitiesBillingSection
+              period={period}
+              readOnly={readOnly}
+              rec={rec}
+              baseRent={baseRent}
+              dueDateDay={dueDateDay}
+              showUtilityFees={showUtilityFees}
+              electricityFormula={electricityFormula}
+              waterMeterFormula={waterMeterFormula}
+              fieldCls={fieldCls}
+              inp={inp}
+              autoRentPeriod={autoRentPeriod}
+              baseRentPeriodFrom={baseRentPeriodFrom}
+              setBaseRentPeriodFrom={setBaseRentPeriodFrom}
+              baseRentPeriodTo={baseRentPeriodTo}
+              setBaseRentPeriodTo={setBaseRentPeriodTo}
+              waterFee={waterFee}
+              setWaterFee={setWaterFee}
+              waterPeriodFrom={waterPeriodFrom}
+              setWaterPeriodFrom={setWaterPeriodFrom}
+              waterPeriodTo={waterPeriodTo}
+              setWaterPeriodTo={setWaterPeriodTo}
+              electricityFee={electricityFee}
+              setElectricityFee={setElectricityFee}
+              electricityPeriodFrom={electricityPeriodFrom}
+              setElectricityPeriodFrom={setElectricityPeriodFrom}
+              electricityPeriodTo={electricityPeriodTo}
+              setElectricityPeriodTo={setElectricityPeriodTo}
+              meterPrevReading={meterPrevReading}
+              setMeterPrevReading={setMeterPrevReading}
+              meterCurrReading={meterCurrReading}
+              setMeterCurrReading={setMeterCurrReading}
+              meterRatePerUnit={meterRatePerUnit}
+              setMeterRatePerUnit={setMeterRatePerUnit}
+              otherUnitUsages={otherUnitUsages}
+              setOtherUnitUsages={setOtherUnitUsages}
+              waterMeterPrev={waterMeterPrev}
+              setWaterMeterPrev={setWaterMeterPrev}
+              waterMeterCurr={waterMeterCurr}
+              setWaterMeterCurr={setWaterMeterCurr}
+              waterMeterRate={waterMeterRate}
+              setWaterMeterRate={setWaterMeterRate}
+              suggestedPrevReading={suggestedPrevReading}
+              suggestedPrevWaterReading={suggestedPrevWaterReading}
+              sharedMeterDeductionUnits={data?.sharedMeterDeductionUnits || []}
+              utilityNote={utilityNote}
+              setUtilityNote={setUtilityNote}
+              utilitySaveState={utilitySaveState}
+              utilityCanUndo={utilityCanUndo}
+              undoUtilitySave={undoUtilitySave}
+              liveElectricityFee={liveElectricityFee}
+              liveWaterFee={liveWaterFee}
+              liveMonthTotal={liveMonthTotal}
+              recStatus={recStatus}
+              balance={balance}
+            />
           )}
 
           {/* Action bar */}
@@ -1645,7 +764,7 @@ function RentalDetailInner() {
                     🖨 {bi('View Invoice', '查看發票')}
                   </Link>
                 )}
-                <button onClick={() => { setNoteText(''); setShowNoteModal(true); }}
+                <button onClick={() => setShowNoteModal(true)}
                   className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">
                   📝 {bi('Add Note', '新增備註')}
                 </button>
@@ -1827,346 +946,75 @@ function RentalDetailInner() {
         </div>
       </div>
 
-      {/* Invoice Modal — preview/edit/send like invoice payment reminders */}
-      {showInvoiceModal && rec && (
-        <Modal title="Send Invoice 發送租金單" onClose={() => setShowInvoiceModal(false)}>
-          <div className="space-y-4">
-            <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 text-sm">
-              <p className="font-semibold text-gray-700 mb-2">Bill Summary</p>
-              <div className="space-y-1">
-                <div className="flex justify-between text-brand-700 gap-2">
-                  <span className="text-xs">{baseRentLineLabel({ ...rec, billingPeriod: period, baseRentPeriodFrom, baseRentPeriodTo })}</span>
-                  <span className="font-medium shrink-0">{formatMoney(Number(baseRent) || rec.baseRent)}</span>
-                </div>
-                <div className="flex justify-between text-blue-700">
-                  <span>{utilityLineLabel('water', { waterPeriodFrom, waterPeriodTo, electricityPeriodFrom: '', electricityPeriodTo: '' })}</span>
-                  <span>{formatUtilityAmount(Number(waterFee))}</span>
-                </div>
-                <div className="flex justify-between text-yellow-700">
-                  <span>{utilityLineLabel('electricity', { waterPeriodFrom: '', waterPeriodTo: '', electricityPeriodFrom, electricityPeriodTo })}</span>
-                  <span>{formatUtilityAmount(Number(electricityFee))}</span>
-                </div>
-                <div className="flex justify-between font-bold border-t pt-1 mt-1">
-                  <span>Total</span>
-                  <span className="text-lg">{formatMoney((Number(baseRent) || rec.baseRent) + Number(waterFee) + Number(electricityFee))}</span>
-                </div>
-              </div>
-            </div>
+      <RentalInvoiceModal
+        open={Boolean(showInvoiceModal && rec)}
+        rec={rec!}
+        unit={unit}
+        period={period}
+        baseRent={baseRent}
+        waterFee={waterFee}
+        electricityFee={electricityFee}
+        waterPeriodFrom={waterPeriodFrom}
+        waterPeriodTo={waterPeriodTo}
+        electricityPeriodFrom={electricityPeriodFrom}
+        electricityPeriodTo={electricityPeriodTo}
+        baseRentPeriodFrom={baseRentPeriodFrom}
+        baseRentPeriodTo={baseRentPeriodTo}
+        invoiceTo={invoiceTo}
+        setInvoiceTo={setInvoiceTo}
+        invoiceSubject={invoiceSubject}
+        setInvoiceSubject={setInvoiceSubject}
+        invoiceBody={invoiceBody}
+        setInvoiceBody={setInvoiceBody}
+        invoiceNote={invoiceNote}
+        setInvoiceNote={setInvoiceNote}
+        invoicePaymentTemplate={invoicePaymentTemplate}
+        setInvoicePaymentTemplate={setInvoicePaymentTemplate}
+        invoicePaymentRemark={invoicePaymentRemark}
+        setInvoicePaymentRemark={setInvoicePaymentRemark}
+        hasPersistedRecord={hasPersistedRecord}
+        busy={busy}
+        onClose={() => setShowInvoiceModal(false)}
+        onSend={() => void sendInvoice()}
+      />
 
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('To', '收件人')}</label>
-              <input
-                type="email"
-                className={inp}
-                value={invoiceTo}
-                onChange={(e) => setInvoiceTo(e.target.value)}
-                placeholder="tenant@email.com"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Subject', '主旨')}</label>
-              <input
-                type="text"
-                className={inp}
-                value={invoiceSubject}
-                onChange={(e) => setInvoiceSubject(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Body', '內文')}</label>
-              <textarea
-                className={`${inp} font-mono text-xs`}
-                rows={10}
-                value={invoiceBody}
-                onChange={(e) => setInvoiceBody(e.target.value)}
-              />
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {bi('Edit before sending. Same flow as invoice payment reminders.', '發送前可編輯。與發票催款郵件相同流程。')}
-              </p>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white p-3">
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                {bi('Preview', '預覽')}
-              </p>
-              <p className="text-xs text-gray-500 mb-1">
-                <span className="font-medium text-gray-700">{bi('To', '收件人')}:</span> {invoiceTo || '—'}
-              </p>
-              <p className="text-xs text-gray-500 mb-2">
-                <span className="font-medium text-gray-700">{bi('Subject', '主旨')}:</span> {invoiceSubject || '—'}
-              </p>
-              <div className="text-sm text-gray-800 whitespace-pre-wrap border-t border-gray-100 pt-2 max-h-48 overflow-y-auto">
-                {invoiceBody || '—'}
-              </div>
-            </div>
+      <RentalPaidModal
+        open={showPaidModal}
+        unit={unit}
+        period={period}
+        outstandingCharges={data.outstandingCharges || []}
+        monthlyRent={data.unit.currentYearRent || Number(baseRent) || data.paymentLedger?.find((h) => h.baseRent > 0)?.baseRent || 0}
+        hasCurrentRecord={Boolean(data.currentRecord)}
+        ensurePeriodRecord={ensurePeriodRecord}
+        onClose={() => setShowPaidModal(false)}
+        onSaved={(msg) => {
+          setToast(msg);
+          load();
+        }}
+        onError={setToast}
+      />
 
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Stored invoice note (optional)', '儲存於租金單的備註（選填）')}</label>
-              <textarea className={inp} rows={2} value={invoiceNote} onChange={(e) => setInvoiceNote(e.target.value)} placeholder={`Dear ${unit.tenantName},…`} />
-            </div>
-            <DebitNotePaymentOptions
-              templateId={invoicePaymentTemplate}
-              onTemplateId={setInvoicePaymentTemplate}
-              manualRemark={invoicePaymentRemark}
-              onManualRemark={setInvoicePaymentRemark}
-              showPreview
-            />
-            <div className="flex justify-between gap-3 flex-wrap">
-              <div className="flex gap-2 flex-wrap">
-                {hasPersistedRecord && (
-                  <Link href={`/rentals/records/${rec.id}/invoice`} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">{bi('Preview Print View', '預覽列印')}</Link>
-                )}
-                {unit.tenantId && (
-                  <Link
-                    href={`/billing/debit-note?tenantId=${unit.tenantId}&unitId=${unit.id}&targetPeriod=${period}&mode=single&paymentTemplate=${invoicePaymentTemplate}${invoicePaymentRemark ? `&paymentRemark=${encodeURIComponent(invoicePaymentRemark)}` : ''}`}
-                    className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
-                  >
-                    Formal Debit Note 繳費通知單
-                  </Link>
-                )}
-              </div>
-              <button onClick={sendInvoice} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
-                {busy ? bi('Sending…', '發送中…') : bi('Send invoice', '發送租金單')}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      <RentalEndContractModal
+        open={showEndContractModal}
+        unitId={id}
+        tenantName={unit.tenantName}
+        baseRent={baseRent}
+        dueDateDay={dueDateDay}
+        defaultNewBaseRent={String(unit.currentYearRent || '')}
+        onClose={() => setShowEndContractModal(false)}
+        onDone={(msg) => {
+          setToast(msg);
+          load();
+        }}
+        onError={setToast}
+      />
 
-      {/* Record Payment Modal */}
-      {showPaidModal && unit.tenantId && (
-        <div className="modal-overlay">
-          <div className="modal-panel sm:max-w-3xl max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-bold">Record Payment 記錄收款</h2>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  {bi('Each line is one period with rent, electricity and water. Add or remove lines as needed.', '每列為一個帳期（租金、電費、水費）。可增刪列數。')}
-                </p>
-              </div>
-              <button type="button" onClick={() => setShowPaidModal(false)} className="text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
-            </div>
-
-            <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
-              <p className="text-sm text-green-700">Outstanding for {unit.unitName} 未付總額</p>
-              <p className="text-2xl font-bold text-green-800">
-                {formatMoney((data.outstandingCharges || []).reduce((s, c) => s + chargeOutstanding(c), 0))}
-              </p>
-              <p className="text-xs text-green-600 mt-1">
-                {(data.outstandingCharges || []).length} {bi('open charge item(s)', '未結收費項目')}
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-500">Paid Date 交租日</label>
-                  <input {...periodDateInputProps(
-                    paymentForm.paymentDate,
-                    (v) => setPaymentForm({ ...paymentForm, paymentDate: v }),
-                    inp,
-                  )} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Total Amount 收款總額</label>
-                  <input
-                    type="number"
-                    className={inp}
-                    value={paymentForm.amount}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Method 方式</label>
-                  <select
-                    className={inp}
-                    value={paymentForm.method}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
-                  >
-                    <option value="">Select method 選擇方式</option>
-                    {RENTAL_PAYMENT_METHODS.map((m) => (
-                      <option key={m} value={m}>{RENTAL_PAYMENT_METHOD_LABELS[m]}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Reference 參考</label>
-                  <input className={inp} value={paymentForm.reference} onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })} />
-                </div>
-              </div>
-
-              <PaymentPeriodTable
-                rows={periodRows}
-                onChange={applyPeriodRows}
-                defaultUnitId={data.unit.id}
-                defaultPeriod={startPaymentPeriod()}
-                extraActions={(
-                  <>
-                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={fillOutstandingPeriodRows}>
-                      {bi('Fill arrears', '填未付')}
-                    </button>
-                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(3)}>
-                      {bi('3 months', '預付3個月')}
-                    </button>
-                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
-                      {bi('6 months', '預付6個月')}
-                    </button>
-                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(12)}>
-                      {bi('12 months', '預付12個月')}
-                    </button>
-                  </>
-                )}
-              />
-              <p className="text-xs text-gray-500">
-                {bi('Period total', '帳期合計')}: {formatMoney(sumPaymentPeriodLines(periodRows))}
-                {paymentForm.amount && ` · ${bi('Payment', '收款')} ${formatMoney(Number(paymentForm.amount) || 0)}`}
-              </p>
-
-              {data.currentRecord && (
-                <div>
-                  <p className="text-sm font-medium text-gray-700 mb-2">Upload Bank Slip / 收款憑證 (optional)</p>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    aria-label={bi('Upload bank slip', '上傳收款憑證')}
-                    onClick={() => receiptInputRef.current?.click()}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); receiptInputRef.current?.click(); } }}
-                    onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleReceiptUpload(f); }}
-                    onDragOver={(e) => e.preventDefault()}
-                    className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40"
-                  >
-                    <input
-                      ref={receiptInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      aria-label={bi('Upload bank slip', '上傳收款憑證')}
-                      onChange={(e) => { if (e.target.files?.[0]) handleReceiptUpload(e.target.files[0]); e.target.value = ''; }}
-                    />
-                    {ocrLoading ? (
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600 mx-auto" />
-                    ) : receiptFile ? (
-                      <p className="text-sm text-green-700 font-medium">✅ {receiptFile.name}</p>
-                    ) : (
-                      <p className="text-sm text-gray-500">Drop receipt image for AI extract (current period)</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
-                <textarea className={inp} rows={2} value={paidNote} onChange={(e) => setPaidNote(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowPaidModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
-              <button onClick={confirmPaid} disabled={busy || !Number(paymentForm.amount)} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
-                {busy ? BTN.saving : bi('Save & Allocate', '儲存並核銷')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* End Contract modal */}
-      {showEndContractModal && (
-        <Modal title="End Contract 完約" onClose={() => setShowEndContractModal(false)}>
-          <div className="space-y-4 text-sm">
-            <p className="text-gray-600">{bi('Close the current lease for', '完結現任租約：')} <strong>{unit.tenantName}</strong>. {bi('Auto-invoices will stop after the lease end date.', '租約完結日後將停止自動發票。')}</p>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Actual move-out date 實際退租日</label>
-              <input {...periodDateInputProps(
-                endContractForm.actualEndDate,
-                (v) => setEndContractForm({ ...endContractForm, actualEndDate: v }),
-                inp,
-              )} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Deposit refund 退按金</label>
-                <input type="number" className={inp} value={endContractForm.depositRefund} onChange={(e) => setEndContractForm({ ...endContractForm, depositRefund: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Deductions 扣除</label>
-                <input type="number" className={inp} value={endContractForm.depositDeductions} onChange={(e) => setEndContractForm({ ...endContractForm, depositDeductions: e.target.value })} />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Notes 備註</label>
-              <textarea className={inp} rows={2} value={endContractForm.endNotes} onChange={(e) => setEndContractForm({ ...endContractForm, endNotes: e.target.value })} />
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={endContractForm.startNew} onChange={(e) => setEndContractForm({ ...endContractForm, startNew: e.target.checked })} />
-              Start new lease immediately 立即新租約
-            </label>
-            {endContractForm.startNew && (
-              <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/50">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{bi('New tenant name', '新租客姓名')}</label>
-                  <input className={inp} value={endContractForm.newTenantName} onChange={(e) => setEndContractForm({ ...endContractForm, newTenantName: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">{bi('Lease start', '起租日')}</label>
-                    <input {...periodDateInputProps(
-                      endContractForm.newLeaseStart,
-                      (v) => setEndContractForm({ ...endContractForm, newLeaseStart: v }),
-                      inp,
-                    )} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">{bi('Lease end', '完租日')}</label>
-                    <input {...periodDateInputProps(
-                      endContractForm.newLeaseEnd,
-                      (v) => setEndContractForm({ ...endContractForm, newLeaseEnd: v }),
-                      inp,
-                    )} />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{bi('Base rent', '基本租金')}</label>
-                  <input type="number" className={inp} value={endContractForm.newBaseRent} onChange={(e) => setEndContractForm({ ...endContractForm, newBaseRent: e.target.value })} />
-                </div>
-              </div>
-            )}
-            <div className="flex justify-end gap-3 pt-2">
-              <button onClick={() => setShowEndContractModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
-              <button onClick={submitEndContract} disabled={busy} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
-                {busy ? MSG.processing : bi('Confirm End Contract', '確認完約')}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Note modal */}
-      {showNoteModal && (
-        <Modal title={bi('Log Activity Note', '記錄活動備註')} onClose={() => setShowNoteModal(false)}>
-          <label className="block text-xs font-medium text-gray-500 mb-1">{bi('Activity note', '活動備註')}</label>
-          <textarea className={inp} rows={4} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="e.g. Tenant called about late payment…" />
-          <div className="flex justify-end gap-3 mt-4">
-            <button onClick={() => setShowNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
-            <button onClick={logNote} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
-              {BTN.save} {bi('Note', '備註')}
-            </button>
-          </div>
-        </Modal>
-      )}
+      <RentalNoteModal
+        open={showNoteModal}
+        unitId={id}
+        onClose={() => setShowNoteModal(false)}
+        onSaved={load}
+      />
     </AppLayout>
-  );
-}
-
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div className="modal-overlay">
-      <div className="modal-panel max-h-[92vh]">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-bold">{title}</h2>
-          <button type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-700 text-xl" aria-label={BTN.close}>✕</button>
-        </div>
-        {children}
-      </div>
-    </div>
   );
 }

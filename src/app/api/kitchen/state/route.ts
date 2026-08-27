@@ -7,11 +7,16 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const lite = new URL(request.url).searchParams.get('lite') === '1';
+  const params = new URL(request.url).searchParams;
+  const lite = params.get('lite') === '1';
+  const includeInventory = params.get('inventory') !== '0';
+  const includeOrders = params.get('orders') !== '0';
   const ownerId = await resolveKitchenOwnerUserId();
   const state = await getState(ownerId, {
     isAdmin: session.role === 'admin',
     includeMovements: !lite,
+    includeInventory,
+    includeOrders,
   });
 
   if (!lite) {

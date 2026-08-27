@@ -30,6 +30,7 @@ import {
   type KitchenState,
   type KitchenOpenOrder,
   type KitchenNeedLine,
+  type KitchenDemand,
 } from '@/lib/kitchen';
 import { resolveRawStockName, defaultGiftBoxGlassBottleStockName, BIRD_NEST_TYPES, BIRD_NEST_TYPE_LABELS, type BirdNestType } from '@/lib/kitchen-prep';
 import { type StockMaps } from '@/lib/kitchen-bom';
@@ -49,8 +50,55 @@ type AdjustStockTarget = {
   unit?: string;
 };
 
+const KITCHEN_TABLE_PAGE_SIZE = 20;
+
 function tickKey(orderId: number, needKey: string) {
   return `${orderId}::${needKey}`;
+}
+
+function TablePagination({
+  page,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalItems <= pageSize) return null;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const pageStart = (page - 1) * pageSize;
+  const pageEnd = Math.min(page * pageSize, totalItems);
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 mt-3 border-t border-gray-100 text-sm">
+      <div className="text-gray-600">
+        {bi(`Showing ${pageStart + 1}–${pageEnd} of ${totalItems}`, `顯示 ${pageStart + 1}–${pageEnd}，共 ${totalItems} 筆`)}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          ← {bi('Prev', '上一頁')}
+        </button>
+        <span className="text-xs text-gray-500">
+          {bi(`Page ${page} / ${totalPages}`, `第 ${page} / ${totalPages} 頁`)}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          {bi('Next', '下一頁')} →
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** Stock reserved by temporary ticks (excludes `excludeTickKey` if provided). */
@@ -113,10 +161,36 @@ function isNeedStockEnough(n: KitchenNeedLine, stock: StockMaps): boolean {
   return false;
 }
 
+function mergeOrdersSlice(
+  prev: KitchenState,
+  slice: { openOrders: KitchenOpenOrder[]; demand: KitchenDemand }
+): KitchenState {
+  const { openOrders, demand } = slice;
+  return {
+    ...prev,
+    openOrders,
+    demand,
+    giftBoxes: prev.giftBoxes.map((g) => ({ ...g, needed: demand.giftBoxes[g.boxType] || 0 })),
+    finished: prev.finished.map((f) => ({ ...f, needed: demand.finished[f.sku] || 0 })),
+    raw: prev.raw.map((r) => ({ ...r, needed: demand.raw[r.name] ?? 0 })),
+  };
+}
+
 export default function KitchenPage() {
   const router = useRouter();
   const [state, setState] = useState<KitchenState | null>(null);
-  const [movementsLoading, setMovementsLoading] = useState(true);
+  const [shellLoading, setShellLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [movementsLoading, setMovementsLoading] = useState(false);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [stockExpanded, setStockExpanded] = useState(false);
+  const [ordersExpanded, setOrdersExpanded] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const inventoryLoadedRef = useRef(false);
+  const ordersLoadedRef = useRef(false);
+  const movementsLoadedRef = useRef(false);
   const catalogBundleRef = useRef<{ catalog: KitchenCatalog; formulas: KitchenFormulas } | null>(null);
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [modal, setModal] = useState<Modal>(null);
@@ -169,51 +243,130 @@ export default function KitchenPage() {
       const res = await fetch('/api/kitchen/movements');
       const data = await res.json();
       if (!res.ok) return;
+      movementsLoadedRef.current = true;
       setState((prev) => (prev ? { ...prev, movements: data.movements || [] } : prev));
     } finally {
       setMovementsLoading(false);
     }
   };
 
-  const loadCore = async () => {
-    const res = await fetch('/api/kitchen/state?lite=1');
-    const data = await res.json();
-    if (!res.ok) return;
-    setState((prev) => {
-      const merged = mergeCatalogIntoState(data.state, prev?.movements);
-      if (merged) {
-        const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
-        if (first) setGiftType((cur) => cur || first);
+  const loadOrders = async () => {
+    setOrdersLoading(true);
+    try {
+      const res = await fetch('/api/kitchen/orders');
+      const data = await res.json();
+      if (!res.ok) return;
+      ordersLoadedRef.current = true;
+      setState((prev) => (prev ? mergeOrdersSlice(prev, data.orders) : prev));
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const ensureOrders = async () => {
+    if (ordersLoadedRef.current) return;
+    await loadOrders();
+  };
+
+  const loadInventory = async () => {
+    setInventoryLoading(true);
+    try {
+      const res = await fetch('/api/kitchen/inventory');
+      const data = await res.json();
+      if (!res.ok) return;
+      inventoryLoadedRef.current = true;
+      setState((prev) => (prev ? { ...prev, ...data.inventory } : prev));
+    } finally {
+      setInventoryLoading(false);
+    }
+  };
+
+  const ensureInventory = async () => {
+    if (inventoryLoadedRef.current) return;
+    await loadInventory();
+  };
+
+  const toggleStockExpanded = () => {
+    const next = !stockExpanded;
+    setStockExpanded(next);
+    if (next && !inventoryLoadedRef.current) {
+      void loadInventory();
+    }
+  };
+
+  const toggleOrdersExpanded = () => {
+    const next = !ordersExpanded;
+    setOrdersExpanded(next);
+    if (next && !ordersLoadedRef.current) {
+      void loadOrders();
+    }
+  };
+
+  const toggleHistoryExpanded = () => {
+    const next = !historyExpanded;
+    setHistoryExpanded(next);
+    if (next && !movementsLoadedRef.current) {
+      void loadMovements();
+    }
+  };
+
+  const loadShell = async () => {
+    setShellLoading(true);
+    try {
+      const res = await fetch('/api/kitchen/state?lite=1&inventory=0&orders=0');
+      const data = await res.json();
+      if (!res.ok) return;
+      setState((prev) => {
+        const merged = mergeCatalogIntoState(data.state, prev?.movements);
+        if (merged) {
+          const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
+          if (first) setGiftType((cur) => cur || first);
+        }
+        return merged ?? prev;
+      });
+      if (inventoryLoadedRef.current) {
+        await loadInventory();
       }
-      return merged ?? prev;
-    });
+      if (ordersLoadedRef.current) {
+        await loadOrders();
+      }
+    } finally {
+      setShellLoading(false);
+    }
   };
 
   const loadInitial = async () => {
-    const [stateRes, catalogRes] = await Promise.all([
-      fetch('/api/kitchen/state?lite=1'),
-      fetch('/api/kitchen/catalog'),
-    ]);
-    const stateData = await stateRes.json();
-    const catalogData = await catalogRes.json();
-    if (!stateRes.ok || !catalogRes.ok) return;
+    setShellLoading(true);
+    try {
+      const [stateRes, catalogRes] = await Promise.all([
+        fetch('/api/kitchen/state?lite=1&inventory=0&orders=0'),
+        fetch('/api/kitchen/catalog'),
+      ]);
+      const stateData = await stateRes.json();
+      const catalogData = await catalogRes.json();
+      if (!stateRes.ok || !catalogRes.ok) return;
 
-    catalogBundleRef.current = {
-      catalog: catalogData.catalog,
-      formulas: catalogData.formulas,
-    };
-    const merged = mergeCatalogIntoState(stateData.state, []);
-    if (merged) {
-      setState(merged);
-      const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
-      if (first) setGiftType((cur) => cur || first);
+      catalogBundleRef.current = {
+        catalog: catalogData.catalog,
+        formulas: catalogData.formulas,
+      };
+      const merged = mergeCatalogIntoState(stateData.state, []);
+      if (merged) {
+        setState(merged);
+        const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
+        if (first) setGiftType((cur) => cur || first);
+      }
+    } finally {
+      setShellLoading(false);
     }
-    void loadMovements();
   };
 
-  const load = async (opts?: { refreshMovements?: boolean }) => {
-    await loadCore();
-    if (opts?.refreshMovements !== false) {
+  const load = async (opts?: { refreshMovements?: boolean; refreshOrders?: boolean }) => {
+    await loadShell();
+    if (opts?.refreshOrders !== false && ordersLoadedRef.current) {
+      await loadOrders();
+    }
+    if (opts?.refreshMovements !== false && movementsLoadedRef.current) {
       await loadMovements();
     }
   };
@@ -226,6 +379,14 @@ export default function KitchenPage() {
     const t = setTimeout(() => setToast(null), 4500);
     return () => clearTimeout(t);
   }, [toast]);
+
+  const applyKitchenState = (next: KitchenState | undefined) => {
+    if (!next) return;
+    inventoryLoadedRef.current = true;
+    ordersLoadedRef.current = true;
+    movementsLoadedRef.current = true;
+    setState(next);
+  };
 
   const flash = (text: string, kind: 'success' | 'error' = 'success') => setToast({ text, kind });
 
@@ -280,7 +441,7 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       closeAdjustStock();
       flash(bi('Stock adjusted', '庫存已調整'));
     } finally {
@@ -467,7 +628,8 @@ export default function KitchenPage() {
     setReturnQtys(next);
   };
 
-  const openGift = (order?: KitchenOpenOrder, boxType?: string) => {
+  const openGift = async (order?: KitchenOpenOrder, boxType?: string) => {
+    await Promise.all([ensureInventory(), ensureOrders()]);
     if (order?.type === 'nestiee') {
       setGiftOrderId(order.id);
       const pending = order.needs.find((n) => !n.done && n.needKey.startsWith('gift:'));
@@ -482,7 +644,8 @@ export default function KitchenPage() {
     setModal('gift');
   };
 
-  const openReturn = (order?: KitchenOpenOrder) => {
+  const openReturn = async (order?: KitchenOpenOrder) => {
+    await Promise.all([ensureInventory(), ensureOrders()]);
     const id = order?.id || returnOrders[0]?.id || '';
     const selected = order || returnOrders.find((o) => o.id === id) || null;
     setReturnOrderId(id);
@@ -490,7 +653,8 @@ export default function KitchenPage() {
     setModal('return');
   };
 
-  const openRestock = () => {
+  const openRestock = async () => {
+    await ensureInventory();
     setRawInputs({});
     setModal('restock');
   };
@@ -505,8 +669,9 @@ export default function KitchenPage() {
     });
   };
 
-  const toggleNeedTick = (order: KitchenOpenOrder, need: KitchenNeedLine) => {
+  const toggleNeedTick = async (order: KitchenOpenOrder, need: KitchenNeedLine) => {
     if (need.done || order.fullyFulfilled || busy) return;
+    await Promise.all([ensureInventory(), ensureOrders()]);
     const key = tickKey(order.id, need.needKey);
     const currentlyTicked = Boolean(tempTicks[key]);
     // When ticking on, stock must cover this line after other reservations.
@@ -577,7 +742,7 @@ export default function KitchenPage() {
           flash(data.error || 'Failed', 'error');
           return;
         }
-        setState(data.state);
+        applyKitchenState(data.state);
       } else {
         let latest = state;
         for (const n of pending) {
@@ -594,12 +759,12 @@ export default function KitchenPage() {
           const data = await res.json();
           if (!res.ok) {
             flash(data.error || 'Failed', 'error');
-            if (data.state) setState(data.state);
+            if (data.state) applyKitchenState(data.state);
             else if (latest) setState(latest);
             return;
           }
           latest = data.state;
-          setState(data.state);
+          applyKitchenState(data.state);
         }
       }
       clearOrderTicks(order.id);
@@ -640,7 +805,7 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       setModal(null);
       flash(
         giftOrderId
@@ -671,7 +836,7 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       flash(bi(`Topped up to ${minStock}`, `已補貨至 ${minStock}`));
     } finally {
       setBusy(false);
@@ -693,7 +858,7 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       flash(
         next
           ? bi('Holiday mode on — gift box min 20', '節日模式已開啟 — 禮盒最低庫存 20')
@@ -721,7 +886,7 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       setModal(null);
       flash(bi('Return gift packaged', '回禮已包裝'));
     } finally {
@@ -745,7 +910,7 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       setModal(null);
       flash(bi('Stock updated', '庫存已更新'));
     } finally {
@@ -763,14 +928,17 @@ export default function KitchenPage() {
         flash(data.error || 'Failed', 'error');
         return;
       }
-      setState(data.state);
+      applyKitchenState(data.state);
       flash(bi(`Cancelled: ${actionLabel}`, `已取消：${actionLabel}`));
     } finally {
       setBusy(false);
     }
   };
 
-  const giftNeededTotal = state?.giftBoxes.reduce((s, g) => s + g.needed, 0) || 0;
+  const giftNeededTotal = useMemo(() => {
+    if (!state) return 0;
+    return Object.values(state.demand.giftBoxes).reduce((sum, n) => sum + n, 0);
+  }, [state?.demand.giftBoxes]);
   const returnNeededCount = returnOrders.length;
 
   const filteredMovements = useMemo(() => {
@@ -778,6 +946,31 @@ export default function KitchenPage() {
     if (!historyActionFilter) return state.movements;
     return state.movements.filter((m) => m.action === historyActionFilter);
   }, [state, historyActionFilter]);
+
+  const openOrders = state?.openOrders ?? [];
+  const ordersTotalPages = Math.max(1, Math.ceil(openOrders.length / KITCHEN_TABLE_PAGE_SIZE));
+  const paginatedOpenOrders = useMemo(() => {
+    const start = (ordersPage - 1) * KITCHEN_TABLE_PAGE_SIZE;
+    return openOrders.slice(start, start + KITCHEN_TABLE_PAGE_SIZE);
+  }, [openOrders, ordersPage]);
+
+  const historyTotalPages = Math.max(1, Math.ceil(filteredMovements.length / KITCHEN_TABLE_PAGE_SIZE));
+  const paginatedMovements = useMemo(() => {
+    const start = (historyPage - 1) * KITCHEN_TABLE_PAGE_SIZE;
+    return filteredMovements.slice(start, start + KITCHEN_TABLE_PAGE_SIZE);
+  }, [filteredMovements, historyPage]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historyActionFilter]);
+
+  useEffect(() => {
+    if (ordersPage > ordersTotalPages) setOrdersPage(ordersTotalPages);
+  }, [ordersPage, ordersTotalPages]);
+
+  useEffect(() => {
+    if (historyPage > historyTotalPages) setHistoryPage(historyTotalPages);
+  }, [historyPage, historyTotalPages]);
 
   const historyActionOptions = useMemo(
     () => KITCHEN_ACTIONS.filter((a) => a !== 'void'),
@@ -859,7 +1052,7 @@ export default function KitchenPage() {
           busy={busy}
           onSaved={(next) => {
             catalogBundleRef.current = { catalog: next.catalog, formulas: next.formulas };
-            setState(next);
+            applyKitchenState(next);
           }}
           onError={(msg) => flash(msg, 'error')}
           onSuccess={(msg) => flash(msg, 'success')}
@@ -867,12 +1060,37 @@ export default function KitchenPage() {
         />
       )}
 
-      {/* Inventory */}
+      {/* Inventory — collapsed by default; fetches stock on first expand */}
+      <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <button
+          type="button"
+          onClick={toggleStockExpanded}
+          aria-expanded={stockExpanded}
+          className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors"
+        >
+          <div>
+            <h2 className="font-semibold text-gray-900">{bi('Inventory', '庫存')}</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {bi('Gift boxes · finished bottles · raw materials', '禮盒 · 成品樽 · 原料')}
+            </p>
+          </div>
+          <span className="text-gray-400 text-lg shrink-0" aria-hidden>
+            {stockExpanded ? '▾' : '▸'}
+          </span>
+        </button>
+        {stockExpanded && (
+          <div className="px-5 pb-5 border-t border-gray-100">
+            {inventoryLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+              </div>
+            ) : (
+              <>
       {(() => {
         const lowBoxes = state.giftBoxes.filter((g) => giftBoxTopUpQty(g.quantity, giftMinStock) > 0);
         if (!lowBoxes.length) return null;
         return (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="mt-4 mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             {bi(
               `Gift boxes below ${giftMinStock}: `,
               `禮盒低於 ${giftMinStock}：`
@@ -885,7 +1103,7 @@ export default function KitchenPage() {
           </div>
         );
       })()}
-      <div className="grid lg:grid-cols-3 gap-6 mb-6">
+      <div className="grid lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="font-semibold text-gray-900 mb-3">{bi('Gift boxes', '禮盒庫存')}</h2>
           <div className="overflow-x-auto">
@@ -1101,6 +1319,11 @@ export default function KitchenPage() {
           </div>
         </div>
       </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3 mb-8">
@@ -1137,11 +1360,34 @@ export default function KitchenPage() {
         </button>
       </div>
 
-      {/* Orders + History */}
+      {/* Orders + History — collapsed by default; each lazy-loads on first expand */}
       <div className="grid lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="font-semibold text-gray-900 mb-3">{bi('Orders', '訂單')}</h2>
-          <div className="overflow-x-auto">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <button
+            type="button"
+            onClick={toggleOrdersExpanded}
+            aria-expanded={ordersExpanded}
+            className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors"
+          >
+            <div>
+              <h2 className="font-semibold text-gray-900">{bi('Orders', '訂單')}</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {bi('Nestiee gift boxes · return gifts', 'Nestiee 禮盒 · 回禮')}
+              </p>
+            </div>
+            <span className="text-gray-400 text-lg shrink-0" aria-hidden>
+              {ordersExpanded ? '▾' : '▸'}
+            </span>
+          </button>
+          {ordersExpanded && (
+            <div className="px-5 pb-5 border-t border-gray-100">
+              {ordersLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+                </div>
+              ) : (
+                <>
+          <div className="overflow-x-auto mt-4">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-500 border-b">
@@ -1152,14 +1398,14 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {state.openOrders.length === 0 && (
+                {openOrders.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-6 text-center text-gray-400">
                       {bi('No open Nestiee / 回禮 needs', '沒有待製作的 Nestiee / 回禮')}
                     </td>
                   </tr>
-                )}
-                {state.openOrders.map((o) => (
+                ) : (
+                paginatedOpenOrders.map((o) => (
                   <tr
                     key={o.id}
                     className={`border-b border-gray-50 align-top ${
@@ -1247,36 +1493,72 @@ export default function KitchenPage() {
                       )}
                     </td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={ordersPage}
+            totalItems={openOrders.length}
+            pageSize={KITCHEN_TABLE_PAGE_SIZE}
+            onPageChange={setOrdersPage}
+          />
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h2 className="font-semibold text-gray-900">{bi('History', '歷史')}</h2>
-            <label className="flex items-center gap-2 text-sm text-gray-600">
-              <span>動作</span>
-              <select
-                className={`${inputCls} min-w-[9rem]`}
-                value={historyActionFilter}
-                onChange={(e) =>
-                  setHistoryActionFilter((e.target.value || '') as KitchenAction | '')
-                }
-              >
-                <option value="">{bi('All', '全部')}</option>
-                {historyActionOptions.map((a) => (
-                  <option key={a} value={a}>
-                    {KITCHEN_ACTION_LABELS[a]}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div className="flex items-start justify-between gap-3 px-5 py-4">
+            <button
+              type="button"
+              onClick={toggleHistoryExpanded}
+              aria-expanded={historyExpanded}
+              className="flex-1 flex items-center justify-between gap-3 text-left hover:opacity-80 transition-opacity"
+            >
+              <div>
+                <h2 className="font-semibold text-gray-900">{bi('History', '歷史')}</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {bi('Packaging · restock · adjustments', '包裝 · 補貨 · 調整紀錄')}
+                </p>
+              </div>
+              <span className="text-gray-400 text-lg shrink-0" aria-hidden>
+                {historyExpanded ? '▾' : '▸'}
+              </span>
+            </button>
           </div>
-          <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+          {historyExpanded && (
+            <div className="px-5 pb-5 border-t border-gray-100">
+              <div className="flex flex-wrap items-center justify-end gap-3 mt-4 mb-3">
+                <label className="flex items-center gap-2 text-sm text-gray-600">
+                  <span>動作</span>
+                  <select
+                    className={`${inputCls} min-w-[9rem]`}
+                    value={historyActionFilter}
+                    onChange={(e) =>
+                      setHistoryActionFilter((e.target.value || '') as KitchenAction | '')
+                    }
+                  >
+                    <option value="">{bi('All', '全部')}</option>
+                    {historyActionOptions.map((a) => (
+                      <option key={a} value={a}>
+                        {KITCHEN_ACTION_LABELS[a]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {movementsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+                </div>
+              ) : (
+                <>
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-white">
+              <thead>
                 <tr className="text-left text-gray-500 border-b">
                   <th className="py-2 pr-2">日子/時間</th>
                   <th className="py-2 pr-2">動作</th>
@@ -1286,13 +1568,7 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {movementsLoading ? (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-gray-400">
-                      <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600" />
-                    </td>
-                  </tr>
-                ) : filteredMovements.length === 0 ? (
+                {filteredMovements.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-6 text-center text-gray-400">
                       {state.movements.length === 0
@@ -1301,7 +1577,7 @@ export default function KitchenPage() {
                     </td>
                   </tr>
                 ) : (
-                filteredMovements.map((m) => (
+                paginatedMovements.map((m) => (
                   <tr
                     key={m.id}
                     className={`border-b border-gray-50 align-top ${m.voidedAt ? 'opacity-50' : ''}`}
@@ -1335,6 +1611,16 @@ export default function KitchenPage() {
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={historyPage}
+            totalItems={filteredMovements.length}
+            pageSize={KITCHEN_TABLE_PAGE_SIZE}
+            onPageChange={setHistoryPage}
+          />
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

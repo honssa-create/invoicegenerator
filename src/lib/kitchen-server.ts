@@ -486,31 +486,19 @@ export interface GetStateOptions {
   isAdmin?: boolean;
   /** Default true. Set false for lite dashboard loads (lazy-fetch movements). */
   includeMovements?: boolean;
+  /** Default true. Set false to skip DB stock reads (quantities stay 0; needed still computed). */
+  includeInventory?: boolean;
+  /** Default true. Set false to skip open-order reads (empty list until lazy-loaded). */
+  includeOrders?: boolean;
 }
 
-export async function getState(userId: number, opts?: GetStateOptions): Promise<KitchenState> {
-  const includeMovements = opts?.includeMovements !== false;
+const EMPTY_STOCK: StockMaps = { finished: {}, raw: {}, giftBoxes: {} };
 
-  const { catalog, formulas } = await loadKitchenCatalog(userId);
-  await ensureSeed(userId, catalog);
-
-  const fulfillmentsPromise = loadFulfillments(userId);
-  const independentPromise = Promise.all([
-    loadStockMaps(userId, catalog),
-    includeMovements ? loadKitchenMovements(userId) : Promise.resolve([] as KitchenMovement[]),
-    loadUnfinishedPrepRawDemand(userId, formulas),
-    getHolidayMode(userId),
-  ]);
-
-  const fulfillments = await fulfillmentsPromise;
-  const [openOrders, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
-    loadOpenOrders(userId, fulfillments, catalog),
-    independentPromise,
-  ]);
-
-  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
-  demand.raw = unfinishedRaw;
-
+function buildInventoryRows(
+  catalog: KitchenCatalog,
+  stock: StockMaps,
+  demand: KitchenState['demand']
+): Pick<KitchenState, 'giftBoxes' | 'finished' | 'raw'> {
   const giftBoxes = activeGiftBoxTypes(catalog).map((g) => ({
     boxType: g.id,
     label: g.label,
@@ -534,6 +522,80 @@ export async function getState(userId: number, opts?: GetStateOptions): Promise<
       quantity: roundRawQty(stock.raw[m.name] || 0, m.unit),
       needed: roundRawQty(demand.raw[m.name] || 0, m.unit),
     }));
+
+  return { giftBoxes, finished, raw };
+}
+
+export type KitchenInventorySlice = Pick<KitchenState, 'giftBoxes' | 'finished' | 'raw' | 'demand'>;
+
+/** Load on-hand stock quantities merged with current open-order demand. */
+export async function getInventorySlice(userId: number): Promise<KitchenInventorySlice> {
+  const { catalog, formulas } = await loadKitchenCatalog(userId);
+  await ensureSeed(userId, catalog);
+
+  const [stock, fulfillments, unfinishedRaw] = await Promise.all([
+    loadStockMaps(userId, catalog),
+    loadFulfillments(userId),
+    loadUnfinishedPrepRawDemand(userId, formulas),
+  ]);
+  const openOrders = await loadOpenOrders(userId, fulfillments, catalog);
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
+  demand.raw = unfinishedRaw;
+
+  return {
+    demand,
+    ...buildInventoryRows(catalog, stock, demand),
+  };
+}
+
+export type KitchenOrdersSlice = Pick<KitchenState, 'openOrders' | 'demand'>;
+
+/** Load Nestiee / 回禮 open orders and derived demand. */
+export async function getOpenOrdersSlice(userId: number): Promise<KitchenOrdersSlice> {
+  const { catalog, formulas } = await loadKitchenCatalog(userId);
+  await ensureSeed(userId, catalog);
+
+  const [fulfillments, unfinishedRaw] = await Promise.all([
+    loadFulfillments(userId),
+    loadUnfinishedPrepRawDemand(userId, formulas),
+  ]);
+  const openOrders = await loadOpenOrders(userId, fulfillments, catalog);
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
+  demand.raw = unfinishedRaw;
+
+  return { openOrders, demand };
+}
+
+export async function getState(userId: number, opts?: GetStateOptions): Promise<KitchenState> {
+  const includeMovements = opts?.includeMovements !== false;
+  const includeInventory = opts?.includeInventory !== false;
+  const includeOrders = opts?.includeOrders !== false;
+
+  const { catalog, formulas } = await loadKitchenCatalog(userId);
+  await ensureSeed(userId, catalog);
+
+  const fulfillmentsPromise = includeOrders
+    ? loadFulfillments(userId)
+    : Promise.resolve(new Map<string, number>());
+  const openOrdersPromise = includeOrders
+    ? fulfillmentsPromise.then((fulfillments) => loadOpenOrders(userId, fulfillments, catalog))
+    : Promise.resolve([] as KitchenOpenOrder[]);
+  const independentPromise = Promise.all([
+    includeInventory ? loadStockMaps(userId, catalog) : Promise.resolve(EMPTY_STOCK),
+    includeMovements ? loadKitchenMovements(userId) : Promise.resolve([] as KitchenMovement[]),
+    loadUnfinishedPrepRawDemand(userId, formulas),
+    getHolidayMode(userId),
+  ]);
+
+  const [openOrders, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
+    openOrdersPromise,
+    independentPromise,
+  ]);
+
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
+  demand.raw = unfinishedRaw;
+
+  const { giftBoxes, finished, raw } = buildInventoryRows(catalog, stock, demand);
 
   return {
     giftBoxes,

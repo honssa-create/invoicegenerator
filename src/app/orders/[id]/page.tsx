@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -8,19 +8,15 @@ import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import CustomerSelect from '@/components/CustomerSelect';
 import OrderDetailTypePanel from '@/components/orders/OrderDetailTypePanel';
-import OrderPropertyBar, { type AccountUser } from '@/components/OrderPropertyBar';
-import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
-import { CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH } from '@/lib/concurrency';
-import { DEFAULT_OPTIONS } from '@/lib/expenses';
-import { mergeSupplierLists } from '@/lib/expense-suppliers';
-import { compressImage } from '@/lib/imageCompression';
-import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
+import PaymentDetailSection from '@/components/orders/sections/PaymentDetailSection';
+import { labeled, nonNeg, readOnly, ORDER_DETAIL_SOFT_INPUT } from '@/components/orders/order-detail-ui';
+import OrderPropertyBar from '@/components/OrderPropertyBar';
+import { useOrderDetail } from '@/hooks/orders/useOrderDetail';
+import { orderFileUrl } from '@/lib/image-url';
 import EntityAttachments from '@/components/EntityAttachments';
 import {
   ORDER_SHIPPING_METHODS,
   ORDER_TYPES,
-  ORDER_PAYMENT_METHODS,
-  ORDER_PAYMENT_METHOD_OTHER,
   computeBirdNestTotals,
   computeOrderPaidTotal,
   computeHonourLineTotals,
@@ -32,10 +28,8 @@ import {
   honourSuppliersDerivedFields,
   computeWeddingGiftMaterials,
   computeWeddingGiftPacking,
-  normalizeOrderPaymentMethod,
   parseHonourLines,
   parseHonourSuppliers,
-  NESTIEE_GIFT_BOX_TYPES,
   parseAssigneeIds,
   parseOrderTags,
   parseOrderDueDateField,
@@ -52,11 +46,7 @@ import {
 import { displayInvoiceNumber, displayQuotationNumber } from '@/lib/record-numbering-core';
 import type { Customer } from '@/lib/types';
 import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
-import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
-import {
-  formatKitchenShortageConfirm,
-  parseKitchenShortageResponse,
-} from '@/lib/kitchen-ship-allocate';
+import { BTN, bi } from '@/lib/ui-labels';
 
 const SfExpressShipmentModal = dynamic(
   () => import('@/components/SfExpressShipmentModal'),
@@ -68,227 +58,39 @@ const WeddingGiftConfirmPasteModal = dynamic(
   { loading: () => null },
 );
 
-interface InvoiceOption {
-  id: number;
-  invoice_number: string;
-  status: string;
-}
-
-interface QuotationOption {
-  id: number;
-  quote_number: string;
-  status: string;
-}
-
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
-  const [order, setOrder] = useState<Order | null>(null);
-  const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
-  const [quotations, setQuotations] = useState<QuotationOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    order,
+    setOrder,
+    loading,
+    invoices,
+    quotations,
+    quoteToast,
+    setQuoteToast,
+    accountUsers,
+    tagSuggestions,
+    setTagSuggestions,
+    supplierOptions,
+    setSupplierOptions,
+    nestieeGiftBoxes,
+    bigDayPersistedRef,
+    bigDaySavedOnChangeRef,
+    patch,
+    setCoreLocal,
+    setFieldLocal,
+    updatedAtRef,
+  } = useOrderDetail(id);
+
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const payment1InputRef = useRef<HTMLInputElement>(null);
-  const payment2InputRef = useRef<HTMLInputElement>(null);
-  const payment3InputRef = useRef<HTMLInputElement>(null);
-  const [paymentPreview, setPaymentPreview] = useState<{ 1?: string; 2?: string; 3?: string }>({});
-  const [paymentScanMsg, setPaymentScanMsg] = useState<{ 1?: string; 2?: string; 3?: string }>({});
   const [convertingQuote, setConvertingQuote] = useState(false);
-  const [quoteToast, setQuoteToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
   const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
   const [confirmPasteText, setConfirmPasteText] = useState('');
   const [confirmPasteError, setConfirmPasteError] = useState('');
   const [sfModalOpen, setSfModalOpen] = useState(false);
-  const [accountUsers, setAccountUsers] = useState<AccountUser[]>([]);
-  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
-  const [supplierOptions, setSupplierOptions] = useState<string[]>([...DEFAULT_OPTIONS.supplier]);
-  const [nestieeGiftBoxes, setNestieeGiftBoxes] = useState(NESTIEE_GIFT_BOX_TYPES);
-  /** Big Day value last persisted with derived dates (or loaded from server). */
-  const bigDayPersistedRef = useRef('');
-  /** Skip blur PATCH when onChange already saved this Big Day + derived dates. */
-  const bigDaySavedOnChangeRef = useRef<string | null>(null);
-  const patchQueueRef = useRef(Promise.resolve());
-  const updatedAtRef = useRef('');
-  /** Monotonic seq so an older PATCH response cannot wipe newer local edits. */
-  const patchSeqRef = useRef(0);
-  const patchesInFlightRef = useRef(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    fetch(`/api/orders/${id}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled) return;
-        const o = d?.order || null;
-        setOrder(o);
-        if (o) {
-          bigDayPersistedRef.current = String(o.fields?.big_day || '');
-          bigDaySavedOnChangeRef.current = null;
-          updatedAtRef.current = o.updated_at || '';
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/kitchen/catalog')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled || !d?.catalog?.giftBoxTypes) return;
-        const boxes = (d.catalog.giftBoxTypes as {
-          id: string;
-          label: string;
-          qtyKey: string;
-          active?: boolean;
-        }[])
-          .filter((g) => g.active !== false)
-          .map((g) => ({
-            id: g.id,
-            label: g.label,
-            qtyKey: g.qtyKey || `nestiee_gift_qty_${g.id}`,
-          }));
-        if (boxes.length) setNestieeGiftBoxes(boxes);
-      })
-      .catch(() => {
-        /* keep defaults */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const refetchOrder = useCallback(() => {
-    if (patchesInFlightRef.current > 0) return;
-    fetch(`/api/orders/${id}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (patchesInFlightRef.current > 0) return;
-        const o = d?.order || null;
-        if (!o) return;
-        setOrder(o);
-        bigDayPersistedRef.current = String(o.fields?.big_day || '');
-        updatedAtRef.current = o.updated_at || '';
-      })
-      .catch(() => {});
-  }, [id]);
-
-  useRefetchOnFocus(refetchOrder, Boolean(id) && !loading);
-
-  useEffect(() => {
-    fetch('/api/invoices?fields=options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setInvoices((d?.invoices || []).map((i: InvoiceOption) => ({ id: i.id, invoice_number: i.invoice_number, status: i.status }))))
-      .catch(() => {});
-    fetch('/api/quotations?fields=options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setQuotations((d?.quotations || []).map((q: QuotationOption) => ({ id: q.id, quote_number: q.quote_number, status: q.status }))))
-      .catch(() => {});
-    fetch('/api/account/users')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAccountUsers(Array.isArray(d?.users) ? d.users : []))
-      .catch(() => {});
-    fetch('/api/orders/tag-options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setTagSuggestions(Array.isArray(d?.tags) ? d.tags : []))
-      .catch(() => {});
-    fetch('/api/expense-options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const list = d?.options?.supplier;
-        if (Array.isArray(list)) setSupplierOptions(list.map(String));
-      })
-      .catch(() => {});
-  }, []);
-
-  const patch = (payload: {
-    core?: Record<string, unknown>;
-    fields?: Record<string, unknown>;
-    linked_invoice_id?: string | number | null;
-    linked_quotation_id?: string | number | null;
-    skip_kitchen_allocation?: boolean;
-  }, opts?: { revertStatusTo?: string }) => {
-    const seq = ++patchSeqRef.current;
-    patchesInFlightRef.current += 1;
-    // Keep UI in sync immediately so a later server response can't briefly wipe autofills.
-    if (payload.fields && Object.keys(payload.fields).length) {
-      setOrder((o) =>
-        o
-          ? {
-              ...o,
-              fields: {
-                ...o.fields,
-                ...(payload.fields as Record<string, string | boolean>),
-              },
-            }
-          : o
-      );
-    }
-    patchQueueRef.current = patchQueueRef.current.then(async () => {
-      try {
-        const res = await fetch(`/api/orders/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...payload,
-            expected_updated_at: updatedAtRef.current || undefined,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.order) {
-          updatedAtRef.current = data.order.updated_at || '';
-          // Skip full replace when a newer local patch already updated the UI.
-          if (seq === patchSeqRef.current) {
-            setOrder(data.order);
-            bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
-          }
-          return;
-        }
-        const shortages = parseKitchenShortageResponse(data);
-        if (res.status === 409 && shortages) {
-          const shipAnyway = window.confirm(formatKitchenShortageConfirm(shortages));
-          if (shipAnyway) {
-            patch({ ...payload, skip_kitchen_allocation: true }, opts);
-          } else if (opts?.revertStatusTo != null) {
-            setCoreLocal('status', opts.revertStatusTo);
-          }
-          return;
-        }
-        if (res.status === 409) {
-          if (data.order) {
-            setOrder(data.order);
-            bigDayPersistedRef.current = String(data.order.fields?.big_day || '');
-            updatedAtRef.current = data.order.updated_at || '';
-          } else {
-            refetchOrder();
-          }
-          setQuoteToast({
-            text: bi(CONFLICT_MESSAGE, CONFLICT_MESSAGE_ZH),
-            kind: 'error',
-          });
-        } else if (!res.ok) {
-          if (opts?.revertStatusTo != null) setCoreLocal('status', opts.revertStatusTo);
-          setQuoteToast({
-            text: (data as { error?: string }).error || MSG.saveFailed,
-            kind: 'error',
-          });
-        }
-      } catch {
-        if (opts?.revertStatusTo != null) setCoreLocal('status', opts.revertStatusTo);
-        setQuoteToast({ text: MSG.saveFailed, kind: 'error' });
-      } finally {
-        patchesInFlightRef.current = Math.max(0, patchesInFlightRef.current - 1);
-      }
-    });
-  };
 
   const convertToQuotation = async () => {
     setConvertingQuote(true);
@@ -342,11 +144,6 @@ export default function OrderDetailPage() {
     router.push('/orders');
   };
 
-  const setCoreLocal = (col: string, value: unknown) =>
-    setOrder((o) => (o ? ({ ...o, [col]: value } as Order) : o));
-  const setFieldLocal = (key: string, value: unknown) =>
-    setOrder((o) => (o ? { ...o, fields: { ...o.fields, [key]: value as string | boolean } } : o));
-
   /** Keep status-bar receipt date and Shipment 客人收貨日期 in sync. */
   const setLinkedDeliveryDatesLocal = (next: string) =>
     setOrder((o) =>
@@ -364,93 +161,6 @@ export default function OrderDetailPage() {
   const commitLinkedDeliveryDates = (next: string) => {
     setLinkedDeliveryDatesLocal(next);
     patch({ fields: { due_date: next, client_delivery_date: next } });
-  };
-
-  const handlePaymentReceipt = async (rawFile: File, slot: 1 | 2 | 3) => {
-    setPaymentScanMsg((m) => ({ ...m, [slot]: 'Compressing & scanning receipt…' }));
-    // Compress with the receipt rule: 1600px, quality 0.65, < 300KB. Heavy PDFs → first page image.
-    let file = rawFile;
-    try {
-      if (rawFile.type === 'application/pdf') {
-        const { compressPdfToImages } = await import('@/lib/pdfCompression');
-        const pages = await compressPdfToImages(rawFile, { quality: 0.65, maxWidthOrHeight: 1600 });
-        if (pages[0]) file = pages[0];
-      } else {
-        const c = await compressImage(rawFile, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg', quality: 0.65 });
-        file = c.file;
-      }
-    } catch {
-      /* fall back to original */
-    }
-    setPaymentPreview((p) => ({ ...p, [slot]: URL.createObjectURL(file) }));
-
-    const prefix = slot === 1 ? 'payment' : `payment${slot}`;
-    const fd = new FormData();
-    fd.append('receipt', file);
-    try {
-      const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) {
-        setPaymentScanMsg((m) => ({ ...m, [slot]: data.error || MSG.scanFailed }));
-        return;
-      }
-      const r = data.result;
-      const bankKey = slot === 1 ? 'payment_bank' : `${prefix}_bank`;
-      const methodKey = slot === 1 ? 'payment_method_detail' : `${prefix}_method_detail`;
-      const refKey = slot === 1 ? 'payment_reference' : `${prefix}_reference`;
-      const upd: Record<string, string> = {
-        [`${prefix}_receipt_path`]: r.receipt_path || '',
-      };
-      if (r.payment_date) {
-        upd[`${prefix}_date`] = r.payment_date;
-        if (slot === 1) upd.payment1_date = r.payment_date;
-      }
-      if (r.amount != null) {
-        upd[`${prefix}_amount`] = String(r.amount);
-        if (slot === 1) upd.payment1_amount = String(r.amount);
-      }
-      if (r.bank) upd[bankKey] = r.bank;
-      if (r.method) {
-        const normalized = normalizeOrderPaymentMethod(r.method);
-        if (normalized.method) upd[methodKey] = normalized.method;
-        if (normalized.note) {
-          const noteKey = slot === 1 ? 'payment_method_note' : `${prefix}_method_note`;
-          upd[noteKey] = normalized.note;
-        }
-      }
-      if (r.reference) upd[refKey] = r.reference;
-      const nextFields = { ...(order?.fields || {}), ...upd };
-      const paid = computeOrderPaidTotal(nextFields);
-      const orderType = String(order?.fields?.order_type || '');
-      const honourDue =
-        isBadgeOrderType(orderType) && order
-          ? computeHonourLineTotals(parseHonourLines(nextFields)).totalAmount
-          : 0;
-      const weddingDue =
-        isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(nextFields) : 0;
-      const due =
-        order?.linked_invoice?.total ??
-        (honourDue > 0
-          ? honourDue
-          : weddingDue > 0
-            ? weddingDue
-            : order?.total_amount != null && order.total_amount > 0
-              ? order.total_amount
-              : null);
-      upd.payment_status_label = derivePaymentStatusLabel(paid, due);
-      setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
-      patch({ fields: upd });
-      const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
-      const found = [r.payment_date && 'date', r.amount != null && 'amount', r.bank && 'bank', r.method && 'method', r.reference && 'ref'].filter(Boolean);
-      setPaymentScanMsg((m) => ({
-        ...m,
-        [slot]: found.length
-          ? `Extracted via ${via}: ${found.join(', ')}. Please verify.`
-          : `No fields auto-extracted (${via}). Enter manually.`,
-      }));
-    } catch {
-      setPaymentScanMsg((m) => ({ ...m, [slot]: MSG.scanFailed }));
-    }
   };
 
   if (loading) {
@@ -478,7 +188,7 @@ export default function OrderDetailPage() {
   }
 
   // Helpers for the structured section boxes (values stored in fields_json).
-  const softInput = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-colors';
+  const softInput = ORDER_DETAIL_SOFT_INPUT;
   const fVal = (k: string) => (order.fields[k] as string) ?? '';
 
   const applyCustomerFromList = (c: Customer) => {
@@ -513,12 +223,6 @@ export default function OrderDetailPage() {
   };
 
   /** Clamp typed quantity to ≥ 0 (empty stays empty). */
-  const nonNeg = (value: string): string => {
-    if (value.trim() === '') return '';
-    const n = Number(value);
-    if (!Number.isFinite(n)) return value;
-    return n < 0 ? '0' : value;
-  };
   const fInput = (key: string, type = 'text', placeholder = '') => (
     <input
       type={type}
@@ -561,118 +265,6 @@ export default function OrderDetailPage() {
   const paidTotal = computeOrderPaidTotal(order.fields);
   const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
 
-  const payment3FieldKeys = [
-    'payment3_amount',
-    'payment3_date',
-    'payment3_bank',
-    'payment3_reference',
-    'payment3_receipt_path',
-    'payment3_method_detail',
-    'payment3_method_note',
-  ] as const;
-  const hasPayment3Content =
-    Boolean(paymentPreview[3]) ||
-    payment3FieldKeys.some((k) => String(order.fields[k] ?? '').trim());
-  const showPayment3 =
-    hasPayment3Content ||
-    order.fields.payment3_enabled === true ||
-    String(order.fields.payment3_enabled ?? '').trim() === 'true';
-
-  const applyAmountAndStatus = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount', value: string) => {
-    let fields: Record<string, string> = {};
-    setOrder((prev) => {
-      if (!prev) return prev;
-      fields = { [key]: value };
-      if (key === 'payment_amount') fields.payment1_amount = value;
-      const nextFields = { ...prev.fields, ...fields };
-      const paid = computeOrderPaidTotal(nextFields);
-      fields.payment_status_label = derivePaymentStatusLabel(paid, dueTotal);
-      return { ...prev, fields: { ...prev.fields, ...fields } };
-    });
-    patch({ fields });
-  };
-  const paymentAmountInput = (key: 'payment_amount' | 'payment2_amount' | 'payment3_amount') => (
-    <input
-      type="number"
-      value={fVal(key) || (key === 'payment_amount' ? fVal('payment1_amount') : '')}
-      onChange={(e) => {
-        setFieldLocal(key, e.target.value);
-        if (key === 'payment_amount') setFieldLocal('payment1_amount', e.target.value);
-      }}
-      onBlur={(e) => applyAmountAndStatus(key, e.target.value)}
-      placeholder="0.00"
-      className={softInput}
-    />
-  );
-  const paymentMethodFields = (slot: 1 | 2 | 3) => {
-    const methodKey = slot === 1 ? 'payment_method_detail' : `payment${slot}_method_detail`;
-    const noteKey = slot === 1 ? 'payment_method_note' : `payment${slot}_method_note`;
-    const raw = fVal(methodKey);
-    const known = (ORDER_PAYMENT_METHODS as readonly string[]).includes(raw);
-    const selectValue = known ? raw : raw ? ORDER_PAYMENT_METHOD_OTHER : '';
-    const showNote = selectValue === ORDER_PAYMENT_METHOD_OTHER;
-    const noteValue = fVal(noteKey) || (!known && raw ? raw : '');
-    return (
-      <>
-        {labeled(
-          '支付方式 Payment Method',
-          <select
-            value={selectValue}
-            onChange={(e) => {
-              const v = e.target.value;
-              const fields: Record<string, string> = { [methodKey]: v };
-              if (v !== ORDER_PAYMENT_METHOD_OTHER) fields[noteKey] = '';
-              else if (!known && raw && !fVal(noteKey)) fields[noteKey] = raw;
-              setFieldLocal(methodKey, v);
-              if (fields[noteKey] !== undefined) setFieldLocal(noteKey, fields[noteKey]);
-              patch({ fields });
-            }}
-            className={softInput}
-          >
-            <option value="">—</option>
-            {ORDER_PAYMENT_METHODS.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        )}
-        {showNote && (
-          <div className="sm:col-span-2">
-            {labeled(
-              '備註 Remarks',
-              <input
-                value={noteValue}
-                onChange={(e) => setFieldLocal(noteKey, e.target.value)}
-                onBlur={(e) => {
-                  const fields: Record<string, string> = { [noteKey]: e.target.value };
-                  if (!known && raw && selectValue === ORDER_PAYMENT_METHOD_OTHER) {
-                    fields[methodKey] = ORDER_PAYMENT_METHOD_OTHER;
-                  }
-                  patch({ fields });
-                }}
-                placeholder="請註明其他支付方式…"
-                className={softInput}
-              />
-            )}
-          </div>
-        )}
-      </>
-    );
-  };
-  const labeled = (label: string, node: React.ReactNode, hint?: string) => (
-    <div>
-      <label className="block text-xs font-medium text-gray-900 mb-1.5">
-        {label}
-        {hint ? <span className="text-gray-400 font-normal"> · {hint}</span> : null}
-      </label>
-      {node}
-    </div>
-  );
-  const readOnly = (label: string, value: React.ReactNode) => (
-    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-wide text-gray-900">{label}</p>
-      <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{value}</p>
-    </div>
-  );
   const bn = computeBirdNestTotals(order.fields);
 
   const commitHonourLines = (lines: HonourLineItem[]) => {
@@ -1179,182 +771,14 @@ export default function OrderDetailPage() {
 
           </section>
 
-          {/* BOX 2 — Payment Detail */}
-          <section className="bg-white rounded-2xl border border-gray-200 p-8">
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 2</p>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Payment Detail 付款詳情</h2>
+          <PaymentDetailSection
+            order={order}
+            dueTotal={dueTotal}
+            form={{ softInput, fVal, fInput, labeled, readOnly, nonNeg, setFieldLocal, patch, setOrder }}
+            onReceiptPreview={setLightbox}
+          />
 
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
-              {readOnly('已付總額 Current Paid', paidTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}
-              {readOnly(
-                '應付金額 Amount Due',
-                dueTotal != null
-                  ? dueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                  : '—'
-              )}
-              <div>
-                <label className="block text-xs font-medium text-gray-900 mb-1.5">
-                  Payment Status 付款狀態
-                  <span className="text-gray-400 font-normal"> · auto</span>
-                </label>
-                <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5 text-sm font-semibold text-gray-900">
-                  {autoStatus}
-                </div>
-              </div>
-            </div>
-
-            {/* First payment */}
-            <div className="rounded-xl border border-gray-200 p-5 mb-6 bg-gray-50/30">
-              <h3 className="text-sm font-semibold text-gray-800 mb-4">第一期付款 First Payment</h3>
-              <div className="grid md:grid-cols-[200px_1fr] gap-5">
-                <div>
-                  <div
-                    onClick={() => payment1InputRef.current?.click()}
-                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 1); }}
-                    onDragOver={(e) => e.preventDefault()}
-                    className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
-                  >
-                    <input ref={payment1InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 1); e.target.value = ''; }} />
-                    {paymentPreview[1] || order.fields.payment_receipt_path ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={paymentPreview[1] || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || ''), 1) || ''}
-                        alt="First payment receipt"
-                        onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[1] || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || ''), 1) || ''); }}
-                        className="max-h-28 rounded-lg cursor-zoom-in"
-                      />
-                    ) : (
-                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-900">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
-                    )}
-                  </div>
-                  {paymentScanMsg[1] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[1]}</p>}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
-                  {labeled(
-                    '支付日期 Payment Date',
-                    <input
-                      type="date"
-                      value={fVal('payment_date') || fVal('payment1_date')}
-                      onChange={(e) => {
-                        setFieldLocal('payment_date', e.target.value);
-                        setFieldLocal('payment1_date', e.target.value);
-                      }}
-                      onBlur={(e) => patch({ fields: { payment_date: e.target.value, payment1_date: e.target.value } })}
-                      className={softInput}
-                    />
-                  )}
-                  {labeled('銀碼 Amount', paymentAmountInput('payment_amount'))}
-                  {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                  {paymentMethodFields(1)}
-                  <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Second payment */}
-            <div className="rounded-xl border border-gray-200 p-5 mb-6 bg-gray-50/30">
-              <h3 className="text-sm font-semibold text-gray-800 mb-4">第二期付款 Second Payment</h3>
-              <div className="grid md:grid-cols-[200px_1fr] gap-5">
-                <div>
-                  <div
-                    onClick={() => payment2InputRef.current?.click()}
-                    onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 2); }}
-                    onDragOver={(e) => e.preventDefault()}
-                    className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
-                  >
-                    <input ref={payment2InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 2); e.target.value = ''; }} />
-                    {paymentPreview[2] || order.fields.payment2_receipt_path ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={paymentPreview[2] || orderPaymentReceiptUrl(order.id, String(order.fields.payment2_receipt_path || ''), 2) || ''}
-                        alt="Second payment receipt"
-                        onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[2] || orderPaymentReceiptUrl(order.id, String(order.fields.payment2_receipt_path || ''), 2) || ''); }}
-                        className="max-h-28 rounded-lg cursor-zoom-in"
-                      />
-                    ) : (
-                      <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-900">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
-                    )}
-                  </div>
-                  {paymentScanMsg[2] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[2]}</p>}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
-                  {labeled('支付日期 Payment Date', fInput('payment2_date', 'date'))}
-                  {labeled('銀碼 Amount', paymentAmountInput('payment2_amount'))}
-                  {labeled('銀行 / 平台 Bank/Platform', fInput('payment2_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                  {paymentMethodFields(2)}
-                  <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment2_reference', 'text', 'Transaction / 流水號'))}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Third payment — hidden until enabled or existing data */}
-            {showPayment3 ? (
-              <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/30">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <h3 className="text-sm font-semibold text-gray-800">第三期付款 Third Payment</h3>
-                  {!hasPayment3Content ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFieldLocal('payment3_enabled', '');
-                        patch({ fields: { payment3_enabled: '' } });
-                      }}
-                      className="text-sm text-gray-500 hover:text-red-600"
-                    >
-                      {bi('Remove', '移除')}
-                    </button>
-                  ) : null}
-                </div>
-                <div className="grid md:grid-cols-[200px_1fr] gap-5">
-                  <div>
-                    <div
-                      onClick={() => payment3InputRef.current?.click()}
-                      onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0], 3); }}
-                      onDragOver={(e) => e.preventDefault()}
-                      className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px] bg-white"
-                    >
-                      <input ref={payment3InputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0], 3); e.target.value = ''; }} />
-                      {paymentPreview[3] || order.fields.payment3_receipt_path ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''}
-                          alt="Third payment receipt"
-                          onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview[3] || orderPaymentReceiptUrl(order.id, String(order.fields.payment3_receipt_path || ''), 3) || ''); }}
-                          className="max-h-28 rounded-lg cursor-zoom-in"
-                        />
-                      ) : (
-                        <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-900">付款收據 Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
-                      )}
-                    </div>
-                    {paymentScanMsg[3] && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg[3]}</p>}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
-                    {labeled('支付日期 Payment Date', fInput('payment3_date', 'date'))}
-                    {labeled('銀碼 Amount', paymentAmountInput('payment3_amount'))}
-                    {labeled('銀行 / 平台 Bank/Platform', fInput('payment3_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                    {paymentMethodFields(3)}
-                    <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment3_reference', 'text', 'Transaction / 流水號'))}</div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setFieldLocal('payment3_enabled', 'true');
-                  patch({ fields: { payment3_enabled: 'true' } });
-                }}
-                className="w-full rounded-xl border border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-brand-600 hover:border-brand-400 hover:bg-brand-50/40 transition-colors"
-              >
-                + {bi('Add third payment', '新增第三期付款')}
-              </button>
-            )}
-          </section>
-
-          <EntityAttachments
+                    <EntityAttachments
             className="bg-white rounded-xl border border-gray-200 p-6"
             title="Design Proofs 設計圖 / Image Preview"
             files={order.files}

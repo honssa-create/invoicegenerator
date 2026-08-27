@@ -16,25 +16,55 @@ function parseFields(raw: string | null | undefined): Record<string, unknown> {
   }
 }
 
+function isYmd(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const url = new URL(request.url);
+  const dateStartRaw = url.searchParams.get('dateStart')?.trim() || '';
+  const dateEndRaw = url.searchParams.get('dateEnd')?.trim() || '';
+  const dateStart = isYmd(dateStartRaw) ? dateStartRaw : '';
+  const dateEnd = isYmd(dateEndRaw) ? dateEndRaw : '';
+
   const ownerId = await getDataOwnerId(session);
   try {
+    const clauses = [
+      'user_id = ?',
+      `status = 'processing'`,
+      `(
+         order_type = ?
+         OR COALESCE(fields_json::jsonb->>'order_type', '') = ?
+       )`,
+    ];
+    const params: Array<string | number> = [ownerId, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE];
+
+    // Match orders list FilterBar: compare created_at date portion (YYYY-MM-DD).
+    // Empty created_at is kept (same as client list filter).
+    if (dateStart) {
+      clauses.push(
+        `(COALESCE(LEFT(created_at, 10), '') = '' OR LEFT(created_at, 10) >= ?)`
+      );
+      params.push(dateStart);
+    }
+    if (dateEnd) {
+      clauses.push(
+        `(COALESCE(LEFT(created_at, 10), '') = '' OR LEFT(created_at, 10) <= ?)`
+      );
+      params.push(dateEnd);
+    }
+
     const rows = (await db
       .prepare(
         `SELECT status, fields_json, order_type
          FROM orders
-         WHERE user_id = ?
-           AND status = 'processing'
-           AND (
-             order_type = ?
-             OR COALESCE(fields_json::jsonb->>'order_type', '') = ?
-           )
+         WHERE ${clauses.join('\n           AND ')}
          ORDER BY id DESC`
       )
-      .all(ownerId, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE)) as Array<{
+      .all(...params)) as Array<{
       status: string | null;
       fields_json: string | null;
       order_type: string | null;

@@ -141,7 +141,11 @@ function OrdersPageContent() {
   const loadNestieeDemand = useCallback(() => {
     if (!isNestieeOrdersFilter(orderType)) return;
     setNestieeDemandLoading(true);
-    fetch('/api/orders/nestiee-processing-demand')
+    const params = new URLSearchParams();
+    if (dateStart) params.set('dateStart', dateStart);
+    if (dateEnd) params.set('dateEnd', dateEnd);
+    const qs = params.toString();
+    fetch(`/api/orders/nestiee-processing-demand${qs ? `?${qs}` : ''}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.demand) setNestieeDemand(d.demand);
@@ -150,7 +154,7 @@ function OrdersPageContent() {
         /* keep previous */
       })
       .finally(() => setNestieeDemandLoading(false));
-  }, [orderType]);
+  }, [orderType, dateStart, dateEnd]);
 
   const load = () => {
     setLoading(true);

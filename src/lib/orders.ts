@@ -240,20 +240,43 @@ export function summarizeOrderListProducts(
   return [];
 }
 
-/** Payment status label for list/board views (matches Payment Detail derivation). */
-export function orderListPaymentStatus(o: Pick<Order, 'fields' | 'total_amount'>): PaymentStatusLabel {
-  const paid = computeOrderPaidTotal(o.fields);
+/** Amount due for payment status: line/invoice totals, including an explicit $0. */
+export function computeOrderDueTotal(
+  o: Pick<Order, 'fields' | 'total_amount'> & { linked_invoice?: { total: number } | null }
+): number | null {
+  const invoiceTotal = o.linked_invoice?.total;
+  if (invoiceTotal != null && Number.isFinite(invoiceTotal) && invoiceTotal > 0) {
+    return invoiceTotal;
+  }
+
   const orderType = getOrderType(o);
-  let due: number | null = null;
   if (isBadgeOrderType(orderType)) {
-    const total = computeHonourLineTotals(parseHonourLines(o.fields)).totalAmount;
-    if (total > 0) due = total;
+    const lines = parseHonourLines(o.fields);
+    if (honourProductLineCount(lines) > 0) {
+      return computeHonourLineTotals(lines).totalAmount;
+    }
   } else if (isWeddingGiftOrderType(orderType)) {
     const total = computeWeddingGiftTotal(o.fields);
-    if (total > 0) due = total;
+    if (total > 0) return total;
+  } else if (isNestieeOrderType(orderType)) {
+    const lines = getNestieeLines(o.fields);
+    if (lines.length) {
+      return Math.round(lines.reduce((sum, line) => sum + (Number(line.line_total) || 0), 0) * 100) / 100;
+    }
+  } else if (isCupmokaOrderType(orderType)) {
+    const lines = getCupmokaLines(o.fields);
+    if (lines.length) {
+      return Math.round(lines.reduce((sum, line) => sum + (Number(line.line_total) || 0), 0) * 100) / 100;
+    }
   }
-  if (due == null && o.total_amount != null && o.total_amount > 0) due = o.total_amount;
-  return derivePaymentStatusLabel(paid, due);
+
+  if (o.total_amount != null && o.total_amount > 0) return o.total_amount;
+  return null;
+}
+
+/** Payment status label for list/board views (matches Payment Detail derivation). */
+export function orderListPaymentStatus(o: Pick<Order, 'fields' | 'total_amount'>): PaymentStatusLabel {
+  return derivePaymentStatusLabel(computeOrderPaidTotal(o.fields), computeOrderDueTotal(o));
 }
 
 /**
@@ -1500,6 +1523,20 @@ function nestieeNum(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function hasExplicitAmount(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string') return value.trim() !== '';
+  return false;
+}
+
+/** Keep an explicit $0 line total; only fall back to unit × qty when total is missing. */
+function nestieeResolvedLineTotal(explicit: unknown, unitPrice: number, quantity: number): number {
+  if (hasExplicitAmount(explicit)) {
+    return Math.round(nestieeNum(explicit) * 100) / 100;
+  }
+  return Math.round(unitPrice * quantity * 100) / 100;
+}
+
 /** Strip simple HTML tags from TM EPO labels. */
 export function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
@@ -1567,9 +1604,7 @@ export function parseNestieeLinesFromWoo(lineItems: WooLineItemLike[] | null | u
     if (!name) continue;
     const quantity = nestieeNum(li.quantity);
     const unit_price = Math.round(nestieeNum(li.price) * 100) / 100;
-    const rawTotal = nestieeNum(li.total);
-    const line_total =
-      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const line_total = nestieeResolvedLineTotal(li.total, unit_price, quantity);
     const options = parseNestieeOptionsFromMeta(li.meta_data);
     const row: NestieeLineItem = { name, quantity, unit_price, line_total };
     if (options.length) row.options = options;
@@ -1701,9 +1736,11 @@ export function getNestieeLines(
     if (!name) continue;
     const quantity = nestieeNum(r.quantity);
     const unit_price = Math.round(nestieeNum(r.unit_price ?? r.price) * 100) / 100;
-    const rawTotal = nestieeNum(r.line_total ?? r.total);
-    const line_total =
-      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const line_total = nestieeResolvedLineTotal(
+      r.line_total != null && r.line_total !== '' ? r.line_total : r.total,
+      unit_price,
+      quantity
+    );
     const item: NestieeLineItem = { name, quantity, unit_price, line_total };
     const options = parseNestieeOptionsStored(r.options);
     if (options) item.options = options;
@@ -1935,9 +1972,7 @@ export function parseCupmokaLinesFromWoo(lineItems: WooLineItemLike[] | null | u
     if (!name) continue;
     const quantity = nestieeNum(li.quantity);
     const unit_price = Math.round(nestieeNum(li.price) * 100) / 100;
-    const rawTotal = nestieeNum(li.total);
-    const line_total =
-      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const line_total = nestieeResolvedLineTotal(li.total, unit_price, quantity);
     const row: CupmokaLineItem = { name, quantity, unit_price, line_total };
     const image = String(li?.image?.src ?? '').trim();
     if (image) row.image = image;
@@ -1995,9 +2030,11 @@ export function getCupmokaLines(
     if (!name) continue;
     const quantity = nestieeNum(r.quantity);
     const unit_price = Math.round(nestieeNum(r.unit_price ?? r.price) * 100) / 100;
-    const rawTotal = nestieeNum(r.line_total ?? r.total);
-    const line_total =
-      Math.round((rawTotal > 0 ? rawTotal : unit_price * quantity) * 100) / 100;
+    const line_total = nestieeResolvedLineTotal(
+      r.line_total != null && r.line_total !== '' ? r.line_total : r.total,
+      unit_price,
+      quantity
+    );
     const item: CupmokaLineItem = { name, quantity, unit_price, line_total };
     const image = String(r.image ?? '').trim();
     if (image) item.image = image;
@@ -2380,6 +2417,9 @@ export function derivePaymentStatusLabel(
   paidTotal: number,
   dueTotal?: number | null
 ): PaymentStatusLabel {
+  if (dueTotal != null && Number.isFinite(dueTotal) && dueTotal <= 0.009) {
+    return 'Full Paid';
+  }
   if (paidTotal <= 0.009) return 'Unpaid';
   if (dueTotal != null && Number.isFinite(dueTotal) && dueTotal > 0 && paidTotal >= dueTotal - 0.01) {
     return 'Full Paid';

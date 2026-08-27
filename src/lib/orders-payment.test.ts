@@ -4,6 +4,7 @@ import {
   derivePaymentStatusLabel,
   expandOrderToPaymentEntries,
   orderHasPaymentSlotData,
+  orderListPaymentStatus,
   parsePaymentAmount,
   paymentSlotFields,
 } from './orders';
@@ -42,6 +43,27 @@ describe('derivePaymentStatusLabel', () => {
     expect(derivePaymentStatusLabel(50, 100)).toBe('部分付款 Partly Paid');
     expect(derivePaymentStatusLabel(100, 100)).toBe('Full Paid');
     expect(derivePaymentStatusLabel(100.005, 100)).toBe('Full Paid');
+  });
+
+  it('treats a zero amount due as Full Paid', () => {
+    expect(derivePaymentStatusLabel(0, 0)).toBe('Full Paid');
+    expect(derivePaymentStatusLabel(0, 0.004)).toBe('Full Paid');
+  });
+});
+
+describe('orderListPaymentStatus', () => {
+  it('marks Nestiee orders with $0 line totals as Full Paid', () => {
+    expect(
+      orderListPaymentStatus({
+        total_amount: 0,
+        fields: {
+          order_type: 'Nestiee 燕窩訂單',
+          nestiee_lines: JSON.stringify([
+            { name: '贈品', quantity: 1, unit_price: 128, line_total: 0 },
+          ]),
+        },
+      })
+    ).toBe('Full Paid');
   });
 });
 

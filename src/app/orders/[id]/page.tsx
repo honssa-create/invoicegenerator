@@ -18,6 +18,7 @@ import {
   ORDER_SHIPPING_METHODS,
   ORDER_TYPES,
   computeBirdNestTotals,
+  computeOrderDueTotal,
   computeOrderPaidTotal,
   computeHonourLineTotals,
   computeWeddingGiftTotal,
@@ -248,20 +249,8 @@ export default function OrderDetailPage() {
         productLines: honourLines,
       })
     : [];
-  const honourDue =
-    isBadgeOrderType(orderType) && honourTotals.totalAmount > 0 ? honourTotals.totalAmount : null;
   const weddingGiftTotal = isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(order.fields) : 0;
-  const weddingDue = weddingGiftTotal > 0 ? weddingGiftTotal : null;
-  const dueTotal =
-    order.linked_invoice?.total != null && order.linked_invoice.total > 0
-      ? order.linked_invoice.total
-      : honourDue != null
-        ? honourDue
-        : weddingDue != null
-          ? weddingDue
-          : order.total_amount != null && order.total_amount > 0
-            ? order.total_amount
-            : null;
+  const dueTotal = computeOrderDueTotal(order);
   const paidTotal = computeOrderPaidTotal(order.fields);
   const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
 

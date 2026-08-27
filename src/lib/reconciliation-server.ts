@@ -457,7 +457,8 @@ async function getOrderDueTotal(
   const row = (await db
     .prepare('SELECT total_amount FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, userId)) as { total_amount: number | null } | undefined;
-  if (row?.total_amount != null && row.total_amount > 0) return Number(row.total_amount);
+  if (row?.total_amount != null && Number(row.total_amount) > 0) return Number(row.total_amount);
+  if (row?.total_amount != null && Number(row.total_amount) <= 0.009) return 0;
   return null;
 }
 

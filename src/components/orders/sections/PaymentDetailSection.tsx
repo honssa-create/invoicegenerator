@@ -6,14 +6,10 @@ import { orderPaymentReceiptUrl } from '@/lib/image-url';
 import {
   ORDER_PAYMENT_METHODS,
   ORDER_PAYMENT_METHOD_OTHER,
-  computeHonourLineTotals,
+  computeOrderDueTotal,
   computeOrderPaidTotal,
-  computeWeddingGiftTotal,
   derivePaymentStatusLabel,
-  isBadgeOrderType,
-  isWeddingGiftOrderType,
   normalizeOrderPaymentMethod,
-  parseHonourLines,
   type Order,
 } from '@/lib/orders';
 import { MSG, bi } from '@/lib/ui-labels';
@@ -198,21 +194,10 @@ export default function PaymentDetailSection({ order, dueTotal, form, onReceiptP
       if (r.reference) upd[refKey] = r.reference;
       const nextFields = { ...(order.fields || {}), ...upd };
       const paid = computeOrderPaidTotal(nextFields);
-      const orderType = String(order.fields?.order_type || '');
-      const honourDue =
-        isBadgeOrderType(orderType)
-          ? computeHonourLineTotals(parseHonourLines(nextFields)).totalAmount
-          : 0;
-      const weddingDue = isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(nextFields) : 0;
-      const due =
-        order.linked_invoice?.total ??
-        (honourDue > 0
-          ? honourDue
-          : weddingDue > 0
-            ? weddingDue
-            : order.total_amount != null && order.total_amount > 0
-              ? order.total_amount
-              : null);
+      const due = computeOrderDueTotal({
+        ...order,
+        fields: nextFields,
+      });
       upd.payment_status_label = derivePaymentStatusLabel(paid, due);
       setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
       patch({ fields: upd });

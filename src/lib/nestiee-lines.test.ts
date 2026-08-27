@@ -37,6 +37,12 @@ describe('parseNestieeLinesFromWoo', () => {
     ]);
   });
 
+  it('keeps an explicit zero line total', () => {
+    expect(parseNestieeLinesFromWoo([{ name: '贈品', quantity: 1, price: 128, total: '0.00' }])).toEqual([
+      { name: '贈品', quantity: 1, unit_price: 128, line_total: 0 },
+    ]);
+  });
+
   it('skips blank names', () => {
     expect(parseNestieeLinesFromWoo([{ name: '  ', quantity: 1, price: 5 }, { name: 'A', quantity: 1, price: 1 }])).toEqual([
       { name: 'A', quantity: 1, unit_price: 1, line_total: 1 },

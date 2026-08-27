@@ -90,8 +90,13 @@ export async function ingestWooOrders(
         return day >= dateRange.dateFrom && day <= dateRange.dateTo;
       })
     : orders;
-  // Nestiee and cupmoka skip Woo checkout drafts; honour stores already did too.
-  const rows = dateRows.filter((order) => !isWooDraftOrder(order.status));
+  // Honour/cupmoka skip Woo checkout drafts. Nestiee only keeps pending /
+  // processing / shipped / completed (unmapped statuses are dropped).
+  const rows = dateRows.filter((order) => {
+    if (isWooDraftOrder(order.status)) return false;
+    if (platform === 'nestiee') return mapNestieeWooStatus(order.status) != null;
+    return true;
+  });
   result.fetched = dateRows.length;
   result.skipped += dateRows.length - rows.length;
   const syncedAt = new Date().toISOString();
@@ -99,17 +104,22 @@ export async function ingestWooOrders(
   await db.transaction(async () => {
     for (const order of rows) {
       try {
+        const status =
+          platform === 'nestiee'
+            ? mapNestieeWooStatus(order.status)
+            : platform === 'cupmoka'
+              ? mapCupmokaWooStatus(order.status)
+              : mapWooStatus(order.status);
+        if (!status) {
+          result.skipped += 1;
+          continue;
+        }
         const upsert = await upsertHubOrder(userId, {
           source_platform: platform,
           original_order_id: String(order.id),
           customer_name: wooCustomerName(order),
           total_amount: Number(order.total) || 0,
-          status:
-            platform === 'nestiee'
-              ? mapNestieeWooStatus(order.status)
-              : platform === 'cupmoka'
-                ? mapCupmokaWooStatus(order.status)
-                : mapWooStatus(order.status),
+          status,
           created_at: order.date_created.replace('T', ' ').slice(0, 19),
           customer_email: order.billing?.email || null,
           phone: order.billing?.phone || null,

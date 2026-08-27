@@ -180,29 +180,23 @@ export function mapWooStatus(status: string): string {
   }
 }
 
-/** Nestiee / ecommerce Woo statuses → InvoiceFlow ecommerce status set. */
-export function mapNestieeWooStatus(status: string): string {
+/**
+ * Nestiee Woo statuses → InvoiceFlow ecommerce status set.
+ * Only exact Woo statuses are imported; anything else is dropped at ingest.
+ */
+export function mapNestieeWooStatus(status: string): string | null {
   const normalized = String(status || '').trim().toLowerCase();
   switch (normalized) {
-    case 'checkout-draft':
-    case 'draft':
-    case 'wc-draft':
-      return 'checkout-draft';
     case 'pending':
-    case 'failed':
-    case 'cancelled':
-    case 'refunded':
       return 'pending payment';
     case 'processing':
-    case 'on-hold':
       return 'processing';
     case 'shipped':
-    case 'wc-shipped':
       return 'shipped';
     case 'completed':
       return 'completed';
     default:
-      return 'processing';
+      return null;
   }
 }
 

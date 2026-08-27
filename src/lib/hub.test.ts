@@ -25,32 +25,23 @@ describe('mapWooStatus', () => {
 });
 
 describe('mapNestieeWooStatus', () => {
-  it('maps draft statuses to checkout-draft', () => {
-    expect(mapNestieeWooStatus('checkout-draft')).toBe('checkout-draft');
-    expect(mapNestieeWooStatus('draft')).toBe('checkout-draft');
-    expect(mapNestieeWooStatus('wc-draft')).toBe('checkout-draft');
-  });
-
-  it('maps pending and attention statuses to pending payment', () => {
+  it('maps only exact Woo statuses', () => {
     expect(mapNestieeWooStatus('pending')).toBe('pending payment');
-    expect(mapNestieeWooStatus('failed')).toBe('pending payment');
-    expect(mapNestieeWooStatus('cancelled')).toBe('pending payment');
-    expect(mapNestieeWooStatus('refunded')).toBe('pending payment');
-  });
-
-  it('maps processing and on-hold to processing', () => {
     expect(mapNestieeWooStatus('processing')).toBe('processing');
-    expect(mapNestieeWooStatus('on-hold')).toBe('processing');
-  });
-
-  it('maps shipped and completed', () => {
     expect(mapNestieeWooStatus('shipped')).toBe('shipped');
-    expect(mapNestieeWooStatus('wc-shipped')).toBe('shipped');
     expect(mapNestieeWooStatus('completed')).toBe('completed');
   });
 
-  it('maps unknown Woo statuses to processing', () => {
-    expect(mapNestieeWooStatus('custom-status')).toBe('processing');
+  it('drops unmatched Woo statuses', () => {
+    expect(mapNestieeWooStatus('checkout-draft')).toBeNull();
+    expect(mapNestieeWooStatus('draft')).toBeNull();
+    expect(mapNestieeWooStatus('on-hold')).toBeNull();
+    expect(mapNestieeWooStatus('failed')).toBeNull();
+    expect(mapNestieeWooStatus('cancelled')).toBeNull();
+    expect(mapNestieeWooStatus('refunded')).toBeNull();
+    expect(mapNestieeWooStatus('wc-shipped')).toBeNull();
+    expect(mapNestieeWooStatus('custom-status')).toBeNull();
+    expect(mapNestieeWooStatus('')).toBeNull();
   });
 });
 

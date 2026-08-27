@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PaymentMethod, ReconciliationRecord } from '@/lib/reconciliation';
 import { displayInvoiceNumber } from '@/lib/record-numbering-core';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 import { bi } from '@/lib/ui-labels';
 import {
   depositDateKey,
@@ -15,7 +16,30 @@ import {
   type ZoneFilter,
 } from '@/lib/reconciliation-page-utils';
 
+const RECONCILIATION_LIST_UI_KEY = 'reconciliation-list-ui';
+const ZONE_FILTERS: ZoneFilter[] = ['high', 'medium', 'attention', 'matched'];
+const SORT_KEYS: ReconciliationSortKey[] = [
+  'deposit_time',
+  'gross_amount',
+  'transaction_fee',
+  'net_amount',
+  'status',
+  'created_at',
+  'created_by',
+];
+
+type ReconciliationListUiState = {
+  zoneFilter: ZoneFilter | null;
+  dateStart: string;
+  dateEnd: string;
+  search: string;
+  methodFilter: string;
+  sort: { key: ReconciliationSortKey; dir: 'asc' | 'desc' };
+  page: number;
+};
+
 export function useReconciliationList() {
+  const savedUi = useMemo(() => readListUi<ReconciliationListUiState>(RECONCILIATION_LIST_UI_KEY), []);
   const [records, setRecords] = useState<ReconciliationRecord[]>([]);
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
@@ -28,16 +52,28 @@ export function useReconciliationList() {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
   const [batchApproving, setBatchApproving] = useState(false);
-  const [zoneFilter, setZoneFilter] = useState<ZoneFilter | null>('high');
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [search, setSearch] = useState('');
-  const [methodFilter, setMethodFilter] = useState('');
-  const [sort, setSort] = useState<{ key: ReconciliationSortKey; dir: 'asc' | 'desc' }>({
-    key: 'deposit_time',
-    dir: 'desc',
+  const [zoneFilter, setZoneFilter] = useState<ZoneFilter | null>(() => {
+    const saved = savedUi?.zoneFilter;
+    if (saved === null) return null;
+    if (saved && ZONE_FILTERS.includes(saved)) return saved;
+    return 'high';
   });
-  const [page, setPage] = useState(1);
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [methodFilter, setMethodFilter] = useState(savedUi?.methodFilter ?? '');
+  const [sort, setSort] = useState<{ key: ReconciliationSortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && SORT_KEYS.includes(key) && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'deposit_time', dir: 'desc' };
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -62,6 +98,18 @@ export function useReconciliationList() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    writeListUi(RECONCILIATION_LIST_UI_KEY, {
+      zoneFilter,
+      dateStart,
+      dateEnd,
+      search,
+      methodFilter,
+      sort,
+      page,
+    });
+  }, [zoneFilter, dateStart, dateEnd, search, methodFilter, sort, page]);
 
   const zoneCounts = useMemo(
     () => ({

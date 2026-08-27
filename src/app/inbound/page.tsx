@@ -7,12 +7,22 @@ import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 import { compressImage } from '@/lib/imageCompression';
 import { inboundPhotoUrl } from '@/lib/image-url';
 import type { InboundShipment } from '@/lib/inbound';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 type SortKey = 'arrival' | 'waybill' | 'sender';
 type SortDir = 'asc' | 'desc';
+const INBOUND_LIST_UI_KEY = 'inbound-list-ui';
+const SORT_KEYS: SortKey[] = ['arrival', 'waybill', 'sender'];
+
+type InboundListUiState = {
+  dateStart: string;
+  dateEnd: string;
+  search: string;
+  sort: { key: SortKey; dir: SortDir };
+};
 
 /** Prefer arrival_date; fall back to created_at date (matches list API ordering). */
 function shipmentDate(s: InboundShipment): string {
@@ -20,12 +30,20 @@ function shipmentDate(s: InboundShipment): string {
 }
 
 export default function InboundPage() {
+  const savedUi = useMemo(() => readListUi<InboundListUiState>(INBOUND_LIST_UI_KEY), []);
   const [shipments, setShipments] = useState<InboundShipment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'arrival', dir: 'desc' });
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && SORT_KEYS.includes(key) && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'arrival', dir: 'desc' };
+  });
   const [waybill, setWaybill] = useState('');
   const [sender, setSender] = useState('');
   const [senderAddress, setSenderAddress] = useState('');
@@ -46,6 +64,10 @@ export default function InboundPage() {
     fetch('/api/inbound').then((r) => r.json()).then((d) => setShipments(d.shipments || [])).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    writeListUi(INBOUND_LIST_UI_KEY, { dateStart, dateEnd, search, sort });
+  }, [dateStart, dateEnd, search, sort]);
 
   const resetForm = () => {
     setWaybill(''); setSender(''); setSenderAddress(''); setReceiverAddress(''); setArrival(today()); setAmount(''); setPhotoPath(''); setPreview(null); setScanMsg('');

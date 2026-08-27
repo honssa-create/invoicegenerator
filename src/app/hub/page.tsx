@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
@@ -17,6 +17,7 @@ import {
 } from '@/lib/hub';
 import { fetchWooOrdersInBrowser } from '@/lib/woocommerce-client';
 import { displayInvoiceNumber, displayOrderNumber } from '@/lib/record-numbering-core';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 interface HubResponse {
   orders: HubOrderRow[];
@@ -60,6 +61,16 @@ function formatImportResult(result: HubSyncResult): string {
   return parts.join(' · ');
 }
 
+const HUB_LIST_UI_KEY = 'hub-list-ui';
+
+type HubListUiState = {
+  platformFilter: HubPlatform | 'all';
+  dateStart: string;
+  dateEnd: string;
+  search: string;
+  page: number;
+};
+
 export default function OrderHubPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-gray-500">Loading hub…</div>}>
@@ -70,18 +81,27 @@ export default function OrderHubPage() {
 
 function OrderHubContent() {
   const searchParams = useSearchParams();
+  const savedUi = useMemo(() => readListUi<HubListUiState>(HUB_LIST_UI_KEY), []);
   const [data, setData] = useState<HubResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState<ImportPlatform | 'all' | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [platformFilter, setPlatformFilter] = useState<HubPlatform | 'all'>('all');
+  const [platformFilter, setPlatformFilter] = useState<HubPlatform | 'all'>(() => {
+    const saved = savedUi?.platformFilter;
+    if (saved === 'all' || (saved && HUB_PLATFORMS.includes(saved))) return saved;
+    return 'all';
+  });
   const [importDateFrom, setImportDateFrom] = useState(defaultImportDateFrom);
   const [importDateTo, setImportDateTo] = useState(defaultImportDateTo);
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const skipPageResetRef = useRef(true);
   const PAGE_SIZE = 50;
 
   const load = () => {
@@ -121,6 +141,14 @@ function OrderHubContent() {
   }, [data, platformFilter, dateStart, dateEnd, search]);
 
   useEffect(() => {
+    writeListUi(HUB_LIST_UI_KEY, { platformFilter, dateStart, dateEnd, search, page });
+  }, [platformFilter, dateStart, dateEnd, search, page]);
+
+  useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [platformFilter, dateStart, dateEnd, search]);
 

@@ -11,15 +11,18 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
+  PREP_STATUSES,
   PREP_STATUS_LABELS,
   getPrepStatusAction,
   isRedDateAllowed,
   type PrepCapacity,
   type PrepOrder,
   type PrepOrderType,
+  type PrepStatus,
 } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 const STATUS_COLORS: Record<string, string> = {
   not_started: 'bg-gray-100 text-gray-600',
@@ -114,6 +117,17 @@ function parsePrefillForm(searchParams: URLSearchParams): FormState | null {
 
 type SortKey = 'stewing_date' | 'order_code' | 'capacity' | 'status';
 type SortDir = 'asc' | 'desc';
+const KITCHEN_PREP_LIST_UI_KEY = 'kitchen-prep-list-ui';
+const SORT_KEYS: SortKey[] = ['stewing_date', 'order_code', 'capacity', 'status'];
+
+type KitchenPrepListUiState = {
+  dateStart: string;
+  dateEnd: string;
+  search: string;
+  status: string;
+  sortKey: SortKey;
+  sortDir: SortDir;
+};
 
 function localIsoDate(d: Date): string {
   const y = d.getFullYear();
@@ -156,6 +170,7 @@ export default function KitchenPrepListPage() {
 function KitchenPrepListContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const savedUi = useMemo(() => readListUi<KitchenPrepListUiState>(KITCHEN_PREP_LIST_UI_KEY), []);
   const [orders, setOrders] = useState<PrepOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -165,11 +180,21 @@ function KitchenPrepListContent() {
   const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
   const [advancingId, setAdvancingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('stewing_date');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const key = savedUi?.sortKey;
+    return key && SORT_KEYS.includes(key) ? key : 'stewing_date';
+  });
+  const [sortDir, setSortDir] = useState<SortDir>(() => {
+    const dir = savedUi?.sortDir;
+    return dir === 'asc' || dir === 'desc' ? dir : 'asc';
+  });
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [status, setStatus] = useState<PrepStatus | ''>(() => {
+    const saved = savedUi?.status;
+    return saved && (PREP_STATUSES as readonly string[]).includes(saved) ? (saved as PrepStatus) : '';
+  });
+  const [search, setSearch] = useState(savedUi?.search ?? '');
   const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
     PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
   );
@@ -183,6 +208,10 @@ function KitchenPrepListContent() {
       .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    writeListUi(KITCHEN_PREP_LIST_UI_KEY, { dateStart, dateEnd, search, status, sortKey, sortDir });
+  }, [dateStart, dateEnd, search, status, sortKey, sortDir]);
 
   useEffect(() => {
     fetch('/api/kitchen/catalog')
@@ -213,6 +242,7 @@ function KitchenPrepListContent() {
     return orders.filter((o) => {
       if (dateStart && o.stewing_date < dateStart) return false;
       if (dateEnd && o.stewing_date > dateEnd) return false;
+      if (status && o.status !== status) return false;
       if (!q) return true;
       const haystack = [
         o.stewing_date,
@@ -227,7 +257,7 @@ function KitchenPrepListContent() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [orders, dateStart, dateEnd, search]);
+  }, [orders, dateStart, dateEnd, search, status]);
 
   const sortedOrders = useMemo(() => {
     const list = [...filteredOrders];
@@ -257,6 +287,7 @@ function KitchenPrepListContent() {
   const clearFilters = () => {
     setDateStart('');
     setDateEnd('');
+    setStatus('');
     setSearch('');
   };
 
@@ -394,7 +425,23 @@ function KitchenPrepListContent() {
         onSearch={setSearch}
         searchPlaceholder={bi('Order ID, capacity, status, type…', '訂單編號、容量、狀態、類型…')}
         onClear={clearFilters}
-      />
+      >
+        <div className="flex flex-col min-w-[140px]">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as PrepStatus | '')}
+            className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+          >
+            <option value="">{BTN.all}</option>
+            {PREP_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {PREP_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </FilterBar>
 
       <p className="text-sm text-gray-600 -mt-4 mb-6">
         {bi('Quick filters:', '快速篩選：')}{' '}

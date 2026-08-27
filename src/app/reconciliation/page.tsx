@@ -306,10 +306,15 @@ function ReconciliationContent() {
   const pageStart = displayed.length ? (page - 1) * RECONCILIATION_PAGE_SIZE : 0;
   const pageEnd = Math.min(page * RECONCILIATION_PAGE_SIZE, displayed.length);
   const pageRows = displayed.slice(pageStart, pageEnd);
+  const skipPageResetRef = useRef(true);
 
   useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
-  }, [zoneFilter, methodFilter, dateStart, dateEnd, search, sort, linkOrderId, focusRecordId, matchedOrderId]);
+  }, [zoneFilter, methodFilter, dateStart, dateEnd, search, sort, linkOrderId, focusRecordId, matchedOrderId, setPage]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);

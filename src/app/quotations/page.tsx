@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -18,25 +18,50 @@ import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { quotationFileUrl } from '@/lib/image-url';
 import { pickThumbnailFile } from '@/lib/attachment-files';
 import { ListThumb } from '@/components/EntityAttachments';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 type SortKey = 'number' | 'customer' | 'date' | 'amount' | 'status';
 const PAGE_SIZE = 50;
+const QUOTATIONS_LIST_UI_KEY = 'quotations-list-ui';
+const SORT_KEYS: SortKey[] = ['number', 'customer', 'date', 'amount', 'status'];
+
+type QuotationsListUiState = {
+  dateStart: string;
+  dateEnd: string;
+  client: string;
+  status: string;
+  search: string;
+  sort: { key: SortKey; dir: 'asc' | 'desc' };
+  page: number;
+};
 
 export default function QuotationsPage() {
   const router = useRouter();
   const { isSectionReadOnly } = useAuth();
   const readOnly = isSectionReadOnly('quotations');
+  const savedUi = useMemo(() => readListUi<QuotationsListUiState>(QUOTATIONS_LIST_UI_KEY), []);
   const [quotations, setQuotations] = useState<QuotationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [client, setClient] = useState('');
-  const [status, setStatus] = useState('');
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
-  const [page, setPage] = useState(1);
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [client, setClient] = useState(savedUi?.client ?? '');
+  const [status, setStatus] = useState(savedUi?.status ?? '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && SORT_KEYS.includes(key) && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'date', dir: 'desc' };
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const skipPageResetRef = useRef(true);
 
   const load = () => {
     setLoading(true);
@@ -96,6 +121,22 @@ export default function QuotationsPage() {
   const pageRows = displayed.slice(pageStart, pageEnd);
 
   useEffect(() => {
+    writeListUi(QUOTATIONS_LIST_UI_KEY, {
+      dateStart,
+      dateEnd,
+      client,
+      status,
+      search,
+      sort,
+      page,
+    });
+  }, [dateStart, dateEnd, client, status, search, sort, page]);
+
+  useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [dateStart, dateEnd, client, status, search, sort]);
 

@@ -42,6 +42,7 @@ import {
 import type { Expense } from '@/lib/types';
 import { expenseReceiptUrl, formReceiptPreviewUrl } from '@/lib/image-url';
 import ExpenseDetailPanel from '@/components/ExpenseDetailPanel';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 const EMPTY_FORM = {
   category: '',
@@ -65,8 +66,16 @@ type Options = Record<OptionType, string[]>;
 type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'paymentChannel' | 'fundingSource' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', fundingSource: '', reason: '', platform: '', search: '' };
+const EXPENSES_LIST_UI_KEY = 'expenses-list-ui';
 const PAGE_SIZES = [10, 20, 30, 50] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
+
+type ExpensesListUiState = {
+  filters: typeof EMPTY_FILTERS;
+  sort: { key: SortKey; dir: 'asc' | 'desc' };
+  pageSize: PageSize;
+  page: number;
+};
 
 function buildPageNumbers(current: number, total: number): (number | '…')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -101,6 +110,7 @@ function normalizeOptions(raw?: Partial<Options>): Options {
 
 export default function ExpensesPage() {
   const router = useRouter();
+  const savedUi = useMemo(() => readListUi<ExpensesListUiState>(EXPENSES_LIST_UI_KEY), []);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -119,10 +129,27 @@ export default function ExpensesPage() {
   const [supplierOcrMatch, setSupplierOcrMatch] = useState<SupplierMatch | null>(null);
   const [supplierInputOcrHint, setSupplierInputOcrHint] = useState(false);
 
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
-  const [pageSize, setPageSize] = useState<PageSize>(20);
-  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState(() => ({
+    ...EMPTY_FILTERS,
+    ...(savedUi?.filters ?? {}),
+  }));
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && dir && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'date', dir: 'desc' };
+  });
+  const [pageSize, setPageSize] = useState<PageSize>(() => {
+    const n = savedUi?.pageSize;
+    return n && PAGE_SIZES.includes(n) ? n : 20;
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const skipPageResetRef = useRef(true);
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
@@ -286,6 +313,14 @@ export default function ExpensesPage() {
   const pagedRows = displayed.slice(pageStart, pageEnd);
 
   useEffect(() => {
+    writeListUi(EXPENSES_LIST_UI_KEY, { filters, sort, pageSize, page });
+  }, [filters, sort, pageSize, page]);
+
+  useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [filters, sort, pageSize]);
 

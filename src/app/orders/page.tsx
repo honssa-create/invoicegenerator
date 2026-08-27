@@ -37,6 +37,7 @@ import {
   parseKitchenShortageResponse,
   type KitchenShortage,
 } from '@/lib/kitchen-ship-allocate';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
   giftBoxes: [],
@@ -68,27 +69,6 @@ type OrdersListUiState = {
   page: number;
 };
 
-function readOrdersListUi(): Partial<OrdersListUiState> | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = sessionStorage.getItem(ORDERS_LIST_UI_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<OrdersListUiState>;
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeOrdersListUi(state: OrdersListUiState) {
-  try {
-    sessionStorage.setItem(ORDERS_LIST_UI_KEY, JSON.stringify(state));
-  } catch {
-    /* ignore quota / private mode */
-  }
-}
-
 export default function OrdersPage() {
   return (
     <AppLayout>
@@ -110,7 +90,7 @@ export default function OrdersPage() {
 function OrdersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const savedUi = useMemo(() => readOrdersListUi(), []);
+  const savedUi = useMemo(() => readListUi<OrdersListUiState>(ORDERS_LIST_UI_KEY), []);
   const urlType = searchParams.get('type');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,7 +172,7 @@ function OrdersPageContent() {
   }, [searchParams]);
 
   useEffect(() => {
-    writeOrdersListUi({
+    writeListUi(ORDERS_LIST_UI_KEY, {
       view,
       dateStart,
       dateEnd,

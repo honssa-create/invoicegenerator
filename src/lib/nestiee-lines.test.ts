@@ -403,7 +403,7 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
           line_total: 200,
         },
         {
-          name: '星空禮盒 · 即食燕窩 - 金-‧-桂花-1-盒',
+          name: '星空禮盒 · 即食燕窩 - 金-‧-桂花 1盒',
           quantity: 1,
           unit_price: 100,
           line_total: 100,
@@ -447,47 +447,88 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
     });
   });
 
-  it('maps Trial Set using the first Arabic digit, defaulting to 1', () => {
+  it('maps Trial Set using N盒, defaulting to 1', () => {
     expect(
       computeNestieeGiftBoxQtysFromLines([
         { name: 'Trial Set', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: 'Trial Set 3盒', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '3盒 x Trial Set', quantity: 2, unit_price: 1, line_total: 2 },
         { name: 'Trial Set 3', quantity: 1, unit_price: 1, line_total: 1 },
         { name: '3 x Trial Set', quantity: 2, unit_price: 1, line_total: 2 },
       ])
     ).toEqual({
       ...emptyAutoQtys,
-      nestiee_gift_qty_trial_set: 1 + 3 + 3 * 2,
+      nestiee_gift_qty_trial_set: 1 + 3 + 3 * 2 + 1 + 1 * 2,
     });
   });
 
-  it('maps 金銀套裝 只選單味 + 金/銀盒 to 紅色金 / 紅色銀', () => {
+  it('does not treat 45mL as a gift-box quantity', () => {
     expect(
       computeNestieeGiftBoxQtysFromLines([
+        { name: 'Trial Set 45mL', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: 'Trial Set 45mL 2盒', quantity: 1, unit_price: 1, line_total: 1 },
         {
-          name: '即食燕窩心意禮盒 ‧ 金銀套裝',
+          name: '星空禮盒 · 即食燕窩 - 金 · 桂花 45mL 3盒',
           quantity: 1,
-          unit_price: 500,
-          line_total: 500,
-          options: [
-            { label: '款式', value: '⚪️ 只選單味（紅棗或冰糖）', price: 0 },
-            { label: '盒子', value: '🟡 金盒｜紅棗・暖潤', price: 0 },
-          ],
+          unit_price: 1,
+          line_total: 1,
         },
         {
-          name: '即食燕窩心意禮盒 · 金銀套裝',
-          quantity: 4,
-          unit_price: 500,
-          line_total: 2000,
-          options: [
-            { label: '款式', value: '⚪️ 只選單味（紅棗或冰糖）', price: 0 },
-            { label: '盒子', value: '⚪ 銀盒｜冰糖・清潤', price: 0 },
-          ],
+          name: '星空禮盒 · 即食燕窩 - 銀 · 冰糖 45mL 2盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
         },
       ])
     ).toEqual({
       ...emptyAutoQtys,
-      nestiee_gift_qty_red_gold: 1,
-      nestiee_gift_qty_red_silver: 4,
+      nestiee_gift_qty_trial_set: 1 + 2,
+      nestiee_gift_qty_star_gold: 3,
+      nestiee_gift_qty_star_silver: 2,
+    });
+  });
+
+  it('maps 心意禮盒 紅棗x盒 / 冰糖x盒 / x套y盒 to 紅色金 / 紅色銀', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '即食燕窩心意禮盒',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+          options: [{ label: '數量', value: '紅棗3盒', price: 0 }],
+        },
+        {
+          name: '心意禮盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '冰糖 4 盒', price: 0 }],
+        },
+        {
+          name: '即食燕窩心意禮盒 · 金銀套裝',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '3套6盒', price: 0 }],
+        },
+        {
+          name: '心意禮盒 2盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+        },
+        {
+          name: '其他產品 紅棗9盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_red_gold: 3 * 2 + 3,
+      nestiee_gift_qty_red_silver: 4 + 3,
     });
   });
 
@@ -564,7 +605,7 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
           quantity: 1,
           unit_price: 1,
           line_total: 1,
-          options: [{ label: 'Qty', value: '4', price: 0 }],
+          options: [{ label: 'Qty', value: '4盒', price: 0 }],
         },
       ])
     ).toEqual({
@@ -625,7 +666,7 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
     });
   });
 
-  it('maps 心意禮盒 N盒 to both 紅色金 and 紅色銀', () => {
+  it('maps 心意禮盒 紅棗 and 冰糖 on the same line independently', () => {
     expect(
       computeNestieeGiftBoxQtysFromLines([
         {
@@ -633,13 +674,13 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
           quantity: 1,
           unit_price: 1,
           line_total: 1,
-          options: [{ label: '數量', value: '2盒', price: 0 }],
+          options: [{ label: '數量', value: '紅棗2盒 冰糖1盒', price: 0 }],
         },
       ])
     ).toEqual({
       ...emptyAutoQtys,
       nestiee_gift_qty_red_gold: 2,
-      nestiee_gift_qty_red_silver: 2,
+      nestiee_gift_qty_red_silver: 1,
     });
   });
 

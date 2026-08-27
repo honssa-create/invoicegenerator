@@ -1197,12 +1197,6 @@ const NESTIEE_HUA_YUE_CN_QTY: Record<string, number> = {
   八: 8,
 };
 
-const NESTIEE_RED_BOX_NAME = '即食燕窩心意禮盒 ‧ 金銀套裝';
-const NESTIEE_RED_BOX_NAME_ALT = '即食燕窩心意禮盒 · 金銀套裝';
-const NESTIEE_RED_SINGLE_FLAVOR_OPTION = '⚪️ 只選單味（紅棗或冰糖）';
-const NESTIEE_RED_GOLD_OPTION = '🟡 金盒｜紅棗・暖潤';
-const NESTIEE_RED_SILVER_OPTION = '⚪ 銀盒｜冰糖・清潤';
-
 const NESTIEE_PINK_BOX_NAME = '心意即食燕窩禮盒 ‧ 𝑫𝒆𝒂𝒓𝒆𝒔𝒕 𝑴𝒐𝒎𝒆𝒏𝒕';
 const NESTIEE_PINK_BOX_NAME_ALT = '心意即食燕窩禮盒 · 𝑫𝒆𝒂𝒓𝒆𝒔𝒕 𝑴𝒐𝒎𝒆𝒏𝒕';
 const NESTIEE_PINK_SINGLE_OPTION = '👑👩 單盒就夠';
@@ -1263,9 +1257,9 @@ function parseNestieeStarGiftBoxQtys(
   if (mixed) {
     return { gold: Number(mixed[2]) || 0, silver: Number(mixed[3]) || 0 };
   }
-  const gold = haystack.match(/金[\s\S]*?·[\s\S]*?桂花[\s\S]*?(\d+)[\s\S]*?盒/);
+  const gold = haystack.match(/金[\s\S]*?·[\s\S]*?桂花[\s\S]*?(\d+)\s*盒/);
   if (gold) return { gold: Number(gold[1]) || 0, silver: 0 };
-  const silver = haystack.match(/銀[\s\S]*?·[\s\S]*?冰糖[\s\S]*?(\d+)[\s\S]*?盒/);
+  const silver = haystack.match(/銀[\s\S]*?·[\s\S]*?冰糖[\s\S]*?(\d+)\s*盒/);
   if (silver) return { gold: 0, silver: Number(silver[1]) || 0 };
   return { gold: 0, silver: 0 };
 }
@@ -1277,15 +1271,35 @@ function parseNestieeHuaYueQty(name: string, haystack: string): number | null {
 
 function parseNestieeTrialSetQty(name: string, haystack: string): number | null {
   if (!nestieeNameForGiftMatch(name).includes('Trial Set')) return null;
-  const m = haystack.match(/\d+/);
-  const parsed = m ? Number(m[0]) : 1;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  return parseNestieeNBoxQty(haystack) ?? 1;
+}
+
+/** 心意禮盒: 紅棗x盒 → 紅色金, 冰糖x盒 → 紅色銀, x套y盒 → x on both. */
+function parseNestieeXinYiGiftBoxQtys(
+  name: string,
+  haystack: string
+): { gold: number; silver: number } | null {
+  if (!nestieeNameForGiftMatch(name).includes('心意禮盒')) return null;
+  const redDate = haystack.match(/紅棗\s*(\d+)\s*盒/);
+  const rockSugar = haystack.match(/冰糖\s*(\d+)\s*盒/);
+  if (redDate || rockSugar) {
+    return {
+      gold: redDate ? Number(redDate[1]) || 0 : 0,
+      silver: rockSugar ? Number(rockSugar[1]) || 0 : 0,
+    };
+  }
+  const set = haystack.match(/(\d+)\s*套\s*(\d+)\s*盒/);
+  if (set) {
+    const n = Number(set[1]) || 0;
+    return { gold: n, silver: n };
+  }
+  return { gold: 0, silver: 0 };
 }
 
 /**
  * Derive 所需禮盒 quantities from Nestiee Woo lines.
- * Product identity is taken from the line name; quantity tokens from name + all EPO options
- * (NFKC so fullwidth / math-bold digits match).
+ * Product identity is taken from the line name; box counts from name + all EPO options
+ * as a number immediately before 盒 (NFKC so fullwidth / math-bold digits match).
  */
 export function computeNestieeGiftBoxQtysFromLines(
   lines: NestieeLineItem[]
@@ -1304,13 +1318,6 @@ export function computeNestieeGiftBoxQtysFromLines(
     nestiee_gift_qty_sui_xin_7: 0,
     nestiee_gift_qty_sui_xin_14: 0,
   };
-  const redNames = new Set([
-    normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME),
-    normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME_ALT),
-  ]);
-  const redSingle = normalizeNestieeMatchText(NESTIEE_RED_SINGLE_FLAVOR_OPTION);
-  const redGoldOpt = normalizeNestieeMatchText(NESTIEE_RED_GOLD_OPTION);
-  const redSilverOpt = normalizeNestieeMatchText(NESTIEE_RED_SILVER_OPTION);
   const pinkNames = new Set([
     normalizeNestieeMatchText(NESTIEE_PINK_BOX_NAME),
     normalizeNestieeMatchText(NESTIEE_PINK_BOX_NAME_ALT),
@@ -1384,16 +1391,10 @@ export function computeNestieeGiftBoxQtysFromLines(
       }
     }
 
-    const xinYiNBox = nameForProduct.includes('心意禮盒') ? parseNestieeNBoxQty(haystack) : null;
-    if (xinYiNBox != null) {
-      qtys.nestiee_gift_qty_red_gold += xinYiNBox * qty;
-      qtys.nestiee_gift_qty_red_silver += xinYiNBox * qty;
-      continue;
-    }
-
-    if (redNames.has(name) && firstOpt === redSingle) {
-      if (secondOpt === redGoldOpt) qtys.nestiee_gift_qty_red_gold += qty;
-      else if (secondOpt === redSilverOpt) qtys.nestiee_gift_qty_red_silver += qty;
+    const xinYiQtys = parseNestieeXinYiGiftBoxQtys(line.name, haystack);
+    if (xinYiQtys) {
+      qtys.nestiee_gift_qty_red_gold += xinYiQtys.gold * qty;
+      qtys.nestiee_gift_qty_red_silver += xinYiQtys.silver * qty;
       continue;
     }
 

@@ -387,6 +387,10 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
     nestiee_gift_qty_pink_red_date: 0,
     nestiee_gift_qty_hua_yue: 0,
     nestiee_gift_qty_trial_set: 0,
+    nestiee_gift_qty_rou_run_share_box: 0,
+    nestiee_gift_qty_qiu_yan_fei_yue: 0,
+    nestiee_gift_qty_sui_xin_7: 0,
+    nestiee_gift_qty_sui_xin_14: 0,
   };
 
   it('maps 星空禮盒 name suffixes to 星空金 / 星空銀', () => {
@@ -537,6 +541,146 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
       nestiee_gift_qty_pink_red_date: 1 + 1,
     });
   });
+
+  it('reads 星空 / 花月 / Trial Set counts from extra options', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '星空禮盒 · 即食燕窩',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '3盒2金1銀', price: 0 }],
+        },
+        {
+          name: '花月禮盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '盒數', value: '三盒', price: 0 }],
+        },
+        {
+          name: 'Trial Set',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: 'Qty', value: '4', price: 0 }],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_star_gold: 2,
+      nestiee_gift_qty_star_silver: 1,
+      nestiee_gift_qty_hua_yue: 3,
+      nestiee_gift_qty_trial_set: 4,
+    });
+  });
+
+  it('folds fullwidth and math-bold digits via NFKC', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: 'Sharing We Time Box',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '３盒', price: 0 }],
+        },
+        {
+          name: '秋燕飛躍',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '𝟑盒', price: 0 }],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_rou_run_share_box: 3,
+      nestiee_gift_qty_qiu_yan_fei_yue: 3,
+    });
+  });
+
+  it('maps Sharing We Time / 柔潤分享時光盒 N盒, including line quantity', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: 'Sharing We Time Box',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+          options: [{ label: '數量', value: '3盒', price: 0 }],
+        },
+        {
+          name: '柔潤分享時光盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '盒數', value: '二盒', price: 0 }],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_rou_run_share_box: 3 * 2 + 2,
+    });
+  });
+
+  it('maps 心意禮盒 N盒 to both 紅色金 and 紅色銀', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '心意禮盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '2盒', price: 0 }],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_red_gold: 2,
+      nestiee_gift_qty_red_silver: 2,
+    });
+  });
+
+  it('maps 秋燕飛躍 N盒 and 隨心燉 pack tokens from name or options', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '秋燕飛躍',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+          options: [{ label: '數量', value: '1盒', price: 0 }],
+        },
+        {
+          name: '隨心燉',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '裝量', value: '一周7份', price: 0 }],
+        },
+        {
+          name: '隨心燉',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '裝量', value: '14份裝', price: 0 }],
+        },
+        {
+          name: '隨心燉 21份裝',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_qiu_yan_fei_yue: 2,
+      nestiee_gift_qty_sui_xin_7: 1 + 2 + 1,
+      nestiee_gift_qty_sui_xin_14: 1,
+    });
+  });
 });
 
 describe('applyNestieeGiftBoxAutoQtys', () => {
@@ -664,6 +808,10 @@ describe('appendNestieeShippingLine', () => {
       nestiee_gift_qty_pink_red_date: 0,
       nestiee_gift_qty_hua_yue: 0,
       nestiee_gift_qty_trial_set: 0,
+      nestiee_gift_qty_rou_run_share_box: 0,
+      nestiee_gift_qty_qiu_yan_fei_yue: 0,
+      nestiee_gift_qty_sui_xin_7: 0,
+      nestiee_gift_qty_sui_xin_14: 0,
     });
   });
 });

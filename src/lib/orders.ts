@@ -1217,45 +1217,64 @@ function nestieeNameForGiftMatch(name: string): string {
   return normalizeNestieeMatchText(stripNestieeEmojis(name));
 }
 
-function parseNestieeStarGiftBoxQtysFromName(
-  name: string
+/** NFKC first so math-bold / fullwidth digits become ASCII before emoji/surrogate stripping. */
+function nestieeQtyText(text: string): string {
+  return nestieeNameForGiftMatch(text.normalize('NFKC'));
+}
+
+function nestieeGiftQtyHaystack(line: NestieeLineItem): string {
+  const parts = [line.name || ''];
+  for (const opt of line.options || []) {
+    if (opt.label) parts.push(opt.label);
+    if (opt.value) parts.push(opt.value);
+  }
+  return nestieeQtyText(parts.join(' '));
+}
+
+/** Arabic N盒, else Chinese 一…八盒. Ignores 金盒 / 銀盒 / 單盒 / 雙盒. */
+function parseNestieeNBoxQty(haystack: string): number | null {
+  const arabic = haystack.match(/(\d+)\s*盒/);
+  if (arabic) {
+    const n = Number(arabic[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  const cn = haystack.match(/([一二三四五六七八])\s*盒/);
+  if (!cn) return null;
+  return NESTIEE_HUA_YUE_CN_QTY[cn[1]] ?? null;
+}
+
+function parseNestieeStarGiftBoxQtys(
+  name: string,
+  haystack: string
 ): { gold: number; silver: number } | null {
-  const n = nestieeNameForGiftMatch(name);
-  if (!n.includes(NESTIEE_STAR_BOX_NAME_CORE)) return null;
-  const mixed = n.match(/(\d+)\s*盒[\s\S]*?(\d+)\s*金\s*(\d+)\s*銀/);
+  if (!nestieeNameForGiftMatch(name).includes(NESTIEE_STAR_BOX_NAME_CORE)) return null;
+  const mixed = haystack.match(/(\d+)\s*盒[\s\S]*?(\d+)\s*金\s*(\d+)\s*銀/);
   if (mixed) {
     return { gold: Number(mixed[2]) || 0, silver: Number(mixed[3]) || 0 };
   }
-  const gold = n.match(/金[\s\S]*?·[\s\S]*?桂花[\s\S]*?(\d+)[\s\S]*?盒/);
+  const gold = haystack.match(/金[\s\S]*?·[\s\S]*?桂花[\s\S]*?(\d+)[\s\S]*?盒/);
   if (gold) return { gold: Number(gold[1]) || 0, silver: 0 };
-  const silver = n.match(/銀[\s\S]*?·[\s\S]*?冰糖[\s\S]*?(\d+)[\s\S]*?盒/);
+  const silver = haystack.match(/銀[\s\S]*?·[\s\S]*?冰糖[\s\S]*?(\d+)[\s\S]*?盒/);
   if (silver) return { gold: 0, silver: Number(silver[1]) || 0 };
   return { gold: 0, silver: 0 };
 }
 
-function parseNestieeHuaYueQtyFromName(name: string): number | null {
-  const n = nestieeNameForGiftMatch(name);
-  if (!n.includes('花月禮盒')) return null;
-  const m = n.match(/([一二三四五六七八])\s*盒/);
-  if (!m) return null;
-  return NESTIEE_HUA_YUE_CN_QTY[m[1]] ?? null;
+function parseNestieeHuaYueQty(name: string, haystack: string): number | null {
+  if (!nestieeNameForGiftMatch(name).includes('花月禮盒')) return null;
+  return parseNestieeNBoxQty(haystack);
 }
 
-function parseNestieeTrialSetQtyFromName(name: string): number | null {
-  const n = nestieeNameForGiftMatch(name);
-  if (!n.includes('Trial Set')) return null;
-  const m = n.match(/\d+/);
+function parseNestieeTrialSetQty(name: string, haystack: string): number | null {
+  if (!nestieeNameForGiftMatch(name).includes('Trial Set')) return null;
+  const m = haystack.match(/\d+/);
   const parsed = m ? Number(m[0]) : 1;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
 /**
  * Derive 所需禮盒 quantities from Nestiee Woo lines.
- * - 星空禮盒 name suffixes → 星空銀 / 星空金
- * - 花月禮盒 + 一…八盒 (anywhere in the name) → 花月禮盒
- * - Trial Set + optional Arabic digit → Trial Set
- * - 金銀套裝 + 只選單味 + 金/銀盒 → 紅色金 / 紅色銀
- * - Dearest Moment 單盒/雙盒/兩味 → 粉紅心意 桂花 / 紅棗
+ * Product identity is taken from the line name; quantity tokens from name + all EPO options
+ * (NFKC so fullwidth / math-bold digits match).
  */
 export function computeNestieeGiftBoxQtysFromLines(
   lines: NestieeLineItem[]
@@ -1269,6 +1288,10 @@ export function computeNestieeGiftBoxQtysFromLines(
     nestiee_gift_qty_pink_red_date: 0,
     nestiee_gift_qty_hua_yue: 0,
     nestiee_gift_qty_trial_set: 0,
+    nestiee_gift_qty_rou_run_share_box: 0,
+    nestiee_gift_qty_qiu_yan_fei_yue: 0,
+    nestiee_gift_qty_sui_xin_7: 0,
+    nestiee_gift_qty_sui_xin_14: 0,
   };
   const redNames = new Set([
     normalizeNestieeMatchText(NESTIEE_RED_BOX_NAME),
@@ -1289,27 +1312,71 @@ export function computeNestieeGiftBoxQtysFromLines(
 
   for (const line of lines) {
     const name = normalizeNestieeMatchText(line.name);
+    const nameForProduct = nestieeNameForGiftMatch(line.name);
+    const haystack = nestieeGiftQtyHaystack(line);
     const qty = Math.max(0, line.quantity || 0);
     if (!qty) continue;
     const firstOpt = normalizeNestieeMatchText(line.options?.[0]?.value || '');
     const secondOpt = normalizeNestieeMatchText(line.options?.[1]?.value || '');
 
-    const trialQty = parseNestieeTrialSetQtyFromName(line.name);
+    const trialQty = parseNestieeTrialSetQty(line.name, haystack);
     if (trialQty != null) {
       qtys.nestiee_gift_qty_trial_set += trialQty * qty;
       continue;
     }
 
-    const huaYueQty = parseNestieeHuaYueQtyFromName(line.name);
+    const huaYueQty = parseNestieeHuaYueQty(line.name, haystack);
     if (huaYueQty != null) {
       qtys.nestiee_gift_qty_hua_yue += huaYueQty * qty;
       continue;
     }
 
-    const starQtys = parseNestieeStarGiftBoxQtysFromName(line.name);
+    const starQtys = parseNestieeStarGiftBoxQtys(line.name, haystack);
     if (starQtys) {
       qtys.nestiee_gift_qty_star_gold += starQtys.gold * qty;
       qtys.nestiee_gift_qty_star_silver += starQtys.silver * qty;
+      continue;
+    }
+
+    if (
+      nameForProduct.includes('Sharing We Time Box') ||
+      nameForProduct.includes('柔潤分享時光盒')
+    ) {
+      const nBox = parseNestieeNBoxQty(haystack);
+      if (nBox != null) {
+        qtys.nestiee_gift_qty_rou_run_share_box += nBox * qty;
+        continue;
+      }
+    }
+
+    if (nameForProduct.includes('秋燕飛躍')) {
+      const nBox = parseNestieeNBoxQty(haystack);
+      if (nBox != null) {
+        qtys.nestiee_gift_qty_qiu_yan_fei_yue += nBox * qty;
+        continue;
+      }
+    }
+
+    if (nameForProduct.includes('隨心燉')) {
+      if (haystack.includes('21份裝')) {
+        qtys.nestiee_gift_qty_sui_xin_7 += qty;
+        qtys.nestiee_gift_qty_sui_xin_14 += qty;
+        continue;
+      }
+      if (haystack.includes('14份裝')) {
+        qtys.nestiee_gift_qty_sui_xin_7 += 2 * qty;
+        continue;
+      }
+      if (haystack.includes('一周7份')) {
+        qtys.nestiee_gift_qty_sui_xin_7 += qty;
+        continue;
+      }
+    }
+
+    const xinYiNBox = nameForProduct.includes('心意禮盒') ? parseNestieeNBoxQty(haystack) : null;
+    if (xinYiNBox != null) {
+      qtys.nestiee_gift_qty_red_gold += xinYiNBox * qty;
+      qtys.nestiee_gift_qty_red_silver += xinYiNBox * qty;
       continue;
     }
 

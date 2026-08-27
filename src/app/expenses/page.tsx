@@ -667,7 +667,10 @@ export default function ExpensesPage() {
     const ids = displayed.filter((e) => selected.has(e.id)).map((e) => e.id);
     if (
       !confirm(
-        bi('Move {n} expense(s) to Deleted Records? You can restore them within 60 days.', '將 {n} 筆支出移至已刪除紀錄？可於 60 天內還原。').replace('{n}', String(ids.length))
+        bi(
+          `Move ${ids.length} expense(s) to Deleted Records? You can restore them within 60 days.`,
+          `將 ${ids.length} 筆支出移至已刪除紀錄？可於 60 天內還原。`,
+        )
       )
     ) {
       return;

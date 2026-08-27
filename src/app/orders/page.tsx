@@ -565,9 +565,9 @@ function OrdersPageContent() {
     if (
       !window.confirm(
         bi(
-          'Move {n} order(s) to Deleted Records? You can restore them within 60 days.',
-          '將 {n} 張訂單移至已刪除紀錄？可於 60 天內還原。',
-        ).replace('{n}', String(ids.length)),
+          `Move ${ids.length} order(s) to Deleted Records? You can restore them within 60 days.`,
+          `將 ${ids.length} 張訂單移至已刪除紀錄？可於 60 天內還原。`,
+        ),
       )
     ) {
       return;

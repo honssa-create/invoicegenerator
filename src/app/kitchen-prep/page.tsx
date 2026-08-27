@@ -432,9 +432,9 @@ function KitchenPrepListContent() {
     if (
       !confirm(
         bi(
-          'Move {n} prep order(s) to Deleted Records? You can restore them within 60 days.',
-          '將 {n} 張備料單移至已刪除紀錄？可於 60 天內還原。'
-        ).replace('{n}', String(ids.length))
+          `Move ${ids.length} prep order(s) to Deleted Records? You can restore them within 60 days.`,
+          `將 ${ids.length} 張備料單移至已刪除紀錄？可於 60 天內還原。`,
+        )
       )
     ) {
       return;

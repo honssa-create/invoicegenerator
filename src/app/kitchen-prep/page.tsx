@@ -180,6 +180,8 @@ function KitchenPrepListContent() {
   const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
   const [advancingId, setAdvancingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>(() => {
     const key = savedUi?.sortKey;
     return key && SORT_KEYS.includes(key) ? key : 'stewing_date';
@@ -373,6 +375,29 @@ function KitchenPrepListContent() {
     }
   };
 
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleSelected =
+    sortedOrders.length > 0 && sortedOrders.every((o) => selected.has(o.id));
+
+  const toggleSelectAllVisible = () => {
+    setSelected((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        for (const o of sortedOrders) next.delete(o.id);
+        return next;
+      }
+      return new Set([...Array.from(prev), ...sortedOrders.map((o) => o.id)]);
+    });
+  };
+
   const remove = async (id: number) => {
     if (
       !confirm(
@@ -394,6 +419,55 @@ function KitchenPrepListContent() {
       return;
     }
     setOrders((prev) => prev.filter((o) => o.id !== id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    if (!selected.size || bulkDeleting) return;
+    const ids = Array.from(selected);
+    if (
+      !confirm(
+        bi(
+          'Move {n} prep order(s) to Deleted Records? You can restore them within 60 days.',
+          '將 {n} 張備料單移至已刪除紀錄？可於 60 天內還原。'
+        ).replace('{n}', String(ids.length))
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError('');
+    try {
+      const res = await fetch('/api/kitchen-prep/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || bi('Failed to delete', '刪除失敗'));
+        return;
+      }
+      const deleted = new Set(ids.filter((id) => !data.not_found?.includes(id)));
+      setOrders((prev) => prev.filter((o) => !deleted.has(o.id)));
+      setSelected(new Set());
+      if (data.not_found?.length) {
+        setError(
+          bi(
+            `Moved ${data.deleted} · ${data.not_found.length} skipped (not found or no access)`,
+            `已移至已刪除 ${data.deleted} 張 · ${data.not_found.length} 張略過（找不到或無權限）`
+          )
+        );
+      }
+    } catch {
+      setError(bi('Failed to delete', '刪除失敗'));
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const input = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
@@ -406,6 +480,16 @@ function KitchenPrepListContent() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Scheduled stewing orders — click a row to open the ingredient calculator', '排程燉製訂單 — 點擊列開啟配料計算器')}</p>
         </div>
         <div className="page-actions">
+          <button
+            type="button"
+            onClick={() => { void deleteSelected(); }}
+            disabled={selected.size === 0 || bulkDeleting}
+            className="px-4 py-2 bg-white border border-red-200 text-red-700 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {bulkDeleting
+              ? BTN.deleting
+              : `🗑 ${bi('Delete Selected', '刪除所選')}${selected.size > 0 ? ` (${selected.size})` : ''}`}
+          </button>
           <button onClick={() => { setError(''); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
             + {bi('New Prep Order', '新增備料單')}
           </button>
@@ -475,6 +559,15 @@ function KitchenPrepListContent() {
           <table className="w-full min-w-[800px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                <th className="px-4 py-3 w-12">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                    aria-label={bi('Select all visible', '全選可見')}
+                  />
+                </th>
                 <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('stewing_date')}>
                   Target Stewing Date 燉製日期{sortIndicator('stewing_date')}
                 </th>
@@ -497,8 +590,17 @@ function KitchenPrepListContent() {
                 <tr
                   key={o.id}
                   onClick={() => router.push(`/kitchen-prep/${o.id}`)}
-                  className="hover:bg-brand-50/50 cursor-pointer"
+                  className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''}`}
                 >
+                  <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(o.id)}
+                      onChange={() => toggleSelect(o.id)}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                      aria-label={bi(`Select ${o.order_code}`, `選擇 ${o.order_code}`)}
+                    />
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{o.stewing_date}</td>
                   <td className="px-4 py-3 font-mono text-brand-600">
                     {o.linked_order_id ? (
@@ -545,7 +647,7 @@ function KitchenPrepListContent() {
                       })()}
                       <button
                         type="button"
-                        disabled={deletingId === o.id}
+                        disabled={deletingId === o.id || bulkDeleting}
                         onClick={(e) => { e.stopPropagation(); remove(o.id); }}
                         className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-medium rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap"
                       >

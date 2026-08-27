@@ -30,7 +30,7 @@ import {
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
-import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 import { orderFileUrl } from '@/lib/image-url';
 import { ListThumb } from '@/components/EntityAttachments';
 import {
@@ -132,6 +132,7 @@ function OrdersPageContent() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [nestieeDemand, setNestieeDemand] = useState<NestieeProcessingDemand>(EMPTY_NESTIEE_DEMAND);
   const [nestieeDemandLoading, setNestieeDemandLoading] = useState(false);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<number>>(new Set());
@@ -492,7 +493,7 @@ function OrdersPageContent() {
   };
 
   const bulkChangeOrderStatus = async () => {
-    if (!bulkStatus || bulkStatusMixedTypes || bulkUpdating) return;
+    if (!bulkStatus || bulkStatusMixedTypes || bulkUpdating || bulkDeleting) return;
     const targets = selectedOrders.filter((o) => o.status !== bulkStatus);
     if (!targets.length) {
       clearOrderSelection();
@@ -555,6 +556,56 @@ function OrdersPageContent() {
       );
     } else if (otherFailed > 0) {
       setBoardError(bi('Failed to update selected orders', '無法更新所選訂單'));
+    }
+  };
+
+  const bulkDeleteOrders = async () => {
+    if (!selectedOrderIds.size || bulkUpdating || bulkDeleting) return;
+    const ids = Array.from(selectedOrderIds);
+    if (
+      !window.confirm(
+        bi(
+          'Move {n} order(s) to Deleted Records? You can restore them within 60 days.',
+          '將 {n} 張訂單移至已刪除紀錄？可於 60 天內還原。',
+        ).replace('{n}', String(ids.length)),
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setBoardError('');
+    try {
+      const res = await fetch('/api/orders/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBoardError(data.error || MSG.bulkDeleteFailed);
+        return;
+      }
+      const deleted = new Set(ids.filter((id) => !data.not_found?.includes(id)));
+      setOrders((list) => list.filter((o) => !deleted.has(o.id)));
+      setExpandedOrderIds((prev) => {
+        const next = new Set(prev);
+        deleted.forEach((id) => next.delete(id));
+        return next;
+      });
+      clearOrderSelection();
+      loadNestieeDemand();
+      if (data.not_found?.length) {
+        setBoardError(
+          bi(
+            `Moved ${data.deleted} · ${data.not_found.length} skipped (not found or no access)`,
+            `已移至已刪除 ${data.deleted} 張 · ${data.not_found.length} 張略過（找不到或無權限）`,
+          ),
+        );
+      }
+    } catch {
+      setBoardError(MSG.bulkDeleteFailed);
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -743,7 +794,7 @@ function OrdersPageContent() {
                     <select
                       value={bulkStatus}
                       onChange={(e) => setBulkStatus(e.target.value)}
-                      disabled={bulkStatusMixedTypes || bulkUpdating}
+                      disabled={bulkStatusMixedTypes || bulkUpdating || bulkDeleting}
                       className={`${selectCls} min-w-[10rem] disabled:opacity-50`}
                       aria-label={bi('Bulk status', '批量狀態')}
                     >
@@ -755,15 +806,25 @@ function OrdersPageContent() {
                     <button
                       type="button"
                       onClick={() => { void bulkChangeOrderStatus(); }}
-                      disabled={!bulkStatus || bulkStatusMixedTypes || bulkUpdating}
+                      disabled={!bulkStatus || bulkStatusMixedTypes || bulkUpdating || bulkDeleting}
                       className="px-2.5 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 text-xs font-medium"
                     >
                       {bulkUpdating ? bi('Updating…', '更新中…') : bi('Apply', '套用')}
                     </button>
                     <button
                       type="button"
+                      onClick={() => { void bulkDeleteOrders(); }}
+                      disabled={bulkUpdating || bulkDeleting}
+                      className="px-2.5 py-1.5 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-40 text-xs font-medium"
+                    >
+                      {bulkDeleting
+                        ? BTN.deleting
+                        : `🗑 ${bi('Delete', '刪除')}`}
+                    </button>
+                    <button
+                      type="button"
                       onClick={clearOrderSelection}
-                      disabled={bulkUpdating}
+                      disabled={bulkUpdating || bulkDeleting}
                       className="text-xs text-gray-500 hover:text-gray-800 underline disabled:opacity-40"
                     >
                       {bi('Clear', '清除')}

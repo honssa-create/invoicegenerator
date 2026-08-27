@@ -630,11 +630,11 @@ export default function KitchenPage() {
 
   const openGift = async (order?: KitchenOpenOrder, boxType?: string) => {
     await Promise.all([ensureInventory(), ensureOrders()]);
+    if (boxType) setGiftType(boxType);
     if (order?.type === 'nestiee') {
       setGiftOrderId(order.id);
       const pending = order.needs.find((n) => !n.done && n.needKey.startsWith('gift:'));
-      if (boxType) setGiftType(boxType);
-      else if (pending) setGiftType(pending.needKey.slice(5));
+      if (!boxType && pending) setGiftType(pending.needKey.slice(5));
       const rem = pending?.remaining || 1;
       setGiftQty(Math.max(1, rem));
     } else {
@@ -812,32 +812,6 @@ export default function KitchenPage() {
           ? bi('Gift boxes allocated', '禮盒已分配')
           : bi('Gift box packaged', '禮盒已包裝')
       );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const topUpGiftBox = async (boxType: string, quantity: number) => {
-    const minStock = giftBoxMinStock(Boolean(state?.holidayMode));
-    const topUp = giftBoxTopUpQty(quantity, minStock);
-    if (topUp <= 0 || busy) return;
-    setBusy(true);
-    try {
-      const res = await fetch('/api/kitchen/make-gift-box', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boxType, quantity: topUp, birdNestType: giftBirdNestType }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (offerPrepFromFinishedShortfalls(data.finished_shortfalls, data.error)) {
-          return;
-        }
-        flash(data.error || 'Failed', 'error');
-        return;
-      }
-      applyKitchenState(data.state);
-      flash(bi(`Topped up to ${minStock}`, `已補貨至 ${minStock}`));
     } finally {
       setBusy(false);
     }
@@ -1097,8 +1071,8 @@ export default function KitchenPage() {
             )}
             {lowBoxes.map((g) => g.label).join('、')}
             {bi(
-              ` — use Top up to restock${state.holidayMode ? ' (holiday mode)' : ''}.`,
-              ` — 請用「補貨至${giftMinStock}」補充${state.holidayMode ? '（節日模式）' : ''}。`
+              ` — use Package to restock${state.holidayMode ? ' (holiday mode)' : ''}.`,
+              ` — 請用「包裝」補充${state.holidayMode ? '（節日模式）' : ''}。`
             )}
           </div>
         );
@@ -1113,7 +1087,7 @@ export default function KitchenPage() {
                   <th className="py-2 pr-2">禮盒</th>
                   <th className="py-2 pr-2 text-right">庫存</th>
                   <th className="py-2 pr-2 text-right">需要</th>
-                  <th className="py-2 text-right">{bi('Min', '最低')}</th>
+                  <th className="py-2 text-right">{bi('Action', '操作')}</th>
                   {state.isAdmin && <th className="py-2 text-right">Admin</th>}
                 </tr>
               </thead>
@@ -1121,27 +1095,21 @@ export default function KitchenPage() {
                 {state.giftBoxes.map((g) => {
                   const have = availableStockMaps.giftBoxes[g.boxType] ?? g.quantity;
                   const needed = Math.max(0, g.needed - (tempReserved.gift[g.boxType] || 0));
-                  const topUp = giftBoxTopUpQty(g.quantity, giftMinStock);
-                  const low = topUp > 0;
+                  const low = giftBoxTopUpQty(g.quantity, giftMinStock) > 0;
                   return (
                   <tr key={g.boxType} className={`border-b border-gray-50 ${low ? 'bg-amber-50/60' : ''}`}>
                     <td className="py-2 pr-2">{g.label}</td>
                     <td className={`py-2 pr-2 text-right font-medium ${low ? 'text-red-600' : ''}`}>{have}</td>
                     <td className={`py-2 pr-2 text-right ${shortfall(have, needed)}`}>{needed}</td>
                     <td className="py-2 text-right">
-                      {low ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => topUpGiftBox(g.boxType, g.quantity)}
-                          className="text-xs px-2 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-40"
-                          title={bi(`Package ${topUp} to reach ${giftMinStock}`, `包裝 ${topUp} 個至 ${giftMinStock}`)}
-                        >
-                          {bi(`Top up +${topUp}`, `補貨至${giftMinStock} +${topUp}`)}
-                        </button>
-                      ) : (
-                        <span className="text-gray-400 text-xs">≥{giftMinStock}</span>
-                      )}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => { void openGift(undefined, g.boxType); }}
+                        className="text-xs px-2 py-1 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+                      >
+                        {bi('Package', '包裝')}
+                      </button>
                     </td>
                     {state.isAdmin && (
                       <td className="py-2 text-right">
@@ -1670,6 +1638,22 @@ export default function KitchenPage() {
                   >
                     +
                   </button>
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  {[5, 10, 15].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setGiftQty(n)}
+                      className={`flex-1 py-1.5 rounded-lg border text-sm font-medium ${
+                        giftQty === n
+                          ? 'border-brand-600 bg-brand-50 text-brand-800'
+                          : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
                   <div className="rounded-lg bg-gray-50 p-3">

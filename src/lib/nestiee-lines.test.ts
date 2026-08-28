@@ -14,6 +14,8 @@ import {
   isNestieeScheduledShipOption,
   parseNestieeReceiptDateFromDeliveryOptions,
   parseNestieeDeliveryDateMeta,
+  resolveNestieeReceiptDateOnIngest,
+  resolveHonourReceiptDateOnIngest,
   resolveOrderAddressesForQuotation,
   stripHtml,
   NESTIEE_SHIPPING_LINE_NAME,
@@ -289,6 +291,90 @@ describe('parseNestieeReceiptDateFromDeliveryOptions', () => {
       },
     ]);
     expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '')).toBe('');
+  });
+});
+
+describe('resolveNestieeReceiptDateOnIngest', () => {
+  it('overwrites checkout date when Woo admin later changes nestiee/delivery_date', () => {
+    expect(
+      resolveNestieeReceiptDateOnIngest(
+        { due_date: '2026-08-20', client_delivery_date: '2026-08-20' },
+        [],
+        '2026-08-14T09:40:02',
+        {
+          date_created: '2026-08-14T09:40:02',
+          meta_data: [{ key: '_wc_other/nestiee/delivery_date', value: '2026-09-05' }],
+        }
+      )
+    ).toBe('2026-09-05');
+  });
+
+  it('overwrites a local 客人收貨日期 edit with the current Woo date', () => {
+    expect(
+      resolveNestieeReceiptDateOnIngest(
+        { due_date: '2026-08-18', client_delivery_date: '2026-08-18' },
+        [],
+        '2026-08-14T09:40:02',
+        {
+          date_created: '2026-08-14T09:40:02',
+          meta_data: [{ key: 'nestiee/delivery_date', value: 'Sat, 22 Aug 2026' }],
+        }
+      )
+    ).toBe('2026-08-22');
+  });
+
+  it('overwrites ASAP created+2 when Woo later has a booked date', () => {
+    const asapLines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        price: 100,
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              {
+                name: '<b>📦送貨安排</b>',
+                value: '⚡按最快日子寄出 (1-2個工作天寄出)',
+                price: 0,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(
+      resolveNestieeReceiptDateOnIngest(
+        { due_date: '2026-08-16', client_delivery_date: '2026-08-16' },
+        asapLines,
+        '2026-08-14T09:40:02',
+        {
+          date_created: '2026-08-14T09:40:02',
+          meta_data: [{ key: '_wc_other/nestiee/delivery_date', value: '2026-09-01' }],
+        }
+      )
+    ).toBe('2026-09-01');
+  });
+
+  it('keeps the local date only when Woo has no parseable delivery date', () => {
+    expect(
+      resolveNestieeReceiptDateOnIngest(
+        { due_date: '2026-08-18', client_delivery_date: '2026-08-18' },
+        [{ name: 'x', quantity: 1, unit_price: 1, line_total: 1 }],
+        '2026-08-14'
+      )
+    ).toBe('2026-08-18');
+  });
+});
+
+describe('resolveHonourReceiptDateOnIngest', () => {
+  it('overwrites a local date when Honour Woo estimate changes', () => {
+    expect(
+      resolveHonourReceiptDateOnIngest(
+        { due_date: '2026-08-13', client_delivery_date: '2026-08-13' },
+        { meta_data: [{ key: 'pi_overall_estimate_min_date', value: '2026/09/01' }] }
+      )
+    ).toBe('2026-09-01');
   });
 });
 

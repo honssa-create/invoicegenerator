@@ -1,28 +1,37 @@
 /** Client-safe Nestiee production demand rollup for processing orders. */
 
 import { expandGiftBoxBom, finishedSku, GIFT_BOX_BOMS, type BomLine } from './kitchen-bom';
-import { isNestieeOrderType, orderDueDate, orderTypeFromFields } from './orders';
+import { isNestieeOrderType, localDateYmd, orderDueDate, orderTypeFromFields } from './orders';
+import { addCalendarDays } from './wedding-gift-confirmation';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
 
-export type NestieeDemandScope = 'processing' | 'shipped' | 'all';
+export type NestieeDemandScope = 'processing' | 'shipped' | 'all' | 'ship_today';
 
 export const NESTIEE_DEMAND_SCOPES: readonly NestieeDemandScope[] = [
   'processing',
   'shipped',
   'all',
+  'ship_today',
 ] as const;
+
+/** Inclusive delivery-date window: today through today + N calendar days. */
+export const NESTIEE_SHIP_TODAY_DAYS = 3;
 
 export function parseNestieeDemandScope(raw: string | null | undefined): NestieeDemandScope {
   const v = String(raw || '').trim();
-  if (v === 'shipped' || v === 'all') return v;
+  if (v === 'shipped' || v === 'all' || v === 'ship_today') return v;
   return 'processing';
+}
+
+export function isNestieeShipTodayScope(scope: NestieeDemandScope): boolean {
+  return scope === 'ship_today';
 }
 
 /** Statuses included in the Nestiee production dashboard for a given scope. */
 export function nestieeStatusesForDemandScope(scope: NestieeDemandScope): readonly string[] {
-  if (scope === 'processing') return [NESTIEE_PROCESSING_STATUS];
+  if (scope === 'processing' || scope === 'ship_today') return [NESTIEE_PROCESSING_STATUS];
   if (scope === 'shipped') return NESTIEE_SHIPPED_STATUSES;
   return [NESTIEE_PROCESSING_STATUS, ...NESTIEE_SHIPPED_STATUSES];
 }
@@ -75,6 +84,30 @@ export function orderMatchesNestieeDateRange(
   return true;
 }
 
+export function nestieeShipTodayDateRange(today: string = localDateYmd()): {
+  dateStart: string;
+  dateEnd: string;
+} {
+  return {
+    dateStart: today,
+    dateEnd: addCalendarDays(today, NESTIEE_SHIP_TODAY_DAYS),
+  };
+}
+
+/** Unshipped (processing) Nestiee orders with delivery date from today through today+3. */
+export function orderMatchesNestieeShipToday(
+  order: { status?: string | null; fields?: Record<string, unknown> },
+  today: string = localDateYmd(),
+): boolean {
+  if (!orderMatchesNestieeDemandScope(order.status, 'ship_today')) return false;
+  const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);
+  return orderMatchesNestieeDateRange(order, {
+    dateStart,
+    dateEnd,
+    dateFilterType: 'delivery_date',
+  });
+}
+
 export interface NestieeGiftBoxDemandType {
   id: string;
   label: string;
@@ -125,10 +158,11 @@ export function isNestieeOrdersFilter(filter: string): boolean {
 }
 
 export function summarizeNestieeProcessingDemand(
-  orders: Array<{ status?: string; fields?: Record<string, unknown> }>,
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
   giftBoxTypes: NestieeGiftBoxDemandType[],
   giftBoxBoms: Record<string, BomLine[]> = {},
   scope: NestieeDemandScope = 'processing',
+  opts?: { today?: string },
 ): NestieeProcessingDemand {
   const boms = { ...GIFT_BOX_BOMS, ...giftBoxBoms };
   const activeTypes = [...giftBoxTypes]
@@ -146,7 +180,11 @@ export function summarizeNestieeProcessingDemand(
   for (const order of orders) {
     const orderType = orderTypeFromFields(order.fields);
     if (!orderType || !isNestieeOrderType(orderType)) continue;
-    if (!orderMatchesNestieeDemandScope(order.status, scope)) continue;
+    if (scope === 'ship_today') {
+      if (!orderMatchesNestieeShipToday(order, opts?.today)) continue;
+    } else if (!orderMatchesNestieeDemandScope(order.status, scope)) {
+      continue;
+    }
     orderCount += 1;
 
     const fields = order.fields || {};

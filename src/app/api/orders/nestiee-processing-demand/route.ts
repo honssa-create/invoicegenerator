@@ -3,10 +3,11 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
-import { NESTIEE_ORDER_TYPE } from '@/lib/orders';
+import { NESTIEE_ORDER_TYPE, localDateYmd } from '@/lib/orders';
 import {
   nestieeStatusesForDemandScope,
   orderMatchesNestieeDateRange,
+  orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
@@ -37,6 +38,8 @@ export async function GET(request: Request) {
   const dateEnd = isYmd(dateEndRaw) ? dateEndRaw : '';
   const scope = parseNestieeDemandScope(url.searchParams.get('scope'));
   const dateFilterType = parseNestieeDateFilterType(url.searchParams.get('dateFilterType'));
+  const todayRaw = url.searchParams.get('today')?.trim() || '';
+  const today = isYmd(todayRaw) ? todayRaw : localDateYmd();
   const statuses = [...nestieeStatusesForDemandScope(scope)];
 
   const ownerId = await getDataOwnerId(session);
@@ -73,7 +76,9 @@ export async function GET(request: Request) {
         created_at: row.created_at || '',
       }))
       .filter((order) =>
-        orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType }),
+        scope === 'ship_today'
+          ? orderMatchesNestieeShipToday(order, today)
+          : orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType }),
       );
 
     const { catalog, formulas } = await loadKitchenCatalog(ownerId);
@@ -90,6 +95,7 @@ export async function GET(request: Request) {
       giftBoxTypes,
       formulas.giftBoxBoms,
       scope,
+      { today },
     );
     return NextResponse.json({ demand });
   } catch {

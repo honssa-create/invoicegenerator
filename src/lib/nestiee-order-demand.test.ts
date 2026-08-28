@@ -3,9 +3,11 @@ import { GIFT_BOX_BOMS } from './kitchen-bom';
 import { NESTIEE_GIFT_BOX_TYPES, NESTIEE_ORDER_TYPE } from './orders';
 import {
   isNestieeOrdersFilter,
+  nestieeShipTodayDateRange,
   nestieeStatusesForDemandScope,
   orderMatchesNestieeDateRange,
   orderMatchesNestieeDemandScope,
+  orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
@@ -57,10 +59,11 @@ const sampleOrders = [
 ];
 
 describe('parseNestieeDemandScope', () => {
-  it('defaults to processing and accepts shipped/all', () => {
+  it('defaults to processing and accepts shipped/all/ship_today', () => {
     expect(parseNestieeDemandScope(null)).toBe('processing');
     expect(parseNestieeDemandScope('shipped')).toBe('shipped');
     expect(parseNestieeDemandScope('all')).toBe('all');
+    expect(parseNestieeDemandScope('ship_today')).toBe('ship_today');
     expect(parseNestieeDemandScope('invalid')).toBe('processing');
   });
 });
@@ -68,6 +71,7 @@ describe('parseNestieeDemandScope', () => {
 describe('nestieeStatusesForDemandScope', () => {
   it('maps scopes to status sets', () => {
     expect(nestieeStatusesForDemandScope('processing')).toEqual(['processing']);
+    expect(nestieeStatusesForDemandScope('ship_today')).toEqual(['processing']);
     expect(nestieeStatusesForDemandScope('shipped')).toEqual(['shipped', 'completed']);
     expect(nestieeStatusesForDemandScope('all')).toEqual(['processing', 'shipped', 'completed']);
   });
@@ -143,6 +147,28 @@ describe('orderMatchesNestieeDateRange', () => {
   });
 });
 
+describe('orderMatchesNestieeShipToday', () => {
+  it('uses today through today+3 on delivery date and only processing', () => {
+    expect(nestieeShipTodayDateRange('2026-08-28')).toEqual({
+      dateStart: '2026-08-28',
+      dateEnd: '2026-08-31',
+    });
+    const today = '2026-08-28';
+    const nestiee = (status: string, due: string) => ({
+      status,
+      fields: { order_type: NESTIEE_ORDER_TYPE, due_date: due },
+    });
+    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-08-28'), today)).toBe(true);
+    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-08-31'), today)).toBe(true);
+    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-09-01'), today)).toBe(false);
+    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-08-27'), today)).toBe(false);
+    expect(orderMatchesNestieeShipToday(nestiee('shipped', '2026-08-28'), today)).toBe(false);
+    expect(orderMatchesNestieeShipToday(nestiee('completed', '2026-08-28'), today)).toBe(false);
+    expect(orderMatchesNestieeShipToday(nestiee('pending payment', '2026-08-28'), today)).toBe(false);
+    expect(orderMatchesNestieeShipToday(nestiee('checkout-draft', '2026-08-28'), today)).toBe(false);
+  });
+});
+
 describe('summarizeNestieeProcessingDemand', () => {
   it('only counts Nestiee orders in processing status by default', () => {
     const demand = summarizeNestieeProcessingDemand(sampleOrders, giftBoxTypes, GIFT_BOX_BOMS);
@@ -205,6 +231,70 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.bottles.find((b) => b.label === '冰糖 (45g)')?.qty).toBe(2);
     expect(demand.bottles.find((b) => b.label === '桂花 (45g)')?.qty).toBe(2);
     expect(demand.bottles.find((b) => b.label === '紅棗 (45g)')?.qty).toBe(2);
+  });
+
+  it('counts only processing orders due today through today+3 for ship_today', () => {
+    const today = '2026-08-28';
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            due_date: '2026-08-28',
+            nestiee_gift_qty_star_gold: 1,
+          },
+        },
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            due_date: '2026-08-31',
+            nestiee_gift_qty_star_gold: 2,
+          },
+        },
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            due_date: '2026-09-01',
+            nestiee_gift_qty_star_gold: 99,
+          },
+        },
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            due_date: '2026-08-27',
+            nestiee_gift_qty_star_gold: 99,
+          },
+        },
+        {
+          status: 'shipped',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            due_date: '2026-08-28',
+            nestiee_gift_qty_star_gold: 99,
+          },
+        },
+        {
+          status: 'pending payment',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            due_date: '2026-08-28',
+            nestiee_gift_qty_star_gold: 99,
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS,
+      'ship_today',
+      { today },
+    );
+
+    expect(demand.scope).toBe('ship_today');
+    expect(demand.orderCount).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(3);
   });
 });
 

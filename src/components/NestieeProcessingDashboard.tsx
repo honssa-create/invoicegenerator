@@ -14,6 +14,7 @@ const SCOPE_LABELS: Record<NestieeDemandScope, { en: string; zh: string }> = {
   processing: { en: 'Processing', zh: '處理中' },
   shipped: { en: 'Shipped', zh: '已出貨' },
   all: { en: 'All', zh: '全部' },
+  ship_today: { en: 'Ship today', zh: '今日出貨' },
 };
 
 const DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string }> = {
@@ -98,6 +99,9 @@ function orderCountLabel(scope: NestieeDemandScope, count: number): string {
   if (scope === 'shipped') {
     return bi(`${count} shipped order(s)`, `${count} 張已出貨訂單`);
   }
+  if (scope === 'ship_today') {
+    return bi(`${count} order(s) to ship today`, `${count} 張今日需出貨訂單`);
+  }
   return bi(`${count} related order(s)`, `${count} 張相關訂單`);
 }
 
@@ -112,6 +116,12 @@ function emptyGiftBoxMessage(scope: NestieeDemandScope): string {
     return bi(
       'No 所需禮盒 quantities entered on shipped orders in this range.',
       '所選範圍內的已出貨訂單尚未填寫所需禮盒數量。',
+    );
+  }
+  if (scope === 'ship_today') {
+    return bi(
+      'No 所需禮盒 quantities entered on orders that ship today.',
+      '今日需出貨訂單尚未填寫所需禮盒數量。',
     );
   }
   return bi(
@@ -161,11 +171,17 @@ export default function NestieeProcessingDashboard({
             options={NESTIEE_DATE_FILTER_TYPES}
             labels={DATE_FILTER_LABELS}
             ariaLabel={bi('Date filter basis', '日期篩選基準')}
-            disabled={loading}
+            disabled={loading || scope === 'ship_today'}
             onChange={onDateFilterTypeChange}
           />
         </div>
       </div>
+
+      {!loading && scope === 'ship_today' && demand.orderCount === 0 && (
+        <p className="text-sm text-gray-500">
+          {bi('No orders to ship today.', '今日沒有需要出貨的訂單。')}
+        </p>
+      )}
 
       {!loading && demand.orderCount > 0 && !hasDemand && (
         <p className="text-sm text-gray-500">{emptyGiftBoxMessage(scope)}</p>

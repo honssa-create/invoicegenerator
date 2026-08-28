@@ -21,12 +21,14 @@ import {
   statusKeyForTypeFilter,
   statusesForOrderType,
   isUnattendedImportedOrder,
+  localDateYmd,
   summarizeOrderDashboard,
   summarizeOrderListProducts,
   type Order,
 } from '@/lib/orders';
 import {
   isNestieeOrdersFilter,
+  orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
   type NestieeDateFilterType,
@@ -160,6 +162,7 @@ function OrdersPageContent() {
     if (dateEnd) params.set('dateEnd', dateEnd);
     params.set('scope', nestieeDemandScope);
     params.set('dateFilterType', dateFilterType);
+    params.set('today', localDateYmd());
     const qs = params.toString();
     fetch(`/api/orders/nestiee-processing-demand?${qs}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -253,14 +256,9 @@ function OrdersPageContent() {
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const shipToday = isNestieeFilter && nestieeDemandScope === 'ship_today';
     let list = orders.filter((o) => {
-      const created = o.created_at?.slice(0, 10) || '';
-      if (dateStart && created && created < dateStart) return false;
-      if (dateEnd && created && created > dateEnd) return false;
       if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
-      if (status && o.status !== status) return false;
-      if (dashFocus === 'unshipped' && !isOrderUnshipped(o)) return false;
-      if (dashFocus === 'urgent' && !isOrderUrgent(o)) return false;
       if (q) {
         const hay = [o.reference_number, o.po_number, o.name, o.description, getOrderType(o)]
           .filter(Boolean)
@@ -268,6 +266,15 @@ function OrdersPageContent() {
           .toLowerCase();
         if (!hay.includes(q)) return false;
       }
+      if (shipToday) {
+        return orderMatchesNestieeShipToday(o);
+      }
+      const created = o.created_at?.slice(0, 10) || '';
+      if (dateStart && created && created < dateStart) return false;
+      if (dateEnd && created && created > dateEnd) return false;
+      if (status && o.status !== status) return false;
+      if (dashFocus === 'unshipped' && !isOrderUnshipped(o)) return false;
+      if (dashFocus === 'urgent' && !isOrderUrgent(o)) return false;
       return true;
     });
     const dir = sort.dir === 'asc' ? 1 : -1;
@@ -295,7 +302,7 @@ function OrdersPageContent() {
       return dir * base || b.id - a.id;
     });
     return list;
-  }, [orders, dateStart, dateEnd, orderType, status, search, sort, dashFocus]);
+  }, [orders, dateStart, dateEnd, orderType, status, search, sort, dashFocus, isNestieeFilter, nestieeDemandScope]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
   const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
@@ -358,7 +365,7 @@ function OrdersPageContent() {
       return;
     }
     setPage(1);
-  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus]);
+  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus, nestieeDemandScope]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);

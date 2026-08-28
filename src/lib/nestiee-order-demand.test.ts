@@ -148,10 +148,10 @@ describe('orderMatchesNestieeDateRange', () => {
 });
 
 describe('orderMatchesNestieeShipToday', () => {
-  it('uses today through today+3 on delivery date and only processing', () => {
+  it('uses today through today+4 on delivery date and only processing', () => {
     expect(nestieeShipTodayDateRange('2026-08-28')).toEqual({
       dateStart: '2026-08-28',
-      dateEnd: '2026-08-31',
+      dateEnd: '2026-09-01',
     });
     const today = '2026-08-28';
     const nestiee = (status: string, due: string) => ({
@@ -159,8 +159,8 @@ describe('orderMatchesNestieeShipToday', () => {
       fields: { order_type: NESTIEE_ORDER_TYPE, due_date: due },
     });
     expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-08-28'), today)).toBe(true);
-    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-08-31'), today)).toBe(true);
-    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-09-01'), today)).toBe(false);
+    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-09-01'), today)).toBe(true);
+    expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-09-02'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('processing', '2026-08-27'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('shipped', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('completed', '2026-08-28'), today)).toBe(false);
@@ -233,7 +233,7 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.bottles.find((b) => b.label === '紅棗 (45g)')?.qty).toBe(2);
   });
 
-  it('counts only processing orders due today through today+3 for ship_today', () => {
+  it('counts only processing orders due today through today+4 for ship_today', () => {
     const today = '2026-08-28';
     const demand = summarizeNestieeProcessingDemand(
       [
@@ -249,7 +249,7 @@ describe('summarizeNestieeProcessingDemand', () => {
           status: 'processing',
           fields: {
             order_type: NESTIEE_ORDER_TYPE,
-            due_date: '2026-08-31',
+            due_date: '2026-09-01',
             nestiee_gift_qty_star_gold: 2,
           },
         },
@@ -257,7 +257,7 @@ describe('summarizeNestieeProcessingDemand', () => {
           status: 'processing',
           fields: {
             order_type: NESTIEE_ORDER_TYPE,
-            due_date: '2026-09-01',
+            due_date: '2026-09-02',
             nestiee_gift_qty_star_gold: 99,
           },
         },

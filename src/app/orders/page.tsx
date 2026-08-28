@@ -27,7 +27,9 @@ import {
 } from '@/lib/orders';
 import {
   isNestieeOrdersFilter,
+  parseNestieeDateFilterType,
   parseNestieeDemandScope,
+  type NestieeDateFilterType,
   type NestieeDemandScope,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
@@ -72,6 +74,7 @@ type OrdersListUiState = {
   dashFocus: DashFocus;
   page: number;
   nestieeDemandScope?: NestieeDemandScope;
+  nestieeDateFilterType?: NestieeDateFilterType;
 };
 
 export default function OrdersPage() {
@@ -141,6 +144,9 @@ function OrdersPageContent() {
   const [nestieeDemandScope, setNestieeDemandScope] = useState<NestieeDemandScope>(() =>
     parseNestieeDemandScope(savedUi?.nestieeDemandScope),
   );
+  const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>(() =>
+    parseNestieeDateFilterType(savedUi?.nestieeDateFilterType),
+  );
   const [nestieeDemandLoading, setNestieeDemandLoading] = useState(false);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<number>>(new Set());
 
@@ -153,6 +159,7 @@ function OrdersPageContent() {
     if (dateStart) params.set('dateStart', dateStart);
     if (dateEnd) params.set('dateEnd', dateEnd);
     params.set('scope', nestieeDemandScope);
+    params.set('dateFilterType', dateFilterType);
     const qs = params.toString();
     fetch(`/api/orders/nestiee-processing-demand?${qs}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -163,7 +170,7 @@ function OrdersPageContent() {
         /* keep previous */
       })
       .finally(() => setNestieeDemandLoading(false));
-  }, [orderType, dateStart, dateEnd, nestieeDemandScope]);
+  }, [orderType, dateStart, dateEnd, nestieeDemandScope, dateFilterType]);
 
   const load = () => {
     setLoading(true);
@@ -203,8 +210,9 @@ function OrdersPageContent() {
       dashFocus,
       page,
       nestieeDemandScope,
+      nestieeDateFilterType: dateFilterType,
     });
-  }, [view, dateStart, dateEnd, orderType, status, search, sort, dashFocus, page, nestieeDemandScope]);
+  }, [view, dateStart, dateEnd, orderType, status, search, sort, dashFocus, page, nestieeDemandScope, dateFilterType]);
 
   const setOrderTypeAndUrl = (value: string) => {
     setOrderType(value);
@@ -744,6 +752,8 @@ function OrdersPageContent() {
           demand={nestieeDemand}
           scope={nestieeDemandScope}
           onScopeChange={setNestieeDemandScope}
+          dateFilterType={dateFilterType}
+          onDateFilterTypeChange={setDateFilterType}
           loading={loading || nestieeDemandLoading}
         />
       )}

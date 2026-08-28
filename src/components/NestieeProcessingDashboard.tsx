@@ -2,7 +2,9 @@
 
 import type { ReactNode } from 'react';
 import {
+  NESTIEE_DATE_FILTER_TYPES,
   NESTIEE_DEMAND_SCOPES,
+  type NestieeDateFilterType,
   type NestieeDemandScope,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
@@ -12,6 +14,11 @@ const SCOPE_LABELS: Record<NestieeDemandScope, { en: string; zh: string }> = {
   processing: { en: 'Processing', zh: '處理中' },
   shipped: { en: 'Shipped', zh: '已出貨' },
   all: { en: 'All', zh: '全部' },
+};
+
+const DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string }> = {
+  order_date: { en: 'By order date', zh: '落下單日期' },
+  delivery_date: { en: 'By delivery date', zh: '按送貨日期' },
 };
 
 function DemandCard({ label, qty, loading }: { label: string; qty: number; loading?: boolean }) {
@@ -37,6 +44,50 @@ function DemandSection({
       <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-4">{title}</h2>
       {children}
     </section>
+  );
+}
+
+function GoldSegmented<T extends string>({
+  value,
+  options,
+  labels,
+  ariaLabel,
+  disabled,
+  onChange,
+}: {
+  value: T;
+  options: readonly T[];
+  labels: Record<T, { en: string; zh: string }>;
+  ariaLabel: string;
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div
+      className="inline-flex rounded-lg border border-[#C8B07A] bg-[#F7F2E8] p-0.5 text-sm self-start sm:self-auto"
+      role="group"
+      aria-label={ariaLabel}
+    >
+      {options.map((option) => {
+        const active = value === option;
+        const label = labels[option];
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            disabled={disabled}
+            className={`px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-50 ${
+              active
+                ? 'bg-[#C8B07A] text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-white/60'
+            }`}
+          >
+            {bi(label.en, label.zh)}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -73,11 +124,15 @@ export default function NestieeProcessingDashboard({
   demand,
   scope,
   onScopeChange,
+  dateFilterType,
+  onDateFilterTypeChange,
   loading,
 }: {
   demand: NestieeProcessingDemand;
   scope: NestieeDemandScope;
   onScopeChange: (scope: NestieeDemandScope) => void;
+  dateFilterType: NestieeDateFilterType;
+  onDateFilterTypeChange: (value: NestieeDateFilterType) => void;
   loading?: boolean;
 }) {
   const giftBoxes = demand.giftBoxes.filter((g) => loading || g.qty > 0);
@@ -86,36 +141,29 @@ export default function NestieeProcessingDashboard({
 
   return (
     <div className="mb-6 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <p className="text-xs text-gray-500">
           {loading
             ? bi('Loading production totals…', '載入生產需求中…')
             : orderCountLabel(scope, demand.orderCount)}
         </p>
-        <div
-          className="inline-flex rounded-lg border border-[#C8B07A] bg-[#F7F2E8] p-0.5 text-sm self-start sm:self-auto"
-          role="group"
-          aria-label={bi('Production demand scope', '生產需求範圍')}
-        >
-          {NESTIEE_DEMAND_SCOPES.map((option) => {
-            const active = scope === option;
-            const label = SCOPE_LABELS[option];
-            return (
-              <button
-                key={option}
-                type="button"
-                onClick={() => onScopeChange(option)}
-                disabled={loading}
-                className={`px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-50 ${
-                  active
-                    ? 'bg-[#C8B07A] text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/60'
-                }`}
-              >
-                {bi(label.en, label.zh)}
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center gap-2">
+          <GoldSegmented
+            value={scope}
+            options={NESTIEE_DEMAND_SCOPES}
+            labels={SCOPE_LABELS}
+            ariaLabel={bi('Production demand scope', '生產需求範圍')}
+            disabled={loading}
+            onChange={onScopeChange}
+          />
+          <GoldSegmented
+            value={dateFilterType}
+            options={NESTIEE_DATE_FILTER_TYPES}
+            labels={DATE_FILTER_LABELS}
+            ariaLabel={bi('Date filter basis', '日期篩選基準')}
+            disabled={loading}
+            onChange={onDateFilterTypeChange}
+          />
         </div>
       </div>
 

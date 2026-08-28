@@ -1,8 +1,18 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import type { NestieeProcessingDemand } from '@/lib/nestiee-order-demand';
+import {
+  NESTIEE_DEMAND_SCOPES,
+  type NestieeDemandScope,
+  type NestieeProcessingDemand,
+} from '@/lib/nestiee-order-demand';
 import { bi } from '@/lib/ui-labels';
+
+const SCOPE_LABELS: Record<NestieeDemandScope, { en: string; zh: string }> = {
+  processing: { en: 'Processing', zh: '處理中' },
+  shipped: { en: 'Shipped', zh: '已出貨' },
+  all: { en: 'All', zh: '全部' },
+};
 
 function DemandCard({ label, qty, loading }: { label: string; qty: number; loading?: boolean }) {
   return (
@@ -30,11 +40,44 @@ function DemandSection({
   );
 }
 
+function orderCountLabel(scope: NestieeDemandScope, count: number): string {
+  if (scope === 'processing') {
+    return bi(`${count} processing order(s)`, `${count} 張處理中訂單`);
+  }
+  if (scope === 'shipped') {
+    return bi(`${count} shipped order(s)`, `${count} 張已出貨訂單`);
+  }
+  return bi(`${count} related order(s)`, `${count} 張相關訂單`);
+}
+
+function emptyGiftBoxMessage(scope: NestieeDemandScope): string {
+  if (scope === 'processing') {
+    return bi(
+      'No 所需禮盒 quantities entered on processing orders yet.',
+      '處理中訂單尚未填寫所需禮盒數量。',
+    );
+  }
+  if (scope === 'shipped') {
+    return bi(
+      'No 所需禮盒 quantities entered on shipped orders in this range.',
+      '所選範圍內的已出貨訂單尚未填寫所需禮盒數量。',
+    );
+  }
+  return bi(
+    'No 所需禮盒 quantities entered for orders in this range.',
+    '所選範圍內尚未填寫所需禮盒數量。',
+  );
+}
+
 export default function NestieeProcessingDashboard({
   demand,
+  scope,
+  onScopeChange,
   loading,
 }: {
   demand: NestieeProcessingDemand;
+  scope: NestieeDemandScope;
+  onScopeChange: (scope: NestieeDemandScope) => void;
   loading?: boolean;
 }) {
   const giftBoxes = demand.giftBoxes.filter((g) => loading || g.qty > 0);
@@ -43,22 +86,41 @@ export default function NestieeProcessingDashboard({
 
   return (
     <div className="mb-6 space-y-4">
-      <p className="text-xs text-gray-500">
-        {loading
-          ? bi('Loading production totals…', '載入生產需求中…')
-          : bi(
-              `${demand.processingOrderCount} processing order(s)`,
-              `${demand.processingOrderCount} 張處理中訂單`,
-            )}
-      </p>
-
-      {!loading && demand.processingOrderCount > 0 && !hasDemand && (
-        <p className="text-sm text-gray-500">
-          {bi(
-            'No 所需禮盒 quantities entered on processing orders yet.',
-            '處理中訂單尚未填寫所需禮盒數量。',
-          )}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <p className="text-xs text-gray-500">
+          {loading
+            ? bi('Loading production totals…', '載入生產需求中…')
+            : orderCountLabel(scope, demand.orderCount)}
         </p>
+        <div
+          className="inline-flex rounded-lg border border-[#C8B07A] bg-[#F7F2E8] p-0.5 text-sm self-start sm:self-auto"
+          role="group"
+          aria-label={bi('Production demand scope', '生產需求範圍')}
+        >
+          {NESTIEE_DEMAND_SCOPES.map((option) => {
+            const active = scope === option;
+            const label = SCOPE_LABELS[option];
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => onScopeChange(option)}
+                disabled={loading}
+                className={`px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-50 ${
+                  active
+                    ? 'bg-[#C8B07A] text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/60'
+                }`}
+              >
+                {bi(label.en, label.zh)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {!loading && demand.orderCount > 0 && !hasDemand && (
+        <p className="text-sm text-gray-500">{emptyGiftBoxMessage(scope)}</p>
       )}
 
       <DemandSection title={bi('Gift boxes needed', '訂單所需禮盒')}>

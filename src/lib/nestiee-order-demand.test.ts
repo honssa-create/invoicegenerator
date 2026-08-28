@@ -3,6 +3,9 @@ import { GIFT_BOX_BOMS } from './kitchen-bom';
 import { NESTIEE_GIFT_BOX_TYPES, NESTIEE_ORDER_TYPE } from './orders';
 import {
   isNestieeOrdersFilter,
+  nestieeStatusesForDemandScope,
+  orderMatchesNestieeDemandScope,
+  parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
 } from './nestiee-order-demand';
 
@@ -12,41 +15,108 @@ const giftBoxTypes = NESTIEE_GIFT_BOX_TYPES.map((g, i) => ({
   active: true,
 }));
 
-describe('summarizeNestieeProcessingDemand', () => {
-  it('only counts Nestiee orders in processing status', () => {
-    const demand = summarizeNestieeProcessingDemand(
-      [
-        {
-          status: 'processing',
-          fields: {
-            order_type: NESTIEE_ORDER_TYPE,
-            nestiee_gift_qty_star_gold: 2,
-            nestiee_gift_qty_trial_set: 1,
-          },
-        },
-        {
-          status: 'shipped',
-          fields: {
-            order_type: NESTIEE_ORDER_TYPE,
-            nestiee_gift_qty_star_gold: 99,
-          },
-        },
-        {
-          status: 'processing',
-          fields: {
-            order_type: 'honour訂製',
-            nestiee_gift_qty_star_gold: 99,
-          },
-        },
-      ],
-      giftBoxTypes,
-      GIFT_BOX_BOMS
-    );
+const sampleOrders = [
+  {
+    status: 'processing',
+    fields: {
+      order_type: NESTIEE_ORDER_TYPE,
+      nestiee_gift_qty_star_gold: 2,
+      nestiee_gift_qty_trial_set: 1,
+    },
+  },
+  {
+    status: 'shipped',
+    fields: {
+      order_type: NESTIEE_ORDER_TYPE,
+      nestiee_gift_qty_star_gold: 5,
+    },
+  },
+  {
+    status: 'completed',
+    fields: {
+      order_type: NESTIEE_ORDER_TYPE,
+      nestiee_gift_qty_star_silver: 3,
+    },
+  },
+  {
+    status: 'pending payment',
+    fields: {
+      order_type: NESTIEE_ORDER_TYPE,
+      nestiee_gift_qty_star_gold: 99,
+    },
+  },
+  {
+    status: 'processing',
+    fields: {
+      order_type: 'honour訂製',
+      nestiee_gift_qty_star_gold: 99,
+    },
+  },
+];
 
-    expect(demand.processingOrderCount).toBe(1);
+describe('parseNestieeDemandScope', () => {
+  it('defaults to processing and accepts shipped/all', () => {
+    expect(parseNestieeDemandScope(null)).toBe('processing');
+    expect(parseNestieeDemandScope('shipped')).toBe('shipped');
+    expect(parseNestieeDemandScope('all')).toBe('all');
+    expect(parseNestieeDemandScope('invalid')).toBe('processing');
+  });
+});
+
+describe('nestieeStatusesForDemandScope', () => {
+  it('maps scopes to status sets', () => {
+    expect(nestieeStatusesForDemandScope('processing')).toEqual(['processing']);
+    expect(nestieeStatusesForDemandScope('shipped')).toEqual(['shipped', 'completed']);
+    expect(nestieeStatusesForDemandScope('all')).toEqual(['processing', 'shipped', 'completed']);
+  });
+});
+
+describe('orderMatchesNestieeDemandScope', () => {
+  it('excludes draft/pending payment for all scopes', () => {
+    expect(orderMatchesNestieeDemandScope('pending payment', 'all')).toBe(false);
+    expect(orderMatchesNestieeDemandScope('checkout-draft', 'all')).toBe(false);
+    expect(orderMatchesNestieeDemandScope('completed', 'shipped')).toBe(true);
+  });
+});
+
+describe('summarizeNestieeProcessingDemand', () => {
+  it('only counts Nestiee orders in processing status by default', () => {
+    const demand = summarizeNestieeProcessingDemand(sampleOrders, giftBoxTypes, GIFT_BOX_BOMS);
+
+    expect(demand.scope).toBe('processing');
+    expect(demand.orderCount).toBe(1);
     expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
     expect(demand.giftBoxes.find((g) => g.id === 'trial_set')?.qty).toBe(1);
     expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(0);
+  });
+
+  it('counts shipped and completed orders when scope is shipped', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      sampleOrders,
+      giftBoxTypes,
+      GIFT_BOX_BOMS,
+      'shipped',
+    );
+
+    expect(demand.scope).toBe('shipped');
+    expect(demand.orderCount).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(5);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(3);
+  });
+
+  it('counts processing, shipped, and completed when scope is all', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      sampleOrders,
+      giftBoxTypes,
+      GIFT_BOX_BOMS,
+      'all',
+    );
+
+    expect(demand.scope).toBe('all');
+    expect(demand.orderCount).toBe(3);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(7);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(3);
+    expect(demand.giftBoxes.find((g) => g.id === 'trial_set')?.qty).toBe(1);
   });
 
   it('rolls up finished bottles from gift-box BOMs', () => {

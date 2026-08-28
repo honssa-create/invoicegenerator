@@ -4,7 +4,11 @@ import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import { NESTIEE_ORDER_TYPE } from '@/lib/orders';
-import { summarizeNestieeProcessingDemand } from '@/lib/nestiee-order-demand';
+import {
+  nestieeStatusesForDemandScope,
+  parseNestieeDemandScope,
+  summarizeNestieeProcessingDemand,
+} from '@/lib/nestiee-order-demand';
 
 function parseFields(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
@@ -29,18 +33,21 @@ export async function GET(request: Request) {
   const dateEndRaw = url.searchParams.get('dateEnd')?.trim() || '';
   const dateStart = isYmd(dateStartRaw) ? dateStartRaw : '';
   const dateEnd = isYmd(dateEndRaw) ? dateEndRaw : '';
+  const scope = parseNestieeDemandScope(url.searchParams.get('scope'));
+  const statuses = [...nestieeStatusesForDemandScope(scope)];
 
   const ownerId = await getDataOwnerId(session);
   try {
+    const statusPlaceholders = statuses.map(() => '?').join(', ');
     const clauses = [
       'user_id = ?',
-      `status = 'processing'`,
+      `status IN (${statusPlaceholders})`,
       `(
          order_type = ?
          OR COALESCE(fields_json::jsonb->>'order_type', '') = ?
        )`,
     ];
-    const params: Array<string | number> = [ownerId, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE];
+    const params: Array<string | number> = [ownerId, ...statuses, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE];
 
     // Match orders list FilterBar: compare created_at date portion (YYYY-MM-DD).
     // Empty created_at is kept (same as client list filter).
@@ -84,7 +91,12 @@ export async function GET(request: Request) {
       active: g.active,
     }));
 
-    const demand = summarizeNestieeProcessingDemand(orders, giftBoxTypes, formulas.giftBoxBoms);
+    const demand = summarizeNestieeProcessingDemand(
+      orders,
+      giftBoxTypes,
+      formulas.giftBoxBoms,
+      scope,
+    );
     return NextResponse.json({ demand });
   } catch {
     return NextResponse.json({ error: 'Failed to load Nestiee demand' }, { status: 500 });

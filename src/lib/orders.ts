@@ -1560,21 +1560,38 @@ function parseNestieeOptionsFromMeta(meta: WooMetaDatum[] | null | undefined): N
   if (!Array.isArray(meta)) return [];
   const epo = meta.find((m) => m?.key === '_tmcartepo_data');
   const raw = epo?.value;
-  if (!Array.isArray(raw)) return [];
-  const out: NestieeLineOption[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue;
-    const e = entry as Record<string, unknown>;
-    const label = stripHtml(String(e.name ?? ''));
-    const value = stripHtml(String(e.value ?? ''));
+  if (Array.isArray(raw)) {
+    const out: NestieeLineOption[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const label = stripHtml(String(e.name ?? ''));
+      const value = stripHtml(String(e.value ?? ''));
+      if (!label && !value) continue;
+      out.push({
+        label: label || 'Option',
+        value,
+        price: Math.round(nestieeNum(e.price) * 100) / 100,
+      });
+    }
+    if (out.length) return out;
+  }
+
+  // Admin-created Woo line items often store options as visible meta, not _tmcartepo_data.
+  const visible: NestieeLineOption[] = [];
+  for (const m of meta) {
+    const key = String(m?.key || '').trim();
+    if (!key || key.startsWith('_')) continue;
+    const label = stripHtml(String(m.display_key || key));
+    const value = nestieeMetaScalarText(m.display_value ?? m.value);
     if (!label && !value) continue;
-    out.push({
+    visible.push({
       label: label || 'Option',
       value,
-      price: Math.round(nestieeNum(e.price) * 100) / 100,
+      price: 0,
     });
   }
-  return out;
+  return visible;
 }
 
 function parseNestieeOptionsStored(raw: unknown): NestieeLineOption[] | undefined {
@@ -1650,21 +1667,97 @@ function isNestieeAsapDeliveryText(raw: string): boolean {
   return /按最快(?:日子)?寄出/.test(stripHtml(raw));
 }
 
-/** Nestiee checkout field outside EPO: order meta `nestiee/delivery_date`. */
+const NESTIEE_DELIVERY_DATE_META_KEYS = new Set([
+  '_wc_other/nestiee/delivery_date',
+  'nestiee/delivery_date',
+]);
+
+/** True for Woo meta that looks like a delivery/receipt date (admin custom fields included). */
+export function isNestieeDeliveryDateMetaField(key: string, displayKey = ''): boolean {
+  const k = String(key || '').trim();
+  const d = stripHtml(String(displayKey || ''));
+  if (!k && !d) return false;
+  if (NESTIEE_DELIVERY_DATE_META_KEYS.has(k)) return true;
+  const hay = `${k} ${d}`.toLowerCase();
+  if (/(?:^|_)(?:date_paid|date_completed|date_created|date_modified|paid_date)(?:$|_)/.test(hay)) {
+    return false;
+  }
+  if (/pi_overall_estimate/.test(hay)) return false;
+  if (/delivery[_-]?date|ship(?:ping)?[_-]?date/.test(hay)) return true;
+  if (/送貨日期|收貨日期|送達日期|出貨日期/.test(`${k}${d}`)) return true;
+  return false;
+}
+
+function nestieeMetaScalarText(value: unknown): string {
+  if (value == null || value === false) return '';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value > 1e12) return new Date(value).toISOString().slice(0, 10);
+    if (value > 1e9) return new Date(value * 1000).toISOString().slice(0, 10);
+    return String(value);
+  }
+  if (typeof value === 'string') return stripHtml(value).trim();
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      const text = nestieeMetaScalarText(v);
+      if (text) return text;
+    }
+    return '';
+  }
+  if (typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    for (const k of ['date', 'value', 'delivery_date', 'formatted', 'label']) {
+      const text = nestieeMetaScalarText(o[k]);
+      if (text) return text;
+    }
+  }
+  return stripHtml(String(value)).trim();
+}
+
+function parseNestieeDeliveryDateMetaValue(raw: unknown): string {
+  const value = nestieeMetaScalarText(raw);
+  if (!value) return '';
+  if (isNestieeAsapDeliveryText(value)) return '__ASAP__';
+  return normalizeOrderDueDate(value) || '';
+}
+
+function collectNestieeWooMeta(payload: Record<string, unknown>): WooMetaDatum[] {
+  const out: WooMetaDatum[] = [];
+  if (Array.isArray(payload.meta_data)) {
+    out.push(...(payload.meta_data as WooMetaDatum[]));
+  }
+  const lines = Array.isArray(payload.line_items) ? payload.line_items : [];
+  for (const line of lines) {
+    if (!line || typeof line !== 'object') continue;
+    const meta = (line as WooLineItemLike).meta_data;
+    if (Array.isArray(meta)) out.push(...meta);
+  }
+  return out;
+}
+
+/** Nestiee checkout / admin custom field: order (or line) meta delivery date. */
 export function parseNestieeDeliveryDateMeta(
   payload: Record<string, unknown> | null | undefined
 ): string {
   if (!payload) return '';
-  const meta = Array.isArray(payload.meta_data) ? (payload.meta_data as WooMetaDatum[]) : [];
-  const keys = new Set(['_wc_other/nestiee/delivery_date', 'nestiee/delivery_date']);
+  const meta = collectNestieeWooMeta(payload);
+
+  const read = (m: WooMetaDatum): string =>
+    parseNestieeDeliveryDateMetaValue(m.display_value ?? m.value);
+
   for (const m of meta) {
-    const key = String(m?.key || '');
-    if (!keys.has(key)) continue;
-    const value = stripHtml(String(m?.value ?? '')).trim();
-    if (!value) continue;
-    if (isNestieeAsapDeliveryText(value)) return '__ASAP__';
-    const iso = normalizeOrderDueDate(value);
-    if (iso) return iso;
+    const key = String(m?.key || '').trim();
+    if (!NESTIEE_DELIVERY_DATE_META_KEYS.has(key)) continue;
+    const parsed = read(m);
+    if (parsed) return parsed;
+  }
+
+  for (const m of meta) {
+    const key = String(m?.key || '').trim();
+    if (key === '_tmcartepo_data') continue;
+    const displayKey = String(m?.display_key || '');
+    if (!isNestieeDeliveryDateMetaField(key, displayKey)) continue;
+    const parsed = read(m);
+    if (parsed) return parsed;
   }
   return '';
 }
@@ -1672,8 +1765,9 @@ export function parseNestieeDeliveryDateMeta(
 /**
  * Nestiee → 客人收貨日期 (priority):
  * 1. Order meta nestiee/delivery_date (ISO / English date, or ASAP text → created+2)
- * 2. EPO 預約指定日子 + companion 預約送達日期
- * 3. EPO 按最快寄出… → created+2
+ * 2. Other Woo delivery-date custom fields (admin-created orders often skip checkout EPO)
+ * 3. EPO 預約指定日子 + companion 預約送達日期 (or the same options on visible line meta)
+ * 4. EPO 按最快寄出… → created+2
  */
 export function parseNestieeReceiptDateFromDeliveryOptions(
   lines: NestieeLineItem[] | null | undefined,

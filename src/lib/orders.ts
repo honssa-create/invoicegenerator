@@ -242,7 +242,7 @@ export function summarizeOrderListProducts(
 
 /** Amount due for payment status: line/invoice totals, including an explicit $0. */
 export function computeOrderDueTotal(
-  o: Pick<Order, 'fields' | 'total_amount'> & { linked_invoice?: { total: number } | null }
+  o: Pick<Order, 'fields' | 'total_amount'> & { linked_invoice?: { total?: number | null } | null }
 ): number | null {
   const invoiceTotal = o.linked_invoice?.total;
   if (invoiceTotal != null && Number.isFinite(invoiceTotal) && invoiceTotal > 0) {

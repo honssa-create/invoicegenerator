@@ -14,6 +14,9 @@ import {
   isNestieeScheduledShipOption,
   parseNestieeReceiptDateFromDeliveryOptions,
   parseNestieeDeliveryDateMeta,
+  parseNestieeReceiptDateFromCustomerNote,
+  normalizeTmCartepoRows,
+  normalizeOrderDueDate,
   resolveNestieeReceiptDateOnIngest,
   resolveHonourReceiptDateOnIngest,
   resolveOrderAddressesForQuotation,
@@ -351,6 +354,84 @@ describe('parseNestieeReceiptDateFromDeliveryOptions', () => {
       },
     ]);
     expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-08-14')).toBe('2026-09-01');
+  });
+
+  it('parses _tmcartepo_data when Woo stores it as a JSON string (order 10667 shape)', () => {
+    const payload = {
+      date_created: '2026-05-10T11:00:00',
+      line_items: [
+        {
+          name: '禮盒',
+          quantity: 1,
+          meta_data: [
+            {
+              key: '_tmcartepo_data',
+              value: JSON.stringify([
+                { name: '<b>📦送貨安排</b>', value: '📅 預約指定日子' },
+                { name: '<b>📦預約送達日期</b>', value: '21/07/2026' },
+              ]),
+            },
+          ],
+        },
+      ],
+    };
+    const lines = parseNestieeLinesFromWoo(payload.line_items);
+    expect(lines[0].options?.some((o) => o.label.includes('預約送達日期'))).toBe(true);
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, payload.date_created, payload)).toBe(
+      '2026-07-21'
+    );
+  });
+
+  it('uses an EPO date field even when 送貨安排 is not 預約指定日子', () => {
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              { name: '<b>📦送貨安排</b>', value: '⚡按最快日子寄出 (1-2個工作天寄出)' },
+              { name: '<b>📦預約送達日期</b>', value: '2026-07-21' },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-05-10')).toBe('2026-07-21');
+  });
+
+  it('reads 到貨日期 / Chinese / unix Woo custom fields', () => {
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: '到貨日期', value: '2026年7月21日' }],
+      })
+    ).toBe('2026-07-21');
+    expect(normalizeOrderDueDate('20260721')).toBe('2026-07-21');
+    expect(normalizeOrderDueDate(String(Date.parse('2026-07-21T00:00:00+08:00') / 1000))).toBe(
+      '2026-07-21'
+    );
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions([], '2026-05-10', {
+        meta_data: [{ key: 'e_deliverydate', value: { date: '2026-07-22' } }],
+      })
+    ).toBe('2026-07-22');
+  });
+
+  it('parses a wrapped EPO object and customer_note dates', () => {
+    expect(
+      normalizeTmCartepoRows({
+        '123': [{ name: '預約送達日期', value: '24/05/2026' }],
+      })
+    ).toHaveLength(1);
+    expect(parseNestieeReceiptDateFromCustomerNote('送貨日期：24/05/2026 請下午送到')).toBe(
+      '2026-05-24'
+    );
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions([], '2026-05-10', {
+        customer_note: '客人收貨日期: 2026-07-21',
+      })
+    ).toBe('2026-07-21');
   });
 });
 

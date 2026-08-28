@@ -15,7 +15,8 @@ import {
   type HubPlatform,
   type HubSyncResult,
 } from '@/lib/hub';
-import { fetchWooOrdersInBrowser } from '@/lib/woocommerce-client';
+import { fetchWooOrdersByNumbersInBrowser, fetchWooOrdersInBrowser } from '@/lib/woocommerce-client';
+import { parseHubImportOrderNumbers } from '@/lib/hub-import';
 import { displayInvoiceNumber, displayOrderNumber } from '@/lib/record-numbering-core';
 import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
@@ -94,6 +95,7 @@ function OrderHubContent() {
   });
   const [importDateFrom, setImportDateFrom] = useState(defaultImportDateFrom);
   const [importDateTo, setImportDateTo] = useState(defaultImportDateTo);
+  const [importOrderNumbers, setImportOrderNumbers] = useState('');
   const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
   const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
   const [search, setSearch] = useState(savedUi?.search ?? '');
@@ -155,7 +157,13 @@ function OrderHubContent() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const importBody = () => JSON.stringify({ date_from: importDateFrom, date_to: importDateTo });
+  const importOrderNumberList = () => parseHubImportOrderNumbers(importOrderNumbers);
+  const importBody = () =>
+    JSON.stringify({
+      date_from: importDateFrom,
+      date_to: importDateTo,
+      order_numbers: importOrderNumberList(),
+    });
 
   const finishImport = (
     platform: ImportPlatform,
@@ -194,18 +202,40 @@ function OrderHubContent() {
       throw new Error(config.error || 'Failed to load store credentials.');
     }
 
-    const orders = await fetchWooOrdersInBrowser(
+    const numbers = importOrderNumberList();
+    const ranged = await fetchWooOrdersInBrowser(
       config.storeUrl,
       config.consumerKey,
       config.consumerSecret,
       platform,
       { dateFrom: importDateFrom, dateTo: importDateTo }
     );
+    const extra = numbers.length
+      ? await fetchWooOrdersByNumbersInBrowser(
+          config.storeUrl,
+          config.consumerKey,
+          config.consumerSecret,
+          platform,
+          numbers
+        )
+      : [];
+    const seen = new Set(ranged.map((o) => o.id));
+    const orders = [...ranged];
+    for (const order of extra) {
+      if (seen.has(order.id)) continue;
+      seen.add(order.id);
+      orders.push(order);
+    }
 
     const res = await fetch(`/api/hub/import/${platform}/ingest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date_from: importDateFrom, date_to: importDateTo, orders }),
+      body: JSON.stringify({
+        date_from: importDateFrom,
+        date_to: importDateTo,
+        order_numbers: numbers,
+        orders,
+      }),
     });
     const text = await res.text();
     let d: { error?: string; result?: HubSyncResult };
@@ -366,7 +396,7 @@ function OrderHubContent() {
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
         <h2 className="text-sm font-semibold text-gray-900">Import date range 匯入日期範圍</h2>
         <p className="text-xs text-gray-500 mt-1 mb-3">
-          Only orders and invoices created within this range are imported. WooCommerce stores are fetched from your browser (same path as your successful API test).
+          Only orders and invoices created within this range are imported, plus any Woo order numbers listed below (even if they were created earlier). WooCommerce stores are fetched from your browser (same path as your successful API test).
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
           <div>
@@ -387,12 +417,24 @@ function OrderHubContent() {
               className={selectCls}
             />
           </div>
-          <div className="sm:col-span-2 lg:col-span-2">
-            <p className="text-xs text-gray-400">
-              WooCommerce uses order <strong>created</strong> date. QuickBooks uses invoice <strong>transaction</strong> date.
-            </p>
+          <div className="sm:col-span-2">
+            <label className="text-[11px] font-medium text-gray-500 mb-1 block">
+              Also import Woo order #s 同時匯入訂單編號
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={importOrderNumbers}
+              onChange={(e) => setImportOrderNumbers(e.target.value)}
+              placeholder="10667, 10997"
+              className={selectCls}
+            />
           </div>
         </div>
+        <p className="text-xs text-gray-400 mt-2">
+          WooCommerce uses order <strong>created</strong> date. QuickBooks uses invoice <strong>transaction</strong> date.
+          Order numbers always re-fetch that Woo order so delivery dates can update after a parser fix.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

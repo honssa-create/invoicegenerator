@@ -299,6 +299,24 @@ export function parseOrderDueDateField(fields: Record<string, unknown>): string 
 }
 
 /** Normalize common date strings to YYYY-MM-DD. */
+function ymdIfValid(year: number, month: number, day: number): string | null {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function ymdFromUnixMs(ms: number): string | null {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Hong_Kong',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+  return /^\d{4}-\d{2}-\d{2}$/.test(parts) ? parts : null;
+}
+
 export function normalizeOrderDueDate(raw: string | null | undefined): string | null {
   const s = String(raw || '').trim();
   if (!s) return null;
@@ -306,29 +324,31 @@ export function normalizeOrderDueDate(raw: string | null | undefined): string | 
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const ymd = s.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
   if (ymd) {
-    const month = Number(ymd[2]);
-    const day = Number(ymd[3]);
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${ymd[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
+    return ymdIfValid(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+  }
+  const zh = s.match(/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
+  if (zh) {
+    return ymdIfValid(Number(zh[1]), Number(zh[2]), Number(zh[3]));
+  }
+  if (/^\d{8}$/.test(s)) {
+    return ymdIfValid(Number(s.slice(0, 4)), Number(s.slice(4, 6)), Number(s.slice(6, 8)));
   }
   const dmy = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (dmy) {
     let y = Number(dmy[3]);
     if (y < 100) y += 2000;
-    const day = Number(dmy[1]);
-    const month = Number(dmy[2]);
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${String(y).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
+    return ymdIfValid(y, Number(dmy[2]), Number(dmy[1]));
+  }
+  if (/^\d{10}$/.test(s)) {
+    return ymdFromUnixMs(Number(s) * 1000);
+  }
+  if (/^\d{13}$/.test(s)) {
+    return ymdFromUnixMs(Number(s));
   }
   const t = Date.parse(s);
   if (!Number.isNaN(t)) {
     const d = new Date(t);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return ymdIfValid(d.getFullYear(), d.getMonth() + 1, d.getDate());
   }
   return null;
 }
@@ -1556,17 +1576,49 @@ export function formatWooAddress(addr: WooAddressLike | null | undefined): strin
   return lines.join('\n');
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** TM EPO `_tmcartepo_data` may be an array, a JSON string, or a keyed object wrapper. */
+export function normalizeTmCartepoRows(raw: unknown): Record<string, unknown>[] {
+  if (raw == null || raw === false || raw === '') return [];
+  let value: unknown = raw;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      value = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(value)) return value.filter(isPlainRecord);
+  if (!isPlainRecord(value)) return [];
+  if (Array.isArray(value.data)) return value.data.filter(isPlainRecord);
+  const collected: Record<string, unknown>[] = [];
+  for (const nested of Object.values(value)) {
+    if (Array.isArray(nested)) {
+      collected.push(...nested.filter(isPlainRecord));
+    } else if (isPlainRecord(nested) && (nested.name != null || nested.value != null)) {
+      collected.push(nested);
+    }
+  }
+  return collected;
+}
+
 function parseNestieeOptionsFromMeta(meta: WooMetaDatum[] | null | undefined): NestieeLineOption[] {
   if (!Array.isArray(meta)) return [];
-  const epo = meta.find((m) => m?.key === '_tmcartepo_data');
-  const raw = epo?.value;
-  if (Array.isArray(raw)) {
+  const epo = meta.find((m) => {
+    const key = String(m?.key || '').trim();
+    return key === '_tmcartepo_data' || key === 'tmcartepo_data' || key === '_tm_epo_data';
+  });
+  const rows = normalizeTmCartepoRows(epo?.value);
+  if (rows.length) {
     const out: NestieeLineOption[] = [];
-    for (const entry of raw) {
-      if (!entry || typeof entry !== 'object') continue;
-      const e = entry as Record<string, unknown>;
-      const label = stripHtml(String(e.name ?? ''));
-      const value = stripHtml(String(e.value ?? ''));
+    for (const e of rows) {
+      const label = stripHtml(String(e.name ?? e.key ?? ''));
+      const value = nestieeMetaScalarText(e.value);
       if (!label && !value) continue;
       out.push({
         label: label || 'Option',
@@ -1652,7 +1704,10 @@ export function isNestieeScheduledDeliveryDateOption(
   opt: Pick<NestieeLineOption, 'label' | 'value'>
 ): boolean {
   const label = stripHtml(String(opt.label || ''));
-  return /預約送達日期|請選擇送貨日/.test(label);
+  if (/送貨安排/.test(label)) return false;
+  return /預約送達日期|請選擇送貨日|送貨日期|收貨日期|到貨日期|送達日期|客人收貨|delivery\s*date/i.test(
+    label
+  );
 }
 
 function nestieeOrderCreatedIso(orderCreatedAt: string | null | undefined): string {
@@ -1683,8 +1738,10 @@ export function isNestieeDeliveryDateMetaField(key: string, displayKey = ''): bo
     return false;
   }
   if (/pi_overall_estimate/.test(hay)) return false;
-  if (/delivery[_-]?date|ship(?:ping)?[_-]?date/.test(hay)) return true;
-  if (/送貨日期|收貨日期|送達日期|出貨日期/.test(`${k}${d}`)) return true;
+  if (/delivery[_-]?date|ship(?:ping)?[_-]?date|e_deliverydate|orddd/.test(hay)) return true;
+  if (/送貨日期|收貨日期|送達日期|出貨日期|到貨日期|到貨日|客人收貨|收貨日/.test(`${k}${d}`)) {
+    return true;
+  }
   return false;
 }
 
@@ -1753,11 +1810,22 @@ export function parseNestieeDeliveryDateMeta(
 
   for (const m of meta) {
     const key = String(m?.key || '').trim();
-    if (key === '_tmcartepo_data') continue;
+    if (key === '_tmcartepo_data' || key === 'tmcartepo_data' || key === '_tm_epo_data') continue;
     const displayKey = String(m?.display_key || '');
     if (!isNestieeDeliveryDateMetaField(key, displayKey)) continue;
     const parsed = read(m);
     if (parsed) return parsed;
+  }
+
+  for (const m of meta) {
+    const key = String(m?.key || '').trim();
+    if (key !== '_tmcartepo_data' && key !== 'tmcartepo_data' && key !== '_tm_epo_data') continue;
+    for (const row of normalizeTmCartepoRows(m.value)) {
+      const name = stripHtml(String(row.name ?? row.key ?? ''));
+      if (!isNestieeScheduledDeliveryDateOption({ label: name, value: '' })) continue;
+      const parsed = parseNestieeDeliveryDateMetaValue(row.value);
+      if (parsed && parsed !== '__ASAP__') return parsed;
+    }
   }
   return '';
 }
@@ -1766,8 +1834,10 @@ export function parseNestieeDeliveryDateMeta(
  * Nestiee → 客人收貨日期 (priority):
  * 1. Order meta nestiee/delivery_date (ISO / English date, or ASAP text → created+2)
  * 2. Other Woo delivery-date custom fields (admin-created orders often skip checkout EPO)
- * 3. EPO 預約指定日子 + companion 預約送達日期 (or the same options on visible line meta)
- * 4. EPO 按最快寄出… → created+2
+ * 3. EPO companion date (預約送達日期 / 送貨日期) even when 送貨安排 is not 預約指定日子
+ * 4. EPO 預約指定日子 + companion 預約送達日期 (or the same options on visible line meta)
+ * 5. EPO 按最快寄出… → created+2
+ * 6. customer_note text mentioning 送貨/收貨日期
  */
 export function parseNestieeReceiptDateFromDeliveryOptions(
   lines: NestieeLineItem[] | null | undefined,
@@ -1788,9 +1858,7 @@ export function parseNestieeReceiptDateFromDeliveryOptions(
 
   if (Array.isArray(lines) && lines.length) {
     for (const line of lines) {
-      const opts = line.options || [];
-      if (!opts.some((opt) => isNestieeScheduledShipOption(opt))) continue;
-      for (const opt of opts) {
+      for (const opt of line.options || []) {
         if (!isNestieeScheduledDeliveryDateOption(opt)) continue;
         const iso = normalizeOrderDueDate(opt.value);
         if (iso) return iso;
@@ -1803,7 +1871,23 @@ export function parseNestieeReceiptDateFromDeliveryOptions(
     if (hasFastest && created) return addCalendarDays(created, 2);
   }
 
+  const fromNote = parseNestieeReceiptDateFromCustomerNote(
+    typeof payload?.customer_note === 'string' ? payload.customer_note : ''
+  );
+  if (fromNote) return fromNote;
+
   return '';
+}
+
+export function parseNestieeReceiptDateFromCustomerNote(note: string | null | undefined): string {
+  const text = String(note || '').trim();
+  if (!text) return '';
+  const match = text.match(
+    /(?:送貨日期|收貨日期|到貨日期|送達日期|客人收貨日期|delivery\s*date)\s*[:：]?\s*([^\n,，;；]+)/i
+  );
+  if (!match) return '';
+  const chunk = match[1].trim();
+  return normalizeOrderDueDate(chunk) || normalizeOrderDueDate(chunk.split(/\s+/)[0] || '') || '';
 }
 
 /** Existing InvoiceFlow receipt date (due_date / 客人收貨日期), if parseable. */

@@ -23,9 +23,8 @@ import {
   honourSuppliersDerivedFields,
   parseHonourCpoNotesFromLines,
   parseHonourPaymentFromWoo,
-  parseHonourEstimateMinDate,
-  normalizeOrderDueDate,
-  parseNestieeReceiptDateFromDeliveryOptions,
+  resolveHonourReceiptDateOnIngest,
+  resolveNestieeReceiptDateOnIngest,
   pruneStaleOrderFields,
   orderTypeFromFields,
   WEDDING_GIFT_ORDER_TYPE,
@@ -172,14 +171,13 @@ export async function upsertHubOrder(
     }
 
     // Nestiee delivery_date meta / EPO 送貨安排 → linked receipt-date fields.
-    const receiptDate =
-      normalizeOrderDueDate(String(fields.due_date || '')) ||
-      normalizeOrderDueDate(String(fields.client_delivery_date || '')) ||
-      parseNestieeReceiptDateFromDeliveryOptions(
-        nestieeLines,
-        typeof payload.date_created === 'string' ? payload.date_created : '',
-        payload
-      );
+    // Woo wins on re-sync (admin/customer date changes after checkout).
+    const receiptDate = resolveNestieeReceiptDateOnIngest(
+      fields,
+      nestieeLines,
+      typeof payload.date_created === 'string' ? payload.date_created : '',
+      payload
+    );
     if (receiptDate) {
       fields.due_date = receiptDate;
       fields.client_delivery_date = receiptDate;
@@ -236,12 +234,8 @@ export async function upsertHubOrder(
     }
 
     // The status-bar and Shipment Detail inputs are the same receipt date.
-    // Preserve a manual value on re-sync; otherwise seed both linked keys from
-    // Honour's earliest overall delivery estimate.
-    const receiptDate =
-      normalizeOrderDueDate(String(fields.due_date || '')) ||
-      normalizeOrderDueDate(String(fields.client_delivery_date || '')) ||
-      parseHonourEstimateMinDate(payload);
+    // Woo estimate wins on re-sync; keep a local date only if Woo has none.
+    const receiptDate = resolveHonourReceiptDateOnIngest(fields, payload);
     if (receiptDate) {
       fields.due_date = receiptDate;
       fields.client_delivery_date = receiptDate;

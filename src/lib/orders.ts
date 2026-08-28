@@ -1712,6 +1712,33 @@ export function parseNestieeReceiptDateFromDeliveryOptions(
   return '';
 }
 
+/** Existing InvoiceFlow receipt date (due_date / 客人收貨日期), if parseable. */
+export function existingOrderReceiptDate(fields: Record<string, unknown> | null | undefined): string {
+  if (!fields) return '';
+  return (
+    normalizeOrderDueDate(String(fields.due_date || '')) ||
+    normalizeOrderDueDate(String(fields.client_delivery_date || '')) ||
+    ''
+  );
+}
+
+/**
+ * Hub ingest / re-sync: Woo delivery date wins whenever it parses.
+ * Covers Woo-admin edits after checkout, local 客人收貨日期 edits, and ASAP (created+2).
+ * Keep the local date only when Woo has nothing parseable.
+ */
+export function resolveNestieeReceiptDateOnIngest(
+  fields: Record<string, unknown> | null | undefined,
+  lines: NestieeLineItem[] | null | undefined,
+  orderCreatedAt: string | null | undefined,
+  payload?: Record<string, unknown> | null
+): string {
+  return (
+    parseNestieeReceiptDateFromDeliveryOptions(lines, orderCreatedAt, payload) ||
+    existingOrderReceiptDate(fields)
+  );
+}
+
 /** Read `fields.nestiee_lines` (JSON string or already-parsed array). */
 export function getNestieeLines(
   fields: Record<string, string | boolean | unknown>
@@ -2357,6 +2384,14 @@ export function parseHonourEstimateMinDate(
     meta.find((m) => String(m?.key || '') === 'pi_overall_estimate_min_date')?.value ?? ''
   ).trim();
   return normalizeOrderDueDate(min) || '';
+}
+
+/** Hub ingest / re-sync: Honour Woo estimate wins whenever it parses. */
+export function resolveHonourReceiptDateOnIngest(
+  fields: Record<string, unknown> | null | undefined,
+  payload?: Record<string, unknown> | null
+): string {
+  return parseHonourEstimateMinDate(payload) || existingOrderReceiptDate(fields);
 }
 
 /** Collect CPO options across all product line items. */

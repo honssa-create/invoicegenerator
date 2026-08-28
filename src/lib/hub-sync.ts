@@ -110,7 +110,7 @@ export async function ingestWooOrders(
   };
 
   const alwaysInclude = new Set(
-    [...(options?.alwaysIncludeIds || [])].map((v) => String(v).trim()).filter(Boolean)
+    Array.from(options?.alwaysIncludeIds || [], (v) => String(v).trim()).filter(Boolean)
   );
   const dateRows = dateRange
     ? orders.filter((o) => {

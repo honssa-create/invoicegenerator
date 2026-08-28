@@ -17,7 +17,7 @@ export const NESTIEE_DEMAND_SCOPES: readonly NestieeDemandScope[] = [
 ] as const;
 
 /** Inclusive delivery-date window: today through today + N calendar days. */
-export const NESTIEE_SHIP_TODAY_DAYS = 3;
+export const NESTIEE_SHIP_TODAY_DAYS = 4;
 
 export function parseNestieeDemandScope(raw: string | null | undefined): NestieeDemandScope {
   const v = String(raw || '').trim();
@@ -94,7 +94,7 @@ export function nestieeShipTodayDateRange(today: string = localDateYmd()): {
   };
 }
 
-/** Unshipped (processing) Nestiee orders with delivery date from today through today+3. */
+/** Unshipped (processing) Nestiee orders with delivery date from today through today+4. */
 export function orderMatchesNestieeShipToday(
   order: { status?: string | null; fields?: Record<string, unknown> },
   today: string = localDateYmd(),

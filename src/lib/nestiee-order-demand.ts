@@ -4,6 +4,36 @@ import { expandGiftBoxBom, finishedSku, GIFT_BOX_BOMS, type BomLine } from './ki
 import { isNestieeOrderType, orderTypeFromFields } from './orders';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
+export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
+
+export type NestieeDemandScope = 'processing' | 'shipped' | 'all';
+
+export const NESTIEE_DEMAND_SCOPES: readonly NestieeDemandScope[] = [
+  'processing',
+  'shipped',
+  'all',
+] as const;
+
+export function parseNestieeDemandScope(raw: string | null | undefined): NestieeDemandScope {
+  const v = String(raw || '').trim();
+  if (v === 'shipped' || v === 'all') return v;
+  return 'processing';
+}
+
+/** Statuses included in the Nestiee production dashboard for a given scope. */
+export function nestieeStatusesForDemandScope(scope: NestieeDemandScope): readonly string[] {
+  if (scope === 'processing') return [NESTIEE_PROCESSING_STATUS];
+  if (scope === 'shipped') return NESTIEE_SHIPPED_STATUSES;
+  return [NESTIEE_PROCESSING_STATUS, ...NESTIEE_SHIPPED_STATUSES];
+}
+
+export function orderMatchesNestieeDemandScope(
+  status: string | null | undefined,
+  scope: NestieeDemandScope,
+): boolean {
+  const s = String(status || '').trim();
+  return nestieeStatusesForDemandScope(scope).includes(s);
+}
 
 export interface NestieeGiftBoxDemandType {
   id: string;
@@ -28,7 +58,8 @@ export interface NestieeDemandBottle {
 export interface NestieeProcessingDemand {
   giftBoxes: NestieeDemandGiftBox[];
   bottles: NestieeDemandBottle[];
-  processingOrderCount: number;
+  orderCount: number;
+  scope: NestieeDemandScope;
 }
 
 /** Finished-bottle cards shown on the Nestiee orders dashboard. */
@@ -56,7 +87,8 @@ export function isNestieeOrdersFilter(filter: string): boolean {
 export function summarizeNestieeProcessingDemand(
   orders: Array<{ status?: string; fields?: Record<string, unknown> }>,
   giftBoxTypes: NestieeGiftBoxDemandType[],
-  giftBoxBoms: Record<string, BomLine[]> = {}
+  giftBoxBoms: Record<string, BomLine[]> = {},
+  scope: NestieeDemandScope = 'processing',
 ): NestieeProcessingDemand {
   const boms = { ...GIFT_BOX_BOMS, ...giftBoxBoms };
   const activeTypes = [...giftBoxTypes]
@@ -69,13 +101,13 @@ export function summarizeNestieeProcessingDemand(
   const bottleTotals = new Map<string, number>();
   for (const slot of NESTIEE_BOTTLE_DASHBOARD_SLOTS) bottleTotals.set(slot.sku, 0);
 
-  let processingOrderCount = 0;
+  let orderCount = 0;
 
   for (const order of orders) {
     const orderType = orderTypeFromFields(order.fields);
     if (!orderType || !isNestieeOrderType(orderType)) continue;
-    if (order.status !== NESTIEE_PROCESSING_STATUS) continue;
-    processingOrderCount += 1;
+    if (!orderMatchesNestieeDemandScope(order.status, scope)) continue;
+    orderCount += 1;
 
     const fields = order.fields || {};
     for (const g of activeTypes) {
@@ -102,6 +134,7 @@ export function summarizeNestieeProcessingDemand(
       label: slot.label,
       qty: bottleTotals.get(slot.sku) || 0,
     })),
-    processingOrderCount,
+    orderCount,
+    scope,
   };
 }

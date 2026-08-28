@@ -27,6 +27,8 @@ import {
 } from '@/lib/orders';
 import {
   isNestieeOrdersFilter,
+  parseNestieeDemandScope,
+  type NestieeDemandScope,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
@@ -43,7 +45,8 @@ import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
   giftBoxes: [],
   bottles: [],
-  processingOrderCount: 0,
+  orderCount: 0,
+  scope: 'processing',
 };
 
 const OrdersBoard = dynamic(() => import('@/components/OrdersBoard'), { ssr: false });
@@ -68,6 +71,7 @@ type OrdersListUiState = {
   sort: { key: SortKey; dir: 'asc' | 'desc' };
   dashFocus: DashFocus;
   page: number;
+  nestieeDemandScope?: NestieeDemandScope;
 };
 
 export default function OrdersPage() {
@@ -134,6 +138,9 @@ function OrdersPageContent() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [nestieeDemand, setNestieeDemand] = useState<NestieeProcessingDemand>(EMPTY_NESTIEE_DEMAND);
+  const [nestieeDemandScope, setNestieeDemandScope] = useState<NestieeDemandScope>(() =>
+    parseNestieeDemandScope(savedUi?.nestieeDemandScope),
+  );
   const [nestieeDemandLoading, setNestieeDemandLoading] = useState(false);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<number>>(new Set());
 
@@ -145,8 +152,9 @@ function OrdersPageContent() {
     const params = new URLSearchParams();
     if (dateStart) params.set('dateStart', dateStart);
     if (dateEnd) params.set('dateEnd', dateEnd);
+    params.set('scope', nestieeDemandScope);
     const qs = params.toString();
-    fetch(`/api/orders/nestiee-processing-demand${qs ? `?${qs}` : ''}`)
+    fetch(`/api/orders/nestiee-processing-demand?${qs}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.demand) setNestieeDemand(d.demand);
@@ -155,7 +163,7 @@ function OrdersPageContent() {
         /* keep previous */
       })
       .finally(() => setNestieeDemandLoading(false));
-  }, [orderType, dateStart, dateEnd]);
+  }, [orderType, dateStart, dateEnd, nestieeDemandScope]);
 
   const load = () => {
     setLoading(true);
@@ -194,8 +202,9 @@ function OrdersPageContent() {
       sort,
       dashFocus,
       page,
+      nestieeDemandScope,
     });
-  }, [view, dateStart, dateEnd, orderType, status, search, sort, dashFocus, page]);
+  }, [view, dateStart, dateEnd, orderType, status, search, sort, dashFocus, page, nestieeDemandScope]);
 
   const setOrderTypeAndUrl = (value: string) => {
     setOrderType(value);
@@ -733,6 +742,8 @@ function OrdersPageContent() {
       {isNestieeFilter && (
         <NestieeProcessingDashboard
           demand={nestieeDemand}
+          scope={nestieeDemandScope}
+          onScopeChange={setNestieeDemandScope}
           loading={loading || nestieeDemandLoading}
         />
       )}

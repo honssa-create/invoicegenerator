@@ -292,6 +292,66 @@ describe('parseNestieeReceiptDateFromDeliveryOptions', () => {
     ]);
     expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '')).toBe('');
   });
+
+  it('reads admin-created Woo delivery custom fields (not checkout EPO)', () => {
+    expect(
+      parseNestieeDeliveryDateMeta({
+        created_via: 'admin',
+        meta_data: [{ key: 'delivery_date', value: '2026-09-01' }],
+      })
+    ).toBe('2026-09-01');
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: '_wc_other/other/delivery_date', value: '01/09/2026' }],
+      })
+    ).toBe('2026-09-01');
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: '_custom_field', display_key: '送貨日期', value: '2026-08-30' }],
+      })
+    ).toBe('2026-08-30');
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions([], '2026-08-14T09:40:02', {
+        created_via: 'admin',
+        date_created: '2026-08-14T09:40:02',
+        meta_data: [{ key: '_delivery_date', value: 'Sat, 29 Aug 2026' }],
+      })
+    ).toBe('2026-08-29');
+    expect(
+      parseNestieeReceiptDateFromDeliveryOptions([], '2026-08-14', {
+        line_items: [
+          {
+            name: '禮盒',
+            quantity: 1,
+            meta_data: [
+              { key: 'delivery_date', display_key: 'Delivery Date', value: '2026-09-02' },
+            ],
+          },
+        ],
+      })
+    ).toBe('2026-09-02');
+    expect(
+      parseNestieeDeliveryDateMeta({
+        meta_data: [{ key: 'date_paid', value: '2026-09-01' }],
+      })
+    ).toBe('');
+  });
+
+  it('parses 送貨安排 from visible line meta when _tmcartepo_data is missing', () => {
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '禮盒',
+        quantity: 1,
+        price: 100,
+        total: '100',
+        meta_data: [
+          { key: '送貨安排', display_key: '📦送貨安排', value: '📅 預約指定日子' },
+          { key: '預約送達日期', display_key: '📦預約送達日期', value: '01/09/2026' },
+        ],
+      },
+    ]);
+    expect(parseNestieeReceiptDateFromDeliveryOptions(lines, '2026-08-14')).toBe('2026-09-01');
+  });
 });
 
 describe('resolveNestieeReceiptDateOnIngest', () => {

@@ -1,7 +1,7 @@
 /** Client-safe Nestiee production demand rollup for processing orders. */
 
 import { expandGiftBoxBom, finishedSku, GIFT_BOX_BOMS, type BomLine } from './kitchen-bom';
-import { isNestieeOrderType, orderTypeFromFields } from './orders';
+import { isNestieeOrderType, orderDueDate, orderTypeFromFields } from './orders';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
@@ -33,6 +33,46 @@ export function orderMatchesNestieeDemandScope(
 ): boolean {
   const s = String(status || '').trim();
   return nestieeStatusesForDemandScope(scope).includes(s);
+}
+
+export type NestieeDateFilterType = 'order_date' | 'delivery_date';
+
+export const NESTIEE_DATE_FILTER_TYPES: readonly NestieeDateFilterType[] = [
+  'order_date',
+  'delivery_date',
+] as const;
+
+export function parseNestieeDateFilterType(raw: string | null | undefined): NestieeDateFilterType {
+  return String(raw || '').trim() === 'delivery_date' ? 'delivery_date' : 'order_date';
+}
+
+export function orderMatchesNestieeDateRange(
+  order: { created_at?: string | null; fields?: Record<string, unknown> },
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): boolean {
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  if (!dateStart && !dateEnd) return true;
+
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  if (dateFilterType === 'delivery_date') {
+    const day = orderDueDate(order);
+    if (!day) return false;
+    if (dateStart && day < dateStart) return false;
+    if (dateEnd && day > dateEnd) return false;
+    return true;
+  }
+
+  // Match orders list FilterBar: empty created_at is kept.
+  const created = String(order.created_at || '').slice(0, 10);
+  if (!created) return true;
+  if (dateStart && created < dateStart) return false;
+  if (dateEnd && created > dateEnd) return false;
+  return true;
 }
 
 export interface NestieeGiftBoxDemandType {

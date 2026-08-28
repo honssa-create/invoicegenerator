@@ -6,6 +6,8 @@ import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import { NESTIEE_ORDER_TYPE } from '@/lib/orders';
 import {
   nestieeStatusesForDemandScope,
+  orderMatchesNestieeDateRange,
+  parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
@@ -34,6 +36,7 @@ export async function GET(request: Request) {
   const dateStart = isYmd(dateStartRaw) ? dateStartRaw : '';
   const dateEnd = isYmd(dateEndRaw) ? dateEndRaw : '';
   const scope = parseNestieeDemandScope(url.searchParams.get('scope'));
+  const dateFilterType = parseNestieeDateFilterType(url.searchParams.get('dateFilterType'));
   const statuses = [...nestieeStatusesForDemandScope(scope)];
 
   const ownerId = await getDataOwnerId(session);
@@ -49,24 +52,9 @@ export async function GET(request: Request) {
     ];
     const params: Array<string | number> = [ownerId, ...statuses, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE];
 
-    // Match orders list FilterBar: compare created_at date portion (YYYY-MM-DD).
-    // Empty created_at is kept (same as client list filter).
-    if (dateStart) {
-      clauses.push(
-        `(COALESCE(LEFT(created_at, 10), '') = '' OR LEFT(created_at, 10) >= ?)`
-      );
-      params.push(dateStart);
-    }
-    if (dateEnd) {
-      clauses.push(
-        `(COALESCE(LEFT(created_at, 10), '') = '' OR LEFT(created_at, 10) <= ?)`
-      );
-      params.push(dateEnd);
-    }
-
     const rows = (await db
       .prepare(
-        `SELECT status, fields_json, order_type
+        `SELECT status, fields_json, order_type, created_at
          FROM orders
          WHERE ${clauses.join('\n           AND ')}
          ORDER BY id DESC`
@@ -75,12 +63,18 @@ export async function GET(request: Request) {
       status: string | null;
       fields_json: string | null;
       order_type: string | null;
+      created_at: string | null;
     }>;
 
-    const orders = rows.map((row) => ({
-      status: row.status || '',
-      fields: parseFields(row.fields_json),
-    }));
+    const orders = rows
+      .map((row) => ({
+        status: row.status || '',
+        fields: parseFields(row.fields_json),
+        created_at: row.created_at || '',
+      }))
+      .filter((order) =>
+        orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType }),
+      );
 
     const { catalog, formulas } = await loadKitchenCatalog(ownerId);
     const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({

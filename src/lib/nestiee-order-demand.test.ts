@@ -4,7 +4,9 @@ import { NESTIEE_GIFT_BOX_TYPES, NESTIEE_ORDER_TYPE } from './orders';
 import {
   isNestieeOrdersFilter,
   nestieeStatusesForDemandScope,
+  orderMatchesNestieeDateRange,
   orderMatchesNestieeDemandScope,
+  parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
 } from './nestiee-order-demand';
@@ -76,6 +78,68 @@ describe('orderMatchesNestieeDemandScope', () => {
     expect(orderMatchesNestieeDemandScope('pending payment', 'all')).toBe(false);
     expect(orderMatchesNestieeDemandScope('checkout-draft', 'all')).toBe(false);
     expect(orderMatchesNestieeDemandScope('completed', 'shipped')).toBe(true);
+  });
+});
+
+describe('parseNestieeDateFilterType', () => {
+  it('defaults to order_date', () => {
+    expect(parseNestieeDateFilterType(null)).toBe('order_date');
+    expect(parseNestieeDateFilterType('delivery_date')).toBe('delivery_date');
+    expect(parseNestieeDateFilterType('invalid')).toBe('order_date');
+  });
+});
+
+describe('orderMatchesNestieeDateRange', () => {
+  it('ignores dates when the FilterBar range is empty', () => {
+    expect(orderMatchesNestieeDateRange({ created_at: '2026-01-01' })).toBe(true);
+    expect(
+      orderMatchesNestieeDateRange(
+        { created_at: '2026-01-01', fields: { due_date: '2026-09-01' } },
+        { dateFilterType: 'delivery_date' },
+      ),
+    ).toBe(true);
+  });
+
+  it('filters by created_at for order_date', () => {
+    const range = { dateStart: '2026-08-01', dateEnd: '2026-08-31', dateFilterType: 'order_date' as const };
+    expect(orderMatchesNestieeDateRange({ created_at: '2026-08-14T09:40:02' }, range)).toBe(true);
+    expect(orderMatchesNestieeDateRange({ created_at: '2026-07-31' }, range)).toBe(false);
+    expect(orderMatchesNestieeDateRange({ created_at: '' }, range)).toBe(true);
+  });
+
+  it('filters by due_date / client_delivery_date for delivery_date', () => {
+    const range = { dateStart: '2026-08-01', dateEnd: '2026-08-31', dateFilterType: 'delivery_date' as const };
+    expect(
+      orderMatchesNestieeDateRange(
+        { created_at: '2026-07-01', fields: { due_date: '2026-08-20' } },
+        range,
+      ),
+    ).toBe(true);
+    expect(
+      orderMatchesNestieeDateRange(
+        { created_at: '2026-08-10', fields: { client_delivery_date: '2026-09-01' } },
+        range,
+      ),
+    ).toBe(false);
+    expect(
+      orderMatchesNestieeDateRange(
+        { created_at: '2026-08-10', fields: {} },
+        range,
+      ),
+    ).toBe(false);
+  });
+
+  it('prefers due_date over client_delivery_date', () => {
+    const range = { dateStart: '2026-08-01', dateEnd: '2026-08-31', dateFilterType: 'delivery_date' as const };
+    expect(
+      orderMatchesNestieeDateRange(
+        {
+          created_at: '2026-07-01',
+          fields: { due_date: '2026-08-15', client_delivery_date: '2026-09-01' },
+        },
+        range,
+      ),
+    ).toBe(true);
   });
 });
 

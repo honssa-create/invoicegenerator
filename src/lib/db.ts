@@ -814,12 +814,18 @@ async function runBootDataFixes(): Promise<void> {
   );
 
   if (!migCustomersSchema.rows.length) {
-    await client().query(`
-      UPDATE customers SET address = trim(both from concat_ws(', ',
-        nullif(trim(address), ''), nullif(trim(city), ''),
-        nullif(trim(state), ''), nullif(trim(zip), '')))
-      WHERE city IS NOT NULL OR state IS NOT NULL OR zip IS NOT NULL
-    `);
+    const cityCol = await client().query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'city'`
+    );
+    if (cityCol.rows.length) {
+      await client().query(`
+        UPDATE customers SET address = trim(both from concat_ws(', ',
+          nullif(trim(address), ''), nullif(trim(city), ''),
+          nullif(trim(state), ''), nullif(trim(zip), '')))
+        WHERE city IS NOT NULL OR state IS NOT NULL OR zip IS NOT NULL
+      `);
+    }
     await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS city`);
     await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS state`);
     await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS zip`);
@@ -891,6 +897,9 @@ async function runBootDataFixes(): Promise<void> {
       `INSERT INTO app_migrations (key) VALUES ('orders_attended_at_backfill_v1') ON CONFLICT DO NOTHING`
     );
   }
+
+  const { migrateNestieeGiftBoxQtysOnce } = await import('./nestiee-gift-box-server');
+  await migrateNestieeGiftBoxQtysOnce();
 }
 
 export async function ensureSchema(): Promise<void> {

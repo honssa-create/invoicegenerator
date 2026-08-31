@@ -296,6 +296,83 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.orderCount).toBe(2);
     expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(3);
   });
+
+  it('counts 所需禮盒 from nestiee_lines when stored gift qtys are empty', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_lines: JSON.stringify([
+              { name: '星空金', quantity: 2, unit_price: 344, line_total: 688 },
+              { name: '紅色銀', quantity: 3, unit_price: 10, line_total: 30 },
+            ]),
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS
+    );
+
+    expect(demand.orderCount).toBe(1);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'red_silver')?.qty).toBe(3);
+  });
+
+  it('adds Mid-Autumn bundle line items as 花月 + 星空金 + 星空銀', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_lines: JSON.stringify([
+              {
+                name: '中秋 ‧ 花好月圓燕窩禮盒套裝 - 一套-‧-嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+                quantity: 2,
+                unit_price: 1,
+                line_total: 2,
+              },
+            ]),
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS
+    );
+
+    expect(demand.giftBoxes.find((g) => g.id === 'hua_yue')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(2);
+  });
+
+  it('adds 星空金銀花月禮盒-only variation lines as 花月 + 星空金 + 星空銀', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_lines: JSON.stringify([
+              {
+                name: '嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+                quantity: 2,
+                unit_price: 1,
+                line_total: 2,
+              },
+            ]),
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS
+    );
+
+    expect(demand.giftBoxes.find((g) => g.id === 'hua_yue')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(2);
+  });
 });
 
 describe('isNestieeOrdersFilter', () => {

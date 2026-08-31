@@ -1,6 +1,6 @@
 import db from './db';
 import type { Order } from './orders';
-import { orderDueDate } from './orders';
+import { hydrateNestieeGiftBoxQtys, orderDueDate } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
 import { formatCustomerPartyBlock } from './customer-party';
@@ -35,6 +35,7 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   } catch {
     fields = {};
   }
+  hydrateNestieeGiftBoxQtys(fields);
 
   const files = withRelations
     ? (await db

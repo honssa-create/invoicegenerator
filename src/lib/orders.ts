@@ -1207,6 +1207,71 @@ export const NESTIEE_GIFT_BOX_TYPES: { id: string; label: string; qtyKey: string
   { id: 'hua_yue', label: '花月禮盒', qtyKey: 'nestiee_gift_qty_hua_yue' },
 ];
 
+/** Extra Woo SKU / English names that should count as a 所需禮盒 type. */
+const NESTIEE_GIFT_BOX_LABEL_ALIASES: Record<string, string[]> = {
+  rou_run_share_box: ['Sharing We Time Box', '柔潤分享'],
+};
+
+function normalizeGiftBoxLabel(text: string): string {
+  return nestieeNameForGiftMatch(text)
+    .toLowerCase()
+    .replace(/[\s·‧.\-–—_/]/g, '');
+}
+
+/** Longest-first needles so 粉紅心意-桂花味 wins over a shorter overlap. */
+const NESTIEE_GIFT_BOX_LABEL_NEEDLES: { qtyKey: string; needle: string }[] = (() => {
+  const out: { qtyKey: string; needle: string }[] = [];
+  for (const g of NESTIEE_GIFT_BOX_TYPES) {
+    for (const raw of [g.label, ...(NESTIEE_GIFT_BOX_LABEL_ALIASES[g.id] || [])]) {
+      const needle = normalizeGiftBoxLabel(raw);
+      if (needle) out.push({ qtyKey: g.qtyKey, needle });
+    }
+  }
+  return out.sort((a, b) => b.needle.length - a.needle.length);
+})();
+
+/**
+ * Older Nestiee SKUs (e.g. #10609-era) use the 所需禮盒 label as the Woo line name
+ * (`星空金`, `紅色銀`, `粉紅心意 - 桂花味`) instead of the configurable 星空禮盒 / 心意禮盒 products.
+ */
+function nameMatchesGiftBoxNeedle(normalizedName: string, needle: string): boolean {
+  if (normalizedName === needle) return true;
+  if (!normalizedName.startsWith(needle)) return false;
+  // Allow `星空金3盒` but not `花月禮盒兩盒` / longer configurable product titles.
+  return /^\d+盒?$/.test(normalizedName.slice(needle.length));
+}
+
+function parseNestieeGiftBoxByTypeLabel(
+  name: string,
+  haystack: string
+): { qtyKey: string; boxes: number } | null {
+  const n = normalizeGiftBoxLabel(name);
+  if (!n) return null;
+  for (const g of NESTIEE_GIFT_BOX_LABEL_NEEDLES) {
+    if (nameMatchesGiftBoxNeedle(n, g.needle)) {
+      return { qtyKey: g.qtyKey, boxes: parseNestieeNBoxQty(haystack) ?? 1 };
+    }
+  }
+  return null;
+}
+
+/** Combo SKU: 1 set → 1 花月禮盒 + 1 星空金 + 1 星空銀 (Mid-Autumn parent or variation title). */
+const NESTIEE_HUA_YUE_STAR_COMBO_BUNDLE_NEEDLES = [
+  '中秋 ‧ 花好月圓燕窩禮盒套裝',
+  '星空金銀花月禮盒',
+]
+  .map(normalizeGiftBoxLabel)
+  .filter(Boolean);
+
+function isNestieeHuaYueStarComboBundle(name: string, haystack: string): boolean {
+  if (!NESTIEE_HUA_YUE_STAR_COMBO_BUNDLE_NEEDLES.length) return false;
+  const normalizedName = normalizeGiftBoxLabel(name);
+  const normalizedHaystack = normalizeGiftBoxLabel(haystack);
+  return NESTIEE_HUA_YUE_STAR_COMBO_BUNDLE_NEEDLES.some(
+    (needle) => normalizedName.includes(needle) || normalizedHaystack.includes(needle)
+  );
+}
+
 /** Auto-map Woo line name / EPO options → 所需禮盒 qty keys. */
 const NESTIEE_STAR_BOX_NAME_CORE = '星空禮盒 · 即食燕窩';
 const NESTIEE_HUA_YUE_CN_QTY: Record<string, number> = {
@@ -1340,6 +1405,7 @@ export function computeNestieeGiftBoxQtysFromLines(
     nestiee_gift_qty_qiu_yan_fei_yue: 0,
     nestiee_gift_qty_sui_xin_7: 0,
     nestiee_gift_qty_sui_xin_14: 0,
+    nestiee_gift_qty_sui_xin_18: 0,
   };
   const pinkNames = new Set([
     normalizeNestieeMatchText(NESTIEE_PINK_BOX_NAME),
@@ -1359,6 +1425,14 @@ export function computeNestieeGiftBoxQtysFromLines(
     if (!qty) continue;
     const firstOpt = normalizeNestieeMatchText(line.options?.[0]?.value || '');
     const secondOpt = normalizeNestieeMatchText(line.options?.[1]?.value || '');
+
+    // 中秋 / 星空金銀花月禮盒 combo must run before 花月禮盒 / 星空 parsers — titles embed those words.
+    if (isNestieeHuaYueStarComboBundle(line.name, haystack)) {
+      qtys.nestiee_gift_qty_hua_yue += qty;
+      qtys.nestiee_gift_qty_star_gold += qty;
+      qtys.nestiee_gift_qty_star_silver += qty;
+      continue;
+    }
 
     const trialQty = parseNestieeTrialSetQty(line.name, haystack);
     if (trialQty != null) {
@@ -1404,6 +1478,10 @@ export function computeNestieeGiftBoxQtysFromLines(
         qtys.nestiee_gift_qty_sui_xin_14 += qty;
         continue;
       }
+      if (haystack.includes('18份裝')) {
+        qtys.nestiee_gift_qty_sui_xin_18 += qty;
+        continue;
+      }
       if (haystack.includes('14份裝')) {
         qtys.nestiee_gift_qty_sui_xin_7 += 2 * qty;
         continue;
@@ -1435,6 +1513,12 @@ export function computeNestieeGiftBoxQtysFromLines(
           qtys.nestiee_gift_qty_pink_red_date += qty * 2;
         }
       }
+      continue;
+    }
+
+    const byLabel = parseNestieeGiftBoxByTypeLabel(line.name, haystack);
+    if (byLabel) {
+      qtys[byLabel.qtyKey] = (qtys[byLabel.qtyKey] || 0) + byLabel.boxes * qty;
     }
   }
   return qtys;
@@ -1469,6 +1553,31 @@ export function applyNestieeGiftBoxAutoQtys(
     written.push(key);
   }
   return written;
+}
+
+/**
+ * Fill 所需禮盒 from stored Woo lines (skips keys the user marked manual).
+ * Used on dashboard rollup, order read, and the one-time backfill.
+ */
+export function hydrateNestieeGiftBoxQtys(
+  fields: Record<string, unknown>
+): Record<string, unknown> {
+  const lines = getNestieeLines(fields);
+  if (!lines.length) return fields;
+  applyNestieeGiftBoxAutoQtys(fields, lines);
+  return fields;
+}
+
+/** True when auto gift-box keys would change (used by the persist backfill). */
+export function nestieeGiftBoxQtyFieldsChanged(
+  fields: Record<string, unknown>
+): boolean {
+  const before: Record<string, string> = {};
+  for (const g of NESTIEE_GIFT_BOX_TYPES) {
+    before[g.qtyKey] = String(fields[g.qtyKey] ?? '');
+  }
+  hydrateNestieeGiftBoxQtys(fields);
+  return NESTIEE_GIFT_BOX_TYPES.some((g) => String(fields[g.qtyKey] ?? '') !== before[g.qtyKey]);
 }
 
 export interface NestieeLineOption {

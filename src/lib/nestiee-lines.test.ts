@@ -10,6 +10,8 @@ import {
   appendNestieeShippingLine,
   computeNestieeGiftBoxQtysFromLines,
   applyNestieeGiftBoxAutoQtys,
+  hydrateNestieeGiftBoxQtys,
+  nestieeGiftBoxQtyFieldsChanged,
   isNestieeFastestShipOption,
   isNestieeScheduledShipOption,
   parseNestieeReceiptDateFromDeliveryOptions,
@@ -543,6 +545,7 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
     nestiee_gift_qty_qiu_yan_fei_yue: 0,
     nestiee_gift_qty_sui_xin_7: 0,
     nestiee_gift_qty_sui_xin_14: 0,
+    nestiee_gift_qty_sui_xin_18: 0,
   };
 
   it('maps 星空禮盒 name suffixes to 星空金 / 星空銀', () => {
@@ -874,6 +877,76 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
       nestiee_gift_qty_sui_xin_14: 1,
     });
   });
+
+  it('maps older Woo SKU names that are the 所需禮盒 labels (e.g. #10609)', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        { name: '星空金', quantity: 2, unit_price: 344, line_total: 688 },
+        { name: '紅色銀', quantity: 3, unit_price: 10, line_total: 30 },
+        { name: '粉紅心意 - 桂花味', quantity: 1, unit_price: 128.5, line_total: 128.5 },
+        { name: '隨心燉 - 18份裝', quantity: 1, unit_price: 1, line_total: 1 },
+        { name: '🌕星空銀 2盒', quantity: 1, unit_price: 1, line_total: 1 },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_star_gold: 2,
+      nestiee_gift_qty_star_silver: 2,
+      nestiee_gift_qty_red_silver: 3,
+      nestiee_gift_qty_pink_osmanthus: 1,
+      nestiee_gift_qty_sui_xin_18: 1,
+    });
+  });
+
+  it('breaks 中秋 ‧ 花好月圓燕窩禮盒套裝 into 花月 + 星空金 + 星空銀 per qty', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: ' 中秋 ‧ 花好月圓燕窩禮盒套裝 - 一套-‧-嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+        },
+        {
+          name: '中秋 · 花好月圓燕窩禮盒套裝',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '款式', value: '嚐月之禮-花好月圓套裝-星空金銀花月禮盒', price: 0 }],
+        },
+        { name: '星空金', quantity: 1, unit_price: 1, line_total: 1 },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 2 + 1,
+      nestiee_gift_qty_star_gold: 2 + 1 + 1,
+      nestiee_gift_qty_star_silver: 2 + 1,
+    });
+  });
+
+  it('breaks 星空金銀花月禮盒 variation titles without the Mid-Autumn parent name', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+          quantity: 3,
+          unit_price: 1,
+          line_total: 3,
+        },
+        {
+          name: 'Woo line item',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '款式', value: '星空金銀花月禮盒', price: 0 }],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 4,
+      nestiee_gift_qty_star_gold: 4,
+      nestiee_gift_qty_star_silver: 4,
+    });
+  });
 });
 
 describe('applyNestieeGiftBoxAutoQtys', () => {
@@ -913,6 +986,30 @@ describe('applyNestieeGiftBoxAutoQtys', () => {
     expect(fields.nestiee_gift_qty_pink_red_date).toBe('0');
     expect(fields.nestiee_gift_qty_hua_yue).toBe('0');
     expect(fields.nestiee_gift_qty_trial_set).toBe('0');
+  });
+});
+
+describe('hydrateNestieeGiftBoxQtys', () => {
+  it('fills empty 所需禮盒 from stored nestiee_lines', () => {
+    const fields: Record<string, unknown> = {
+      nestiee_lines: JSON.stringify([
+        { name: '星空金', quantity: 2, unit_price: 344, line_total: 688 },
+        { name: '紅色銀', quantity: 1, unit_price: 10, line_total: 10 },
+      ]),
+    };
+    expect(nestieeGiftBoxQtyFieldsChanged(fields)).toBe(true);
+    expect(fields.nestiee_gift_qty_star_gold).toBe('2');
+    expect(fields.nestiee_gift_qty_red_silver).toBe('1');
+  });
+
+  it('keeps manual overrides', () => {
+    const fields: Record<string, unknown> = {
+      nestiee_lines: JSON.stringify([{ name: '星空金', quantity: 2, unit_price: 1, line_total: 2 }]),
+      nestiee_gift_qty_star_gold: '9',
+      nestiee_gift_qty_star_gold_manual: 'true',
+    };
+    hydrateNestieeGiftBoxQtys(fields);
+    expect(fields.nestiee_gift_qty_star_gold).toBe('9');
   });
 });
 
@@ -1005,6 +1102,7 @@ describe('appendNestieeShippingLine', () => {
       nestiee_gift_qty_qiu_yan_fei_yue: 0,
       nestiee_gift_qty_sui_xin_7: 0,
       nestiee_gift_qty_sui_xin_14: 0,
+      nestiee_gift_qty_sui_xin_18: 0,
     });
   });
 });

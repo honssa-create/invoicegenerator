@@ -1272,6 +1272,60 @@ function isNestieeHuaYueStarComboBundle(name: string, haystack: string): boolean
   );
 }
 
+/** Woo add-on: 1 qty → +1 星空金. Appears in line name or TM EPO / visible meta. */
+const NESTIEE_STAR_GOLD_ADDON_FULL =
+  '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1):星空禮盒桂花味';
+const NESTIEE_STAR_GOLD_ADDON_PROMPT = '讓這份驚喜更圓滿';
+const NESTIEE_STAR_GOLD_ADDON_LIMITED = '限時加購';
+const NESTIEE_STAR_GOLD_ADDON_CHOICE = '星空禮盒桂花味';
+
+function normalizeNestieeAddOnText(text: string): string {
+  return normalizeGiftBoxLabel(text).replace(/[?:：？()（）]/g, '');
+}
+
+const NESTIEE_STAR_GOLD_ADDON_FULL_NEEDLE = normalizeNestieeAddOnText(NESTIEE_STAR_GOLD_ADDON_FULL);
+const NESTIEE_STAR_GOLD_ADDON_PROMPT_NEEDLE = normalizeNestieeAddOnText(NESTIEE_STAR_GOLD_ADDON_PROMPT);
+const NESTIEE_STAR_GOLD_ADDON_LIMITED_NEEDLE = normalizeNestieeAddOnText(NESTIEE_STAR_GOLD_ADDON_LIMITED);
+const NESTIEE_STAR_GOLD_ADDON_TWO_PICK_NEEDLE = normalizeNestieeAddOnText('2選1');
+const NESTIEE_STAR_GOLD_ADDON_CHOICE_NEEDLE = normalizeNestieeAddOnText(NESTIEE_STAR_GOLD_ADDON_CHOICE);
+
+function textHasNestieeStarGoldAddOn(text: string): boolean {
+  const n = normalizeNestieeAddOnText(text);
+  if (!n || !NESTIEE_STAR_GOLD_ADDON_CHOICE_NEEDLE) return false;
+  if (NESTIEE_STAR_GOLD_ADDON_FULL_NEEDLE && n.includes(NESTIEE_STAR_GOLD_ADDON_FULL_NEEDLE)) {
+    return true;
+  }
+  if (!n.includes(NESTIEE_STAR_GOLD_ADDON_CHOICE_NEEDLE)) return false;
+  const hasPrompt = Boolean(
+    NESTIEE_STAR_GOLD_ADDON_PROMPT_NEEDLE && n.includes(NESTIEE_STAR_GOLD_ADDON_PROMPT_NEEDLE)
+  );
+  const hasLimitedPick = Boolean(
+    NESTIEE_STAR_GOLD_ADDON_LIMITED_NEEDLE &&
+      n.includes(NESTIEE_STAR_GOLD_ADDON_LIMITED_NEEDLE) &&
+      NESTIEE_STAR_GOLD_ADDON_TWO_PICK_NEEDLE &&
+      n.includes(NESTIEE_STAR_GOLD_ADDON_TWO_PICK_NEEDLE)
+  );
+  return hasPrompt || hasLimitedPick;
+}
+
+/** True when this Woo line is (or carries) the 限時加購 星空禮盒桂花味 add-on. */
+function isNestieeStarGoldOsmanthusAddOn(line: NestieeLineItem): boolean {
+  if (textHasNestieeStarGoldAddOn(line.name)) return true;
+  for (const opt of line.options || []) {
+    if (textHasNestieeStarGoldAddOn(opt.value)) return true;
+    if (textHasNestieeStarGoldAddOn(opt.label)) return true;
+    if (textHasNestieeStarGoldAddOn(`${opt.label || ''}:${opt.value || ''}`)) return true;
+    if (textHasNestieeStarGoldAddOn(`${opt.label || ''} ${opt.value || ''}`)) return true;
+  }
+  return false;
+}
+
+/** Line name itself is the add-on SKU — do not also parse it as another gift-box product. */
+function isStandaloneNestieeStarGoldAddOnLine(name: string): boolean {
+  if (!textHasNestieeStarGoldAddOn(name)) return false;
+  return !isNestieeHuaYueStarComboBundle(name, name);
+}
+
 /** Auto-map Woo line name / EPO options → 所需禮盒 qty keys. */
 const NESTIEE_STAR_BOX_NAME_CORE = '星空禮盒 · 即食燕窩';
 const NESTIEE_HUA_YUE_CN_QTY: Record<string, number> = {
@@ -1425,6 +1479,13 @@ export function computeNestieeGiftBoxQtysFromLines(
     if (!qty) continue;
     const firstOpt = normalizeNestieeMatchText(line.options?.[0]?.value || '');
     const secondOpt = normalizeNestieeMatchText(line.options?.[1]?.value || '');
+
+    // 限時加購 星空禮盒桂花味 stacks with other product rules on the same line (e.g. Mid-Autumn bundle).
+    const isStarGoldAddOn = isNestieeStarGoldOsmanthusAddOn(line);
+    if (isStarGoldAddOn) {
+      qtys.nestiee_gift_qty_star_gold += qty;
+      if (isStandaloneNestieeStarGoldAddOnLine(line.name)) continue;
+    }
 
     // 中秋 / 星空金銀花月禮盒 combo must run before 花月禮盒 / 星空 parsers — titles embed those words.
     if (isNestieeHuaYueStarComboBundle(line.name, haystack)) {

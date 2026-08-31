@@ -896,6 +896,32 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
       nestiee_gift_qty_sui_xin_18: 1,
     });
   });
+
+  it('breaks 中秋 ‧ 花好月圓燕窩禮盒套裝 into 花月 + 星空金 + 星空銀 per qty', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: ' 中秋 ‧ 花好月圓燕窩禮盒套裝 - 一套-‧-嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+        },
+        {
+          name: '中秋 · 花好月圓燕窩禮盒套裝',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '款式', value: '嚐月之禮-花好月圓套裝-星空金銀花月禮盒', price: 0 }],
+        },
+        { name: '星空金', quantity: 1, unit_price: 1, line_total: 1 },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 2 + 1,
+      nestiee_gift_qty_star_gold: 2 + 1 + 1,
+      nestiee_gift_qty_star_silver: 2 + 1,
+    });
+  });
 });
 
 describe('applyNestieeGiftBoxAutoQtys', () => {

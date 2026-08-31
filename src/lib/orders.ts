@@ -1255,6 +1255,20 @@ function parseNestieeGiftBoxByTypeLabel(
   return null;
 }
 
+/** Mid-Autumn combo SKU: 1 set → 1 花月禮盒 + 1 星空金 + 1 星空銀. */
+const NESTIEE_MID_AUTUMN_HUA_YUE_BUNDLE = '中秋 ‧ 花好月圓燕窩禮盒套裝';
+const NESTIEE_MID_AUTUMN_HUA_YUE_BUNDLE_NEEDLE = normalizeGiftBoxLabel(
+  NESTIEE_MID_AUTUMN_HUA_YUE_BUNDLE
+);
+
+function isNestieeMidAutumnHuaYueBundle(name: string, haystack: string): boolean {
+  if (!NESTIEE_MID_AUTUMN_HUA_YUE_BUNDLE_NEEDLE) return false;
+  return (
+    normalizeGiftBoxLabel(name).includes(NESTIEE_MID_AUTUMN_HUA_YUE_BUNDLE_NEEDLE) ||
+    normalizeGiftBoxLabel(haystack).includes(NESTIEE_MID_AUTUMN_HUA_YUE_BUNDLE_NEEDLE)
+  );
+}
+
 /** Auto-map Woo line name / EPO options → 所需禮盒 qty keys. */
 const NESTIEE_STAR_BOX_NAME_CORE = '星空禮盒 · 即食燕窩';
 const NESTIEE_HUA_YUE_CN_QTY: Record<string, number> = {
@@ -1408,6 +1422,14 @@ export function computeNestieeGiftBoxQtysFromLines(
     if (!qty) continue;
     const firstOpt = normalizeNestieeMatchText(line.options?.[0]?.value || '');
     const secondOpt = normalizeNestieeMatchText(line.options?.[1]?.value || '');
+
+    // 中秋套裝 must run before 花月禮盒 / 星空 parsers — the variation title embeds those words.
+    if (isNestieeMidAutumnHuaYueBundle(line.name, haystack)) {
+      qtys.nestiee_gift_qty_hua_yue += qty;
+      qtys.nestiee_gift_qty_star_gold += qty;
+      qtys.nestiee_gift_qty_star_silver += qty;
+      continue;
+    }
 
     const trialQty = parseNestieeTrialSetQty(line.name, haystack);
     if (trialQty != null) {

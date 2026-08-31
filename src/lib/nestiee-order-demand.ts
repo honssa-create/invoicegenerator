@@ -1,7 +1,13 @@
 /** Client-safe Nestiee production demand rollup for processing orders. */
 
 import { expandGiftBoxBom, finishedSku, GIFT_BOX_BOMS, type BomLine } from './kitchen-bom';
-import { isNestieeOrderType, localDateYmd, orderDueDate, orderTypeFromFields } from './orders';
+import {
+  hydrateNestieeGiftBoxQtys,
+  isNestieeOrderType,
+  localDateYmd,
+  orderDueDate,
+  orderTypeFromFields,
+} from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
@@ -187,7 +193,7 @@ export function summarizeNestieeProcessingDemand(
     }
     orderCount += 1;
 
-    const fields = order.fields || {};
+    const fields = hydrateNestieeGiftBoxQtys({ ...(order.fields || {}) });
     for (const g of activeTypes) {
       const boxQty = fieldQty(fields, g.qtyKey);
       if (boxQty <= 0) continue;

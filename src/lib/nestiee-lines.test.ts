@@ -922,6 +922,31 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
       nestiee_gift_qty_star_silver: 2 + 1,
     });
   });
+
+  it('breaks 星空金銀花月禮盒 variation titles without the Mid-Autumn parent name', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+          quantity: 3,
+          unit_price: 1,
+          line_total: 3,
+        },
+        {
+          name: 'Woo line item',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '款式', value: '星空金銀花月禮盒', price: 0 }],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 4,
+      nestiee_gift_qty_star_gold: 4,
+      nestiee_gift_qty_star_silver: 4,
+    });
+  });
 });
 
 describe('applyNestieeGiftBoxAutoQtys', () => {

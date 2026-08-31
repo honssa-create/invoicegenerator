@@ -4,7 +4,7 @@ import {
   nestieeGiftBoxQtyFieldsChanged,
 } from './orders';
 
-const MIGRATION_KEY = 'nestiee_gift_box_qty_from_lines_v2';
+const MIGRATION_KEY = 'nestiee_gift_box_qty_from_lines_v3';
 
 /**
  * Persist 所需禮盒 from stored `nestiee_lines` for every Nestiee order.

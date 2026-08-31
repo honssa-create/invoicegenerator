@@ -346,6 +346,33 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
     expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(2);
   });
+
+  it('adds 星空金銀花月禮盒-only variation lines as 花月 + 星空金 + 星空銀', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_lines: JSON.stringify([
+              {
+                name: '嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+                quantity: 2,
+                unit_price: 1,
+                line_total: 2,
+              },
+            ]),
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS
+    );
+
+    expect(demand.giftBoxes.find((g) => g.id === 'hua_yue')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(2);
+  });
 });
 
 describe('isNestieeOrdersFilter', () => {

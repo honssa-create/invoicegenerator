@@ -5,7 +5,7 @@ import { migrateNestieeGiftBoxQtysOnce } from '@/lib/nestiee-gift-box-server';
 
 const hasDb = Boolean(process.env.DATABASE_URL?.trim());
 const TEST_USER_ID = 99931;
-const MIGRATION_KEY = 'nestiee_gift_box_qty_from_lines_v2';
+const MIGRATION_KEY = 'nestiee_gift_box_qty_from_lines_v3';
 
 describe.skipIf(!hasDb)('migrateNestieeGiftBoxQtysOnce', () => {
   beforeEach(async () => {

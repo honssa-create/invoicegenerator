@@ -373,6 +373,40 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
     expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(2);
   });
+
+  it('adds 限時加購 星空禮盒桂花味 on top of Mid-Autumn bundle 星空金', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_lines: JSON.stringify([
+              {
+                name: '中秋 ‧ 花好月圓燕窩禮盒套裝 - 一套-‧-嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+                quantity: 1,
+                unit_price: 1,
+                line_total: 1,
+                options: [
+                  {
+                    label: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1)',
+                    value: '星空禮盒桂花味',
+                    price: 88,
+                  },
+                ],
+              },
+            ]),
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS
+    );
+
+    expect(demand.giftBoxes.find((g) => g.id === 'hua_yue')?.qty).toBe(1);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
+    expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(1);
+  });
 });
 
 describe('isNestieeOrdersFilter', () => {

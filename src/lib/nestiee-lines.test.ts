@@ -947,6 +947,162 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
       nestiee_gift_qty_star_silver: 4,
     });
   });
+
+  it('adds 星空金 for 限時加購 星空禮盒桂花味 (name or EPO / meta value)', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1):星空禮盒桂花味',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+        },
+        {
+          name: '心意即食燕窩禮盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [
+            {
+              label: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1)',
+              value: '星空禮盒桂花味',
+              price: 88,
+            },
+          ],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_star_gold: 3,
+    });
+  });
+
+  it('does not count the other 2選1 add-on choice as 星空金', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '心意即食燕窩禮盒',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+          options: [
+            {
+              label: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1)',
+              value: '星空禮盒冰糖味',
+              price: 88,
+            },
+          ],
+        },
+      ])
+    ).toEqual(emptyAutoQtys);
+  });
+
+  it('stacks Mid-Autumn bundle + 限時加購 星空禮盒桂花味 on the same line', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '中秋 ‧ 花好月圓燕窩禮盒套裝 - 一套-‧-嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+          options: [
+            {
+              label: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1)',
+              value: '星空禮盒桂花味',
+              price: 88,
+            },
+          ],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 2,
+      nestiee_gift_qty_star_gold: 4,
+      nestiee_gift_qty_star_silver: 2,
+    });
+  });
+
+  it('stacks Mid-Autumn bundle line with a separate 限時加購 line', () => {
+    expect(
+      computeNestieeGiftBoxQtysFromLines([
+        {
+          name: '中秋 ‧ 花好月圓燕窩禮盒套裝 - 一套-‧-嚐月之禮-花好月圓套裝-星空金銀花月禮盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+        },
+        {
+          name: '加購',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [
+            {
+              label: '讓這份驚喜更圓滿？（限時加購·2選1）',
+              value: '星空禮盒桂花味',
+              price: 88,
+            },
+          ],
+        },
+      ])
+    ).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 1,
+      nestiee_gift_qty_star_gold: 2,
+      nestiee_gift_qty_star_silver: 1,
+    });
+  });
+
+  it('reads the 限時加購 add-on from Woo meta_data via parseNestieeLinesFromWoo', () => {
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: '中秋 ‧ 花好月圓燕窩禮盒套裝',
+        quantity: 1,
+        price: 1,
+        total: '1',
+        meta_data: [
+          {
+            key: '_tmcartepo_data',
+            value: [
+              {
+                name: '<b>讓這份驚喜更圓滿？ (限時加購 ‧ 2選1)</b>',
+                value: '星空禮盒桂花味',
+                price: 88,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(computeNestieeGiftBoxQtysFromLines(lines)).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_hua_yue: 1,
+      nestiee_gift_qty_star_gold: 2,
+      nestiee_gift_qty_star_silver: 1,
+    });
+  });
+
+  it('reads the 限時加購 add-on from a visible Woo meta value field', () => {
+    const lines = parseNestieeLinesFromWoo([
+      {
+        name: 'Nestiee gift',
+        quantity: 2,
+        price: 1,
+        total: '2',
+        meta_data: [
+          {
+            key: 'addon',
+            display_key: '加購',
+            value: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1):星空禮盒桂花味',
+          },
+        ],
+      },
+    ]);
+    expect(computeNestieeGiftBoxQtysFromLines(lines)).toEqual({
+      ...emptyAutoQtys,
+      nestiee_gift_qty_star_gold: 2,
+    });
+  });
 });
 
 describe('applyNestieeGiftBoxAutoQtys', () => {
@@ -986,6 +1142,31 @@ describe('applyNestieeGiftBoxAutoQtys', () => {
     expect(fields.nestiee_gift_qty_pink_red_date).toBe('0');
     expect(fields.nestiee_gift_qty_hua_yue).toBe('0');
     expect(fields.nestiee_gift_qty_trial_set).toBe('0');
+  });
+
+  it('keeps a manual 星空金 override when bundle + add-on would auto-sum', () => {
+    const fields: Record<string, unknown> = {
+      nestiee_gift_qty_star_gold: '1',
+      nestiee_gift_qty_star_gold_manual: 'true',
+    };
+    applyNestieeGiftBoxAutoQtys(fields, [
+      {
+        name: '中秋 ‧ 花好月圓燕窩禮盒套裝',
+        quantity: 1,
+        unit_price: 1,
+        line_total: 1,
+        options: [
+          {
+            label: '讓這份驚喜更圓滿？ (限時加購 ‧ 2選1)',
+            value: '星空禮盒桂花味',
+            price: 88,
+          },
+        ],
+      },
+    ]);
+    expect(fields.nestiee_gift_qty_star_gold).toBe('1');
+    expect(fields.nestiee_gift_qty_hua_yue).toBe('1');
+    expect(fields.nestiee_gift_qty_star_silver).toBe('1');
   });
 });
 

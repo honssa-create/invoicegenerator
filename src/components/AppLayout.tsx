@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
+import { dateInputFromEventTarget, openNativeDatePicker } from '@/lib/open-date-picker';
 import { APP } from '@/lib/ui-labels';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -19,6 +20,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       document.body.style.overflow = '';
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const input = dateInputFromEventTarget(event.target);
+      if (input) openNativeDatePicker(input);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, []);
 
   // Middleware already gates routes; render shell + children immediately so
   // page data fetches run in parallel with /api/auth/me (not behind it).

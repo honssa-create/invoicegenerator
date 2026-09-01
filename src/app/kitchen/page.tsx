@@ -1106,7 +1106,7 @@ export default function KitchenPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => { void openGift(undefined, g.boxType); }}
-                        className="text-xs px-2 py-1 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+                        className="relative z-10 inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-xs px-3 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
                       >
                         {bi('Package', '包裝')}
                       </button>
@@ -1298,7 +1298,7 @@ export default function KitchenPage() {
         <button
           type="button"
           onClick={() => openGift()}
-          className="relative px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+          className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
         >
           包裝禮盒
           {giftNeededTotal > 0 && (
@@ -1310,7 +1310,7 @@ export default function KitchenPage() {
         <button
           type="button"
           onClick={() => openReturn()}
-          className="relative px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+          className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
         >
           包裝回禮
           {returnNeededCount > 0 && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
@@ -18,12 +18,21 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
   const pathname = usePathname();
   const { user, logout, canAccess } = useAuth();
   const [ordersMenuOpen, setOrdersMenuOpen] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
 
   const isMobile = variant === 'mobile';
 
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    if (isMobile && !open) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  }, [isMobile, open]);
+
   const asideClass = isMobile
-    ? `fixed inset-y-0 left-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-gray-200 bg-white shadow-xl transition-transform duration-200 ease-out lg:hidden ${
-        open ? 'translate-x-0' : '-translate-x-full pointer-events-none'
+    ? // Use `left` (not transform) so iPad Safari hit-testing follows the off-screen box.
+      `fixed top-0 bottom-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-gray-200 bg-white shadow-xl transition-[left] duration-200 ease-out lg:hidden ${
+        open ? 'left-0' : 'left-[calc(-1*min(18rem,88vw)-2px)] pointer-events-none'
       }`
     : 'hidden lg:flex relative z-40 w-64 min-h-screen flex-col border-r border-gray-200 bg-white';
 
@@ -36,7 +45,11 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
   const ordersActive = pathname === '/orders' || pathname.startsWith('/orders/');
 
   return (
-    <aside className={asideClass} aria-hidden={isMobile ? !open : undefined}>
+    <aside
+      ref={asideRef}
+      className={asideClass}
+      aria-hidden={isMobile ? !open : undefined}
+    >
       <div className="border-b border-gray-200 p-4 sm:p-6">
         <Link href="/dashboard" className="flex items-center gap-2" onClick={handleNav}>
           <span className="text-2xl">💰</span>

@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import DateSelectSheet from '@/components/DateSelectSheet';
-import { tapProps } from '@/lib/tap-action';
+import TapButton from '@/components/TapButton';
 import { BTN, FILTER, bi } from '@/lib/ui-labels';
 
 interface FilterBarProps {
@@ -56,13 +56,12 @@ export default function FilterBar({
           className={field}
         />
       </div>
-      <button
-        type="button"
+      <TapButton
         className="w-full sm:w-auto min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
-        {...tapProps(onClear)}
+        onTap={onClear}
       >
         {BTN.clearFilters}
-      </button>
+      </TapButton>
     </div>
   );
 }
@@ -82,13 +81,12 @@ function FilterDateField({
   return (
     <div className="flex flex-col min-w-0">
       <span className="text-[11px] font-medium text-gray-500 mb-1">{label}</span>
-      <button
-        type="button"
+      <TapButton
         className={`${className} text-left ${value ? 'text-gray-900' : 'text-gray-400'}`}
-        {...tapProps(() => setOpen(true))}
+        onTap={() => setOpen(true)}
       >
         {value || bi('Any date', '不限日期')}
-      </button>
+      </TapButton>
       {open && (
         <DateSelectSheet
           title={label}

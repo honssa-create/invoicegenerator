@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
@@ -18,22 +18,15 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
   const pathname = usePathname();
   const { user, logout, canAccess } = useAuth();
   const [ordersMenuOpen, setOrdersMenuOpen] = useState(false);
-  const asideRef = useRef<HTMLElement>(null);
 
   const isMobile = variant === 'mobile';
 
-  useEffect(() => {
-    const el = asideRef.current;
-    if (!el) return;
-    if (isMobile && !open) el.setAttribute('inert', '');
-    else el.removeAttribute('inert');
-  }, [isMobile, open]);
-
+  // iOS 15.8 still hit-tests off-screen `position:fixed` drawers. Unmount the
+  // box from the layer tree with `display:none` when closed.
   const asideClass = isMobile
-    ? // Use `left` (not transform) so iPad Safari hit-testing follows the off-screen box.
-      `fixed top-0 bottom-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-gray-200 bg-white shadow-xl transition-[left] duration-200 ease-out lg:hidden ${
-        open ? 'left-0' : 'left-[calc(-1*min(18rem,88vw)-2px)] pointer-events-none'
-      }`
+    ? open
+      ? 'fixed top-0 bottom-0 left-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-gray-200 bg-white shadow-xl lg:hidden'
+      : 'hidden'
     : 'hidden lg:flex relative z-40 w-64 min-h-screen flex-col border-r border-gray-200 bg-white';
 
   const handleNav = () => {
@@ -46,7 +39,6 @@ export default function Sidebar({ variant = 'desktop', open = false, onNavigate 
 
   return (
     <aside
-      ref={asideRef}
       className={asideClass}
       aria-hidden={isMobile ? !open : undefined}
     >

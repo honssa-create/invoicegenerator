@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createPortal } from 'react-dom';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
 import TapButton from '@/components/TapButton';
-import { tapProps } from '@/lib/tap-action';
 import {
   giftBoxMinStock,
   giftBoxTopUpQty,
@@ -1038,11 +1038,10 @@ export default function KitchenPage() {
 
       {/* Inventory — collapsed by default; fetches stock on first expand */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <button
-          type="button"
+        <TapButton
           aria-expanded={stockExpanded}
           className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors"
-          {...tapProps(toggleStockExpanded)}
+          onTap={toggleStockExpanded}
         >
           <div>
             <h2 className="font-semibold text-gray-900">{bi('Inventory', '庫存')}</h2>
@@ -1053,7 +1052,7 @@ export default function KitchenPage() {
           <span className="text-gray-400 text-lg shrink-0" aria-hidden>
             {stockExpanded ? '▾' : '▸'}
           </span>
-        </button>
+        </TapButton>
         {stockExpanded && (
           <div className="px-5 pb-5 border-t border-gray-100">
             {inventoryLoading ? (
@@ -1592,8 +1591,10 @@ export default function KitchenPage() {
         </div>
       </div>
 
-      {/* Modals */}
-      {modal && (
+      {/* Modals — portal to body so iOS 15.8 does not trap taps in page overflow */}
+      {modal &&
+        typeof document !== 'undefined' &&
+        createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
             {modal === 'gift' && (
@@ -1602,28 +1603,31 @@ export default function KitchenPage() {
                   {giftOrderId ? '分配禮盒' : '包裝禮盒'}
                 </h3>
                 <label className="block text-sm text-gray-600 mb-1">禮盒種類</label>
-                <select
-                  className={`${inputCls} w-full mb-3`}
-                  value={giftType}
-                  onChange={(e) => setGiftType(e.target.value)}
-                >
+                <div className="grid grid-cols-1 gap-2 mb-3">
                   {giftBoxTypes.map((g) => (
-                    <option key={g.id} value={g.id}>
+                    <TapButton
+                      key={g.id}
+                      onTap={() => setGiftType(g.id)}
+                      className={`min-h-[44px] w-full rounded-lg border px-3 text-left text-sm font-medium ${
+                        giftType === g.id
+                          ? 'border-brand-600 bg-brand-50 text-brand-800'
+                          : 'border-gray-200 text-gray-700'
+                      }`}
+                    >
                       {g.label}
-                    </option>
+                    </TapButton>
                   ))}
-                </select>
+                </div>
                 <label className="block text-sm text-gray-600 mb-1">
                   {giftOrderId ? '分配數量' : '包裝數量'}
                 </label>
                 <div className="flex items-center gap-2 mb-3">
-                  <button
-                    type="button"
-                    className="w-9 h-9 rounded-lg border"
-                    onClick={() => setGiftQty((q) => Math.max(1, q - 1))}
+                  <TapButton
+                    className="min-h-[44px] min-w-[44px] rounded-lg border"
+                    onTap={() => setGiftQty((q) => Math.max(1, q - 1))}
                   >
                     −
-                  </button>
+                  </TapButton>
                   <input
                     type="number"
                     min={1}
@@ -1631,28 +1635,26 @@ export default function KitchenPage() {
                     value={giftQty}
                     onChange={(e) => setGiftQty(Math.max(1, Number(e.target.value) || 1))}
                   />
-                  <button
-                    type="button"
-                    className="w-9 h-9 rounded-lg border"
-                    onClick={() => setGiftQty((q) => q + 1)}
+                  <TapButton
+                    className="min-h-[44px] min-w-[44px] rounded-lg border"
+                    onTap={() => setGiftQty((q) => q + 1)}
                   >
                     +
-                  </button>
+                  </TapButton>
                 </div>
                 <div className="flex items-center gap-2 mb-3">
                   {[5, 10, 15].map((n) => (
-                    <button
+                    <TapButton
                       key={n}
-                      type="button"
-                      onClick={() => setGiftQty(n)}
-                      className={`flex-1 py-1.5 rounded-lg border text-sm font-medium ${
+                      onTap={() => setGiftQty(n)}
+                      className={`flex-1 min-h-[44px] py-1.5 rounded-lg border text-sm font-medium ${
                         giftQty === n
                           ? 'border-brand-600 bg-brand-50 text-brand-800'
                           : 'border-gray-200 text-gray-700 hover:bg-gray-50'
                       }`}
                     >
                       {n}
-                    </button>
+                    </TapButton>
                   ))}
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
@@ -1673,18 +1675,17 @@ export default function KitchenPage() {
                     <label className="block text-sm text-gray-600 mb-1.5">燕餅類型 Bird&apos;s-nest type</label>
                     <div className="flex gap-2">
                       {BIRD_NEST_TYPES.map((t) => (
-                        <button
+                        <TapButton
                           key={t}
-                          type="button"
-                          onClick={() => setGiftBirdNestType(t)}
-                          className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                          onTap={() => setGiftBirdNestType(t)}
+                          className={`flex-1 min-h-[44px] px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
                             giftBirdNestType === t
                               ? 'border-brand-600 bg-brand-50 text-brand-800'
                               : 'border-gray-200 text-gray-700 hover:bg-gray-50'
                           }`}
                         >
                           {BIRD_NEST_TYPE_LABELS[t]}
-                        </button>
+                        </TapButton>
                       ))}
                     </div>
                     <p className="text-xs text-gray-500 mt-1.5">
@@ -1761,17 +1762,16 @@ export default function KitchenPage() {
                   </div>
                 )}
                 <div className="flex justify-end gap-2">
-                  <button type="button" className="px-4 py-2 rounded-lg border" onClick={() => setModal(null)}>
+                  <TapButton className="min-h-[44px] px-4 py-2 rounded-lg border" onTap={() => setModal(null)}>
                     {BTN.cancel}
-                  </button>
-                  <button
-                    type="button"
+                  </TapButton>
+                  <TapButton
                     disabled={!giftOk || busy}
-                    onClick={submitGift}
-                    className="px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
+                    onTap={submitGift}
+                    className="min-h-[44px] px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
                   >
                     {BTN.confirm}
-                  </button>
+                  </TapButton>
                 </div>
               </>
             )}
@@ -1853,17 +1853,16 @@ export default function KitchenPage() {
                   ))}
                 </div>
                 <div className="flex justify-end gap-2">
-                  <button type="button" className="px-4 py-2 rounded-lg border" onClick={() => setModal(null)}>
+                  <TapButton className="min-h-[44px] px-4 py-2 rounded-lg border" onTap={() => setModal(null)}>
                     {BTN.cancel}
-                  </button>
-                  <button
-                    type="button"
+                  </TapButton>
+                  <TapButton
                     disabled={!returnOk || busy}
-                    onClick={submitReturn}
-                    className="px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
+                    onTap={submitReturn}
+                    className="min-h-[44px] px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
                   >
                     {BTN.confirm}
-                  </button>
+                  </TapButton>
                 </div>
               </>
             )}
@@ -1890,22 +1889,22 @@ export default function KitchenPage() {
                   ))}
                 </div>
                 <div className="flex justify-end gap-2">
-                  <button type="button" className="px-4 py-2 rounded-lg border" onClick={() => setModal(null)}>
+                  <TapButton className="min-h-[44px] px-4 py-2 rounded-lg border" onTap={() => setModal(null)}>
                     {BTN.cancel}
-                  </button>
-                  <button
-                    type="button"
+                  </TapButton>
+                  <TapButton
                     disabled={busy}
-                    onClick={submitRestock}
-                    className="px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
+                    onTap={submitRestock}
+                    className="min-h-[44px] px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
                   >
                     {BTN.confirm}
-                  </button>
+                  </TapButton>
                 </div>
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {adjustStock && (

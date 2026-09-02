@@ -24,6 +24,10 @@ const config: Config = {
       },
     },
   },
+  // iPad Safari treats :hover as sticky — first tap applies hover, second tap clicks.
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
   plugins: [],
 };
 

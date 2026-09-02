@@ -11,13 +11,31 @@
     @apply antialiased text-gray-900 overflow-x-hidden;
   }
 
-  /* Prevent iOS Safari zoom-on-focus for form fields */
-  @media (max-width: 639px) {
+  /* Prevent iOS / iPad Safari zoom-on-focus (phones AND tablets). */
+  @media (pointer: coarse) {
     input,
     select,
     textarea {
       font-size: 16px;
     }
+  }
+
+  /*
+    iPad Safari: elements without cursor:pointer inside overflow scrollers often
+    swallow the first tap. touch-action:manipulation removes the 300ms delay.
+  */
+  button,
+  [type='button'],
+  [type='submit'],
+  [type='reset'],
+  a,
+  select,
+  input[type='date'],
+  input[type='month'],
+  summary,
+  [role='button'] {
+    cursor: pointer;
+    touch-action: manipulation;
   }
 }
 

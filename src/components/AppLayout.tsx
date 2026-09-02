@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
-import { dateInputFromEventTarget, openNativeDatePicker } from '@/lib/open-date-picker';
+import { tapProps } from '@/lib/tap-action';
 import { APP } from '@/lib/ui-labels';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -21,15 +21,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [menuOpen]);
 
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      const input = dateInputFromEventTarget(event.target);
-      if (input) openNativeDatePicker(input);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, []);
-
   // Middleware already gates routes; render shell + children immediately so
   // page data fetches run in parallel with /api/auth/me (not behind it).
   return (
@@ -42,7 +33,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           type="button"
           aria-label={APP.closeMenu}
           className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-          onClick={() => setMenuOpen(false)}
+          {...tapProps(() => setMenuOpen(false))}
         />
       )}
 
@@ -51,8 +42,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             aria-label={APP.openMenu}
-            onClick={() => setMenuOpen(true)}
             className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-700 hover:bg-gray-50"
+            {...tapProps(() => setMenuOpen(true))}
           >
             ☰
           </button>

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
+import TapButton from '@/components/TapButton';
+import { tapProps } from '@/lib/tap-action';
 import {
   giftBoxMinStock,
   giftBoxTopUpQty,
@@ -1038,9 +1040,9 @@ export default function KitchenPage() {
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
         <button
           type="button"
-          onClick={toggleStockExpanded}
           aria-expanded={stockExpanded}
           className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors"
+          {...tapProps(toggleStockExpanded)}
         >
           <div>
             <h2 className="font-semibold text-gray-900">{bi('Inventory', '庫存')}</h2>
@@ -1080,62 +1082,57 @@ export default function KitchenPage() {
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="font-semibold text-gray-900 mb-3">{bi('Gift boxes', '禮盒庫存')}</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b">
-                  <th className="py-2 pr-2">禮盒</th>
-                  <th className="py-2 pr-2 text-right">庫存</th>
-                  <th className="py-2 pr-2 text-right">需要</th>
-                  <th className="py-2 text-right">{bi('Action', '操作')}</th>
-                  {state.isAdmin && <th className="py-2 text-right">Admin</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {state.giftBoxes.map((g) => {
-                  const have = availableStockMaps.giftBoxes[g.boxType] ?? g.quantity;
-                  const needed = Math.max(0, g.needed - (tempReserved.gift[g.boxType] || 0));
-                  const low = giftBoxTopUpQty(g.quantity, giftMinStock) > 0;
-                  return (
-                  <tr key={g.boxType} className={`border-b border-gray-50 ${low ? 'bg-amber-50/60' : ''}`}>
-                    <td className="py-2 pr-2">{g.label}</td>
-                    <td className={`py-2 pr-2 text-right font-medium ${low ? 'text-red-600' : ''}`}>{have}</td>
-                    <td className={`py-2 pr-2 text-right ${shortfall(have, needed)}`}>{needed}</td>
-                    <td className="py-2 text-right">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => { void openGift(undefined, g.boxType); }}
-                        className="relative z-10 inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-xs px-3 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
-                      >
-                        {bi('Package', '包裝')}
-                      </button>
-                    </td>
-                    {state.isAdmin && (
-                      <td className="py-2 text-right">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() =>
-                            openAdjustStock({
-                              kind: 'gift_box',
-                              key: g.boxType,
-                              label: g.label,
-                              current: g.quantity,
-                            })
-                          }
-                          className="text-xs text-brand-600 hover:underline disabled:opacity-40"
-                        >
-                          設定
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ul className="divide-y divide-gray-100">
+            {state.giftBoxes.map((g) => {
+              const have = availableStockMaps.giftBoxes[g.boxType] ?? g.quantity;
+              const needed = Math.max(0, g.needed - (tempReserved.gift[g.boxType] || 0));
+              const low = giftBoxTopUpQty(g.quantity, giftMinStock) > 0;
+              return (
+                <li
+                  key={g.boxType}
+                  className={`flex items-center gap-2 py-2 ${low ? 'bg-amber-50/60 -mx-2 px-2 rounded-lg' : ''}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-900">{g.label}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      <span className={low ? 'text-red-600 font-medium' : ''}>
+                        {bi('Stock', '庫存')} {have}
+                      </span>
+                      <span className="mx-1">·</span>
+                      <span className={shortfall(have, needed)}>
+                        {bi('Need', '需要')} {needed}
+                      </span>
+                    </div>
+                  </div>
+                  <TapButton
+                    disabled={busy}
+                    onTap={() => {
+                      void openGift(undefined, g.boxType);
+                    }}
+                    className="shrink-0 inline-flex min-h-[44px] min-w-[72px] items-center justify-center text-sm px-3 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+                  >
+                    {bi('Package', '包裝')}
+                  </TapButton>
+                  {state.isAdmin && (
+                    <TapButton
+                      disabled={busy}
+                      onTap={() =>
+                        openAdjustStock({
+                          kind: 'gift_box',
+                          key: g.boxType,
+                          label: g.label,
+                          current: g.quantity,
+                        })
+                      }
+                      className="shrink-0 min-h-[44px] px-2 text-sm text-brand-600 disabled:opacity-40"
+                    >
+                      設定
+                    </TapButton>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-5 lg:col-span-1">
@@ -1295,9 +1292,10 @@ export default function KitchenPage() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3 mb-8">
-        <button
-          type="button"
-          onClick={() => openGift()}
+        <TapButton
+          onTap={() => {
+            void openGift();
+          }}
           className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
         >
           包裝禮盒
@@ -1306,10 +1304,11 @@ export default function KitchenPage() {
               {giftNeededTotal}
             </span>
           )}
-        </button>
-        <button
-          type="button"
-          onClick={() => openReturn()}
+        </TapButton>
+        <TapButton
+          onTap={() => {
+            void openReturn();
+          }}
           className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
         >
           包裝回禮
@@ -1318,14 +1317,15 @@ export default function KitchenPage() {
               {returnNeededCount}
             </span>
           )}
-        </button>
-        <button
-          type="button"
-          onClick={openRestock}
-          className="px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+        </TapButton>
+        <TapButton
+          onTap={() => {
+            void openRestock();
+          }}
+          className="min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
         >
           補充原料
-        </button>
+        </TapButton>
       </div>
 
       {/* Orders + History — collapsed by default; each lazy-loads on first expand */}

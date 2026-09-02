@@ -1,8 +1,9 @@
 'use client';
 
-import { useId, type ReactNode } from 'react';
-import { openNativeDatePicker } from '@/lib/open-date-picker';
-import { BTN, FILTER } from '@/lib/ui-labels';
+import { useState, type ReactNode } from 'react';
+import DateSelectSheet from '@/components/DateSelectSheet';
+import { tapProps } from '@/lib/tap-action';
+import { BTN, FILTER, bi } from '@/lib/ui-labels';
 
 interface FilterBarProps {
   dateStart: string;
@@ -57,8 +58,8 @@ export default function FilterBar({
       </div>
       <button
         type="button"
-        onClick={onClear}
         className="w-full sm:w-auto min-h-[44px] sm:min-h-0 px-3 py-2.5 sm:py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+        {...tapProps(onClear)}
       >
         {BTN.clearFilters}
       </button>
@@ -77,20 +78,28 @@ function FilterDateField({
   onChange: (v: string) => void;
   className: string;
 }) {
-  const id = useId();
+  const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col min-w-0">
-      <label htmlFor={id} className="text-[11px] font-medium text-gray-500 mb-1">
-        {label}
-      </label>
-      <input
-        id={id}
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onPointerDown={(e) => openNativeDatePicker(e.currentTarget)}
-        className={className}
-      />
+      <span className="text-[11px] font-medium text-gray-500 mb-1">{label}</span>
+      <button
+        type="button"
+        className={`${className} text-left ${value ? 'text-gray-900' : 'text-gray-400'}`}
+        {...tapProps(() => setOpen(true))}
+      >
+        {value || bi('Any date', '不限日期')}
+      </button>
+      {open && (
+        <DateSelectSheet
+          title={label}
+          value={value}
+          onApply={(ymd) => {
+            onChange(ymd);
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 }

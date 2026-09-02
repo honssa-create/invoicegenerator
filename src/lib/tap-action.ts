@@ -1,3 +1,5 @@
+import type { MouseEvent, TouchEvent } from 'react';
+
 /** Movement (px) above this is treated as a scroll, not a tap. */
 export const TAP_SLOP_PX = 12;
 const GHOST_CLICK_MS = 800;
@@ -17,13 +19,13 @@ export function tapProps(onTap: () => void, disabled = false) {
   let startX = 0;
   let startY = 0;
   return {
-    onTouchStart: (event: { changedTouches: TouchList }) => {
+    onTouchStart: (event: TouchEvent<HTMLElement>) => {
       const t = event.changedTouches[0];
       if (!t) return;
       startX = t.clientX;
       startY = t.clientY;
     },
-    onTouchEnd: (event: { changedTouches: TouchList; preventDefault: () => void }) => {
+    onTouchEnd: (event: TouchEvent<HTMLElement>) => {
       if (disabled) return;
       const t = event.changedTouches[0];
       if (!t) return;
@@ -32,7 +34,7 @@ export function tapProps(onTap: () => void, disabled = false) {
       event.preventDefault();
       onTap();
     },
-    onClick: () => {
+    onClick: (_event?: MouseEvent<HTMLElement>) => {
       if (disabled) return;
       if (Date.now() - lastTouchTapAt < GHOST_CLICK_MS) return;
       onTap();

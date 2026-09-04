@@ -13,6 +13,7 @@ import {
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
+  summarizeNestieeUsedShippingBoxes,
 } from './nestiee-order-demand';
 
 const giftBoxTypes = NESTIEE_GIFT_BOX_TYPES.map((g, i) => ({
@@ -501,6 +502,87 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(
       demand.shippingBoxes.reduce((sum, box) => sum + box.qty, 0),
     ).toBe(2);
+  });
+});
+
+describe('summarizeNestieeUsedShippingBoxes', () => {
+  const giftBoxTypes = [
+    { id: 'star_gold', label: '星空', qtyKey: 'nestiee_gift_qty_star_gold', active: true },
+    { id: 'hua_yue', label: '花月', qtyKey: 'nestiee_gift_qty_hua_yue', active: true },
+  ];
+
+  it('only counts shipped/completed Nestiee orders in the date range', () => {
+    const summary = summarizeNestieeUsedShippingBoxes(
+      [
+        {
+          status: 'shipped',
+          created_at: '2026-09-01',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_hua_yue: 3,
+          },
+        },
+        {
+          status: 'processing',
+          created_at: '2026-09-02',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_hua_yue: 10,
+          },
+        },
+        {
+          status: 'shipped',
+          created_at: '2026-09-02',
+          fields: {
+            order_type: 'honour訂製',
+            nestiee_gift_qty_hua_yue: 5,
+          },
+        },
+        {
+          status: 'completed',
+          created_at: '2026-08-01',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_hua_yue: 1,
+          },
+        },
+      ],
+      giftBoxTypes,
+      { dateStart: '2026-09-01', dateEnd: '2026-09-30', dateFilterType: 'order_date' },
+    );
+
+    expect(summary.orderCount).toBe(1);
+    expect(summary.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(1);
+  });
+
+  it('maps gift boxes to outer boxes per shipped order', () => {
+    const summary = summarizeNestieeUsedShippingBoxes(
+      [
+        {
+          status: 'shipped',
+          created_at: '2026-09-05',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_star_gold: 2,
+            nestiee_gift_qty_hua_yue: 1,
+          },
+        },
+        {
+          status: 'completed',
+          created_at: '2026-09-06',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_star_gold: 5,
+          },
+        },
+      ],
+      giftBoxTypes,
+      { dateStart: '2026-09-01', dateEnd: '2026-09-30' },
+    );
+
+    expect(summary.orderCount).toBe(2);
+    expect(summary.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(1);
+    expect(summary.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(2);
   });
 });
 

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
+import KitchenUsedShippingBoxes from '@/components/KitchenUsedShippingBoxes';
 import TapButton from '@/components/TapButton';
 import { tapProps } from '@/lib/tap-action';
 import {
@@ -1039,6 +1040,8 @@ export default function KitchenPage() {
           onBusy={setBusy}
         />
       )}
+
+      <KitchenUsedShippingBoxes />
 
       {/* Inventory — collapsed by default; fetches stock on first expand */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">

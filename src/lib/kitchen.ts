@@ -186,6 +186,7 @@ export interface KitchenOpenOrder {
   id: number;
   referenceNumber: string;
   poNumber: string;
+  status: string;
   type: 'nestiee' | 'return_gift';
   typeLabel: string;
   needs: KitchenNeedLine[];

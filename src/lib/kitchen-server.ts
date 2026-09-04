@@ -44,6 +44,7 @@ import {
 } from './orders';
 import {
   NESTIEE_SHIPPING_BOX_SLOTS,
+  NESTIEE_PROCESSING_STATUS,
   giftCountForOrderShippingBoxes,
   mapShippingBoxesForGiftCount,
   shippingBoxDisplayLabel,
@@ -276,6 +277,17 @@ interface OrderRow {
   status?: string | null;
 }
 
+function isNestieeProcessingStatus(status: string | null | undefined): boolean {
+  return String(status || '').trim() === NESTIEE_PROCESSING_STATUS;
+}
+
+/** Nestiee gift-box / shipping demand rolls up processing orders only (matches orders dashboard). */
+function nestieeOrderCountsForKitchenDemand(order: KitchenOpenOrder): boolean {
+  return order.type !== 'nestiee' || isNestieeProcessingStatus(order.status);
+}
+
+export { isNestieeProcessingStatus, nestieeOrderCountsForKitchenDemand };
+
 /** Merge denormalized orders.order_type into parsed fields_json for kitchen reads. */
 export function orderFieldsFromRow(row: Pick<OrderRow, 'fields_json' | 'order_type'>): Record<string, unknown> {
   const fields = parseFields(row.fields_json);
@@ -381,11 +393,13 @@ async function loadOpenOrders(
       type = 'nestiee';
       typeLabel = 'Nestiee';
       needs = nestieeNeeds(row, fields, fulfillments, giftTypes);
-      const hydrated = hydrateNestieeGiftBoxQtys({ ...fields });
-      const giftTotal = totalGiftBoxesInOrder(hydrated, activeGiftTypes);
-      const shipping = mapShippingBoxesForGiftCount(giftCountForOrderShippingBoxes(giftTotal));
-      for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
-        shippingDemand[id] += shipping[id];
+      if (isNestieeProcessingStatus(row.status)) {
+        const hydrated = hydrateNestieeGiftBoxQtys({ ...fields });
+        const giftTotal = totalGiftBoxesInOrder(hydrated, activeGiftTypes);
+        const shipping = mapShippingBoxesForGiftCount(giftCountForOrderShippingBoxes(giftTotal));
+        for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
+          shippingDemand[id] += shipping[id];
+        }
       }
     } else if (ot === WEDDING_GIFT_ORDER_TYPE) {
       type = 'return_gift';
@@ -402,6 +416,7 @@ async function loadOpenOrders(
       id: row.id,
       referenceNumber: row.reference_number,
       poNumber: row.po_number?.trim() || '',
+      status: String(row.status || '').trim(),
       type,
       typeLabel,
       needs,
@@ -427,6 +442,7 @@ function computeDemand(
   const raw: Record<string, number> = {};
 
   for (const o of openOrders) {
+    if (!nestieeOrderCountsForKitchenDemand(o)) continue;
     for (const n of o.needs) {
       if (n.remaining <= 0) continue;
       if (n.needKey.startsWith('gift:')) {

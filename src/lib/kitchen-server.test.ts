@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { hydrateNestieeGiftBoxQtys, NESTIEE_ORDER_TYPE } from './orders';
-import { orderFieldsFromRow } from './kitchen-server';
+import { NESTIEE_PROCESSING_STATUS } from './nestiee-order-demand';
+import {
+  nestieeOrderCountsForKitchenDemand,
+  orderFieldsFromRow,
+} from './kitchen-server';
+import type { KitchenOpenOrder } from './kitchen';
+
+function openOrder(partial: Partial<KitchenOpenOrder> & Pick<KitchenOpenOrder, 'type' | 'status'>): KitchenOpenOrder {
+  return {
+    id: 1,
+    referenceNumber: 'ORD-0000001',
+    poNumber: '',
+    typeLabel: 'Nestiee',
+    needs: [],
+    fullyFulfilled: false,
+    ...partial,
+  };
+}
 
 describe('orderFieldsFromRow', () => {
   it('uses denormalized order_type when fields_json is missing order_type', () => {
@@ -36,5 +53,30 @@ describe('nestiee gift-box demand hydration', () => {
       ],
     });
     expect(fields.nestiee_gift_qty_qiu_yan_fei_yue).toBe('2');
+  });
+});
+
+describe('nestieeOrderCountsForKitchenDemand', () => {
+  it('includes processing Nestiee orders in gift-box demand rollup', () => {
+    expect(
+      nestieeOrderCountsForKitchenDemand(
+        openOrder({ type: 'nestiee', status: NESTIEE_PROCESSING_STATUS }),
+      ),
+    ).toBe(true);
+  });
+
+  it('excludes non-processing Nestiee orders from gift-box demand rollup', () => {
+    expect(nestieeOrderCountsForKitchenDemand(openOrder({ type: 'nestiee', status: 'on-hold' }))).toBe(
+      false,
+    );
+    expect(nestieeOrderCountsForKitchenDemand(openOrder({ type: 'nestiee', status: 'shipped' }))).toBe(
+      false,
+    );
+  });
+
+  it('still includes 回禮 orders regardless of status', () => {
+    expect(nestieeOrderCountsForKitchenDemand(openOrder({ type: 'return_gift', status: '安排中' }))).toBe(
+      true,
+    );
   });
 });

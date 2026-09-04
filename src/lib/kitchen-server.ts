@@ -37,8 +37,10 @@ import { ensureCatalogStockRows, loadKitchenCatalog } from './kitchen-catalog-se
 import {
   NESTIEE_ORDER_TYPE,
   WEDDING_GIFT_ORDER_TYPE,
+  hydrateNestieeGiftBoxQtys,
   isOrderShipped,
   mapWeddingCapacityToPrep,
+  orderTypeFromFields,
 } from './orders';
 import { kitchenShortagesFromNeeds, type KitchenShortage } from './kitchen-ship-allocate';
 import {
@@ -82,10 +84,6 @@ function parseFields(raw: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
-}
-
-function orderTypeOf(fields: Record<string, unknown>): string {
-  return typeof fields.order_type === 'string' ? fields.order_type : '';
 }
 
 /** Process-local: avoid re-running seed INSERT chatter on every kitchen request. */
@@ -246,8 +244,19 @@ interface OrderRow {
   reference_number: string;
   po_number: string | null;
   name: string | null;
+  order_type: string | null;
   fields_json: string | null;
   status?: string | null;
+}
+
+/** Merge denormalized orders.order_type into parsed fields_json for kitchen reads. */
+export function orderFieldsFromRow(row: Pick<OrderRow, 'fields_json' | 'order_type'>): Record<string, unknown> {
+  const fields = parseFields(row.fields_json);
+  const columnType = String(row.order_type || '').trim();
+  if (columnType && !orderTypeFromFields(fields)) {
+    fields.order_type = columnType;
+  }
+  return fields;
 }
 
 function nestieeNeeds(
@@ -256,10 +265,11 @@ function nestieeNeeds(
   fulfillments: Map<string, number>,
   giftTypes: CatalogGiftBoxType[]
 ): KitchenNeedLine[] {
+  const hydrated = hydrateNestieeGiftBoxQtys({ ...fields });
   const needs: KitchenNeedLine[] = [];
   for (const g of giftTypes) {
     if (!g.active) continue;
-    const required = fieldNum(fields, g.qtyKey);
+    const required = fieldNum(hydrated, g.qtyKey);
     if (required <= 0) continue;
     const needKey = giftNeedKey(g.id);
     const fulfilled = Math.min(required, fulfilledOf(fulfillments, order.id, needKey));
@@ -312,24 +322,27 @@ async function loadOpenOrders(
 ): Promise<KitchenOpenOrder[]> {
   const rows = (await db
     .prepare(
-      `SELECT id, reference_number, po_number, name, status, fields_json
+      `SELECT id, reference_number, po_number, name, status, order_type, fields_json
        FROM orders
        WHERE user_id = ?
-         AND order_type IN (?, ?)
+         AND (
+           order_type IN (?, ?)
+           OR COALESCE(fields_json::jsonb->>'order_type', '') IN (?, ?)
+         )
          AND COALESCE(TRIM(status), '') <> '已寄出 SENT'
          AND (status IS NULL OR status !~* '\\ySENT\\y')
        ORDER BY id DESC`
     )
-    .all(userId, NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE)) as OrderRow[];
+    .all(userId, NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE, NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE)) as OrderRow[];
 
   const giftTypes = catalog.giftBoxTypes;
   const out: KitchenOpenOrder[] = [];
   for (const row of rows) {
-    const fields = parseFields(row.fields_json);
+    const fields = orderFieldsFromRow(row);
     // Hide shipped orders from the kitchen list.
     if (isShippedKitchenStatus(row.status, fields)) continue;
 
-    const ot = orderTypeOf(fields);
+    const ot = orderTypeFromFields(fields) || '';
     let type: 'nestiee' | 'return_gift' | null = null;
     let typeLabel = '';
     let needs: KitchenNeedLine[] = [];
@@ -815,12 +828,12 @@ export async function allocateGiftBox(
   if (!orderId) return { error: 'orderId required' };
 
   const order = (await db
-    .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .prepare('SELECT id, po_number, order_type, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, ownerId)) as OrderRow | undefined;
   if (!order) return { error: 'Order not found' };
 
-  const fields = parseFields(order.fields_json);
-  if (orderTypeOf(fields) !== NESTIEE_ORDER_TYPE) {
+  const fields = orderFieldsFromRow(order);
+  if (orderTypeFromFields(fields) !== NESTIEE_ORDER_TYPE) {
     return { error: 'Order is not a Nestiee order' };
   }
 
@@ -875,12 +888,12 @@ export async function makeReturnGift(
   await ensureSeed(ownerId, catalog);
   const orderId = Number(input.orderId);
   const row = (await db
-    .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .prepare('SELECT id, po_number, order_type, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, ownerId)) as OrderRow | undefined;
   if (!row) return { error: 'Order not found' };
 
-  const fields = parseFields(row.fields_json);
-  if (orderTypeOf(fields) !== WEDDING_GIFT_ORDER_TYPE) {
+  const fields = orderFieldsFromRow(row);
+  if (orderTypeFromFields(fields) !== WEDDING_GIFT_ORDER_TYPE) {
     return { error: 'Order is not a 回禮 order' };
   }
 
@@ -962,12 +975,12 @@ export async function tryAllocateRemainingForOrder(
   await ensureSeed(ownerId, catalog);
 
   const order = (await db
-    .prepare('SELECT id, po_number, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .prepare('SELECT id, po_number, order_type, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, ownerId)) as OrderRow | undefined;
   if (!order) return { ok: true, allocated: false };
 
-  const fields = parseFields(order.fields_json);
-  const ot = orderTypeOf(fields);
+  const fields = orderFieldsFromRow(order);
+  const ot = orderTypeFromFields(fields) || '';
   const fulfillments = await loadFulfillments(ownerId);
 
   let kind: 'nestiee' | 'return_gift' | null = null;

@@ -850,6 +850,25 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
           options: [{ label: '數量', value: '1盒', price: 0 }],
         },
         {
+          name: '秋燕飛躍 3盒',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+        },
+        {
+          name: '金燕秋曜 2盒',
+          quantity: 2,
+          unit_price: 1,
+          line_total: 2,
+        },
+        {
+          name: '金燕秋曜',
+          quantity: 1,
+          unit_price: 1,
+          line_total: 1,
+          options: [{ label: '數量', value: '4盒', price: 0 }],
+        },
+        {
           name: '隨心燉',
           quantity: 1,
           unit_price: 1,
@@ -872,7 +891,7 @@ describe('computeNestieeGiftBoxQtysFromLines', () => {
       ])
     ).toEqual({
       ...emptyAutoQtys,
-      nestiee_gift_qty_qiu_yan_fei_yue: 2,
+      nestiee_gift_qty_qiu_yan_fei_yue: 2 + 3 + 4 + 4,
       nestiee_gift_qty_sui_xin_7: 1 + 2 + 1,
       nestiee_gift_qty_sui_xin_14: 1,
     });

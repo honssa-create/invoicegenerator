@@ -42,6 +42,14 @@ import {
   mapWeddingCapacityToPrep,
   orderTypeFromFields,
 } from './orders';
+import {
+  NESTIEE_SHIPPING_BOX_SLOTS,
+  giftCountForOrderShippingBoxes,
+  mapShippingBoxesForGiftCount,
+  shippingBoxDisplayLabel,
+  totalGiftBoxesInOrder,
+  type NestieeShippingBoxId,
+} from './nestiee-order-demand';
 import { kitchenShortagesFromNeeds, type KitchenShortage } from './kitchen-ship-allocate';
 import {
   aggregateRawNeedsFromPrepOrders,
@@ -181,13 +189,21 @@ async function ensureRawRow(userId: number, name: string, unit = 'g') {
     .run(userId, name, unit);
 }
 
-async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<StockMaps> {
+async function ensureShippingBoxRow(userId: number, boxId: string) {
+  await db
+    .prepare('INSERT OR IGNORE INTO kitchen_shipping_boxes (user_id, box_id, quantity) VALUES (?, ?, 0)')
+    .run(userId, boxId);
+}
+
+type KitchenStockMaps = StockMaps & { shippingBoxes: Record<string, number> };
+
+async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<KitchenStockMaps> {
   const skus = finishedSkusFromCatalog(catalog);
   const skuSet = new Set(skus);
   const rawDefs = catalog.rawMaterials.filter((m) => !isUntrackedStewIngredient(m.name));
   const giftTypes = catalog.giftBoxTypes;
 
-  const [finishedRows, rawRows, giftRows] = await Promise.all([
+  const [finishedRows, rawRows, giftRows, shippingRows] = await Promise.all([
     db
       .prepare('SELECT sku, quantity FROM kitchen_finished WHERE user_id = ?')
       .all(userId) as Promise<{ sku: string; quantity: number }[]>,
@@ -197,6 +213,9 @@ async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<S
     db
       .prepare('SELECT box_type, quantity FROM kitchen_gift_boxes WHERE user_id = ?')
       .all(userId) as Promise<{ box_type: string; quantity: number }[]>,
+    db
+      .prepare('SELECT box_id, quantity FROM kitchen_shipping_boxes WHERE user_id = ?')
+      .all(userId) as Promise<{ box_id: string; quantity: number }[]>,
   ]);
 
   const finished: Record<string, number> = {};
@@ -221,7 +240,15 @@ async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<S
     }
   }
 
-  return { finished, raw, giftBoxes };
+  const shippingBoxes: Record<string, number> = {};
+  for (const slot of NESTIEE_SHIPPING_BOX_SLOTS) shippingBoxes[slot.id] = 0;
+  for (const r of shippingRows) {
+    if (shippingBoxes[r.box_id] !== undefined) {
+      shippingBoxes[r.box_id] = Number(r.quantity) || 0;
+    }
+  }
+
+  return { finished, raw, giftBoxes, shippingBoxes };
 }
 
 async function loadFulfillments(userId: number): Promise<Map<string, number>> {
@@ -319,7 +346,7 @@ async function loadOpenOrders(
   userId: number,
   fulfillments: Map<string, number>,
   catalog: KitchenCatalog
-): Promise<KitchenOpenOrder[]> {
+): Promise<{ orders: KitchenOpenOrder[]; shippingDemand: Record<string, number> }> {
   const rows = (await db
     .prepare(
       `SELECT id, reference_number, po_number, name, status, order_type, fields_json
@@ -336,6 +363,9 @@ async function loadOpenOrders(
     .all(userId, NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE, NESTIEE_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE)) as OrderRow[];
 
   const giftTypes = catalog.giftBoxTypes;
+  const activeGiftTypes = giftTypes.filter((g) => g.active);
+  const shippingDemand: Record<string, number> = {};
+  for (const slot of NESTIEE_SHIPPING_BOX_SLOTS) shippingDemand[slot.id] = 0;
   const out: KitchenOpenOrder[] = [];
   for (const row of rows) {
     const fields = orderFieldsFromRow(row);
@@ -351,6 +381,12 @@ async function loadOpenOrders(
       type = 'nestiee';
       typeLabel = 'Nestiee';
       needs = nestieeNeeds(row, fields, fulfillments, giftTypes);
+      const hydrated = hydrateNestieeGiftBoxQtys({ ...fields });
+      const giftTotal = totalGiftBoxesInOrder(hydrated, activeGiftTypes);
+      const shipping = mapShippingBoxesForGiftCount(giftCountForOrderShippingBoxes(giftTotal));
+      for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
+        shippingDemand[id] += shipping[id];
+      }
     } else if (ot === WEDDING_GIFT_ORDER_TYPE) {
       type = 'return_gift';
       typeLabel = '回禮';
@@ -378,12 +414,13 @@ async function loadOpenOrders(
     if (a.fullyFulfilled !== b.fullyFulfilled) return a.fullyFulfilled ? 1 : -1;
     return b.id - a.id;
   });
-  return out;
+  return { orders: out, shippingDemand };
 }
 
 function computeDemand(
   openOrders: KitchenOpenOrder[],
-  giftBoxBoms: Record<string, BomLine[]>
+  giftBoxBoms: Record<string, BomLine[]>,
+  shippingDemand: Record<string, number> = {}
 ): KitchenState['demand'] {
   const giftBoxes: Record<string, number> = {};
   const finished: Record<string, number> = {};
@@ -407,7 +444,11 @@ function computeDemand(
       }
     }
   }
-  return { giftBoxes, finished, raw };
+  const shippingBoxes: Record<string, number> = {};
+  for (const slot of NESTIEE_SHIPPING_BOX_SLOTS) {
+    shippingBoxes[slot.id] = shippingDemand[slot.id] || 0;
+  }
+  return { giftBoxes, finished, raw, shippingBoxes };
 }
 
 async function loadUnfinishedPrepRawDemand(
@@ -505,13 +546,13 @@ export interface GetStateOptions {
   includeOrders?: boolean;
 }
 
-const EMPTY_STOCK: StockMaps = { finished: {}, raw: {}, giftBoxes: {} };
+const EMPTY_STOCK: KitchenStockMaps = { finished: {}, raw: {}, giftBoxes: {}, shippingBoxes: {} };
 
 function buildInventoryRows(
   catalog: KitchenCatalog,
-  stock: StockMaps,
+  stock: KitchenStockMaps,
   demand: KitchenState['demand']
-): Pick<KitchenState, 'giftBoxes' | 'finished' | 'raw'> {
+): Pick<KitchenState, 'giftBoxes' | 'finished' | 'raw' | 'shippingBoxes'> {
   const giftBoxes = activeGiftBoxTypes(catalog).map((g) => ({
     boxType: g.id,
     label: g.label,
@@ -536,10 +577,20 @@ function buildInventoryRows(
       needed: roundRawQty(demand.raw[m.name] || 0, m.unit),
     }));
 
-  return { giftBoxes, finished, raw };
+  const shippingBoxes = NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
+    boxId: slot.id,
+    label: shippingBoxDisplayLabel(slot),
+    quantity: stock.shippingBoxes[slot.id] || 0,
+    needed: demand.shippingBoxes[slot.id] || 0,
+  }));
+
+  return { giftBoxes, finished, raw, shippingBoxes };
 }
 
-export type KitchenInventorySlice = Pick<KitchenState, 'giftBoxes' | 'finished' | 'raw' | 'demand'>;
+export type KitchenInventorySlice = Pick<
+  KitchenState,
+  'giftBoxes' | 'finished' | 'raw' | 'shippingBoxes' | 'demand'
+>;
 
 /** Load on-hand stock quantities merged with current open-order demand. */
 export async function getInventorySlice(userId: number): Promise<KitchenInventorySlice> {
@@ -551,8 +602,8 @@ export async function getInventorySlice(userId: number): Promise<KitchenInventor
     loadFulfillments(userId),
     loadUnfinishedPrepRawDemand(userId, formulas),
   ]);
-  const openOrders = await loadOpenOrders(userId, fulfillments, catalog);
-  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
+  const { orders: openOrders, shippingDemand } = await loadOpenOrders(userId, fulfillments, catalog);
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms, shippingDemand);
   demand.raw = unfinishedRaw;
 
   return {
@@ -572,8 +623,8 @@ export async function getOpenOrdersSlice(userId: number): Promise<KitchenOrdersS
     loadFulfillments(userId),
     loadUnfinishedPrepRawDemand(userId, formulas),
   ]);
-  const openOrders = await loadOpenOrders(userId, fulfillments, catalog);
-  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
+  const { orders: openOrders, shippingDemand } = await loadOpenOrders(userId, fulfillments, catalog);
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms, shippingDemand);
   demand.raw = unfinishedRaw;
 
   return { openOrders, demand };
@@ -592,7 +643,12 @@ export async function getState(userId: number, opts?: GetStateOptions): Promise<
     : Promise.resolve(new Map<string, number>());
   const openOrdersPromise = includeOrders
     ? fulfillmentsPromise.then((fulfillments) => loadOpenOrders(userId, fulfillments, catalog))
-    : Promise.resolve([] as KitchenOpenOrder[]);
+    : Promise.resolve({
+        orders: [] as KitchenOpenOrder[],
+        shippingDemand: Object.fromEntries(
+          NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => [slot.id, 0])
+        ) as Record<string, number>,
+      });
   const independentPromise = Promise.all([
     includeInventory ? loadStockMaps(userId, catalog) : Promise.resolve(EMPTY_STOCK),
     includeMovements ? loadKitchenMovements(userId) : Promise.resolve([] as KitchenMovement[]),
@@ -600,20 +656,22 @@ export async function getState(userId: number, opts?: GetStateOptions): Promise<
     getHolidayMode(userId),
   ]);
 
-  const [openOrders, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
+  const [openOrdersResult, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
     openOrdersPromise,
     independentPromise,
   ]);
+  const { orders: openOrders, shippingDemand } = openOrdersResult;
 
-  const demand = computeDemand(openOrders, formulas.giftBoxBoms);
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms, shippingDemand);
   demand.raw = unfinishedRaw;
 
-  const { giftBoxes, finished, raw } = buildInventoryRows(catalog, stock, demand);
+  const { giftBoxes, finished, raw, shippingBoxes } = buildInventoryRows(catalog, stock, demand);
 
   return {
     giftBoxes,
     finished,
     raw,
+    shippingBoxes,
     demand,
     openOrders,
     movements,
@@ -1096,12 +1154,12 @@ export async function restockRaw(
   return { state: await getState(ownerId) };
 }
 
-/** Admin: set absolute stock for raw / finished / gift box. */
+/** Admin: set absolute stock for raw / finished / gift box / shipping box. */
 export async function adjustStock(
   ownerId: number,
   actorId: number,
   isAdmin: boolean,
-  input: { kind: 'raw' | 'finished' | 'gift_box'; key: string; quantity: number }
+  input: { kind: 'raw' | 'finished' | 'gift_box' | 'shipping_box'; key: string; quantity: number }
 ): Promise<{ error?: string; state?: KitchenState }> {
   if (!isAdmin) return { error: 'Only admin can adjust stock' };
   const { catalog } = await loadKitchenCatalog(ownerId);
@@ -1152,6 +1210,26 @@ export async function adjustStock(
     if (delta === 0) return { error: 'No change' };
     deltas.giftBoxDeltas.push({ boxType: key, delta });
     summary = `${giftBoxLabel(key, catalog)}: ${from} → ${to}`;
+  } else if (kind === 'shipping_box') {
+    const slot = NESTIEE_SHIPPING_BOX_SLOTS.find((s) => s.id === key);
+    if (!slot) return { error: `Unknown shipping box: ${key}` };
+    from = stock.shippingBoxes[key] || 0;
+    to = Math.floor(Number(input.quantity));
+    if (!Number.isFinite(to) || to < 0) return { error: 'Quantity must be ≥ 0' };
+    if (to === from) return { error: 'No change' };
+    await ensureShippingBoxRow(ownerId, key);
+    await db
+      .prepare('UPDATE kitchen_shipping_boxes SET quantity = ? WHERE user_id = ? AND box_id = ?')
+      .run(to, ownerId, key);
+    summary = `${shippingBoxDisplayLabel(slot)}: ${from} → ${to}`;
+    await insertMovement(
+      ownerId,
+      actorId,
+      'adjust_stock',
+      { summary, deltas, kind, key, from, to },
+      null
+    );
+    return { state: await getState(ownerId, { isAdmin: true }) };
   } else {
     return { error: 'Invalid kind' };
   }

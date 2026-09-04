@@ -219,9 +219,9 @@ export function mapShippingBoxesForGiftCount(totalGiftBoxes: number): Record<Nes
   }
 }
 
-function totalGiftBoxesInOrder(
+export function totalGiftBoxesInOrder(
   fields: Record<string, unknown>,
-  activeTypes: NestieeGiftBoxDemandType[],
+  activeTypes: Array<{ qtyKey: string }>,
 ): number {
   let total = 0;
   for (const g of activeTypes) {

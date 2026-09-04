@@ -142,6 +142,13 @@ export interface FinishedRow {
   needed: number;
 }
 
+export interface ShippingBoxRow {
+  boxId: string;
+  label: string;
+  quantity: number;
+  needed: number;
+}
+
 export interface RawRow {
   name: string;
   unit: string;
@@ -206,11 +213,13 @@ export interface KitchenDemand {
   giftBoxes: Record<string, number>;
   finished: Record<string, number>;
   raw: Record<string, number>;
+  shippingBoxes: Record<string, number>;
 }
 
 export interface KitchenState {
   giftBoxes: GiftBoxRow[];
   finished: FinishedRow[];
+  shippingBoxes: ShippingBoxRow[];
   raw: RawRow[];
   demand: KitchenDemand;
   openOrders: KitchenOpenOrder[];

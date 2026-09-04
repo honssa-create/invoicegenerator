@@ -163,6 +163,12 @@ export function shippingBoxDisplayLabel(box: Pick<NestieeDemandShippingBox, 'lab
   return `${box.label}(${box.size})`;
 }
 
+/** Per-order gift count fed into shipping-box mapping (minimum 1 outer box per order). */
+export function giftCountForOrderShippingBoxes(totalGiftBoxes: number): number {
+  const count = Math.max(0, Math.floor(totalGiftBoxes));
+  return count > 0 ? count : 1;
+}
+
 /** Map total gift boxes in one order → required shipping outer boxes (1–10). */
 export function mapShippingBoxesForGiftCount(totalGiftBoxes: number): Record<NestieeShippingBoxId, number> {
   const empty = (): Record<NestieeShippingBoxId, number> => ({
@@ -293,11 +299,9 @@ export function summarizeNestieeProcessingDemand(
     }
 
     const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
-    if (orderGiftTotal > 0) {
-      const shipping = mapShippingBoxesForGiftCount(orderGiftTotal);
-      for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
-        shippingTotals.set(id, (shippingTotals.get(id) || 0) + shipping[id]);
-      }
+    const shipping = mapShippingBoxesForGiftCount(giftCountForOrderShippingBoxes(orderGiftTotal));
+    for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
+      shippingTotals.set(id, (shippingTotals.get(id) || 0) + shipping[id]);
     }
   }
 

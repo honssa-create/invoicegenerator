@@ -3,6 +3,7 @@ import { GIFT_BOX_BOMS } from './kitchen-bom';
 import { NESTIEE_GIFT_BOX_TYPES, NESTIEE_ORDER_TYPE } from './orders';
 import {
   isNestieeOrdersFilter,
+  giftCountForOrderShippingBoxes,
   mapShippingBoxesForGiftCount,
   nestieeShipTodayDateRange,
   nestieeStatusesForDemandScope,
@@ -167,6 +168,14 @@ describe('orderMatchesNestieeShipToday', () => {
     expect(orderMatchesNestieeShipToday(nestiee('completed', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('pending payment', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('checkout-draft', '2026-08-28'), today)).toBe(false);
+  });
+});
+
+describe('giftCountForOrderShippingBoxes', () => {
+  it('uses the order gift total when positive and defaults to 1 when empty', () => {
+    expect(giftCountForOrderShippingBoxes(0)).toBe(1);
+    expect(giftCountForOrderShippingBoxes(3)).toBe(3);
+    expect(giftCountForOrderShippingBoxes(2.9)).toBe(2);
   });
 });
 
@@ -461,6 +470,37 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.shippingBoxes.find((b) => b.id === 'triple')?.qty).toBe(0);
     expect(demand.shippingBoxes.find((b) => b.id === 'small')?.label).toBe('細箱');
     expect(demand.shippingBoxes.find((b) => b.id === 'small')?.size).toBe('24x15x13cm');
+  });
+
+  it('counts at least one outer box per included order even when 所需禮盒 is empty', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_star_gold: 2,
+            nestiee_gift_qty_trial_set: 1,
+          },
+        },
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS,
+    );
+
+    // Order 1: 3 gift boxes → 1 雙套; order 2: no qty → minimum 1 細箱
+    expect(demand.orderCount).toBe(2);
+    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(1);
+    expect(demand.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(1);
+    expect(
+      demand.shippingBoxes.reduce((sum, box) => sum + box.qty, 0),
+    ).toBe(2);
   });
 });
 

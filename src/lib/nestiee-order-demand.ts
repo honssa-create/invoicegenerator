@@ -326,3 +326,71 @@ export function summarizeNestieeProcessingDemand(
     scope,
   };
 }
+
+export interface NestieeUsedShippingBoxesSummary {
+  shippingBoxes: NestieeDemandShippingBox[];
+  orderCount: number;
+  dateStart: string;
+  dateEnd: string;
+  dateFilterType: NestieeDateFilterType;
+}
+
+/**
+ * Shipped/completed Nestiee orders only — estimated outer boxes used in a date range.
+ * Used by Kitchen 「已用物流箱統計 (燕窩訂單)」.
+ */
+export function summarizeNestieeUsedShippingBoxes(
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  giftBoxTypes: Array<{ qtyKey: string; active?: boolean }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): NestieeUsedShippingBoxesSummary {
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+
+  const activeTypes = giftBoxTypes.filter((g) => g.active !== false);
+  const shippingTotals = new Map<NestieeShippingBoxId, number>();
+  for (const slot of NESTIEE_SHIPPING_BOX_SLOTS) shippingTotals.set(slot.id, 0);
+
+  let orderCount = 0;
+
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+    if (!orderMatchesNestieeDemandScope(order.status, 'shipped')) continue;
+    if (
+      !orderMatchesNestieeDateRange(order, {
+        dateStart,
+        dateEnd,
+        dateFilterType,
+      })
+    ) {
+      continue;
+    }
+
+    orderCount += 1;
+    const fields = hydrateNestieeGiftBoxQtys({ ...(order.fields || {}) });
+    const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
+    const shipping = mapShippingBoxesForGiftCount(giftCountForOrderShippingBoxes(orderGiftTotal));
+    for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
+      shippingTotals.set(id, (shippingTotals.get(id) || 0) + shipping[id]);
+    }
+  }
+
+  return {
+    shippingBoxes: NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
+      id: slot.id,
+      label: slot.label,
+      size: slot.size,
+      qty: shippingTotals.get(slot.id) || 0,
+    })),
+    orderCount,
+    dateStart,
+    dateEnd,
+    dateFilterType,
+  };
+}

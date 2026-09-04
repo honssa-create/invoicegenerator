@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import DateSelectSheet from '@/components/DateSelectSheet';
 import {
   NESTIEE_DATE_FILTER_TYPES,
+  NESTIEE_SHIPPING_BOX_SLOTS,
   shippingBoxDisplayLabel,
   type NestieeDateFilterType,
   type NestieeUsedShippingBoxesSummary,
@@ -15,6 +16,13 @@ import { FILTER, bi } from '@/lib/ui-labels';
 const DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string }> = {
   order_date: { en: 'By order date', zh: '落下單日期' },
   delivery_date: { en: 'By delivery date', zh: '按送貨日期' },
+};
+
+type ShippingInventoryRow = {
+  boxId: string;
+  label: string;
+  quantity: number;
+  needed: number;
 };
 
 function monthStartYmd(): string {
@@ -59,11 +67,16 @@ function UsedDateField({
   );
 }
 
+function shortfallClass(have: number, need: number): string {
+  return need > have ? 'text-red-600 font-semibold' : 'text-green-600';
+}
+
 export default function KitchenUsedShippingBoxes() {
   const [dateStart, setDateStart] = useState(monthStartYmd);
   const [dateEnd, setDateEnd] = useState(localDateYmd);
   const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('order_date');
   const [summary, setSummary] = useState<NestieeUsedShippingBoxesSummary | null>(null);
+  const [shippingInventory, setShippingInventory] = useState<ShippingInventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
@@ -76,6 +89,7 @@ export default function KitchenUsedShippingBoxes() {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.summary) setSummary(d.summary);
+        if (Array.isArray(d?.shippingInventory)) setShippingInventory(d.shippingInventory);
       })
       .catch(() => {
         /* keep previous */
@@ -87,20 +101,39 @@ export default function KitchenUsedShippingBoxes() {
     load();
   }, [load]);
 
-  const boxes = summary?.shippingBoxes ?? [];
-  const total = boxes.reduce((sum, b) => sum + b.qty, 0);
+  const inventoryById = useMemo(() => {
+    const map = new Map<string, ShippingInventoryRow>();
+    for (const row of shippingInventory) map.set(row.boxId, row);
+    return map;
+  }, [shippingInventory]);
+
+  const rows = NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => {
+    const used = summary?.shippingBoxes.find((b) => b.id === slot.id)?.qty ?? 0;
+    const inv = inventoryById.get(slot.id);
+    return {
+      id: slot.id,
+      label: shippingBoxDisplayLabel(slot),
+      used,
+      stock: inv?.quantity ?? 0,
+      needed: inv?.needed ?? 0,
+    };
+  });
+
+  const totalUsed = rows.reduce((sum, r) => sum + r.used, 0);
+  const totalStock = rows.reduce((sum, r) => sum + r.stock, 0);
+  const totalNeeded = rows.reduce((sum, r) => sum + r.needed, 0);
 
   return (
     <div className="mb-6 rounded-xl border border-gray-200 bg-white p-5">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
         <div>
           <h2 className="font-semibold text-gray-900">
-            {bi('Used shipping boxes (Nestiee)', '已用物流箱統計 (燕窩訂單)')}
+            {bi('Shipping boxes (Nestiee)', '物流外箱 (燕窩訂單)')}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
             {bi(
-              'Shipped / completed Nestiee orders only — estimated outer boxes used in the selected date range.',
-              '只計已出貨／已完成燕窩訂單，按日期範圍估計已用外箱。',
+              'Used = shipped/completed in date range · Need = processing orders · Stock = on hand.',
+              '已用 = 日期範圍內已出貨／已完成 · 需要 = 處理中訂單 · 庫存 = 現有數量。',
             )}
           </p>
         </div>
@@ -108,8 +141,8 @@ export default function KitchenUsedShippingBoxes() {
           {loading
             ? bi('Loading…', '載入中…')
             : bi(
-                `${summary?.orderCount ?? 0} shipped order(s)`,
-                `${summary?.orderCount ?? 0} 張已出貨訂單`,
+                `${summary?.orderCount ?? 0} shipped order(s) in range`,
+                `日期範圍內 ${summary?.orderCount ?? 0} 張已出貨訂單`,
               )}
         </p>
       </div>
@@ -155,33 +188,63 @@ export default function KitchenUsedShippingBoxes() {
         </button>
       </div>
 
+      <h3 className="text-sm font-medium text-gray-700 mb-2">
+        {bi('Used shipping boxes (est.)', '已用物流箱統計')}
+      </h3>
+      <p className="text-xs text-gray-500 mb-3">
+        {bi('Date filter applies to used counts only.', '日期篩選只影響「已用」欄。')}
+      </p>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 border-b">
               <th className="py-2 pr-2">{bi('Box type', '箱型')}</th>
+              <th className="py-2 pr-2 text-right">{bi('Stock', '庫存')}</th>
+              <th className="py-2 pr-2 text-right">{bi('Need', '需要')}</th>
               <th className="py-2 text-right">{bi('Used (est.)', '已用（估計）')}</th>
             </tr>
           </thead>
           <tbody>
-            {boxes.map((box) => (
-              <tr key={box.id} className="border-b border-gray-50">
-                <td className="py-2 pr-2">{shippingBoxDisplayLabel(box)}</td>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-b border-gray-50">
+                <td className="py-2 pr-2">{row.label}</td>
+                <td className="py-2 pr-2 text-right font-medium tabular-nums">
+                  {loading ? '—' : row.stock}
+                </td>
+                <td
+                  className={`py-2 pr-2 text-right tabular-nums ${loading ? '' : shortfallClass(row.stock, row.needed)}`}
+                >
+                  {loading ? '—' : row.needed}
+                </td>
                 <td className="py-2 text-right font-medium tabular-nums">
-                  {loading ? '—' : box.qty}
+                  {loading ? '—' : row.used}
                 </td>
               </tr>
             ))}
-            <tr className="font-semibold text-gray-900">
+            <tr className="font-semibold text-gray-900 border-t border-gray-200">
               <td className="py-2 pr-2">{bi('Total', '合計')}</td>
-              <td className="py-2 text-right tabular-nums">{loading ? '—' : total}</td>
+              <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : totalStock}</td>
+              <td
+                className={`py-2 pr-2 text-right tabular-nums ${loading ? '' : shortfallClass(totalStock, totalNeeded)}`}
+              >
+                {loading ? '—' : totalNeeded}
+              </td>
+              <td className="py-2 text-right tabular-nums">{loading ? '—' : totalUsed}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
+      <p className="text-xs text-gray-500 mt-3">
+        {bi(
+          'Need counts processing Nestiee orders (所需物流外箱). Adjust stock under Inventory → Finished bottles / Boxes.',
+          '「需要」為處理中燕窩訂單所需外箱。庫存可在「庫存 → 成品樽 / Boxes 紙箱」設定。',
+        )}
+      </p>
+
       {!loading && (summary?.orderCount ?? 0) === 0 && (
-        <p className="text-sm text-gray-500 mt-3">
+        <p className="text-sm text-gray-500 mt-2">
           {bi(
             'No shipped/completed Nestiee orders in this date range.',
             '此日期範圍內沒有已出貨／已完成的燕窩訂單。',

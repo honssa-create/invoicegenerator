@@ -1,32 +1,36 @@
 'use client';
 
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
-import { useNativeTap } from '@/lib/use-native-tap';
-
-const TAP_CLASS =
-  'cursor-pointer touch-manipulation [-webkit-tap-highlight-color:transparent]';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type Props = {
-  onTap: () => void;
+  /** @deprecated Use onClick — kept so existing callers keep working. */
+  onTap?: () => void;
   children: ReactNode;
-} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'onTouchEnd' | 'onTouchStart'>;
+} & ButtonHTMLAttributes<HTMLButtonElement>;
 
-/** Button that uses native (non-passive) taps — required on iOS 15.8 Safari. */
+/**
+ * Native &lt;button type="button"&gt; with cursor:pointer.
+ * Old iOS Safari only treats real buttons (or cursor:pointer) as tappable.
+ * Do not attach preventDefault on touchend — that cancels the click.
+ */
 export default function TapButton({
   onTap,
+  onClick,
   disabled,
   type = 'button',
   className = '',
   children,
   ...rest
 }: Props) {
-  const ref = useNativeTap<HTMLButtonElement>(onTap, Boolean(disabled));
   return (
     <button
-      ref={ref}
       type={type}
       disabled={disabled}
-      className={`${TAP_CLASS} ${className}`}
+      className={`cursor-pointer ${className}`}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!disabled && !event.defaultPrevented) onTap?.();
+      }}
       {...rest}
     >
       {children}
@@ -34,20 +38,26 @@ export default function TapButton({
   );
 }
 
-/** Full-screen backdrop / non-button hit target with the same native tap binding. */
+/** Full-screen dismiss control — must be a &lt;button&gt;, not a div. */
 export function TapSurface({
   onTap,
+  onClick,
   className = '',
   children,
+  type = 'button',
   ...rest
-}: {
-  onTap: () => void;
-  children?: ReactNode;
-} & Omit<HTMLAttributes<HTMLDivElement>, 'onClick' | 'onTouchEnd' | 'onTouchStart'>) {
-  const ref = useNativeTap<HTMLDivElement>(onTap);
+}: Props) {
   return (
-    <div ref={ref} className={`${TAP_CLASS} ${className}`} {...rest}>
+    <button
+      type={type}
+      className={`cursor-pointer ${className}`}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) onTap?.();
+      }}
+      {...rest}
+    >
       {children}
-    </div>
+    </button>
   );
 }

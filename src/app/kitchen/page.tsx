@@ -630,8 +630,7 @@ export default function KitchenPage() {
     setReturnQtys(next);
   };
 
-  const openGift = async (order?: KitchenOpenOrder, boxType?: string) => {
-    await Promise.all([ensureInventory(), ensureOrders()]);
+  const openGift = (order?: KitchenOpenOrder, boxType?: string) => {
     if (boxType) setGiftType(boxType);
     if (order?.type === 'nestiee') {
       setGiftOrderId(order.id);
@@ -643,22 +642,24 @@ export default function KitchenPage() {
       setGiftOrderId(null);
       setGiftQty(1);
     }
+    // Open immediately — old iOS looks dead if we wait for inventory/orders first.
     setModal('gift');
+    void Promise.all([ensureInventory(), ensureOrders()]);
   };
 
-  const openReturn = async (order?: KitchenOpenOrder) => {
-    await Promise.all([ensureInventory(), ensureOrders()]);
+  const openReturn = (order?: KitchenOpenOrder) => {
     const id = order?.id || returnOrders[0]?.id || '';
     const selected = order || returnOrders.find((o) => o.id === id) || null;
     setReturnOrderId(id);
     initReturnQtys(selected);
     setModal('return');
+    void Promise.all([ensureInventory(), ensureOrders()]);
   };
 
-  const openRestock = async () => {
-    await ensureInventory();
+  const openRestock = () => {
     setRawInputs({});
     setModal('restock');
+    void ensureInventory();
   };
 
   const clearOrderTicks = (orderId: number) => {
@@ -1103,15 +1104,14 @@ export default function KitchenPage() {
                       </span>
                     </div>
                   </div>
-                  <TapButton
+                  <button
+                    type="button"
                     disabled={busy}
-                    onTap={() => {
-                      void openGift(undefined, g.boxType);
-                    }}
-                    className="shrink-0 inline-flex min-h-[44px] min-w-[72px] items-center justify-center text-sm px-3 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+                    onClick={() => openGift(undefined, g.boxType)}
+                    className="shrink-0 inline-flex min-h-[44px] min-w-[72px] items-center justify-center text-sm px-3 rounded-md bg-green-600 text-white cursor-pointer hover:bg-green-700 disabled:opacity-40"
                   >
                     {bi('Package', '包裝')}
-                  </TapButton>
+                  </button>
                   {state.isAdmin && (
                     <TapButton
                       disabled={busy}
@@ -1291,11 +1291,10 @@ export default function KitchenPage() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3 mb-8">
-        <TapButton
-          onTap={() => {
-            void openGift();
-          }}
-          className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+        <button
+          type="button"
+          onClick={() => openGift()}
+          className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium cursor-pointer hover:bg-green-700"
         >
           包裝禮盒
           {giftNeededTotal > 0 && (
@@ -1303,12 +1302,11 @@ export default function KitchenPage() {
               {giftNeededTotal}
             </span>
           )}
-        </TapButton>
-        <TapButton
-          onTap={() => {
-            void openReturn();
-          }}
-          className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+        </button>
+        <button
+          type="button"
+          onClick={() => openReturn()}
+          className="relative min-h-[44px] px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-medium cursor-pointer hover:bg-green-700"
         >
           包裝回禮
           {returnNeededCount > 0 && (
@@ -1316,7 +1314,7 @@ export default function KitchenPage() {
               {returnNeededCount}
             </span>
           )}
-        </TapButton>
+        </button>
         <TapButton
           onTap={() => {
             void openRestock();
@@ -1452,7 +1450,7 @@ export default function KitchenPage() {
                       ) : (
                         <button
                           type="button"
-                          className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium hover:bg-gray-50"
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium cursor-pointer hover:bg-gray-50"
                           onClick={() => (o.type === 'nestiee' ? openGift(o) : openReturn(o))}
                         >
                           分配
@@ -1591,12 +1589,28 @@ export default function KitchenPage() {
         </div>
       </div>
 
-      {/* Modals — portal to body so iOS 15.8 does not trap taps in page overflow */}
+      {/* Modals — portal + inline z-index so old iOS does not trap the sheet */}
       {modal &&
         typeof document !== 'undefined' &&
         createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 2147483000,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            overflow: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            padding: 16,
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-auto my-8 p-6"
+            style={{ position: 'relative', zIndex: 1 }}
+          >
             {modal === 'gift' && (
               <>
                 <h3 className="text-lg font-semibold mb-4">

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
-import TapButton, { TapSurface } from '@/components/TapButton';
 import { APP } from '@/lib/ui-labels';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -14,31 +13,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setMenuOpen(false);
   }, [pathname]);
 
-  // Do not lock document.body overflow — on iOS 15.8 that plus a nested
-  // overflow scroller swallows the first tap on page controls.
-
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
       <Sidebar variant="mobile" open={menuOpen} onNavigate={() => setMenuOpen(false)} />
 
       {menuOpen && (
-        <TapSurface
+        <button
+          type="button"
           aria-label={APP.closeMenu}
-          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-          onTap={() => setMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden cursor-pointer"
+          onClick={() => setMenuOpen(false)}
         />
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 lg:hidden">
-          <TapButton
+          <button
+            type="button"
             aria-label={APP.openMenu}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-700 hover:bg-gray-50"
-            onTap={() => setMenuOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-700 cursor-pointer hover:bg-gray-50"
+            onClick={() => setMenuOpen(true)}
           >
             ☰
-          </TapButton>
+          </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-gray-900">InvoiceFlow</p>
             <p className="truncate text-xs text-gray-500">{APP.financeManager}</p>

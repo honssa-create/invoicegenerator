@@ -3,6 +3,7 @@ import { GIFT_BOX_BOMS } from './kitchen-bom';
 import { NESTIEE_GIFT_BOX_TYPES, NESTIEE_ORDER_TYPE } from './orders';
 import {
   isNestieeOrdersFilter,
+  mapShippingBoxesForGiftCount,
   nestieeShipTodayDateRange,
   nestieeStatusesForDemandScope,
   orderMatchesNestieeDateRange,
@@ -166,6 +167,28 @@ describe('orderMatchesNestieeShipToday', () => {
     expect(orderMatchesNestieeShipToday(nestiee('completed', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('pending payment', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('checkout-draft', '2026-08-28'), today)).toBe(false);
+  });
+});
+
+describe('mapShippingBoxesForGiftCount', () => {
+  it('maps 1–10 gift boxes to shipping outer boxes', () => {
+    expect(mapShippingBoxesForGiftCount(0)).toEqual({ small: 0, single: 0, double: 0, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(1)).toEqual({ small: 1, single: 0, double: 0, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(2)).toEqual({ small: 0, single: 1, double: 0, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(3)).toEqual({ small: 0, single: 0, double: 1, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(4)).toEqual({ small: 0, single: 0, double: 0, triple: 1 });
+    expect(mapShippingBoxesForGiftCount(5)).toEqual({ small: 1, single: 0, double: 1, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(6)).toEqual({ small: 0, single: 1, double: 1, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(7)).toEqual({ small: 0, single: 0, double: 2, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(8)).toEqual({ small: 0, single: 0, double: 2, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(9)).toEqual({ small: 0, single: 0, double: 1, triple: 1 });
+    expect(mapShippingBoxesForGiftCount(10)).toEqual({ small: 0, single: 0, double: 1, triple: 1 });
+  });
+
+  it('recursively applies mapping for counts above 10', () => {
+    expect(mapShippingBoxesForGiftCount(11)).toEqual({ small: 1, single: 0, double: 1, triple: 1 });
+    expect(mapShippingBoxesForGiftCount(12)).toEqual({ small: 0, single: 1, double: 1, triple: 1 });
+    expect(mapShippingBoxesForGiftCount(20)).toEqual({ small: 0, single: 0, double: 2, triple: 2 });
   });
 });
 
@@ -406,6 +429,38 @@ describe('summarizeNestieeProcessingDemand', () => {
     expect(demand.giftBoxes.find((g) => g.id === 'hua_yue')?.qty).toBe(1);
     expect(demand.giftBoxes.find((g) => g.id === 'star_gold')?.qty).toBe(2);
     expect(demand.giftBoxes.find((g) => g.id === 'star_silver')?.qty).toBe(1);
+  });
+
+  it('aggregates shipping outer boxes per order from total gift box count', () => {
+    const demand = summarizeNestieeProcessingDemand(
+      [
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_star_gold: 2,
+            nestiee_gift_qty_trial_set: 1,
+          },
+        },
+        {
+          status: 'processing',
+          fields: {
+            order_type: NESTIEE_ORDER_TYPE,
+            nestiee_gift_qty_star_gold: 5,
+          },
+        },
+      ],
+      giftBoxTypes,
+      GIFT_BOX_BOMS,
+    );
+
+    // Order 1: 3 gift boxes → 1 雙套; order 2: 5 gift boxes → 1 雙套 + 1 細箱
+    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(1);
+    expect(demand.shippingBoxes.find((b) => b.id === 'single')?.qty).toBe(0);
+    expect(demand.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(2);
+    expect(demand.shippingBoxes.find((b) => b.id === 'triple')?.qty).toBe(0);
+    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.label).toBe('細箱');
+    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.size).toBe('24x15x13cm');
   });
 });
 

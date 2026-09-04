@@ -134,11 +134,94 @@ export interface NestieeDemandBottle {
   qty: number;
 }
 
+export type NestieeShippingBoxId = 'small' | 'single' | 'double' | 'triple';
+
+export interface NestieeDemandShippingBox {
+  id: NestieeShippingBoxId;
+  label: string;
+  size: string;
+  qty: number;
+}
+
 export interface NestieeProcessingDemand {
   giftBoxes: NestieeDemandGiftBox[];
   bottles: NestieeDemandBottle[];
+  shippingBoxes: NestieeDemandShippingBox[];
   orderCount: number;
   scope: NestieeDemandScope;
+}
+
+/** Logistics outer boxes (外箱) for Nestiee shipments. */
+export const NESTIEE_SHIPPING_BOX_SLOTS: NestieeDemandShippingBox[] = [
+  { id: 'small', label: '細箱', size: '24x15x13cm', qty: 0 },
+  { id: 'single', label: '單套', size: '25x25x12.5cm', qty: 0 },
+  { id: 'double', label: '雙套', size: '25x25x25cm', qty: 0 },
+  { id: 'triple', label: '三套', size: '25x25x35cm', qty: 0 },
+];
+
+export function shippingBoxDisplayLabel(box: Pick<NestieeDemandShippingBox, 'label' | 'size'>): string {
+  return `${box.label}(${box.size})`;
+}
+
+/** Map total gift boxes in one order → required shipping outer boxes (1–10). */
+export function mapShippingBoxesForGiftCount(totalGiftBoxes: number): Record<NestieeShippingBoxId, number> {
+  const empty = (): Record<NestieeShippingBoxId, number> => ({
+    small: 0,
+    single: 0,
+    double: 0,
+    triple: 0,
+  });
+
+  const count = Math.max(0, Math.floor(totalGiftBoxes));
+  if (count === 0) return empty();
+
+  if (count > 10) {
+    const tens = Math.floor(count / 10);
+    const remainder = count % 10;
+    const result = empty();
+    const add = (partial: Record<NestieeShippingBoxId, number>, multiplier = 1) => {
+      for (const id of Object.keys(partial) as NestieeShippingBoxId[]) {
+        result[id] += partial[id] * multiplier;
+      }
+    };
+    add(mapShippingBoxesForGiftCount(10), tens);
+    if (remainder > 0) add(mapShippingBoxesForGiftCount(remainder));
+    return result;
+  }
+
+  switch (count) {
+    case 1:
+      return { small: 1, single: 0, double: 0, triple: 0 };
+    case 2:
+      return { small: 0, single: 1, double: 0, triple: 0 };
+    case 3:
+      return { small: 0, single: 0, double: 1, triple: 0 };
+    case 4:
+      return { small: 0, single: 0, double: 0, triple: 1 };
+    case 5:
+      return { small: 1, single: 0, double: 1, triple: 0 };
+    case 6:
+      return { small: 0, single: 1, double: 1, triple: 0 };
+    case 7:
+    case 8:
+      return { small: 0, single: 0, double: 2, triple: 0 };
+    case 9:
+    case 10:
+      return { small: 0, single: 0, double: 1, triple: 1 };
+    default:
+      return empty();
+  }
+}
+
+function totalGiftBoxesInOrder(
+  fields: Record<string, unknown>,
+  activeTypes: NestieeGiftBoxDemandType[],
+): number {
+  let total = 0;
+  for (const g of activeTypes) {
+    total += fieldQty(fields, g.qtyKey);
+  }
+  return total;
 }
 
 /** Finished-bottle cards shown on the Nestiee orders dashboard. */
@@ -181,6 +264,9 @@ export function summarizeNestieeProcessingDemand(
   const bottleTotals = new Map<string, number>();
   for (const slot of NESTIEE_BOTTLE_DASHBOARD_SLOTS) bottleTotals.set(slot.sku, 0);
 
+  const shippingTotals = new Map<NestieeShippingBoxId, number>();
+  for (const slot of NESTIEE_SHIPPING_BOX_SLOTS) shippingTotals.set(slot.id, 0);
+
   let orderCount = 0;
 
   for (const order of orders) {
@@ -205,6 +291,14 @@ export function summarizeNestieeProcessingDemand(
         bottleTotals.set(line.sku, (bottleTotals.get(line.sku) || 0) + line.qty);
       }
     }
+
+    const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
+    if (orderGiftTotal > 0) {
+      const shipping = mapShippingBoxesForGiftCount(orderGiftTotal);
+      for (const id of Object.keys(shipping) as NestieeShippingBoxId[]) {
+        shippingTotals.set(id, (shippingTotals.get(id) || 0) + shipping[id]);
+      }
+    }
   }
 
   return {
@@ -217,6 +311,12 @@ export function summarizeNestieeProcessingDemand(
       sku: slot.sku,
       label: slot.label,
       qty: bottleTotals.get(slot.sku) || 0,
+    })),
+    shippingBoxes: NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
+      id: slot.id,
+      label: slot.label,
+      size: slot.size,
+      qty: shippingTotals.get(slot.id) || 0,
     })),
     orderCount,
     scope,

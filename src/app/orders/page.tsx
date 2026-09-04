@@ -28,6 +28,7 @@ import {
 } from '@/lib/orders';
 import {
   isNestieeOrdersFilter,
+  NESTIEE_SHIPPING_BOX_SLOTS,
   orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
@@ -49,6 +50,7 @@ import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
   giftBoxes: [],
   bottles: [],
+  shippingBoxes: NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({ ...slot })),
   orderCount: 0,
   scope: 'processing',
 };

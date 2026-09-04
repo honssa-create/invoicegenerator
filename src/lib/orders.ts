@@ -1210,6 +1210,7 @@ export const NESTIEE_GIFT_BOX_TYPES: { id: string; label: string; qtyKey: string
 /** Extra Woo SKU / English names that should count as a 所需禮盒 type. */
 const NESTIEE_GIFT_BOX_LABEL_ALIASES: Record<string, string[]> = {
   rou_run_share_box: ['Sharing We Time Box', '柔潤分享'],
+  qiu_yan_fei_yue: ['金燕秋曜'],
 };
 
 function normalizeGiftBoxLabel(text: string): string {
@@ -1416,6 +1417,15 @@ function parseNestieeTrialSetQty(name: string, haystack: string): number | null 
   return parseNestieeNBoxQty(haystack) ?? 1;
 }
 
+function isNestieeQiuYanFeiYueProduct(nameForProduct: string): boolean {
+  return nameForProduct.includes('秋燕飛躍') || nameForProduct.includes('金燕秋曜');
+}
+
+function parseNestieeQiuYanFeiYueQty(nameForProduct: string, haystack: string): number | null {
+  if (!isNestieeQiuYanFeiYueProduct(nameForProduct)) return null;
+  return parseNestieeNBoxQty(haystack) ?? 1;
+}
+
 /** 心意禮盒: 紅棗x盒 → 紅色金, 冰糖x盒 → 紅色銀, x套y盒 → x on both. */
 function parseNestieeXinYiGiftBoxQtys(
   name: string,
@@ -1525,12 +1535,10 @@ export function computeNestieeGiftBoxQtysFromLines(
       }
     }
 
-    if (nameForProduct.includes('秋燕飛躍')) {
-      const nBox = parseNestieeNBoxQty(haystack);
-      if (nBox != null) {
-        qtys.nestiee_gift_qty_qiu_yan_fei_yue += nBox * qty;
-        continue;
-      }
+    const qiuYanQty = parseNestieeQiuYanFeiYueQty(nameForProduct, haystack);
+    if (qiuYanQty != null) {
+      qtys.nestiee_gift_qty_qiu_yan_fei_yue += qiuYanQty * qty;
+      continue;
     }
 
     if (nameForProduct.includes('隨心燉')) {

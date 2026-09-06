@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseHubImportDateRange, wooOrderCreatedBounds } from './hub-import';
+import { parseHubImportDateRange, parseHubImportOrderNumbers, wooOrderCreatedBounds } from './hub-import';
 
 describe('parseHubImportDateRange', () => {
   it('requires both dates', () => {
@@ -16,6 +16,14 @@ describe('parseHubImportDateRange', () => {
     if (parsed.ok) {
       expect(parsed.range).toEqual({ dateFrom: '2026-07-01', dateTo: '2026-07-19' });
     }
+  });
+});
+
+describe('parseHubImportOrderNumbers', () => {
+  it('splits comma / space lists and de-dupes', () => {
+    expect(parseHubImportOrderNumbers('10667, 10997 10667')).toEqual(['10667', '10997']);
+    expect(parseHubImportOrderNumbers(['10667', 'abc', '10997'])).toEqual(['10667', '10997']);
+    expect(parseHubImportOrderNumbers('')).toEqual([]);
   });
 });
 

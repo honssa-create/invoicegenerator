@@ -5,7 +5,7 @@ import { getDataOwnerId } from '@/lib/org-server';
 import { importHubPlatform, isQuickBooksConnected } from '@/lib/hub-sync';
 import { getWooStoreSetupIssue } from '@/lib/woocommerce';
 import { clickupConfigured, getQuickBooksCredentials } from '@/lib/integration-settings-server';
-import { parseHubImportDateRange } from '@/lib/hub-import';
+import { parseHubImportDateRange, parseHubImportOrderNumbers } from '@/lib/hub-import';
 
 const PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka', 'quickbooks', 'clickup'] as const;
 type ImportPlatform = (typeof PLATFORMS)[number];
@@ -29,12 +29,13 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
   }
 
-  let body: { date_from?: string; date_to?: string } = {};
+  let body: { date_from?: string; date_to?: string; order_numbers?: unknown } = {};
   try {
     body = await request.json();
   } catch {
   }
 
+  const orderNumbers = parseHubImportOrderNumbers(body.order_numbers);
   const parsedRange = parseHubImportDateRange(body);
   if (!parsedRange.ok) {
     return NextResponse.json({ error: parsedRange.error }, { status: 400 });
@@ -67,7 +68,7 @@ export async function POST(
   }
 
   try {
-    const result = await importHubPlatform(ownerId, platform, parsedRange.range);
+    const result = await importHubPlatform(ownerId, platform, parsedRange.range, orderNumbers);
     const qbEnv = platform === 'quickbooks' ? (await getQuickBooksCredentials(ownerId)).environment : null;
     if (result.errors.length && result.fetched === 0 && result.inserted === 0 && result.updated === 0) {
       return NextResponse.json({ error: result.errors[0], result, date_range: parsedRange.range }, { status: 400 });

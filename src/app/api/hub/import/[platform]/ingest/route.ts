@@ -6,7 +6,7 @@ import { ingestWooOrders } from '@/lib/hub-sync';
 import { setSyncState } from '@/lib/hub-server';
 import { getWooStoreSetupIssue } from '@/lib/woocommerce';
 import type { WooOrder } from '@/lib/woocommerce';
-import { parseHubImportDateRange } from '@/lib/hub-import';
+import { parseHubImportDateRange, parseHubImportOrderNumbers } from '@/lib/hub-import';
 
 const WOO_PLATFORMS = ['nestiee', 'honour', 'honour_en', 'cupmoka'] as const;
 type WooPlatform = (typeof WOO_PLATFORMS)[number];
@@ -30,7 +30,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
   }
 
-  let body: { date_from?: string; date_to?: string; orders?: WooOrder[] };
+  let body: { date_from?: string; date_to?: string; orders?: WooOrder[]; order_numbers?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -55,7 +55,10 @@ export async function POST(
     return NextResponse.json({ error: issue }, { status: 400 });
   }
 
-  const result = await ingestWooOrders(ownerId, platform, body.orders, parsedRange.range);
+  const orderNumbers = parseHubImportOrderNumbers(body.order_numbers);
+  const result = await ingestWooOrders(ownerId, platform, body.orders, parsedRange.range, {
+    alwaysIncludeIds: orderNumbers,
+  });
   if (result.errors.length && result.fetched === 0 && result.inserted === 0 && result.updated === 0) {
     return NextResponse.json({ error: result.errors[0], result, date_range: parsedRange.range }, { status: 400 });
   }

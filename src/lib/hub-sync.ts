@@ -14,6 +14,7 @@ import { mapClickUpTaskToUpsert } from './clickup-map';
 import { ensurePrepFromWeddingOrder } from './kitchen-prep-server';
 import {
   fetchWooOrders,
+  fetchWooOrdersByNumbers,
   getWooStoreConfigs,
   isWooDraftOrder,
   mapCupmokaWooStatus,
@@ -35,7 +36,8 @@ import { normalizeCustomerName } from './customer-name';
 export async function syncWooStore(
   userId: number,
   store: WooStoreConfig,
-  dateRange?: HubImportDateRange
+  dateRange?: HubImportDateRange,
+  orderNumbers?: string[]
 ): Promise<HubSyncResult> {
   const result: HubSyncResult = {
     platform: store.platform,
@@ -48,7 +50,8 @@ export async function syncWooStore(
   };
 
   const lastSync = await getSyncState(userId, 'woocommerce', store.platform);
-  let orders;
+  const numbers = (orderNumbers || []).map((n) => String(n).trim()).filter(Boolean);
+  let orders: WooOrder[] = [];
   try {
     if (dateRange) {
       const bounds = wooOrderCreatedBounds(dateRange);
@@ -61,18 +64,40 @@ export async function syncWooStore(
       orders = await fetchWooOrders(store, { modifiedAfter: lastSync || undefined });
     }
   } catch (err) {
-    result.errors.push(err instanceof Error ? err.message : 'fetch failed');
-    return result;
+    const message = err instanceof Error ? err.message : 'fetch failed';
+    if (!numbers.length) {
+      result.errors.push(message);
+      return result;
+    }
+    result.errors.push(message);
   }
 
-  return await ingestWooOrders(userId, store.platform, orders, dateRange);
+  if (numbers.length) {
+    try {
+      const extra = await fetchWooOrdersByNumbers(store, numbers);
+      const seen = new Set(orders.map((o) => o.id));
+      for (const order of extra) {
+        if (seen.has(order.id)) continue;
+        seen.add(order.id);
+        orders.push(order);
+      }
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : 'order-number fetch failed');
+      if (!orders.length) return result;
+    }
+  }
+
+  return await ingestWooOrders(userId, store.platform, orders, dateRange, {
+    alwaysIncludeIds: numbers,
+  });
 }
 
 export async function ingestWooOrders(
   userId: number,
   platform: WooStoreConfig['platform'],
   orders: WooOrder[],
-  dateRange?: HubImportDateRange
+  dateRange?: HubImportDateRange,
+  options?: { alwaysIncludeIds?: Iterable<string | number> }
 ): Promise<HubSyncResult> {
   const result: HubSyncResult = {
     platform,
@@ -84,8 +109,12 @@ export async function ingestWooOrders(
     errors: [],
   };
 
+  const alwaysInclude = new Set(
+    Array.from(options?.alwaysIncludeIds || [], (v) => String(v).trim()).filter(Boolean)
+  );
   const dateRows = dateRange
     ? orders.filter((o) => {
+        if (alwaysInclude.has(String(o.id)) || alwaysInclude.has(String(o.number))) return true;
         const day = o.date_created.slice(0, 10);
         return day >= dateRange.dateFrom && day <= dateRange.dateTo;
       })
@@ -230,7 +259,8 @@ export async function syncClickUpTasks(
 export async function importHubPlatform(
   userId: number,
   platform: 'nestiee' | 'honour' | 'honour_en' | 'cupmoka' | 'quickbooks' | 'clickup',
-  dateRange?: HubImportDateRange
+  dateRange?: HubImportDateRange,
+  orderNumbers?: string[]
 ): Promise<HubSyncResult> {
   if (platform === 'clickup') {
     return await syncClickUpTasks(userId, dateRange);
@@ -252,7 +282,7 @@ export async function importHubPlatform(
     };
   }
 
-  return await syncWooStore(userId, store, dateRange);
+  return await syncWooStore(userId, store, dateRange, orderNumbers);
 }
 
 export interface QuickBooksTokenRow {

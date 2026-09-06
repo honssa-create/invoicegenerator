@@ -330,22 +330,45 @@ export function summarizeNestieeProcessingDemand(
 export interface NestieeOrderStatusCounts {
   processing: number;
   completed: number;
+  shippedToday: number;
+}
+
+/** Shipped/completed Nestiee orders whose status was last updated today (HK calendar day). */
+export function orderMatchesNestieeShippedToday(
+  order: { status?: string | null; updated_at?: string | null },
+  today: string = localDateYmd(),
+): boolean {
+  if (!orderMatchesNestieeDemandScope(order.status, 'shipped')) return false;
+  const updatedDay = String(order.updated_at || '').slice(0, 10);
+  return updatedDay === today;
 }
 
 /** Nestiee order counts by status for the orders dashboard summary block. */
 export function summarizeNestieeOrderStatusCounts(
-  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  orders: Array<{
+    status?: string;
+    fields?: Record<string, unknown>;
+    created_at?: string | null;
+    updated_at?: string | null;
+  }>,
   opts: {
     dateStart?: string;
     dateEnd?: string;
     dateFilterType?: NestieeDateFilterType;
+    today?: string;
   } = {},
 ): NestieeOrderStatusCounts {
-  const counts: NestieeOrderStatusCounts = { processing: 0, completed: 0 };
+  const counts: NestieeOrderStatusCounts = { processing: 0, completed: 0, shippedToday: 0 };
+  const today = opts.today || localDateYmd();
 
   for (const order of orders) {
     const orderType = orderTypeFromFields(order.fields);
     if (!orderType || !isNestieeOrderType(orderType)) continue;
+
+    if (orderMatchesNestieeShippedToday(order, today)) {
+      counts.shippedToday += 1;
+    }
+
     if (!orderMatchesNestieeDateRange(order, opts)) continue;
 
     const status = String(order.status || '').trim();

@@ -15,12 +15,17 @@ async function runHubSyncForOwner(ownerId: number) {
     errors: string[];
   } = { user_id: ownerId, errors: [] };
 
-  if ((await getWooStoreConfigs(ownerId)).length) {
+  const wooStores = await getWooStoreConfigs(ownerId);
+  if (wooStores.length) {
     try {
       result.woocommerce = await syncAllWooStores(ownerId);
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : 'WooCommerce sync failed');
     }
+  } else {
+    result.errors.push(
+      `No WooCommerce stores configured for hub owner user ${ownerId}. Set HUB_OWNER_USER_ID on Railway or add store API keys under Settings → Integrations for that user.`
+    );
   }
 
   if (await isQuickBooksConnected(ownerId)) {

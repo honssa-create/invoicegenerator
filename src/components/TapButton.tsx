@@ -1,17 +1,62 @@
 'use client';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import { tapProps } from '@/lib/tap-action';
 
 type Props = {
-  onTap: () => void;
+  /** @deprecated Use onClick — kept so existing callers keep working. */
+  onTap?: () => void;
   children: ReactNode;
-} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'onTouchEnd' | 'onTouchStart'>;
+} & ButtonHTMLAttributes<HTMLButtonElement>;
 
-/** Button that fires on iOS 15 Safari touchend (click is often missing). */
-export default function TapButton({ onTap, disabled, type = 'button', children, ...rest }: Props) {
+/**
+ * Native &lt;button type="button"&gt; with cursor:pointer.
+ * Old iOS Safari only treats real buttons (or cursor:pointer) as tappable.
+ * Do not attach preventDefault on touchend — that cancels the click.
+ */
+export default function TapButton({
+  onTap,
+  onClick,
+  disabled,
+  type = 'button',
+  className = '',
+  children,
+  ...rest
+}: Props) {
   return (
-    <button type={type} disabled={disabled} {...rest} {...tapProps(onTap, Boolean(disabled))}>
+    <button
+      type={type}
+      disabled={disabled}
+      className={`cursor-pointer ${className}`}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!disabled && !event.defaultPrevented) onTap?.();
+      }}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Full-screen dismiss control — must be a &lt;button&gt;, not a div. */
+export function TapSurface({
+  onTap,
+  onClick,
+  className = '',
+  children,
+  type = 'button',
+  ...rest
+}: Props) {
+  return (
+    <button
+      type={type}
+      className={`cursor-pointer ${className}`}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) onTap?.();
+      }}
+      {...rest}
+    >
       {children}
     </button>
   );

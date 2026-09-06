@@ -33,9 +33,16 @@
   input[type='date'],
   input[type='month'],
   summary,
-  [role='button'] {
+  [role='button'],
+  label {
     cursor: pointer;
-    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.12);
+  }
+
+  input[type='date'] {
+    min-height: 44px;
+    display: block;
+    width: 100%;
   }
 }
 

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
-import { tapProps } from '@/lib/tap-action';
 import { APP } from '@/lib/ui-labels';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -14,15 +13,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setMenuOpen(false);
   }, [pathname]);
 
-  useEffect(() => {
-    document.body.style.overflow = menuOpen ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [menuOpen]);
-
-  // Middleware already gates routes; render shell + children immediately so
-  // page data fetches run in parallel with /api/auth/me (not behind it).
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
@@ -32,8 +22,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <button
           type="button"
           aria-label={APP.closeMenu}
-          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-          {...tapProps(() => setMenuOpen(false))}
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden cursor-pointer"
+          onClick={() => setMenuOpen(false)}
         />
       )}
 
@@ -42,8 +32,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             aria-label={APP.openMenu}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-700 hover:bg-gray-50"
-            {...tapProps(() => setMenuOpen(true))}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-700 cursor-pointer hover:bg-gray-50"
+            onClick={() => setMenuOpen(true)}
           >
             ☰
           </button>
@@ -53,7 +43,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <main className="min-w-0 flex-1 overflow-x-hidden">
           <div className="p-4 sm:p-6 lg:p-8">{children}</div>
         </main>
       </div>

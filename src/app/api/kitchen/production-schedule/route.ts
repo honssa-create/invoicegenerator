@@ -9,7 +9,11 @@ import {
   stockFromFinishedRows,
 } from '@/lib/kitchen-production-schedule';
 import { NESTIEE_ORDER_TYPE, localDateYmd } from '@/lib/orders';
-import { summarizeNestieeProcessingDemand } from '@/lib/nestiee-order-demand';
+import {
+  orderMatchesNestieeDateRange,
+  parseNestieeDateFilterType,
+  summarizeNestieeProcessingDemand,
+} from '@/lib/nestiee-order-demand';
 
 function parseFields(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
@@ -30,6 +34,11 @@ export async function GET(request: Request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const url = new URL(request.url);
+  const dateStartRaw = url.searchParams.get('dateStart')?.trim() || '';
+  const dateEndRaw = url.searchParams.get('dateEnd')?.trim() || '';
+  const dateStart = isYmd(dateStartRaw) ? dateStartRaw : '';
+  const dateEnd = isYmd(dateEndRaw) ? dateEndRaw : '';
+  const dateFilterType = parseNestieeDateFilterType(url.searchParams.get('dateFilterType'));
   const todayRaw = url.searchParams.get('today')?.trim() || '';
   const today = isYmd(todayRaw) ? todayRaw : localDateYmd();
 
@@ -55,17 +64,21 @@ export async function GET(request: Request) {
       created_at: string | null;
     }>;
 
-    const orders = rows.map((row) => {
-      const fields = parseFields(row.fields_json);
-      if (row.order_type && !fields.order_type) {
-        fields.order_type = row.order_type;
-      }
-      return {
-        status: row.status || '',
-        fields,
-        created_at: row.created_at || '',
-      };
-    });
+    const orders = rows
+      .map((row) => {
+        const fields = parseFields(row.fields_json);
+        if (row.order_type && !fields.order_type) {
+          fields.order_type = row.order_type;
+        }
+        return {
+          status: row.status || '',
+          fields,
+          created_at: row.created_at || '',
+        };
+      })
+      .filter((order) =>
+        orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType }),
+      );
 
     const { catalog, formulas } = await loadKitchenCatalog(ownerId);
     const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({
@@ -97,6 +110,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       schedule,
       orderCount: demandRollup.orderCount,
+      dateStart,
+      dateEnd,
+      dateFilterType,
     });
   } catch {
     return NextResponse.json({ error: 'Failed to load production schedule' }, { status: 500 });

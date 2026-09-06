@@ -4,9 +4,9 @@ import type { ReactNode } from 'react';
 import {
   NESTIEE_DATE_FILTER_TYPES,
   NESTIEE_DEMAND_SCOPES,
-  shippingBoxDisplayLabel,
   type NestieeDateFilterType,
   type NestieeDemandScope,
+  type NestieeOrderStatusCounts,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
 import { tapProps } from '@/lib/tap-action';
@@ -132,33 +132,9 @@ function emptyGiftBoxMessage(scope: NestieeDemandScope): string {
   );
 }
 
-function emptyShippingBoxMessage(scope: NestieeDemandScope): string {
-  if (scope === 'processing') {
-    return bi(
-      'No shipping outer boxes needed for processing orders yet.',
-      '處理中訂單暫無所需物流外箱。',
-    );
-  }
-  if (scope === 'shipped') {
-    return bi(
-      'No shipping outer boxes needed for shipped orders in this range.',
-      '所選範圍內的已出貨訂單暫無所需物流外箱。',
-    );
-  }
-  if (scope === 'ship_today') {
-    return bi(
-      'No shipping outer boxes needed for orders that ship today.',
-      '今日需出貨訂單暫無所需物流外箱。',
-    );
-  }
-  return bi(
-    'No shipping outer boxes needed for orders in this range.',
-    '所選範圍內暫無所需物流外箱。',
-  );
-}
-
 export default function NestieeProcessingDashboard({
   demand,
+  statusCounts,
   scope,
   onScopeChange,
   dateFilterType,
@@ -166,6 +142,7 @@ export default function NestieeProcessingDashboard({
   loading,
 }: {
   demand: NestieeProcessingDemand;
+  statusCounts: NestieeOrderStatusCounts;
   scope: NestieeDemandScope;
   onScopeChange: (scope: NestieeDemandScope) => void;
   dateFilterType: NestieeDateFilterType;
@@ -173,10 +150,7 @@ export default function NestieeProcessingDashboard({
   loading?: boolean;
 }) {
   const giftBoxes = demand.giftBoxes.filter((g) => loading || g.qty > 0);
-  const bottles = demand.bottles.filter((b) => loading || b.qty > 0);
-  const shippingBoxes = demand.shippingBoxes ?? [];
-  const totalShippingBoxes = shippingBoxes.reduce((sum, box) => sum + box.qty, 0);
-  const hasDemand = giftBoxes.some((g) => g.qty > 0) || bottles.some((b) => b.qty > 0);
+  const hasDemand = giftBoxes.some((g) => g.qty > 0);
 
   return (
     <div className="mb-6 space-y-4">
@@ -216,6 +190,21 @@ export default function NestieeProcessingDashboard({
         <p className="text-sm text-gray-500">{emptyGiftBoxMessage(scope)}</p>
       )}
 
+      <DemandSection title={bi('Order status summary', '訂單狀態概覽')}>
+        <div className="grid grid-cols-2 gap-3 max-w-md">
+          <DemandCard
+            label={bi('Processing orders', '處理中訂單')}
+            qty={statusCounts.processing}
+            loading={loading}
+          />
+          <DemandCard
+            label={bi('Completed orders', '已完成訂單')}
+            qty={statusCounts.completed}
+            loading={loading}
+          />
+        </div>
+      </DemandSection>
+
       <DemandSection title={bi('Gift boxes needed', '訂單所需禮盒')}>
         {giftBoxes.length === 0 && !loading ? (
           <p className="text-sm text-[#F7F2E8]/90">—</p>
@@ -223,45 +212,6 @@ export default function NestieeProcessingDashboard({
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {giftBoxes.map((box) => (
               <DemandCard key={box.id} label={box.label} qty={box.qty} loading={loading} />
-            ))}
-          </div>
-        )}
-      </DemandSection>
-
-      <DemandSection title={bi('Finished bottles needed', '訂單所需燕窩樽數')}>
-        {bottles.length === 0 && !loading ? (
-          <p className="text-sm text-[#F7F2E8]/90">—</p>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {bottles.map((bottle) => (
-              <DemandCard key={bottle.sku} label={bottle.label} qty={bottle.qty} loading={loading} />
-            ))}
-          </div>
-        )}
-      </DemandSection>
-
-      <DemandSection title={bi('Shipping boxes needed', '所需物流外箱')}>
-        {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {shippingBoxes.map((box) => (
-              <DemandCard
-                key={box.id}
-                label={shippingBoxDisplayLabel(box)}
-                qty={box.qty}
-                loading
-              />
-            ))}
-          </div>
-        ) : totalShippingBoxes === 0 ? (
-          <p className="text-sm text-[#F7F2E8]/90">{emptyShippingBoxMessage(scope)}</p>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {shippingBoxes.map((box) => (
-              <DemandCard
-                key={box.id}
-                label={shippingBoxDisplayLabel(box)}
-                qty={box.qty}
-              />
             ))}
           </div>
         )}

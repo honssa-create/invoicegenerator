@@ -327,6 +327,38 @@ export function summarizeNestieeProcessingDemand(
   };
 }
 
+export interface NestieeOrderStatusCounts {
+  processing: number;
+  completed: number;
+}
+
+/** Nestiee order counts by status for the orders dashboard summary block. */
+export function summarizeNestieeOrderStatusCounts(
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): NestieeOrderStatusCounts {
+  const counts: NestieeOrderStatusCounts = { processing: 0, completed: 0 };
+
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+    if (!orderMatchesNestieeDateRange(order, opts)) continue;
+
+    const status = String(order.status || '').trim();
+    if (status === NESTIEE_PROCESSING_STATUS) {
+      counts.processing += 1;
+    } else if (NESTIEE_SHIPPED_STATUSES.includes(status as (typeof NESTIEE_SHIPPED_STATUSES)[number])) {
+      counts.completed += 1;
+    }
+  }
+
+  return counts;
+}
+
 export interface NestieeUsedShippingBoxesSummary {
   shippingBoxes: NestieeDemandShippingBox[];
   orderCount: number;

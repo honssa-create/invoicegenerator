@@ -32,6 +32,7 @@ import {
   orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
+  summarizeNestieeOrderStatusCounts,
   type NestieeDateFilterType,
   type NestieeDemandScope,
   type NestieeProcessingDemand,
@@ -155,6 +156,16 @@ function OrdersPageContent() {
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<number>>(new Set());
 
   const isNestieeFilter = isNestieeOrdersFilter(orderType);
+
+  const nestieeStatusCounts = useMemo(
+    () =>
+      summarizeNestieeOrderStatusCounts(orders, {
+        dateStart,
+        dateEnd,
+        dateFilterType,
+      }),
+    [orders, dateStart, dateEnd, dateFilterType],
+  );
 
   const loadNestieeDemand = useCallback(() => {
     if (!isNestieeOrdersFilter(orderType)) return;
@@ -759,6 +770,7 @@ function OrdersPageContent() {
       {isNestieeFilter && (
         <NestieeProcessingDashboard
           demand={nestieeDemand}
+          statusCounts={nestieeStatusCounts}
           scope={nestieeDemandScope}
           onScopeChange={setNestieeDemandScope}
           dateFilterType={dateFilterType}

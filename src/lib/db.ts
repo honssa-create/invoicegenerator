@@ -431,6 +431,15 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_kitchen_daily_user ON kitchen_daily_orders(user_id);
   CREATE INDEX IF NOT EXISTS idx_kitchen_batches_user ON kitchen_batches(user_id);
+
+  CREATE TABLE IF NOT EXISTS kitchen_shipping_boxes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    box_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, box_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // Kitchen Prep (廚房備料系統) — stewing ingredient calculator.
@@ -1132,13 +1141,13 @@ db.exec(`
     const defaults: Record<string, Record<string, boolean>> = {
       operator: {
         dashboard: true, quotations: true, invoices: true, orders: true, inbound: true,
-        kitchen: true, kitchen_prep: true, rentals: false, expenses: true, accounting: false,
-        cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
+        kitchen: true, kitchen_prep: true, demand_forecast: true, rentals: false, expenses: true,
+        accounting: false, cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
       },
       accountant: {
         dashboard: true, quotations: true, invoices: true, orders: false, inbound: false,
-        kitchen: false, kitchen_prep: false, rentals: true, expenses: true, accounting: true,
-        cashflow: true, scan_table: true, customers: true, trash: true, admin: false,
+        kitchen: false, kitchen_prep: false, demand_forecast: false, rentals: true, expenses: true,
+        accounting: true, cashflow: true, scan_table: true, customers: true, trash: true, admin: false,
       },
     };
     const insert = db.prepare(
@@ -1164,6 +1173,16 @@ db.exec(`
   for (const section of ['invoices', 'quotations', 'expenses']) {
     upsert.run(section);
   }
+}
+
+// Demand Forecast 備貨預測 — same access as kitchen for operator/admin.
+{
+  const upsert = db.prepare(
+    `INSERT INTO role_permissions (role, section, allowed) VALUES (?, 'demand_forecast', ?)
+     ON CONFLICT(role, section) DO UPDATE SET allowed = excluded.allowed`
+  );
+  upsert.run('operator', 1);
+  upsert.run('accountant', 0);
 }
 
 // Per-company debit note style templates (label / elite).

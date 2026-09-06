@@ -197,7 +197,7 @@ export function mapShippingBoxesForGiftCount(totalGiftBoxes: number): Record<Nes
 
   switch (count) {
     case 1:
-      return { small: 1, single: 0, double: 0, triple: 0 };
+      return { small: 0, single: 1, double: 0, triple: 0 };
     case 2:
       return { small: 0, single: 1, double: 0, triple: 0 };
     case 3:

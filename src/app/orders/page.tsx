@@ -163,6 +163,7 @@ function OrdersPageContent() {
         dateStart,
         dateEnd,
         dateFilterType,
+        today: localDateYmd(),
       }),
     [orders, dateStart, dateEnd, dateFilterType],
   );

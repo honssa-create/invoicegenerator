@@ -191,7 +191,7 @@ export default function NestieeProcessingDashboard({
       )}
 
       <DemandSection title={bi('Order status summary', '訂單狀態概覽')}>
-        <div className="grid grid-cols-2 gap-3 max-w-md">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-2xl">
           <DemandCard
             label={bi('Processing orders', '處理中訂單')}
             qty={statusCounts.processing}
@@ -200,6 +200,11 @@ export default function NestieeProcessingDashboard({
           <DemandCard
             label={bi('Completed orders', '已完成訂單')}
             qty={statusCounts.completed}
+            loading={loading}
+          />
+          <DemandCard
+            label={bi('Shipped today', '今日出貨訂單')}
+            qty={statusCounts.shippedToday}
             loading={loading}
           />
         </div>

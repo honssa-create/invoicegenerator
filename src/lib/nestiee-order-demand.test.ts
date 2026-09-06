@@ -15,6 +15,7 @@ import {
   summarizeNestieeProcessingDemand,
   summarizeNestieeOrderStatusCounts,
   summarizeNestieeUsedShippingBoxes,
+  orderMatchesNestieeShippedToday,
 } from './nestiee-order-demand';
 
 const giftBoxTypes = NESTIEE_GIFT_BOX_TYPES.map((g, i) => ({
@@ -103,9 +104,78 @@ describe('summarizeNestieeOrderStatusCounts', () => {
       dateStart: '2026-01-01',
       dateEnd: '2026-12-31',
       dateFilterType: 'order_date',
+      today: '2026-09-06',
     });
     expect(counts.processing).toBe(1);
     expect(counts.completed).toBe(2);
+    expect(counts.shippedToday).toBe(0);
+  });
+
+  it('counts shipped/completed orders updated today regardless of date filter', () => {
+    const orders = [
+      {
+        status: 'shipped',
+        updated_at: '2026-09-06 14:30:00',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE },
+      },
+      {
+        status: 'completed',
+        updated_at: '2026-09-06 09:00:00',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE },
+      },
+      {
+        status: 'shipped',
+        updated_at: '2026-09-05 18:00:00',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE },
+      },
+      {
+        status: 'processing',
+        updated_at: '2026-09-06 10:00:00',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE },
+      },
+    ];
+    const counts = summarizeNestieeOrderStatusCounts(orders, {
+      dateStart: '2026-08-01',
+      dateEnd: '2026-08-31',
+      dateFilterType: 'order_date',
+      today: '2026-09-06',
+    });
+    expect(counts.shippedToday).toBe(2);
+    expect(counts.processing).toBe(0);
+    expect(counts.completed).toBe(0);
+  });
+});
+
+describe('orderMatchesNestieeShippedToday', () => {
+  it('matches shipped/completed orders updated today only', () => {
+    expect(
+      orderMatchesNestieeShippedToday(
+        { status: 'shipped', updated_at: '2026-09-06 12:00:00' },
+        '2026-09-06',
+      ),
+    ).toBe(true);
+    expect(
+      orderMatchesNestieeShippedToday(
+        { status: 'completed', updated_at: '2026-09-06 08:15:00' },
+        '2026-09-06',
+      ),
+    ).toBe(true);
+    expect(
+      orderMatchesNestieeShippedToday(
+        { status: 'shipped', updated_at: '2026-09-05 23:59:00' },
+        '2026-09-06',
+      ),
+    ).toBe(false);
+    expect(
+      orderMatchesNestieeShippedToday(
+        { status: 'processing', updated_at: '2026-09-06 12:00:00' },
+        '2026-09-06',
+      ),
+    ).toBe(false);
   });
 });
 

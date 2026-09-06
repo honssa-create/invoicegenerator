@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
 import KitchenUsedShippingBoxes from '@/components/KitchenUsedShippingBoxes';
+import KitchenProductionSchedule from '@/components/KitchenProductionSchedule';
 import TapButton from '@/components/TapButton';
 import { tapProps } from '@/lib/tap-action';
 import {
@@ -1041,7 +1042,10 @@ export default function KitchenPage() {
         />
       )}
 
-      <KitchenUsedShippingBoxes />
+      <div className="grid lg:grid-cols-2 gap-6 mb-6 items-stretch">
+        <KitchenUsedShippingBoxes />
+        <KitchenProductionSchedule />
+      </div>
 
       {/* Inventory — collapsed by default; fetches stock on first expand */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">

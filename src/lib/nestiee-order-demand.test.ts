@@ -13,6 +13,7 @@ import {
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
+  summarizeNestieeOrderStatusCounts,
   summarizeNestieeUsedShippingBoxes,
 } from './nestiee-order-demand';
 
@@ -93,6 +94,18 @@ describe('parseNestieeDateFilterType', () => {
     expect(parseNestieeDateFilterType(null)).toBe('order_date');
     expect(parseNestieeDateFilterType('delivery_date')).toBe('delivery_date');
     expect(parseNestieeDateFilterType('invalid')).toBe('order_date');
+  });
+});
+
+describe('summarizeNestieeOrderStatusCounts', () => {
+  it('counts processing vs completed Nestiee orders in date range', () => {
+    const counts = summarizeNestieeOrderStatusCounts(sampleOrders, {
+      dateStart: '2026-01-01',
+      dateEnd: '2026-12-31',
+      dateFilterType: 'order_date',
+    });
+    expect(counts.processing).toBe(1);
+    expect(counts.completed).toBe(2);
   });
 });
 

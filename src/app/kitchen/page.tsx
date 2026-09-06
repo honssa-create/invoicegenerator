@@ -991,7 +991,7 @@ export default function KitchenPage() {
         <div>
           <h1 className="page-title">{TITLE.kitchen}</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            {bi('Gift boxes · finished bottles · raw · order fulfillment', '禮盒 · 成品樽 · 原料 · 訂單履約')}
+            {bi('Gift boxes · stock planning · order fulfillment', '禮盒 · 備貨預算 · 訂單履約')}
           </p>
         </div>
         {state.isAdmin && (

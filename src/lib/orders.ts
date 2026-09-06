@@ -296,7 +296,7 @@ export function orderDueDate(o: {
   if (fromFields) return fromFields;
 
   const orderType = orderTypeFromFields(o.fields);
-  if (!isNestieeOrderType(orderType)) return null;
+  if (!orderType || !isNestieeOrderType(orderType)) return null;
   const lines = getNestieeLines(o.fields || {});
   const fromLines = parseNestieeReceiptDateFromDeliveryOptions(lines, o.created_at, null);
   return fromLines || null;

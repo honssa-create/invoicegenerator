@@ -1,73 +1,975 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { AsyncLocalStorage } from 'async_hooks';
+import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { warnIfEphemeralReceiptStorage } from './receipt-storage';
+import { warnIfR2Misconfigured } from './r2';
 import fs from 'fs';
+import path from 'path';
+import { assignLegacyDocumentNumbers } from './record-numbering-core';
 
-const dataDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+type Queryable = Pool | PoolClient;
+
+const txStorage = new AsyncLocalStorage<PoolClient>();
+/** True only for nested ensureSchema calls that run inside the boot promise. */
+const schemaBootAls = new AsyncLocalStorage<boolean>();
+
+let pool: Pool | null = null;
+let schemaReady: Promise<void> | null = null;
+
+function databaseUrl(): string {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    // Build must not require a live database.
+    return process.env.DATABASE_URL || 'postgresql://127.0.0.1:5432/invoiceflow_build';
+  }
+  const url = process.env.DATABASE_URL?.trim();
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL is required. Start Postgres (see docker-compose.yml) and set DATABASE_URL in .env.local.'
+    );
+  }
+  return url;
 }
 
-const dbPath = path.join(dataDir, 'invoices.db');
+function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: databaseUrl(),
+      max: Number(process.env.PG_POOL_MAX || 10),
+      ssl: process.env.PGSSLMODE === 'disable' ? undefined : undefined,
+    });
+    pool.on('error', (err) => {
+      console.error('[InvoiceFlow] Postgres pool error:', err);
+    });
+  }
+  return pool;
+}
 
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+function client(): Queryable {
+  return txStorage.getStore() ?? getPool();
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    name TEXT NOT NULL,
-    company_name TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+/** Convert SQLite `?` placeholders to Postgres `$1…$n`. */
+export function convertPlaceholders(sql: string): string {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+
+/** Light dialect fixes for SQL written for SQLite. */
+export function adaptSql(sql: string): string {
+  let out = sql;
+  out = out.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
+  // Append ON CONFLICT DO NOTHING only when not already present and it's INSERT OR IGNORE style —
+  // handled at call sites / via insertIgnore helper. For raw adapted strings that still say OR IGNORE:
+  out = out.replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, "to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')");
+  out = out.replace(/\bexcluded\./gi, 'EXCLUDED.');
+  out = out.replace(/\s+COLLATE\s+NOCASE\b/gi, '');
+  // SQLite IFNULL → Postgres COALESCE
+  out = out.replace(/\bIFNULL\s*\(/gi, 'COALESCE(');
+  // SQLite allows MAX(a,b); Postgres needs GREATEST for scalar max.
+  out = out.replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
+  return out;
+}
+
+function needsConflictDoNothing(originalSql: string): boolean {
+  return /INSERT\s+OR\s+IGNORE\s+INTO/i.test(originalSql);
+}
+
+export interface RunResult {
+  lastInsertRowid: number | bigint;
+  changes: number;
+}
+
+const NO_RETURNING_TABLES = new Set([
+  'expense_option_settings',
+  'expense_report_sequence',
+  'global_record_sequences',
+  'rental_debit_note_seq',
+  'rental_debit_note_styles',
+  'integration_tokens',
+  'hub_order_sequences',
+  'integration_sync_state',
+  'integration_settings',
+  'app_migrations',
+  'role_permissions',
+  'kitchen_settings',
+]);
+
+function insertTableName(sql: string): string | null {
+  const m = sql.match(/INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+export class PgStatement {
+  constructor(private readonly originalSql: string) {}
+
+  private prepared(): { text: string; returningId: boolean } {
+    let sql = adaptSql(this.originalSql);
+    const insertIgnore = needsConflictDoNothing(this.originalSql);
+    if (insertIgnore && !/ON\s+CONFLICT/i.test(sql)) {
+      sql = sql.replace(/;?\s*$/, '') + ' ON CONFLICT DO NOTHING';
+    }
+    const isInsert = /^\s*INSERT\b/i.test(sql);
+    const hasReturning = /\bRETURNING\b/i.test(sql);
+    const table = insertTableName(sql);
+    let returningId = false;
+    if (
+      isInsert &&
+      !hasReturning &&
+      !insertIgnore &&
+      table &&
+      !NO_RETURNING_TABLES.has(table)
+    ) {
+      sql = sql.replace(/;?\s*$/, '') + ' RETURNING id';
+      returningId = true;
+    }
+    return { text: convertPlaceholders(sql), returningId };
+  }
+
+  async get<T extends QueryResultRow = QueryResultRow>(
+    ...params: unknown[]
+  ): Promise<T | undefined> {
+    await ensureSchema();
+    const { text } = this.prepared();
+    const res = await client().query<T>(text, params);
+    return res.rows[0];
+  }
+
+  async all<T extends QueryResultRow = QueryResultRow>(...params: unknown[]): Promise<T[]> {
+    await ensureSchema();
+    const { text } = this.prepared();
+    const res = await client().query<T>(text, params);
+    return res.rows;
+  }
+
+  async run(...params: unknown[]): Promise<RunResult> {
+    await ensureSchema();
+    const { text, returningId } = this.prepared();
+    const res = await client().query(text, params);
+    const id = returningId && res.rows[0] && 'id' in res.rows[0] ? Number(res.rows[0].id) : 0;
+    return {
+      lastInsertRowid: id,
+      changes: res.rowCount ?? 0,
+    };
+  }
+}
+
+async function loadSchemaSql(): Promise<string> {
+  const schemaPath = path.join(process.cwd(), 'src', 'lib', 'pg-schema.sql');
+  return fs.readFileSync(schemaPath, 'utf8');
+}
+
+/**
+ * Split a SQL script into statements so each can autocommit separately.
+ * Running the whole pg-schema.sql as one Query holds AccessExclusiveLock across
+ * many tables until the end — concurrent SELECTs that join those tables deadlock
+ * (e.g. invoices ↔ reconciliation_records).
+ */
+export function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let i = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let dollarTag: string | null = null;
+
+  while (i < sql.length) {
+    const c = sql[i];
+    const next = sql[i + 1];
+
+    if (inLineComment) {
+      buf += c;
+      if (c === '\n') inLineComment = false;
+      i += 1;
+      continue;
+    }
+    if (inBlockComment) {
+      buf += c;
+      if (c === '*' && next === '/') {
+        buf += '/';
+        i += 2;
+        inBlockComment = false;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+    if (dollarTag !== null) {
+      if (c === '$' && sql.startsWith(dollarTag, i)) {
+        buf += dollarTag;
+        i += dollarTag.length;
+        dollarTag = null;
+        continue;
+      }
+      buf += c;
+      i += 1;
+      continue;
+    }
+    if (inSingle) {
+      buf += c;
+      if (c === "'" && next === "'") {
+        buf += next;
+        i += 2;
+        continue;
+      }
+      if (c === "'") inSingle = false;
+      i += 1;
+      continue;
+    }
+    if (inDouble) {
+      buf += c;
+      if (c === '"') inDouble = false;
+      i += 1;
+      continue;
+    }
+
+    if (c === '-' && next === '-') {
+      buf += c + next;
+      i += 2;
+      inLineComment = true;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      buf += c + next;
+      i += 2;
+      inBlockComment = true;
+      continue;
+    }
+    if (c === "'") {
+      buf += c;
+      inSingle = true;
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      buf += c;
+      inDouble = true;
+      i += 1;
+      continue;
+    }
+    if (c === '$') {
+      const rest = sql.slice(i);
+      const m = rest.match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/);
+      if (m) {
+        dollarTag = m[0];
+        buf += dollarTag;
+        i += dollarTag.length;
+        continue;
+      }
+    }
+    if (c === ';') {
+      const stmt = buf.trim();
+      if (stmt) out.push(stmt);
+      buf = '';
+      i += 1;
+      continue;
+    }
+    buf += c;
+    i += 1;
+  }
+  const tail = buf.trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+async function tableNumbersAlreadyNormalized(
+  conn: PoolClient,
+  sql: string,
+): Promise<boolean> {
+  const row = (await conn.query<{ total: number; valid: number; distinct: number }>(sql)).rows[0];
+  const total = Number(row?.total || 0);
+  const valid = Number(row?.valid || 0);
+  const distinct = Number(row?.distinct || 0);
+  return total === valid && total === distinct;
+}
+
+async function applyUnifiedNumberingConstraints(conn: PoolClient): Promise<void> {
+  await conn.query(`ALTER TABLE orders ALTER COLUMN reference_number SET NOT NULL`);
+  await conn.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_reference_number_format`);
+  await conn.query(`
+    ALTER TABLE orders
+    ADD CONSTRAINT orders_reference_number_format CHECK (reference_number ~ '^ORD-[0-9]{7}$')
+  `);
+  await conn.query(`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_number_format`);
+  await conn.query(`
+    ALTER TABLE invoices
+    ADD CONSTRAINT invoices_number_format CHECK (invoice_number ~ '^[0-9]{8}$')
+  `);
+  await conn.query(`ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_number_format`);
+  await conn.query(`
+    ALTER TABLE quotations
+    ADD CONSTRAINT quotations_number_format CHECK (quote_number ~ '^[0-9]{8}$')
+  `);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reference_number ON orders(reference_number)`);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number_global ON invoices(invoice_number)`);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_number_global ON quotations(quote_number)`);
+}
+
+async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
+  const conn = await getPool().connect();
+  try {
+    await conn.query('BEGIN');
+    await conn.query(`SELECT pg_advisory_xact_lock(72910421)`);
+    const done = await conn.query<{ key: string }>(
+      `SELECT key FROM app_migrations WHERE key = 'unified_global_record_numbering_v1'`,
+    );
+    if (done.rows.length) {
+      await conn.query('COMMIT');
+      return;
+    }
+
+    const ordersNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE reference_number ~ '^ORD-[0-9]{7}$')::int AS valid,
+              COUNT(DISTINCT reference_number)::int AS distinct
+       FROM orders`,
+    );
+    const invoicesNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE invoice_number ~ '^[0-9]{8}$')::int AS valid,
+              COUNT(DISTINCT invoice_number)::int AS distinct
+       FROM invoices`,
+    );
+    const quotesNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE quote_number ~ '^[0-9]{8}$')::int AS valid,
+              COUNT(DISTINCT quote_number)::int AS distinct
+       FROM quotations`,
+    );
+
+    let maxInvoice = 0;
+    let maxQuote = 0;
+    let orderSerial = 1;
+
+    if (invoicesNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(invoice_number AS INTEGER)) AS m FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'`,
+      );
+      maxInvoice = Number(maxRow.rows[0]?.m || 0);
+    }
+    if (quotesNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(quote_number AS INTEGER)) AS m FROM quotations WHERE quote_number ~ '^[0-9]{8}$'`,
+      );
+      maxQuote = Number(maxRow.rows[0]?.m || 0);
+    }
+    if (ordersNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) AS m
+         FROM orders WHERE reference_number ~ '^ORD-[0-9]{7}$'`,
+      );
+      orderSerial = Number(maxRow.rows[0]?.m || 0) + 1;
+    }
+
+    // Numbers already unique and in the office format: do not re-stamp ORD-0000001…
+    // (that UPDATE collides with live rows when the migration key is missing).
+    if (!invoicesNormalized || !quotesNormalized || !ordersNormalized) {
+    await conn.query(`
+      UPDATE invoices
+      SET external_invoice_number = invoice_number
+      WHERE external_invoice_number IS NULL
+        AND (source_platform <> 'manual' OR invoice_number !~ '^[0-9]+$')
+    `);
+
+    if (!invoicesNormalized) {
+    const invoiceRows = await conn.query<{
+      id: number;
+      invoice_number: string;
+      created_at: string;
+    }>(`SELECT id, invoice_number, created_at FROM invoices ORDER BY created_at, id`);
+    const invoiceNumbers = assignLegacyDocumentNumbers(
+      invoiceRows.rows.map((row) => ({ id: row.id, value: row.invoice_number, created_at: row.created_at })),
+    );
+    await conn.query(`UPDATE invoices SET invoice_number = '__legacy_invoice_' || id`);
+    for (const [id, serial] of Array.from(invoiceNumbers.entries())) {
+      maxInvoice = Math.max(maxInvoice, serial);
+      await conn.query(`UPDATE invoices SET invoice_number = $1 WHERE id = $2`, [
+        String(serial).padStart(8, '0'),
+        id,
+      ]);
+    }
+    }
+
+    if (!quotesNormalized) {
+    const quoteRows = await conn.query<{
+      id: number;
+      quote_number: string;
+      created_at: string;
+    }>(`SELECT id, quote_number, created_at FROM quotations ORDER BY created_at, id`);
+    const quoteNumbers = assignLegacyDocumentNumbers(
+      quoteRows.rows.map((row) => ({ id: row.id, value: row.quote_number, created_at: row.created_at })),
+    );
+    await conn.query(`UPDATE quotations SET quote_number = '__legacy_quote_' || id`);
+    for (const [id, serial] of Array.from(quoteNumbers.entries())) {
+      maxQuote = Math.max(maxQuote, serial);
+      await conn.query(`UPDATE quotations SET quote_number = $1 WHERE id = $2`, [
+        String(serial).padStart(8, '0'),
+        id,
+      ]);
+    }
+    }
+
+    if (!ordersNormalized) {
+    const orderRows = await conn.query<{ id: number }>(
+      `SELECT id FROM orders ORDER BY created_at, id`,
+    );
+    orderSerial = 1;
+    for (const row of orderRows.rows) {
+      await conn.query(`UPDATE orders SET reference_number = $1 WHERE id = $2`, [
+        `ORD-${String(orderSerial).padStart(7, '0')}`,
+        row.id,
+      ]);
+      orderSerial += 1;
+    }
+    }
+    }
+
+    const linkedQuotes = await conn.query<{
+      id: number;
+      fields_json: string | null;
+      quote_number: string;
+    }>(
+      `SELECT o.id, o.fields_json, q.quote_number
+       FROM orders o
+       JOIN quotations q ON q.id = o.quotation_id`,
+    );
+    for (const row of linkedQuotes.rows) {
+      let fields: Record<string, unknown> = {};
+      try {
+        fields = row.fields_json ? JSON.parse(row.fields_json) : {};
+      } catch {
+        fields = {};
+      }
+      fields.quotation_no = row.quote_number;
+      await conn.query(`UPDATE orders SET fields_json = $1 WHERE id = $2`, [
+        JSON.stringify(fields),
+        row.id,
+      ]);
+    }
+
+    await conn.query(`
+      INSERT INTO global_record_sequences (record_type, next_serial)
+      VALUES ('order', $1), ('quotation', $2), ('invoice', $3)
+      ON CONFLICT (record_type) DO UPDATE
+      SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
+    `, [orderSerial, maxQuote + 1, maxInvoice + 1]);
+
+    await applyUnifiedNumberingConstraints(conn);
+    await conn.query(
+      `INSERT INTO app_migrations (key) VALUES ('unified_global_record_numbering_v1') ON CONFLICT DO NOTHING`,
+    );
+    await conn.query('COMMIT');
+  } catch (error) {
+    await conn.query('ROLLBACK');
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function migrateOrderStatusesV2Once(): Promise<void> {
+  const conn = await getPool().connect();
+  try {
+    await conn.query('BEGIN');
+    await conn.query(`SELECT pg_advisory_xact_lock(72910422)`);
+    const done = await conn.query<{ key: string }>(
+      `SELECT key FROM app_migrations WHERE key = 'order_status_workflow_v2'`,
+    );
+    if (done.rows.length) {
+      await conn.query('COMMIT');
+      return;
+    }
+
+    // Product decision: reset every existing order into the new workflow at OPEN.
+    await conn.query(`UPDATE orders SET status = 'OPEN'`);
+    await conn.query(`ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'OPEN'`);
+    await conn.query(
+      `INSERT INTO app_migrations (key) VALUES ('order_status_workflow_v2') ON CONFLICT DO NOTHING`,
+    );
+    await conn.query('COMMIT');
+  } catch (error) {
+    await conn.query('ROLLBACK');
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function syncGlobalRecordSequences(): Promise<void> {
+  // Align counters to the highest issued number in each table. Using GREATEST()
+  // only (never lowering) let Vitest fixtures (ORD-99999xx) inflate next_serial
+  // permanently after the fixture rows were deleted.
+  await getPool().query(`
+    INSERT INTO global_record_sequences (record_type, next_serial)
+    VALUES
+      ('order', COALESCE((SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) + 1 FROM orders WHERE reference_number ~ '^ORD-[0-9]{7}$'), 1)),
+      ('quotation', COALESCE((SELECT MAX(CAST(quote_number AS INTEGER)) + 1 FROM quotations WHERE quote_number ~ '^[0-9]{8}$'), 1)),
+      ('invoice', COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) + 1 FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'), 1))
+    ON CONFLICT (record_type) DO UPDATE
+    SET next_serial = EXCLUDED.next_serial
+  `);
+}
+
+async function runBootDataFixes(): Promise<void> {
+  await migrateUnifiedRecordNumberingOnce();
+  await migrateOrderStatusesV2Once();
+  // Keep counters aligned with live max on boot (also heals inflated test counters).
+  await syncGlobalRecordSequences();
+
+  // Sequence MAX scans once per DB (not every process cold start).
+  const migSeq = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'boot_sequence_sync_once_v1'`
+  );
+  if (!migSeq.rows.length) {
+    await syncGlobalRecordSequences();
+    await client().query(`
+      INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    const maxRow = await client().query<{ m: string | null }>(`
+      SELECT MAX(CAST(SUBSTR(batch_id, 5) AS INTEGER)) AS m
+      FROM expenses
+      WHERE batch_id IS NOT NULL AND batch_id LIKE 'EXP-%' AND LENGTH(batch_id) >= 5
+    `);
+    const maxSerial = Number(maxRow.rows[0]?.m || 0);
+    if (maxSerial > 0) {
+      await client().query(
+        `UPDATE expense_report_sequence SET next_serial = GREATEST(next_serial, $1) WHERE id = 1`,
+        [maxSerial + 1]
+      );
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('boot_sequence_sync_once_v1') ON CONFLICT DO NOTHING`
+    );
+  } else {
+    await client().query(`
+      INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
+      ON CONFLICT (id) DO NOTHING
+    `);
+  }
+
+  // Normalize utility billing mode labels (idempotent).
+  await client().query(`
+    UPDATE rental_units SET utility_billing_mode = 'company_shared_meter'
+    WHERE utility_billing_mode = 'company_proxy'
+  `);
+  await client().query(`
+    UPDATE rental_tenants SET utility_billing_mode = 'company_shared_meter'
+    WHERE utility_billing_mode = 'company_proxy'
+  `);
+
+  // Purge expired trash.
+  await client().query(`DELETE FROM deleted_records WHERE expires_at < to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')`);
+
+  // Fix legacy permission section key (hyphen → underscore).
+  await client().query(`
+    UPDATE role_permissions SET section = 'kitchen_prep'
+    WHERE section = 'kitchen-prep'
+  `);
+  // Drop obsolete role seeds (staff/viewer) and unused admin rows from the old boot path.
+  await client().query(`DELETE FROM role_permissions WHERE role IN ('staff', 'viewer', 'admin')`);
+
+  // Column must exist before any role_permissions insert/select uses access_level.
+  await client().query(
+    `ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'none'`,
   );
 
-  CREATE TABLE IF NOT EXISTS customers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    email TEXT,
-    phone TEXT,
-    address TEXT,
-    city TEXT,
-    state TEXT,
-    zip TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  // One-time backfill from legacy allowed flag.
+  const migAccessLevel = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'role_permissions_access_level_v1'`,
+  );
+  if (!migAccessLevel.rows.length) {
+    await client().query(`UPDATE role_permissions SET access_level = 'none' WHERE allowed = 0`);
+    await client().query(
+      `UPDATE role_permissions SET access_level = 'read'
+       WHERE allowed = 1 AND role = 'operator' AND section IN ('invoices', 'quotations')`,
+    );
+    await client().query(
+      `UPDATE role_permissions SET access_level = 'write'
+       WHERE allowed = 1 AND access_level = 'none'`,
+    );
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('role_permissions_access_level_v1')`,
+    );
+  }
+
+  // Role permissions: seed missing rows only; runtime access always reads role_permissions table.
+  const { ensureRolePermissionRows } = await import('./permissions-server');
+  await ensureRolePermissionRows();
+
+  // Store wall-clock timestamps in Asia/Hong_Kong (existing DBs still had UTC column defaults).
+  const migHkt = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'timestamp_defaults_asia_hong_kong_v1'`
+  );
+  if (!migHkt.rows.length) {
+    const hktDefault = `(to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))`;
+    const alters: [string, string][] = [
+      ['kitchen_movements', 'created_at'],
+      ['kitchen_prep_orders', 'created_at'],
+      ['kitchen_prep_orders', 'updated_at'],
+      ['kitchen_settings', 'updated_at'],
+      ['kitchen_order_fulfillments', 'updated_at'],
+      ['activity_logs', 'created_at'],
+    ];
+    for (const [table, col] of alters) {
+      await client().query(
+        `ALTER TABLE ${table} ALTER COLUMN ${col} SET DEFAULT ${hktDefault}`
+      );
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('timestamp_defaults_asia_hong_kong_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Allow kitchen_prep_orders.status = inactive (one-time constraint refresh).
+  const mig = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_status_inactive'`
+  );
+  if (!mig.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_status_check
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_status_check
+        CHECK (status IN ('inactive', 'scheduled', 'in_prep', 'completed'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_inactive') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Kitchen prep status v2: not_started / scheduled / prepped / stewing / completed.
+  const migPrepStatusV2 = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_status_v2'`
+  );
+  if (!migPrepStatusV2.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_status_check
+    `);
+    await client().query(`
+      UPDATE kitchen_prep_orders SET status = 'not_started' WHERE status = 'inactive'
+    `);
+    await client().query(`
+      UPDATE kitchen_prep_orders SET status = 'stewing' WHERE status = 'in_prep'
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_status_check
+        CHECK (status IN ('not_started', 'scheduled', 'prepped', 'stewing', 'completed'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_v2') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Allow kitchen_prep_orders.order_type = restock (補充存貨).
+  const migType = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_order_type_restock'`
+  );
+  if (!migType.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_order_type_check
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_order_type_check
+        CHECK (order_type IN ('daily', 'wedding', 'restock'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_order_type_restock') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Reconciliation approval workflow: Pending Approval + confidence / suggestion columns.
+  const migRecon = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_approval_workflow_v1'`
+  );
+  if (!migRecon.rows.length) {
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_status_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_status_check
+        CHECK (status IN ('Unmatched', 'Pending Approval', 'Matched', 'Discrepancy'))
+    `);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS confidence TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_order_id INTEGER`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_invoice_id INTEGER`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS candidate_order_ids_json TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_by TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_at TEXT`);
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_confidence_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_confidence_check
+        CHECK (confidence IS NULL OR confidence IN ('high', 'medium'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_approval_workflow_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Manual payment entry: source=manual + receipt_path.
+  const migReconManual = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_manual_entry_v1'`
+  );
+  if (!migReconManual.rows.length) {
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS receipt_path TEXT`);
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_source_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_source_check
+        CHECK (source IN ('yedpay', 'bank_upload', 'manual'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_manual_entry_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS created_by TEXT`);
+
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_osmanthus INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_red_date INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_rock_sugar INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS stewing_started_at TEXT`);
+
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_osmanthus TEXT DEFAULT 'large'`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_red_date TEXT DEFAULT 'large'`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_rock_sugar TEXT DEFAULT 'large'`);
+
+  // Extra manual payment methods: 現金 / 支票 / 銀行轉帳.
+  const migReconMethods = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_payment_methods_v2'`
+  );
+  if (!migReconMethods.rows.length) {
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_payment_method_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_payment_method_check
+        CHECK (payment_method IN ('Yedpay', 'FPS', 'Payme', '現金', '支票', '銀行轉帳'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_payment_methods_v2') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Drop unused legacy kitchen/order activity tables (replaced by gift-box movements + activity_logs).
+  const migDropLegacy = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'drop_legacy_kitchen_and_order_activities_v1'`
+  );
+  if (!migDropLegacy.rows.length) {
+    await client().query(`DROP TABLE IF EXISTS order_activities CASCADE`);
+    await client().query(`DROP TABLE IF EXISTS kitchen_daily_orders CASCADE`);
+    await client().query(`DROP TABLE IF EXISTS kitchen_batches CASCADE`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('drop_legacy_kitchen_and_order_activities_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Needed for rental charge upsert ON CONFLICT; ignore if duplicate rows already exist.
+  const migChargeUnique = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'rental_charge_items_upsert_unique_v1'`
+  );
+  if (!migChargeUnique.rows.length) {
+    try {
+      await client().query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rental_charge_items_upsert
+        ON rental_charge_items(user_id, unit_id, billing_period, charge_type)
+      `);
+    } catch (err) {
+      console.error('[InvoiceFlow] Could not create rental_charge_items unique index:', err);
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('rental_charge_items_upsert_unique_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  const migCustomersSchema = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'customers_simplified_schema_v1'`
   );
 
-  CREATE TABLE IF NOT EXISTS invoices (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    customer_id INTEGER NOT NULL,
-    invoice_number TEXT NOT NULL,
-    status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'paid', 'overdue')),
-    issue_date TEXT NOT NULL,
-    due_date TEXT NOT NULL,
-    tax_rate REAL DEFAULT 0,
-    notes TEXT,
-    terms TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT,
-    UNIQUE(user_id, invoice_number)
+  // Idempotent every boot — columns must exist before API queries / filtered index.
+  await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name TEXT`);
+  await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ordered TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS company_name TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS contact_name TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_contact_name TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_company_name TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS address TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_address TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_notes TEXT`);
+  await client().query(
+    `CREATE INDEX IF NOT EXISTS idx_customers_user_ordered ON customers(user_id, ordered)`
   );
 
-  CREATE TABLE IF NOT EXISTS invoice_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    invoice_id INTEGER NOT NULL,
-    description TEXT NOT NULL,
-    quantity REAL NOT NULL DEFAULT 1,
-    unit_price REAL NOT NULL DEFAULT 0,
-    amount REAL NOT NULL DEFAULT 0,
-    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
-  );
+  if (!migCustomersSchema.rows.length) {
+    const cityCol = await client().query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'city'`
+    );
+    if (cityCol.rows.length) {
+      await client().query(`
+        UPDATE customers SET address = trim(both from concat_ws(', ',
+          nullif(trim(address), ''), nullif(trim(city), ''),
+          nullif(trim(state), ''), nullif(trim(zip), '')))
+        WHERE city IS NOT NULL OR state IS NOT NULL OR zip IS NOT NULL
+      `);
+    }
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS city`);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS state`);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS zip`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('customers_simplified_schema_v1') ON CONFLICT DO NOTHING`
+    );
+  }
 
-  CREATE INDEX IF NOT EXISTS idx_customers_user ON customers(user_id);
-  CREATE INDEX IF NOT EXISTS idx_invoices_user ON invoices(user_id);
-  CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
-`);
+  const migDropLineItemServiceDate = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'drop_line_item_service_date_v1'`
+  );
+  if (!migDropLineItemServiceDate.rows.length) {
+    await client().query(`ALTER TABLE invoice_items DROP COLUMN IF EXISTS service_date`);
+    await client().query(`ALTER TABLE quotation_items DROP COLUMN IF EXISTS service_date`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('drop_line_item_service_date_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS quotation_id INTEGER`);
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deposit_amount DOUBLE PRECISION`);
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER`);
+  await client().query(`ALTER TABLE quotations ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER`);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_invoices_quotation ON invoices(quotation_id)
+    WHERE quotation_id IS NOT NULL
+  `);
+
+  const { migrateCustomerDedupOnce } = await import('./customer-server');
+  await migrateCustomerDedupOnce();
+
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT`);
+  await client().query(`ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT`);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user_kitchen_type ON orders(user_id, order_type)
+    WHERE order_type IS NOT NULL
+  `);
+
+  const migOrderType = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_order_type_column_v1'`
+  );
+  if (!migOrderType.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET order_type = NULLIF(TRIM(fields_json::jsonb->>'order_type'), '')
+      WHERE order_type IS NULL
+        AND fields_json IS NOT NULL
+        AND btrim(fields_json) <> ''
+        AND fields_json::jsonb ? 'order_type'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_order_type_column_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS attended_at TEXT`);
+  const migAttended = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_attended_at_backfill_v1'`
+  );
+  if (!migAttended.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET attended_at = COALESCE(NULLIF(TRIM(created_at), ''), to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
+      WHERE attended_at IS NULL
+        AND source_platform IS NOT NULL
+        AND source_platform <> 'manual'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_attended_at_backfill_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  const { migrateNestieeGiftBoxQtysOnce } = await import('./nestiee-gift-box-server');
+  await migrateNestieeGiftBoxQtysOnce();
+}
+
+export async function ensureSchema(): Promise<void> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return;
+  // Nested call from boot helpers (e.g. seedRolePermissionsIfEmpty → db.prepare) must not
+  // await the in-flight schemaReady promise — that deadlocks login and every first DB use.
+  if (schemaBootAls.getStore()) {
+    return;
+  }
+  if (!schemaReady) {
+    schemaReady = schemaBootAls
+      .run(true, async () => {
+        const sql = await loadSchemaSql();
+        // Autocommit each statement so AccessExclusiveLock is released between ALTERs.
+        // A single multi-statement Query holds locks across invoices + reconciliation_records
+        // and deadlocks concurrent JOINs (Postgres 40P01).
+        for (const stmt of splitSqlStatements(sql)) {
+          await getPool().query(stmt);
+        }
+        await runBootDataFixes();
+        warnIfEphemeralReceiptStorage();
+        warnIfR2Misconfigured();
+      })
+      .catch((err) => {
+        schemaReady = null;
+        throw err;
+      });
+  }
+  await schemaReady;
+}
+
+const db = {
+  prepare(sql: string) {
+    return new PgStatement(sql);
+  },
+
+  async exec(sql: string): Promise<void> {
+    await ensureSchema();
+    const adapted = adaptSql(sql);
+    await client().query(adapted);
+  },
+
+  /**
+   * Async transaction. Call as: `await db.transaction(async () => { ... })`
+   * (unlike better-sqlite3 which returned a runner function).
+   */
+  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    await ensureSchema();
+    const existing = txStorage.getStore();
+    if (existing) {
+      return fn();
+    }
+    const conn = await getPool().connect();
+    try {
+      await conn.query('BEGIN');
+      const result = await txStorage.run(conn, fn);
+      await conn.query('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await conn.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+};
 
 export default db;
+export { getPool };

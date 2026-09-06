@@ -1,14 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 export default function RegisterPage() {
   const { register } = useAuth();
   const [form, setForm] = useState({ name: '', email: '', password: '', company_name: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/setup-status')
+      .then((r) => r.json())
+      .then((d) => setRegistrationOpen(d.registration_open === true))
+      .catch(() => setRegistrationOpen(false));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,7 +26,7 @@ export default function RegisterPage() {
     try {
       await register(form);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setError(err instanceof Error ? err.message : MSG.registrationFailed);
     } finally {
       setLoading(false);
     }
@@ -31,11 +40,27 @@ export default function RegisterPage() {
             <span className="text-3xl">💰</span>
             <span className="font-bold text-xl">InvoiceFlow</span>
           </Link>
-          <h1 className="mt-6 text-2xl font-bold text-gray-900">Create your account</h1>
-          <p className="mt-2 text-gray-600">Start invoicing in minutes</p>
+          <h1 className="mt-6 text-2xl font-bold text-gray-900">
+            {registrationOpen === false ? bi('Registration closed', '註冊已關閉') : TITLE.createAccount}
+          </h1>
+          <p className="mt-2 text-gray-600">
+            {registrationOpen === false
+              ? bi('Ask an administrator to create your account.', '請聯絡管理員為您建立帳戶。')
+              : registrationOpen
+                ? bi('First setup — this account becomes the system administrator.', '首次設定 — 此帳戶將成為系統管理員。')
+                : BTN.loading}
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-8 shadow-sm">
+        {registrationOpen === false ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm text-center">
+            <p className="text-gray-600 text-sm mb-4">{bi('New users are created by an admin under Administration → Users.', '新用戶由管理員在「系統管理 → 用戶」中建立。')}</p>
+            <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+              {bi('Back to sign in', '返回登入')}
+            </Link>
+          </div>
+        ) : registrationOpen ? (
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
               {error}
@@ -44,7 +69,7 @@ export default function RegisterPage() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Full name', '全名')}</label>
               <input
                 type="text"
                 value={form.name}
@@ -55,7 +80,7 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Company name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Company name', '公司名稱')}</label>
               <input
                 type="text"
                 value={form.company_name}
@@ -65,7 +90,7 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Email', '電郵')}</label>
               <input
                 type="email"
                 value={form.email}
@@ -76,7 +101,7 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Password', '密碼')}</label>
               <input
                 type="password"
                 value={form.password}
@@ -94,16 +119,21 @@ export default function RegisterPage() {
             disabled={loading}
             className="mt-6 w-full py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? 'Creating account...' : 'Create account'}
+            {loading ? bi('Creating account…', '建立帳戶中…') : bi('Create account', '建立帳戶')}
           </button>
 
           <p className="mt-4 text-center text-sm text-gray-600">
-            Already have an account?{' '}
+            {bi('Already have an account?', '已有帳戶？')}{' '}
             <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium">
-              Sign in
+              {BTN.signIn}
             </Link>
           </p>
         </form>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 shadow-sm text-center text-gray-500">
+            {BTN.loading}
+          </div>
+        )}
       </div>
     </div>
   );

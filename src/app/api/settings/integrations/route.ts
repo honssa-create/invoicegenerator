@@ -1,0 +1,39 @@
+import { NextResponse } from 'next/server';
+import { requireApiAdmin } from '@/lib/api-guard';
+import { getDataOwnerId } from '@/lib/org-server';
+import {
+  getIntegrationSettingsMasked,
+  saveIntegrationSettings,
+} from '@/lib/integration-settings-server';
+import type { IntegrationSettingsUpdate } from '@/lib/integration-settings-server';
+
+export async function GET(request: Request) {
+  const session = await requireApiAdmin(request);
+  if (session instanceof NextResponse) return session;
+
+  const ownerId = await getDataOwnerId(session);
+  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
+}
+
+export async function PUT(request: Request) {
+  const session = await requireApiAdmin(request);
+  if (session instanceof NextResponse) return session;
+
+  let body: IntegrationSettingsUpdate;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const ownerId = await getDataOwnerId(session);
+  try {
+    await saveIntegrationSettings(ownerId, body);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to save settings' },
+      { status: 400 }
+    );
+  }
+  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
+}

@@ -1,122 +1,401 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import AppLayout from '@/components/AppLayout';
+import { useRouter, useSearchParams } from 'next/navigation';
+import FilterBar from '@/components/FilterBar';
+import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { invoiceFileUrl } from '@/lib/image-url';
+import { pickThumbnailFile } from '@/lib/attachment-files';
+import { ListThumb } from '@/components/EntityAttachments';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
-const STATUS_FILTERS = ['all', 'draft', 'sent', 'paid', 'overdue'] as const;
+type SortKey = 'number' | 'customer' | 'date' | 'due' | 'amount' | 'status';
+const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
+const PAGE_SIZE = 50;
+const INVOICES_LIST_UI_KEY = 'invoices-list-ui';
+const SORT_KEYS: SortKey[] = ['number', 'customer', 'date', 'due', 'amount', 'status'];
+
+type InvoicesListUiState = {
+  dateStart: string;
+  dateEnd: string;
+  client: string;
+  status: string;
+  search: string;
+  sort: { key: SortKey; dir: 'asc' | 'desc' };
+  page: number;
+};
+
+function PaginationBar({
+  page,
+  totalPages,
+  pageStart,
+  pageEnd,
+  total,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  pageStart: number;
+  pageEnd: number;
+  total: number;
+  onPage: (p: number) => void;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 text-sm">
+      <div className="text-gray-600">
+        {total === 0 ? 'No records' : `Showing ${pageStart + 1}–${pageEnd} of ${total}`}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPage(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          ← Prev
+        </button>
+        <span className="text-xs text-gray-500">
+          Page {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPage(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function InvoicesList() {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('invoices');
+  const savedUi = useMemo(() => readListUi<InvoicesListUiState>(INVOICES_LIST_UI_KEY), []);
+  const urlStatus = searchParams.get('status');
   const [invoices, setInvoices] = useState<InvoiceWithDetails[]>([]);
-  const [filter, setFilter] = useState(searchParams.get('status') || 'all');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const url = filter === 'all' ? '/api/invoices' : `/api/invoices?status=${filter}`;
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [client, setClient] = useState(savedUi?.client ?? '');
+  const [status, setStatus] = useState(() => urlStatus || savedUi?.status || '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && SORT_KEYS.includes(key) && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'date', dir: 'desc' };
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const skipPageResetRef = useRef(true);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
+
+  const loadInvoices = () => {
     setLoading(true);
-    fetch(url)
+    fetch('/api/invoices')
       .then((res) => res.json())
       .then((data) => setInvoices(data.invoices || []))
       .finally(() => setLoading(false));
-  }, [filter]);
+  };
+
+  useEffect(() => {
+    loadInvoices();
+  }, []);
+
+  const clientOptions = Array.from(new Set(invoices.map((i) => i.customer_name).filter(Boolean)));
+
+  const displayed = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = invoices.filter((inv) => {
+      if (dateStart && inv.issue_date < dateStart) return false;
+      if (dateEnd && inv.issue_date > dateEnd) return false;
+      if (client && inv.customer_name !== client) return false;
+      if (status && inv.status !== status) return false;
+      if (q) {
+        const hay = [inv.invoice_number, inv.customer_name].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    list = [...list].sort((a, b) => {
+      let base: number;
+      switch (sort.key) {
+        case 'number':
+          base = a.invoice_number.localeCompare(b.invoice_number);
+          break;
+        case 'customer':
+          base = a.customer_name.localeCompare(b.customer_name);
+          break;
+        case 'due':
+          base = a.due_date.localeCompare(b.due_date);
+          break;
+        case 'amount':
+          base = a.total - b.total;
+          break;
+        case 'status':
+          base = a.status.localeCompare(b.status);
+          break;
+        default:
+          base = a.issue_date.localeCompare(b.issue_date);
+      }
+      return dir * base;
+    });
+    return list;
+  }, [invoices, dateStart, dateEnd, client, status, search, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
+  const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
+  const pageEnd = Math.min(page * PAGE_SIZE, displayed.length);
+  const pageRows = displayed.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    writeListUi(INVOICES_LIST_UI_KEY, {
+      dateStart,
+      dateEnd,
+      client,
+      status,
+      search,
+      sort,
+      page,
+    });
+  }, [dateStart, dateEnd, client, status, search, sort, page]);
+
+  useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
+    setPage(1);
+  }, [dateStart, dateEnd, client, status, search, sort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
+  const sortTh = (key: SortKey, label: string) => (
+    <th
+      onClick={() => toggleSort(key)}
+      className={`px-6 py-3 cursor-pointer select-none whitespace-nowrap hover:text-gray-700 ${sort.key === key ? 'text-brand-700' : ''}`}
+    >
+      {label}
+      <span className="text-gray-400">{arrow(key)}</span>
+    </th>
+  );
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this invoice?')) return;
+    if (!confirm('Move this invoice to Deleted Records? You can restore it within 60 days.')) return;
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     setInvoices((prev) => prev.filter((i) => i.id !== id));
   };
 
+  const handleDuplicate = async (id: number) => {
+    setDuplicatingId(id);
+    try {
+      const res = await fetch(`/api/invoices/${id}/duplicate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || bi('Failed to duplicate invoice', '複製發票失敗'));
+        return;
+      }
+      router.push(`/invoices/${data.id}`);
+    } catch {
+      alert(bi('Failed to duplicate invoice', '複製發票失敗'));
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
+  const clearFilters = () => {
+    setDateStart('');
+    setDateEnd('');
+    setClient('');
+    setStatus('');
+    setSearch('');
+  };
+
+  const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
+
   return (
-    <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+    <>
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-500 mt-1">Create and manage your invoices</p>
+          <h1 className="page-title">{TITLE.invoices}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? bi('View invoices (read-only)', '查看發票（唯讀）') : bi('Create and manage your invoices', '建立及管理發票')}</p>
         </div>
-        <Link
-          href="/invoices/new"
-          className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
-        >
-          + New Invoice
-        </Link>
+        <div className="page-actions">
+          {!readOnly && (
+            <Link
+              href="/invoices/reminders"
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              ⏰ {bi('Payment reminders', '催款郵件')}
+            </Link>
+          )}
+          <a href="/api/invoices/export" className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            ⬇ {BTN.exportExcel}
+          </a>
+          {!readOnly && (
+          <Link href="/invoices/new" className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+            + {TITLE.newInvoice}
+          </Link>
+          )}
+        </div>
       </div>
 
-      <div className="flex gap-2 mb-6">
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`px-3 py-1.5 text-sm rounded-lg capitalize transition-colors ${
-              filter === s
-                ? 'bg-brand-600 text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
+      <FilterBar
+        dateStart={dateStart}
+        dateEnd={dateEnd}
+        onDateStart={setDateStart}
+        onDateEnd={setDateEnd}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder={bi('Search invoice # or client…', '搜尋發票編號或客戶…')}
+        onClear={clearFilters}
+      >
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Client', '客戶')}</label>
+          <select value={client} onChange={(e) => setClient(e.target.value)} className={selectCls}>
+            <option value="">{BTN.all}</option>
+            {clientOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
+            <option value="">{BTN.all}</option>
+            {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
+          </select>
+        </div>
+      </FilterBar>
 
       <div className="bg-white rounded-xl border border-gray-200">
         {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
+          <div className="p-6 space-y-3 animate-pulse">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-10 bg-gray-100 rounded-lg" />
+            ))}
           </div>
-        ) : invoices.length === 0 ? (
+        ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No invoices found.</p>
-            <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">
-              Create an invoice
-            </Link>
+            <p>{bi('No invoices match your filters.', '沒有符合篩選條件的發票。')}</p>
+            {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">{bi('Create an invoice', '建立發票')}</Link>}
           </div>
         ) : (
-          <table className="w-full">
+          <>
+          <PaginationBar
+            page={page}
+            totalPages={totalPages}
+            pageStart={pageStart}
+            pageEnd={pageEnd}
+            total={displayed.length}
+            onPage={setPage}
+          />
+          <div className="table-scroll">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3">Invoice #</th>
-                <th className="px-6 py-3">Customer</th>
-                <th className="px-6 py-3">Issue Date</th>
-                <th className="px-6 py-3">Due Date</th>
-                <th className="px-6 py-3">Amount</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3">Actions</th>
+                <th className="px-4 py-3 w-14">{bi('Thumb', '封面')}</th>
+                {sortTh('number', bi('Invoice #', '發票編號'))}
+                {sortTh('customer', bi('Customer', '客戶'))}
+                {sortTh('date', bi('Issue Date', '開立日期'))}
+                {sortTh('due', bi('Due Date', '到期日'))}
+                {sortTh('amount', bi('Amount', '金額'))}
+                {sortTh('status', bi('Status', '狀態'))}
+                <th className="px-6 py-3">{bi('Actions', '操作')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {invoices.map((inv) => (
+              {pageRows.map((inv) => (
                 <tr key={inv.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-4">
+                    {(() => {
+                      const thumb = pickThumbnailFile(inv.files || [], inv.thumbnail_file_id);
+                      return <ListThumb src={thumb ? invoiceFileUrl(thumb) : null} alt="" />;
+                    })()}
+                  </td>
                   <td className="px-6 py-4">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-                      {inv.invoice_number}
-                    </Link>
+                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{displayInvoiceNumber(inv.invoice_number)}</Link>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700">{inv.customer_name}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.issue_date)}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.due_date)}</td>
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(inv.total)}</td>
                   <td className="px-6 py-4"><StatusBadge status={inv.status} /></td>
-                  <td className="px-6 py-4 text-sm space-x-3">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">
-                      View
-                    </Link>
-                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">
-                      Print
-                    </Link>
-                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">
-                      Delete
-                    </button>
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex flex-col items-start gap-1">
+                      <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.view}</Link>
+                      <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">{BTN.print}</Link>
+                      {inv.status === 'paid' && (
+                        <Link
+                          href={`/invoices/${inv.id}/receipt`}
+                          className="text-gray-600 hover:text-gray-800 font-medium"
+                        >
+                          {bi('Receipt', '收據')}
+                        </Link>
+                      )}
+                      {!readOnly && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleDuplicate(inv.id)}
+                            disabled={duplicatingId === inv.id}
+                            className="text-gray-600 hover:text-gray-800 font-medium disabled:opacity-50"
+                          >
+                            {duplicatingId === inv.id
+                              ? bi('Duplicating…', '複製中…')
+                              : bi('Duplicate', '複製')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(inv.id)}
+                            className="text-red-600 hover:text-red-700 font-medium"
+                          >
+                            {BTN.delete}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
+          {displayed.length > PAGE_SIZE && (
+            <div className="border-t border-gray-100">
+              <PaginationBar
+                page={page}
+                totalPages={totalPages}
+                pageStart={pageStart}
+                pageEnd={pageEnd}
+                total={displayed.length}
+                onPage={setPage}
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 }

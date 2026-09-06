@@ -16,6 +16,7 @@
 # misc
 .DS_Store
 *.pem
+*.traineddata
 
 # debug
 npm-debug.log*
@@ -31,7 +32,16 @@ yarn-error.log*
 /data/*.db-journal
 /data/*.db-shm
 /data/*.db-wal
+/data/.next-build.sqlite
+
+# uploaded receipts
+/data/receipts/
 
 # typescript
 next-env.d.ts
 *.tsbuildinfo
+dev-server.log
+data/.next-build.sqlite*
+
+# generated docs (regenerate with: npm run docs:onboarding)
+/docs/*.docx

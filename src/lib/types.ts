@@ -1,67 +1,132 @@
-export interface User {
-  id: number;
-  email: string;
-  name: string;
-  company_name: string | null;
-  created_at: string;
-}
-
 export interface Customer {
   id: number;
   user_id: number;
   name: string;
+  company_name: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
+  ordered: string | null;
   created_at: string;
 }
 
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue';
+export type InvoiceDiscountType = 'percent' | 'amount';
 
 export interface Invoice {
   id: number;
   user_id: number;
   customer_id: number;
+  order_id: number | null;
+  quotation_id: number | null;
   invoice_number: string;
+  external_invoice_number: string | null;
   status: InvoiceStatus;
   issue_date: string;
   due_date: string;
   tax_rate: number;
   notes: string | null;
   terms: string | null;
+  billing_address: string | null;
+  shipping_address: string | null;
+  email: string | null;
+  send_later: boolean;
+  ship_via: string | null;
+  shipping_date: string | null;
+  tracking_no: string | null;
+  order_no: string | null;
+  receipt_date: string | null;
+  currency: string | null;
+  discount_type: InvoiceDiscountType;
+  discount_value: number;
+  shipping_amount: number;
+  deposit_amount: number | null;
+  thumbnail_file_id: number | null;
+  term: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface LinkedOrderSummary {
+  id: number;
+  reference_number: string;
+  po_number: string | null;
+  name: string | null;
+  description: string | null;
 }
 
 export interface InvoiceItem {
   id: number;
   invoice_id: number;
+  product_service: string | null;
   description: string;
   quantity: number;
   unit_price: number;
   amount: number;
+  class_name: string | null;
+}
+
+export interface InvoiceFile {
+  id: number;
+  path: string;
+  original_name: string | null;
 }
 
 export interface InvoiceWithDetails extends Invoice {
   customer_name: string;
   customer_email: string | null;
+  customer_company_name: string | null;
+  customer_phone: string | null;
   customer_address: string | null;
-  customer_city: string | null;
-  customer_state: string | null;
-  customer_zip: string | null;
   items: InvoiceItem[];
+  files: InvoiceFile[];
   subtotal: number;
+  discount_amount: number;
   tax_amount: number;
   total: number;
 }
 
-export interface DashboardStats {
-  totalInvoices: number;
-  totalRevenue: number;
-  pendingAmount: number;
-  overdueCount: number;
-  recentInvoices: InvoiceWithDetails[];
+export type PaymentStatus = 'unpaid' | 'pending' | 'paid';
+
+export interface ExpenseReceipt {
+  id: number;
+  path: string;
+  source_url?: string | null;
+}
+
+export interface Expense {
+  id: number;
+  user_id: number;
+  created_by_user_id?: number | null;
+  receipt_no: string | null;
+  batch_id: string | null;
+  category: string;
+  merchant: string | null;
+  supplier_input: string | null;
+  amount_hkd: number | null;
+  amount_rmb: number | null;
+  paid_date: string | null;
+  order_no: string | null;
+  platform: string | null;
+  payment_method: string | null;
+  payment_channel: string | null;
+  funding_source: string | null;
+  card_last4: string | null;
+  notes: string | null;
+  special_notes: string | null;
+  payment_status: PaymentStatus;
+  receipt_path: string | null;
+  receipts: ExpenseReceipt[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReceiptScanResult {
+  merchant: string | null;
+  date: string | null;
+  amount_hkd: number | null;
+  amount_rmb: number | null;
+  receipt_path: string | null;
+  raw_text: string;
+  source: 'ai' | 'ocr';
 }

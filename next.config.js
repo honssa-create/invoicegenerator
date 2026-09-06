@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3'],
+    serverComponentsExternalPackages: ['pg', 'tesseract.js', 'exceljs', 'xlsx', '@aws-sdk/client-s3', 'jszip', 'html2canvas', 'jspdf'],
   },
 };
 

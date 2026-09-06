@@ -1,0 +1,765 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import AppLayout from '@/components/AppLayout';
+import ActivityFeed from '@/components/ActivityFeed';
+import CustomerSelect from '@/components/CustomerSelect';
+import { useAuth } from '@/components/AuthProvider';
+import { formatCurrency } from '@/components/ui';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
+import {
+  buildQuotationEditorSnapshot,
+  quotationSnapshotFromRecord,
+} from '@/lib/document-editor-snapshot';
+import { quotationFileUrl } from '@/lib/image-url';
+import EntityAttachments from '@/components/EntityAttachments';
+import {
+  calculateQuotationTotals,
+  QUOTATION_STATUSES,
+  QUOTATION_STATUS_COLORS,
+  QUOTATION_STATUS_FORM_LABEL,
+  type QuotationDiscountType,
+  type QuotationFile,
+  type QuotationWithDetails,
+} from '@/lib/quotations';
+import { formatCustomerPartyBlockFromCustomer } from '@/lib/customer-party';
+import type { Customer } from '@/lib/types';
+import { displayInvoiceNumber, displayOrderNumber, displayQuotationNumber } from '@/lib/record-numbering-core';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
+
+interface LineItem {
+  product_service: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+}
+
+const emptyLine = (): LineItem => ({
+  product_service: '',
+  description: '',
+  quantity: 1,
+  unit_price: 0,
+});
+
+export default function QuotationDetailPage() {
+  const { id } = useParams();
+  const router = useRouter();
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('quotations');
+  const [quote, setQuote] = useState<QuotationWithDetails | null>(null);
+  const [customerId, setCustomerId] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [email, setEmail] = useState('');
+  const [sendLater, setSendLater] = useState(false);
+  const [issueDate, setIssueDate] = useState('');
+  const [validUntil, setValidUntil] = useState('');
+  const [taxRate, setTaxRate] = useState(0);
+  const [status, setStatus] = useState('draft');
+  const [notes, setNotes] = useState('');
+  const [terms, setTerms] = useState('');
+  const [billingAddress, setBillingAddress] = useState('');
+  const [shippingAddress, setShippingAddress] = useState('');
+  const [shipVia, setShipVia] = useState('');
+  const [shippingDate, setShippingDate] = useState('');
+  const [trackingNo, setTrackingNo] = useState('');
+  const [orderNo, setOrderNo] = useState('');
+  const [receiptDate, setReceiptDate] = useState('');
+  const [currency, setCurrency] = useState('HKD');
+  const [discountType, setDiscountType] = useState<QuotationDiscountType>('percent');
+  const [discountValue, setDiscountValue] = useState(0);
+  const [shippingAmount, setShippingAmount] = useState(0);
+  const [items, setItems] = useState<LineItem[]>([emptyLine()]);
+  const [files, setFiles] = useState<QuotationFile[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+
+  const load = () => {
+    fetch(`/api/quotations/${id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const q: QuotationWithDetails = d.quotation;
+        if (!q) return;
+        setQuote(q);
+        setCustomerId(q.customer_id ? String(q.customer_id) : '');
+        setCustomerName(q.customer_name || '');
+        setEmail(q.email || q.customer_email || '');
+        setSendLater(Boolean(q.send_later));
+        setIssueDate(q.issue_date);
+        setValidUntil(q.valid_until || '');
+        setTaxRate(q.tax_rate);
+        setStatus(q.status);
+        setNotes(q.notes || '');
+        setTerms(q.terms || '');
+        setBillingAddress(q.billing_address || '');
+        setShippingAddress(q.shipping_address || '');
+        setShipVia(q.ship_via || '');
+        setShippingDate(q.shipping_date || '');
+        setTrackingNo(q.tracking_no || '');
+        setOrderNo(q.order_no || '');
+        setReceiptDate(q.receipt_date || '');
+        setCurrency(q.currency || 'HKD');
+        setDiscountType(q.discount_type || 'percent');
+        setDiscountValue(q.discount_value || 0);
+        setShippingAmount(q.shipping_amount || 0);
+        setItems(
+          q.items.length
+            ? q.items.map((i) => ({
+                product_service: i.product_service || '',
+                description: i.description || '',
+                quantity: i.quantity,
+                unit_price: i.unit_price,
+              }))
+            : [emptyLine()]
+        );
+        setFiles(q.files || []);
+        setSavedSnapshot(quotationSnapshotFromRecord(q));
+      });
+  };
+  useEffect(() => {
+    load();
+  }, [id]);
+
+  const totals = useMemo(
+    () =>
+      calculateQuotationTotals(items, {
+        taxRate,
+        discountType,
+        discountValue,
+        shippingAmount,
+      }),
+    [items, taxRate, discountType, discountValue, shippingAmount]
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      buildQuotationEditorSnapshot({
+        customerId,
+        email,
+        sendLater,
+        issueDate,
+        validUntil,
+        taxRate,
+        status,
+        notes,
+        terms,
+        billingAddress,
+        shippingAddress,
+        shipVia,
+        shippingDate,
+        trackingNo,
+        orderNo,
+        receiptDate,
+        currency,
+        discountType,
+        discountValue,
+        shippingAmount,
+        items,
+      }),
+    [
+      customerId,
+      email,
+      sendLater,
+      issueDate,
+      validUntil,
+      taxRate,
+      status,
+      notes,
+      terms,
+      billingAddress,
+      shippingAddress,
+      shipVia,
+      shippingDate,
+      trackingNo,
+      orderNo,
+      receiptDate,
+      currency,
+      discountType,
+      discountValue,
+      shippingAmount,
+      items,
+    ],
+  );
+
+  const isDirty = !readOnly && savedSnapshot !== null && savedSnapshot !== currentSnapshot;
+  useUnsavedChangesWarning(isDirty);
+
+  const save = async () => {
+    setSaving(true);
+    const res = await fetch(`/api/quotations/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customer_id: customerId ? Number(customerId) : null,
+        issue_date: issueDate,
+        valid_until: validUntil,
+        tax_rate: taxRate,
+        status,
+        notes,
+        terms,
+        billing_address: billingAddress,
+        shipping_address: shippingAddress,
+        email,
+        send_later: sendLater,
+        ship_via: shipVia,
+        shipping_date: shippingDate,
+        tracking_no: trackingNo,
+        order_no: orderNo,
+        receipt_date: receiptDate,
+        currency,
+        discount_type: discountType,
+        discount_value: discountValue,
+        shipping_amount: shippingAmount,
+        items: items.filter((i) => i.description.trim() || i.product_service.trim()),
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setMsg('Saved');
+      setSavedSnapshot(currentSnapshot);
+      load();
+      setTimeout(() => setMsg(''), 2000);
+    }
+  };
+
+  const convert = async (target: 'invoice' | 'order') => {
+    if (target === 'order' && quote?.linked_order) {
+      alert(bi('This quotation is already linked to an order.', '此報價單已關聯訂單。'));
+      return;
+    }
+    await save();
+    const res = await fetch(`/api/quotations/${id}/convert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 409 && data.id) {
+        alert(bi('Already linked to an order.', '已關聯訂單。'));
+        router.push(`/orders/${data.id}`);
+        return;
+      }
+      alert(data.error || MSG.conversionFailed);
+      return;
+    }
+    router.push(target === 'invoice' ? `/invoices/${data.id}` : `/orders/${data.id}`);
+  };
+
+  const copyToInvoice = async () => {
+    if (quote?.linked_invoice) {
+      alert(bi('This quotation is already linked to an invoice.', '此報價單已關聯發票。'));
+      router.push(`/invoices/${quote.linked_invoice.id}`);
+      return;
+    }
+    setCopying(true);
+    try {
+      await save();
+      const res = await fetch(`/api/quotations/${id}/copy-to-invoice`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 409 && (data as { id?: number }).id) {
+          alert(bi('Already linked to an invoice.', '已關聯發票。'));
+          router.push(`/invoices/${(data as { id: number }).id}`);
+          return;
+        }
+        setToast({ text: (data as { error?: string }).error || 'Failed to create invoice', kind: 'error' });
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      setToast({ text: bi('Invoice created from quotation.', '已從報價單建立發票。'), kind: 'success' });
+      setTimeout(() => router.push(`/invoices/${(data as { id: number }).id}`), 1500);
+    } catch {
+      setToast({ text: 'Failed to copy quotation', kind: 'error' });
+      setTimeout(() => setToast(null), 5000);
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const duplicate = async () => {
+    setDuplicating(true);
+    await save();
+    try {
+      const res = await fetch(`/api/quotations/${id}/duplicate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setToast({ text: data.error || bi('Failed to duplicate quotation', '複製報價單失敗'), kind: 'error' });
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      setToast({
+        text: bi(
+          `Duplicated as ${displayQuotationNumber(data.quote_number)}`,
+          `已複製為 ${displayQuotationNumber(data.quote_number)}`,
+        ),
+        kind: 'success',
+      });
+      setTimeout(() => router.push(`/quotations/${data.id}`), 800);
+    } catch {
+      setToast({ text: bi('Failed to duplicate quotation', '複製報價單失敗'), kind: 'error' });
+      setTimeout(() => setToast(null), 5000);
+    } finally {
+      setDuplicating(false);
+    }
+  };
+
+  const del = async () => {
+    if (!confirm('Move this quotation to Deleted Records? You can restore it within 60 days.')) return;
+    await fetch(`/api/quotations/${id}`, { method: 'DELETE' });
+    router.push('/quotations');
+  };
+
+  const updateItem = (i: number, field: keyof LineItem, value: string | number) =>
+    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, [field]: value } : it)));
+  const addItem = () => setItems((prev) => [...prev, emptyLine()]);
+  const clearItems = () => setItems([emptyLine()]);
+  const removeItem = (i: number) =>
+    setItems((prev) => (prev.length <= 1 ? [emptyLine()] : prev.filter((_, idx) => idx !== i)));
+
+  const applyCustomer = (c: Customer) => {
+    setCustomerId(String(c.id));
+    setCustomerName(c.name);
+    if (!email.trim() && c.email) setEmail(c.email);
+    const composed = formatCustomerPartyBlockFromCustomer(c);
+    if (!billingAddress.trim() && composed) setBillingAddress(composed);
+    if (!shippingAddress.trim() && composed) setShippingAddress(composed);
+  };
+
+  if (!quote) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const inputCls =
+    'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-brand-500 outline-none disabled:bg-gray-50';
+  const labelCls = 'block text-xs font-medium text-gray-600 mb-1';
+  const hintCls = 'text-[11px] text-gray-400 mt-0.5';
+  const currencyLabel = currency || 'HKD';
+
+  return (
+    <AppLayout>
+      <div className="page-header">
+        <div>
+          <Link href="/quotations" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
+            ← {bi('Back to quotations', '返回報價單')}
+          </Link>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <h1 className="page-title">{displayQuotationNumber(quote.quote_number)}</h1>
+            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${QUOTATION_STATUS_COLORS[status]}`}>
+              {QUOTATION_STATUS_FORM_LABEL[status as keyof typeof QUOTATION_STATUS_FORM_LABEL] || status}
+            </span>
+            {quote.linked_order && (
+              <Link
+                href={`/orders/${quote.linked_order.id}`}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-sm font-medium hover:bg-teal-100"
+              >
+                🔗{' '}
+                {displayOrderNumber(quote.linked_order.po_number) ||
+                  quote.linked_order.reference_number ||
+                  `#${quote.linked_order.id}`}
+              </Link>
+            )}
+            {quote.linked_invoice && (
+              <Link
+                href={`/invoices/${quote.linked_invoice.id}`}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100"
+              >
+                🔗 {displayInvoiceNumber(quote.linked_invoice.invoice_number)} · {quote.linked_invoice.status}
+              </Link>
+            )}
+          </div>
+        </div>
+        <div className="page-actions">
+          <Link href={`/quotations/${id}/print`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
+            🧾 {bi('Generate PDF', '產生 PDF')}
+          </Link>
+          <a href={`/api/quotations/${id}/export`} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
+            ⬇ {BTN.exportExcel}
+          </a>
+          {!readOnly && (
+            <>
+              <button
+                onClick={duplicate}
+                disabled={duplicating}
+                className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                {duplicating
+                  ? bi('Duplicating…', '複製中…')
+                  : `📄 ${bi('Duplicate', '複製報價單')}`}
+              </button>
+              <button
+                onClick={copyToInvoice}
+                disabled={copying || Boolean(quote.linked_invoice)}
+                title={
+                  quote.linked_invoice
+                    ? bi('Already linked to an invoice', '已關聯發票')
+                    : undefined
+                }
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {copying
+                  ? bi('Creating…', '建立中…')
+                  : quote.linked_invoice
+                    ? bi('Linked to Invoice', '已轉換為發票')
+                    : `📋 ${bi('Create New Invoice', '轉換為發票')}`}
+              </button>
+              <button
+                onClick={() => convert('order')}
+                disabled={Boolean(quote.linked_order)}
+                title={
+                  quote.linked_order
+                    ? bi('Already linked to an order', '已關聯訂單')
+                    : undefined
+                }
+                className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {quote.linked_order
+                  ? bi('Linked to Order', '已轉換為訂單')
+                  : `→ ${bi('Convert to Order', '轉換為訂單')}`}
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50"
+              >
+                {saving ? BTN.saving : BTN.save}
+              </button>
+              <button onClick={del} className="px-4 py-2 text-red-600 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-50">
+                {BTN.delete}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {msg && <div className="mb-4 text-sm text-green-700">{msg}</div>}
+
+      <div className="grid xl:grid-cols-[1fr_280px] gap-6">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {/* Header: customer / email / status / total */}
+          <div className="p-5 border-b border-gray-100 grid lg:grid-cols-[1fr_1fr_auto] gap-4 items-start">
+            <div className="space-y-3">
+              <div>
+                <label className={labelCls}>{bi('Customer', '客戶')}</label>
+                <CustomerSelect
+                  value={customerName}
+                  onSelect={applyCustomer}
+                  disabled={readOnly}
+                  placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
+                />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className={labelCls}>Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={readOnly} className={inputCls} placeholder="customer@email.com" />
+                <label className="mt-2 inline-flex items-center gap-2 text-sm text-gray-700 select-none">
+                  <input
+                    type="checkbox"
+                    checked={sendLater}
+                    onChange={(e) => setSendLater(e.target.checked)}
+                    disabled={readOnly}
+                    className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  Send later
+                </label>
+              </div>
+            </div>
+            <div className="text-right lg:pl-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AMOUNT</p>
+              <p className="text-3xl font-bold text-gray-900 tabular-nums mt-1">
+                {currencyLabel} {totals.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+          </div>
+
+          {/* Addresses + date/shipping meta */}
+          <div className="p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-6">
+            <div className="space-y-4 w-full lg:w-1/4 lg:min-w-[11rem] lg:max-w-xs shrink-0">
+              <div>
+                <label className={labelCls}>Billing address</label>
+                <textarea
+                  value={billingAddress}
+                  onChange={(e) => setBillingAddress(e.target.value)}
+                  disabled={readOnly}
+                  rows={4}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Shipping to</label>
+                <textarea
+                  value={shippingAddress}
+                  onChange={(e) => setShippingAddress(e.target.value)}
+                  disabled={readOnly}
+                  rows={4}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3 content-start w-full lg:w-1/2 shrink-0">
+              <div>
+                <label className={labelCls}>Estimate date</label>
+                <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Expiration date</label>
+                <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Ship via</label>
+                <input value={shipVia} onChange={(e) => setShipVia(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Shipping date</label>
+                <input type="date" value={shippingDate} onChange={(e) => setShippingDate(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Tracking no.</label>
+                <input value={trackingNo} onChange={(e) => setTrackingNo(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Order no.</label>
+                <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} disabled={readOnly} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Receipt Date</label>
+                <input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} disabled={readOnly} className={inputCls} />
+                <p className={hintCls}>Not printed on form</p>
+              </div>
+              <div>
+                <label className={labelCls}>Currency</label>
+                <input value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={readOnly} className={inputCls} />
+                <p className={hintCls}>Not printed on form</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Line items */}
+          <div className="p-5 border-b border-gray-100 overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
+                  <th className="text-left py-2 pr-2 font-medium w-8">#</th>
+                  <th className="text-left py-2 pr-2 font-medium">Product/Service</th>
+                  <th className="text-left py-2 pr-2 font-medium">Description</th>
+                  <th className="text-right py-2 pr-2 font-medium w-20">Qty</th>
+                  <th className="text-right py-2 pr-2 font-medium w-24">Rate</th>
+                  <th className="text-right py-2 pr-6 font-medium w-32">Amount ({currencyLabel})</th>
+                  <th className="w-10 pr-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, i) => (
+                  <tr key={i} className="border-b border-gray-100 align-top">
+                    <td className="py-2 pr-2 text-gray-400">{i + 1}</td>
+                    <td className="py-2 pr-2">
+                      <input
+                        value={item.product_service}
+                        onChange={(e) => updateItem(i, 'product_service', e.target.value)}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm"
+                        placeholder="Product / service"
+                      />
+                    </td>
+                    <td className="py-2 pr-2 min-w-[220px]">
+                      <textarea
+                        value={item.description}
+                        onChange={(e) => updateItem(i, 'description', e.target.value)}
+                        disabled={readOnly}
+                        rows={3}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm resize-y min-h-[4.5rem]"
+                        placeholder="Description"
+                      />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => updateItem(i, 'quantity', Number(e.target.value))}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm text-right"
+                      />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        value={item.unit_price}
+                        onChange={(e) => updateItem(i, 'unit_price', Number(e.target.value))}
+                        disabled={readOnly}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm text-right"
+                      />
+                    </td>
+                    <td className="py-2 pr-6 text-right tabular-nums pt-3">{formatCurrency(item.quantity * item.unit_price)}</td>
+                    <td className="py-2 pr-2">
+                      {!readOnly && (
+                        <button type="button" onClick={() => removeItem(i)} className="text-gray-400 hover:text-red-600 text-sm px-1" title="Remove line">
+                          🗑
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!readOnly && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button type="button" onClick={addItem} className="px-3 py-1.5 text-sm font-medium text-brand-700 border border-brand-200 rounded-md hover:bg-brand-50">
+                  Add lines
+                </button>
+                <button type="button" onClick={clearItems} className="px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50">
+                  Clear all lines
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Messages + totals */}
+          <div className="p-5 grid lg:grid-cols-[1.2fr_0.8fr] gap-6">
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>Message displayed on estimate</label>
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} disabled={readOnly} rows={4} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Message displayed on statement</label>
+                <textarea
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  disabled={readOnly}
+                  rows={3}
+                  className={inputCls}
+                  placeholder="This description will show up if the estimate is converted to an invoice."
+                />
+              </div>
+            </div>
+            <div className="space-y-2 text-sm max-w-sm ml-auto w-full">
+              <div className="flex justify-between py-1">
+                <span className="text-gray-500">Subtotal</span>
+                <span className="tabular-nums">{formatCurrency(totals.subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500 shrink-0">Discount</span>
+                <div className="flex items-center gap-1">
+                  <select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value as QuotationDiscountType)}
+                    disabled={readOnly}
+                    className="px-2 py-1 border border-gray-300 rounded text-xs"
+                  >
+                    <option value="percent">Discount percent</option>
+                    <option value="amount">Discount amount</option>
+                  </select>
+                  <input
+                    type="number"
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(Number(e.target.value))}
+                    disabled={readOnly}
+                    className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span />
+                <span>− {formatCurrency(totals.discountAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500">Shipping</span>
+                <input
+                  type="number"
+                  value={shippingAmount}
+                  onChange={(e) => setShippingAmount(Number(e.target.value))}
+                  disabled={readOnly}
+                  className="w-28 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 py-1">
+                <span className="text-gray-500">Tax rate (%)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={taxRate}
+                  onChange={(e) => setTaxRate(Number(e.target.value))}
+                  disabled={readOnly}
+                  className="w-28 px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span />
+                <span>{formatCurrency(totals.taxAmount)}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-gray-200 pt-2 mt-1">
+                <span>Total</span>
+                <span className="tabular-nums">{formatCurrency(totals.total)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-base">
+                <span>Estimate Total</span>
+                <span className="tabular-nums">
+                  {currencyLabel} {totals.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 p-5">
+            <EntityAttachments
+              title={bi('Attachments', '附件')}
+              subtitle={bi('Images are compressed; heavy PDFs become page images', '圖片會壓縮；大型 PDF 會轉成頁面圖片')}
+              files={files}
+              fileUrl={quotationFileUrl}
+              uploadUrl={`/api/quotations/${id}/files`}
+              fileApiBase="/api/quotation-files"
+              thumbnailFileId={quote.thumbnail_file_id}
+              readOnly={readOnly}
+              onFilesChange={setFiles}
+              onSetThumbnail={(fileId) => {
+                if (fileId) {
+                  void fetch(`/api/quotation-files/${fileId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ set_thumbnail: true }),
+                  });
+                }
+                setQuote((q) => (q ? { ...q, thumbnail_file_id: fileId } : q));
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <label className={labelCls}>Status</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={readOnly} className={inputCls}>
+              {QUOTATION_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {QUOTATION_STATUS_FORM_LABEL[s]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ActivityFeed entityType="quotation" entityId={quote.id} className="max-h-[700px]" />
+        </div>
+      </div>
+
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-[80] px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
+            toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+          }`}
+        >
+          {toast.text}
+        </div>
+      )}
+    </AppLayout>
+  );
+}

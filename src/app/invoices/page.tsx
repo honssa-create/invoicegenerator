@@ -1,14 +1,21 @@
 import { Suspense } from 'react';
+import AppLayout from '@/components/AppLayout';
 import InvoicesList from './InvoicesList';
 
 export default function InvoicesPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
-      </div>
-    }>
-      <InvoicesList />
-    </Suspense>
+    <AppLayout>
+      <Suspense
+        fallback={
+          <div className="space-y-4 animate-pulse">
+            <div className="h-8 w-48 bg-gray-200 rounded" />
+            <div className="h-10 bg-gray-100 rounded-lg" />
+            <div className="h-64 bg-gray-100 rounded-xl" />
+          </div>
+        }
+      >
+        <InvoicesList />
+      </Suspense>
+    </AppLayout>
   );
 }

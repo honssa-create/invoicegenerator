@@ -1,0 +1,39 @@
+name: Rental invoices cron
+
+on:
+  schedule:
+    # Daily 00:15 HKT (16:15 UTC) — materialize rent periods + overdue flip.
+    # Invoice email auto-dispatch stays disabled; send manually from /rentals.
+    - cron: '15 16 * * *'
+  workflow_dispatch:
+
+jobs:
+  rental-invoices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Materialize rental periods
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "Missing GitHub secrets: APP_URL and/or CRON_SECRET"
+            exit 1
+          fi
+          # Strip trailing slash from APP_URL
+          BASE="${APP_URL%/}"
+          HTTP_CODE=$(curl -sS --max-time 120 -o /tmp/rental-cron-body.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE}/api/cron/rental-invoices")
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/rental-cron-body.json
+          echo
+          case "${HTTP_CODE}" in
+            2??) ;;
+            *)
+              echo "Rental cron failed with HTTP ${HTTP_CODE}"
+              exit 1
+              ;;
+          esac

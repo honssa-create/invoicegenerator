@@ -1,6 +1,10 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
+import db from './db';
+import type { PermissionSection, UserRole } from './permissions';
+import { USER_ROLES } from './permissions';
+import { getRolePermissionLists } from './permissions-server';
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'invoice-generator-dev-secret-change-in-production'
@@ -13,6 +17,22 @@ export interface SessionPayload {
   userId: number;
   email: string;
   name: string;
+  role: UserRole;
+  permissions: PermissionSection[];
+  /** Sections where the role may view but not mutate data. */
+  readOnlySections: PermissionSection[];
+  /** Org data-pool owner; equals userId for admins / solo users. Absent on legacy tokens. */
+  ownerUserId?: number;
+}
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  name: string;
+  company_name: string | null;
+  role: UserRole;
+  permissions: PermissionSection[];
+  readOnlySections: PermissionSection[];
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -21,6 +41,26 @@ export async function hashPassword(password: string): Promise<string> {
 
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
+}
+
+export async function buildSessionPayload(userId: number): Promise<SessionPayload | null> {
+  const row = (await db
+    .prepare('SELECT id, email, name, owner_user_id, role FROM users WHERE id = ?')
+    .get(userId)) as
+    | { id: number; email: string; name: string; owner_user_id: number | null; role: string }
+    | undefined;
+  if (!row) return null;
+  const role = USER_ROLES.includes(row.role as UserRole) ? (row.role as UserRole) : 'operator';
+  const { permissions, readOnlySections } = await getRolePermissionLists(role);
+  return {
+    userId: row.id,
+    email: row.email,
+    name: row.name,
+    role,
+    permissions,
+    readOnlySections,
+    ownerUserId: row.owner_user_id ?? row.id,
+  };
 }
 
 export async function createToken(payload: SessionPayload): Promise<string> {
@@ -34,14 +74,48 @@ export async function createToken(payload: SessionPayload): Promise<string> {
 export async function verifyToken(token: string): Promise<SessionPayload | null> {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET);
+    const role = (payload.role as UserRole) || 'operator';
+    const permissions = (payload.permissions as PermissionSection[]) || [];
+    const readOnlySections = (payload.readOnlySections as PermissionSection[]) || [];
+    const userId = payload.userId as number;
     return {
-      userId: payload.userId as number,
+      userId,
       email: payload.email as string,
       name: payload.name as string,
+      role,
+      permissions,
+      readOnlySections,
+      ...(typeof payload.ownerUserId === 'number' ? { ownerUserId: payload.ownerUserId } : {}),
     };
   } catch {
     return null;
   }
+}
+
+export async function createSessionForUserId(userId: number): Promise<{ token: string; user: AuthUser } | null> {
+  const session = await buildSessionPayload(userId);
+  if (!session) return null;
+  const row = await db
+    .prepare('SELECT id, email, name, company_name FROM users WHERE id = ?')
+    .get(userId) as {
+    id: number;
+    email: string;
+    name: string;
+    company_name: string | null;
+  };
+  const token = await createToken(session);
+  return {
+    token,
+    user: {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      company_name: row.company_name,
+      role: session.role,
+      permissions: session.permissions,
+      readOnlySections: session.readOnlySections,
+    },
+  };
 }
 
 export async function setSessionCookie(token: string) {
@@ -61,7 +135,9 @@ export async function clearSessionCookie() {
 export async function getSession(): Promise<SessionPayload | null> {
   const token = cookies().get(COOKIE_NAME)?.value;
   if (!token) return null;
-  return verifyToken(token);
+  const session = await verifyToken(token);
+  if (!session) return null;
+  return hydrateSessionPermissions(session);
 }
 
 export function getTokenFromRequest(request: Request): string | null {
@@ -74,5 +150,21 @@ export function getTokenFromRequest(request: Request): string | null {
 export async function getSessionFromRequest(request: Request): Promise<SessionPayload | null> {
   const token = getTokenFromRequest(request);
   if (!token) return null;
-  return verifyToken(token);
+  const session = await verifyToken(token);
+  if (!session) return null;
+  return hydrateSessionPermissions(session);
+}
+
+/** Load current role_permissions from DB so admin UI changes apply without re-login. */
+async function hydrateSessionPermissions(session: SessionPayload): Promise<SessionPayload> {
+  if (session.role === 'admin') {
+    return { ...session, readOnlySections: session.readOnlySections ?? [] };
+  }
+  const { permissions, readOnlySections } = await getRolePermissionLists(session.role);
+  return { ...session, permissions, readOnlySections };
+}
+
+export async function refreshSessionCookie(userId: number): Promise<void> {
+  const session = await createSessionForUserId(userId);
+  if (session) await setSessionCookie(session.token);
 }

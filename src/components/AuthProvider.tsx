@@ -1,13 +1,24 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import {
+  canAccessSection,
+  isSectionReadOnly as checkSectionReadOnly,
+  sectionForPagePath,
+  type PermissionSection,
+  type UserRole,
+} from '@/lib/permissions';
 
 interface User {
   id: number;
   email: string;
   name: string;
   company_name: string | null;
+  role: UserRole;
+  role_label?: string;
+  permissions: PermissionSection[];
+  readOnlySections?: PermissionSection[];
 }
 
 interface AuthContextType {
@@ -16,6 +27,9 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (data: { email: string; password: string; name: string; company_name?: string }) => Promise<void>;
   logout: () => Promise<void>;
+  canAccess: (section: PermissionSection) => boolean;
+  isSectionReadOnly: (section: PermissionSection) => boolean;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -28,18 +42,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  const refreshUser = useCallback(async () => {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.user) setUser(data.user);
+      return;
+    }
+    setUser(null);
+  }, []);
+
+  // Fetch session once on mount — not on every route change.
   useEffect(() => {
+    let cancelled = false;
     fetch('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (cancelled) return;
         if (data?.user) {
           setUser(data.user);
-        } else if (!PUBLIC_PATHS.includes(pathname)) {
-          router.push('/login');
+        } else {
+          setUser(null);
         }
       })
-      .finally(() => setLoading(false));
-  }, [pathname, router]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Permission / login redirects from already-loaded user (no network).
+  useEffect(() => {
+    if (loading) return;
+    if (PUBLIC_PATHS.includes(pathname)) return;
+
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    const section = sectionForPagePath(pathname);
+    if (section && !canAccessSection(user.role, user.permissions, section)) {
+      router.push('/dashboard');
+    }
+  }, [loading, user, pathname, router]);
+
+  const canAccess = (section: PermissionSection) => {
+    if (!user) return false;
+    return canAccessSection(user.role, user.permissions, section);
+  };
+
+  const isSectionReadOnly = (section: PermissionSection) => {
+    if (!user) return false;
+    return checkSectionReadOnly(user.role, section, user.readOnlySections);
+  };
 
   const login = async (email: string, password: string) => {
     const res = await fetch('/api/auth/login', {
@@ -72,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, canAccess, isSectionReadOnly, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

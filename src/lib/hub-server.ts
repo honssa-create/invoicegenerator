@@ -38,6 +38,7 @@ import {
 } from './orders';
 import { getOrder } from './order-server';
 import { trySyncCustomerFromOrderRecord } from './customer-server';
+import { getWooStoreConfigs } from './woocommerce';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -597,9 +598,53 @@ export async function setSyncState(userId: number, provider: string, storeKey: s
   ).run(userId, provider, storeKey, syncedAt);
 }
 
+async function userIdWithLatestWooSync(storeKey?: string): Promise<number | null> {
+  const row = storeKey
+    ? await db
+        .prepare(
+          `SELECT user_id FROM integration_sync_state
+           WHERE provider = 'woocommerce' AND store_key = ? AND last_synced_at IS NOT NULL
+           ORDER BY last_synced_at DESC LIMIT 1`
+        )
+        .get(storeKey)
+    : await db
+        .prepare(
+          `SELECT user_id FROM integration_sync_state
+           WHERE provider = 'woocommerce' AND last_synced_at IS NOT NULL
+           ORDER BY last_synced_at DESC LIMIT 1`
+        )
+        .get();
+  const userId = (row as { user_id?: number } | undefined)?.user_id;
+  return typeof userId === 'number' && userId > 0 ? userId : null;
+}
+
+async function firstUserIdWithWooStores(userIds: number[]): Promise<number | null> {
+  for (const id of userIds) {
+    if ((await getWooStoreConfigs(id)).length > 0) return id;
+  }
+  return null;
+}
+
 export async function resolveHubOwnerUserId(): Promise<number> {
   const configured = Number(process.env.HUB_OWNER_USER_ID);
   if (Number.isFinite(configured) && configured > 0) return configured;
+
+  // Prefer the account that last synced Nestiee (matches Order Hub "Last import").
+  const nestieeSyncUser = await userIdWithLatestWooSync('nestiee');
+  if (nestieeSyncUser) return nestieeSyncUser;
+
+  const anyWooSyncUser = await userIdWithLatestWooSync();
+  if (anyWooSyncUser) return anyWooSyncUser;
+
+  const orgRoots = (
+    await db.prepare('SELECT id FROM users WHERE owner_user_id IS NULL ORDER BY id').all()
+  ) as { id: number }[];
+  const rootWithWoo = await firstUserIdWithWooStores(orgRoots.map((r) => r.id));
+  if (rootWithWoo) return rootWithWoo;
+
+  const allUsers = (await db.prepare('SELECT id FROM users ORDER BY id').all()) as { id: number }[];
+  const anyWithWoo = await firstUserIdWithWooStores(allUsers.map((r) => r.id));
+  if (anyWithWoo) return anyWithWoo;
 
   const admin = await db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get() as
     | { id: number }

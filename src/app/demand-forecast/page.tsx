@@ -10,10 +10,7 @@ import {
   monthStartYmd,
   type DemandForecastDateFilterType,
 } from '@/lib/demand-forecast';
-
-function bi(en: string, zh: string): string {
-  return `${en} / ${zh}`;
-}
+import { bi } from '@/lib/ui-labels';
 
 const fieldCls =
   'w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#C8B07A] outline-none';
@@ -37,7 +34,6 @@ export default function DemandForecastPage() {
         </div>
       </div>
 
-      {/* Global date filter */}
       <div className="mb-6 rounded-2xl border border-[#C8B07A]/50 bg-[#F7F2E8]/60 p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-gray-900 mb-3">
           {bi('Section date filter', '區段日期篩選')}

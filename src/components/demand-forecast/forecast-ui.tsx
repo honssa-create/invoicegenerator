@@ -6,10 +6,7 @@ import {
   DEMAND_FORECAST_DATE_FILTER_TYPES,
   type DemandForecastDateFilterType,
 } from '@/lib/demand-forecast';
-
-function bi(en: string, zh: string): string {
-  return `${en} / ${zh}`;
-}
+import { bi } from '@/lib/ui-labels';
 
 export function GoldSegmented<T extends string>({
   value,
@@ -57,13 +54,11 @@ export function GoldSegmented<T extends string>({
 
 export function ForecastCard({
   title,
-  titleZh,
   description,
   children,
   footer,
 }: {
   title: string;
-  titleZh: string;
   description?: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -71,9 +66,7 @@ export function ForecastCard({
   return (
     <section className="rounded-2xl border border-[#C8B07A]/60 bg-white shadow-sm overflow-hidden">
       <div className="bg-[#C8B07A] px-4 sm:px-5 py-3">
-        <h2 className="text-base sm:text-lg font-bold text-gray-900">
-          {title} <span className="font-semibold text-gray-800">{titleZh}</span>
-        </h2>
+        <h2 className="text-base sm:text-lg font-bold text-gray-900">{title}</h2>
         {description && <p className="text-sm text-gray-800/80 mt-1">{description}</p>}
       </div>
       <div className="p-4 sm:p-5">{children}</div>

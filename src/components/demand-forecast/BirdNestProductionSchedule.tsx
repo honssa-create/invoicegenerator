@@ -6,11 +6,8 @@ import {
   type DemandForecastDateFilterType,
   type ProductionScheduleRow,
 } from '@/lib/demand-forecast';
+import { bi } from '@/lib/ui-labels';
 import { ForecastCard } from './forecast-ui';
-
-function bi(en: string, zh: string): string {
-  return `${en} / ${zh}`;
-}
 
 interface Props {
   dateStart: string;
@@ -49,10 +46,11 @@ export default function BirdNestProductionSchedule({
     load();
   }, [load]);
 
+  const dateBasis = DEMAND_FORECAST_DATE_FILTER_LABELS[dateFilterType];
+
   return (
     <ForecastCard
-      title="Bird's Nest Production Schedule"
-      titleZh="燕窩生產排程"
+      title={bi("Bird's Nest Production Schedule", '燕窩生產排程')}
       description={bi(
         '75g bottle demand vs finished stock for processing Nestiee orders.',
         '處理中燕窩訂單的 75g 樽裝需求與成品庫存對照。',
@@ -61,24 +59,21 @@ export default function BirdNestProductionSchedule({
         loading
           ? bi('Loading…', '載入中…')
           : bi(
-              `${orderCount} processing order(s) · ${bi(
-                DEMAND_FORECAST_DATE_FILTER_LABELS[dateFilterType].en,
-                DEMAND_FORECAST_DATE_FILTER_LABELS[dateFilterType].zh,
-              )}`,
-              `範圍內 ${orderCount} 張處理中訂單 · ${DEMAND_FORECAST_DATE_FILTER_LABELS[dateFilterType].zh}`,
+              `${orderCount} processing order(s) in range (${dateBasis.en})`,
+              `範圍內 ${orderCount} 張處理中訂單（${dateBasis.zh}）`,
             )
       }
     >
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[640px]">
           <thead>
-            <tr className="text-left text-xs text-gray-500 uppercase border-b border-gray-200">
-              <th className="py-2 pr-3">{bi('Product', '產品')}</th>
-              <th className="py-2 pr-3 text-right">{bi('Stock', '庫存')}</th>
-              <th className="py-2 pr-3 text-right">{bi('Demand', '需求')}</th>
-              <th className="py-2 pr-3 text-right">{bi('Shortfall', '尚欠')}</th>
-              <th className="py-2 pr-3 text-right">{bi('Days Needed', '預計所需日數')}</th>
-              <th className="py-2 text-right">{bi('Est. Date', '預計完成日')}</th>
+            <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
+              <th className="py-2 pr-3 font-medium">{bi('Product', '產品')}</th>
+              <th className="py-2 pr-3 text-right font-medium">{bi('Stock', '庫存')}</th>
+              <th className="py-2 pr-3 text-right font-medium">{bi('Demand', '需求')}</th>
+              <th className="py-2 pr-3 text-right font-medium">{bi('Shortfall', '尚欠')}</th>
+              <th className="py-2 pr-3 text-right font-medium">{bi('Days needed', '預計所需日數')}</th>
+              <th className="py-2 text-right font-medium">{bi('Est. date', '預計完成日')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">

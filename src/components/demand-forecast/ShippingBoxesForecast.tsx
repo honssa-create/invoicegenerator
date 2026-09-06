@@ -8,11 +8,8 @@ import {
   type DemandForecastDateFilterType,
   type ShippingBoxForecastRow,
 } from '@/lib/demand-forecast';
+import { bi } from '@/lib/ui-labels';
 import { ForecastCard, shortfallClass } from './forecast-ui';
-
-function bi(en: string, zh: string): string {
-  return `${en} / ${zh}`;
-}
 
 interface Props {
   dateStart: string;
@@ -66,8 +63,7 @@ export default function ShippingBoxesForecast({ dateStart, dateEnd, dateFilterTy
 
   return (
     <ForecastCard
-      title="Shipping Boxes Forecast"
-      titleZh="物流箱預算"
+      title={bi('Shipping Boxes Forecast', '物流箱預算')}
       description={bi(
         'Used = shipped/completed in date range · Need = processing orders · Stock = on hand.',
         '已用 = 日期範圍內已出貨／已完成 · 需要 = 處理中訂單 · 庫存 = 現有數量。',
@@ -81,13 +77,13 @@ export default function ShippingBoxesForecast({ dateStart, dateEnd, dateFilterTy
         {loading
           ? bi('Loading…', '載入中…')
           : bi(
-              `${orderCountNeed} processing · ${orderCountUsed} shipped in range (${bi(dateBasis.en, dateBasis.zh)})`,
+              `${orderCountNeed} processing · ${orderCountUsed} shipped in range (${dateBasis.en})`,
               `處理中 ${orderCountNeed} 張 · 範圍內已出貨 ${orderCountUsed} 張（${dateBasis.zh}）`,
             )}
       </p>
 
       <h3 className="text-sm font-medium text-gray-700 mb-2">
-        {bi('Shipping boxes (Nestiee)', '物流外箱 (燕窩訂單)')}
+        {bi('Shipping boxes (Nestiee)', '物流外箱（燕窩訂單）')}
       </h3>
       <p className="text-xs text-gray-500 mb-3">
         {bi('Date filter applies to used counts only.', '日期篩選只影響「已用」欄。')}
@@ -97,10 +93,10 @@ export default function ShippingBoxesForecast({ dateStart, dateEnd, dateFilterTy
         <table className="w-full text-sm min-w-[480px]">
           <thead>
             <tr className="text-left text-gray-500 border-b border-gray-200">
-              <th className="py-2 pr-2">{bi('Box type', '箱型')}</th>
-              <th className="py-2 pr-2 text-right">{bi('Stock', '庫存')}</th>
-              <th className="py-2 pr-2 text-right">{bi('Need', '需要')}</th>
-              <th className="py-2 text-right">{bi('Used (est.)', '已用（估計）')}</th>
+              <th className="py-2 pr-2 text-xs font-medium">{bi('Box type', '箱型')}</th>
+              <th className="py-2 pr-2 text-right text-xs font-medium">{bi('Stock', '庫存')}</th>
+              <th className="py-2 pr-2 text-right text-xs font-medium">{bi('Need', '需要')}</th>
+              <th className="py-2 text-right text-xs font-medium">{bi('Used (est.)', '已用（估計）')}</th>
             </tr>
           </thead>
           <tbody>

@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import DateSelectSheet from '@/components/DateSelectSheet';
+import type { ProductionScheduleSummary } from '@/lib/kitchen-production-schedule';
+import { KITCHEN_DAILY_SESSION_LIMIT } from '@/lib/kitchen-production-schedule';
 import {
   NESTIEE_DATE_FILTER_TYPES,
-  NESTIEE_SHIPPING_BOX_SLOTS,
-  shippingBoxDisplayLabel,
   type NestieeDateFilterType,
-  type NestieeUsedShippingBoxesSummary,
 } from '@/lib/nestiee-order-demand';
 import { localDateYmd } from '@/lib/orders';
 import { tapProps } from '@/lib/tap-action';
@@ -23,7 +22,7 @@ function monthStartYmd(): string {
   return `${today.slice(0, 8)}01`;
 }
 
-function UsedDateField({
+function ScheduleDateField({
   label,
   value,
   onChange,
@@ -60,11 +59,12 @@ function UsedDateField({
   );
 }
 
-export default function KitchenUsedShippingBoxes() {
+export default function KitchenProductionSchedule() {
   const [dateStart, setDateStart] = useState(monthStartYmd);
   const [dateEnd, setDateEnd] = useState(localDateYmd);
-  const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('order_date');
-  const [summary, setSummary] = useState<NestieeUsedShippingBoxesSummary | null>(null);
+  const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('delivery_date');
+  const [schedule, setSchedule] = useState<ProductionScheduleSummary | null>(null);
+  const [orderCount, setOrderCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
@@ -73,10 +73,11 @@ export default function KitchenUsedShippingBoxes() {
     if (dateStart) params.set('dateStart', dateStart);
     if (dateEnd) params.set('dateEnd', dateEnd);
     params.set('dateFilterType', dateFilterType);
-    fetch(`/api/kitchen/used-shipping-boxes?${params}`)
+    fetch(`/api/kitchen/production-schedule?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d?.summary) setSummary(d.summary);
+        if (d?.schedule) setSchedule(d.schedule);
+        if (typeof d?.orderCount === 'number') setOrderCount(d.orderCount);
       })
       .catch(() => {
         /* keep previous */
@@ -88,40 +89,28 @@ export default function KitchenUsedShippingBoxes() {
     load();
   }, [load]);
 
-  const rows = NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
-    id: slot.id,
-    label: shippingBoxDisplayLabel(slot),
-    used: summary?.shippingBoxes.find((b) => b.id === slot.id)?.qty ?? 0,
-  }));
-
-  const totalUsed = rows.reduce((sum, r) => sum + r.used, 0);
+  const totalSessions = schedule?.totalSessions ?? 0;
+  const totalDays = schedule?.totalDaysNeeded ?? 0;
+  const estDate = schedule?.estimatedCompletionDate ?? '—';
 
   return (
     <div className="h-full rounded-xl border border-gray-200 bg-white p-5 flex flex-col">
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
-        <div>
-          <h2 className="font-semibold text-gray-900">已用物流箱統計 (燕窩訂單)</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {bi(
-              'Shipped or completed Nestiee orders in the selected date range.',
-              '日期範圍內已出貨或已完成的燕窩訂單。',
-            )}
-          </p>
-        </div>
-        <p className="text-xs text-gray-500 shrink-0">
+      <div className="mb-4">
+        <h2 className="font-semibold text-gray-900">燕窩生產排程</h2>
+        <p className="text-sm text-gray-500 mt-1">
           {loading
             ? bi('Loading…', '載入中…')
             : bi(
-                `${summary?.orderCount ?? 0} order(s) in range`,
-                `範圍內 ${summary?.orderCount ?? 0} 張訂單`,
+                `${orderCount} unshipped processing order(s) in range`,
+                `日期範圍內 ${orderCount} 張未出貨處理中訂單`,
               )}
         </p>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-4">
         <div className="grid grid-cols-2 gap-3 sm:contents">
-          <UsedDateField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
-          <UsedDateField label={FILTER.endDate} value={dateEnd} onChange={setDateEnd} />
+          <ScheduleDateField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
+          <ScheduleDateField label={FILTER.endDate} value={dateEnd} onChange={setDateEnd} />
         </div>
         <div
           className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm self-start"
@@ -163,35 +152,54 @@ export default function KitchenUsedShippingBoxes() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 border-b">
-              <th className="py-2 pr-2">{bi('Box type', '箱型')}</th>
-              <th className="py-2 text-right">{bi('Used', '已用')}</th>
+              <th className="py-2 pr-2">{bi('Product', '產品')}</th>
+              <th className="py-2 pr-2 text-right">{bi('Stock', '庫存')}</th>
+              <th className="py-2 pr-2 text-right">{bi('Demand', '需求')}</th>
+              <th className="py-2 pr-2 text-right">{bi('Shortfall', '尚欠')}</th>
+              <th className="py-2 text-right">{bi('Sessions', '所需轉數')}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-gray-50">
-                <td className="py-2 pr-2">{row.label}</td>
-                <td className="py-2 text-right font-medium tabular-nums">
-                  {loading ? '—' : row.used}
+            {(schedule?.rows ?? []).map((row) => (
+              <tr key={row.flavor} className="border-b border-gray-50">
+                <td className="py-2 pr-2 font-medium text-gray-900">{row.product}</td>
+                <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.stock}</td>
+                <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.demand}</td>
+                <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.shortfall}</td>
+                <td className="py-2 text-right tabular-nums font-medium">
+                  {loading ? '—' : row.sessions == null ? '—' : row.sessions}
                 </td>
               </tr>
             ))}
-            <tr className="font-semibold text-gray-900 border-t border-gray-200">
-              <td className="py-2 pr-2">{bi('Total', '合計')}</td>
-              <td className="py-2 text-right tabular-nums">{loading ? '—' : totalUsed}</td>
-            </tr>
           </tbody>
         </table>
       </div>
 
-      {!loading && (summary?.orderCount ?? 0) === 0 && (
-        <p className="text-sm text-gray-500 mt-3">
-          {bi(
-            'No shipped/completed Nestiee orders in this date range.',
-            '此日期範圍內沒有已出貨／已完成的燕窩訂單。',
-          )}
+      <div className="mt-5 rounded-lg bg-[#F7F2E8] border border-[#E8DCC8] px-4 py-4 space-y-2">
+        <p className="text-base font-semibold text-gray-900">
+          {loading
+            ? '—'
+            : bi(
+                `Total: ${totalSessions} session(s) (≈ ${totalDays} working day(s))`,
+                `總共需要: ${totalSessions} 轉 (約 ${totalDays} 個工作日)`,
+              )}
         </p>
-      )}
+        <p className="text-base font-semibold text-gray-900">
+          {loading
+            ? '—'
+            : bi(
+                `Est. ready date: ${estDate} (Sundays excluded)`,
+                `預計全部起貨日: ${estDate} (已略過星期日)`,
+              )}
+        </p>
+      </div>
+
+      <p className="text-xs text-gray-500 mt-3">
+        *{bi(
+          `Kitchen daily capacity is ${KITCHEN_DAILY_SESSION_LIMIT} sessions. Closed on Sundays.`,
+          `廚房每日總產能為 ${KITCHEN_DAILY_SESSION_LIMIT} 轉。星期日休息。`,
+        )}
+      </p>
     </div>
   );
 }

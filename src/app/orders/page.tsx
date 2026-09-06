@@ -29,6 +29,7 @@ import {
 import {
   isNestieeOrdersFilter,
   NESTIEE_SHIPPING_BOX_SLOTS,
+  orderMatchesNestieeDateRange,
   orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
@@ -283,9 +284,13 @@ function OrdersPageContent() {
       if (shipToday) {
         return orderMatchesNestieeShipToday(o);
       }
-      const created = o.created_at?.slice(0, 10) || '';
-      if (dateStart && created && created < dateStart) return false;
-      if (dateEnd && created && created > dateEnd) return false;
+      if (isNestieeFilter) {
+        if (!orderMatchesNestieeDateRange(o, { dateStart, dateEnd, dateFilterType })) return false;
+      } else {
+        const created = o.created_at?.slice(0, 10) || '';
+        if (dateStart && created && created < dateStart) return false;
+        if (dateEnd && created && created > dateEnd) return false;
+      }
       if (status && o.status !== status) return false;
       if (dashFocus === 'unshipped' && !isOrderUnshipped(o)) return false;
       if (dashFocus === 'urgent' && !isOrderUrgent(o)) return false;
@@ -316,7 +321,7 @@ function OrdersPageContent() {
       return dir * base || b.id - a.id;
     });
     return list;
-  }, [orders, dateStart, dateEnd, orderType, status, search, sort, dashFocus, isNestieeFilter, nestieeDemandScope]);
+  }, [orders, dateStart, dateEnd, orderType, status, search, sort, dashFocus, isNestieeFilter, nestieeDemandScope, dateFilterType]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
   const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
@@ -379,7 +384,7 @@ function OrdersPageContent() {
       return;
     }
     setPage(1);
-  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus, nestieeDemandScope]);
+  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus, nestieeDemandScope, dateFilterType]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);

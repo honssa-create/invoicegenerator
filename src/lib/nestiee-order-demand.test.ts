@@ -15,7 +15,7 @@ import {
   summarizeNestieeProcessingDemand,
   summarizeNestieeOrderStatusCounts,
   summarizeNestieeUsedShippingBoxes,
-  orderMatchesNestieeShippedToday,
+  orderMatchesNestieeShipWithinDays,
 } from './nestiee-order-demand';
 
 const giftBoxTypes = NESTIEE_GIFT_BOX_TYPES.map((g, i) => ({
@@ -108,34 +108,30 @@ describe('summarizeNestieeOrderStatusCounts', () => {
     });
     expect(counts.processing).toBe(1);
     expect(counts.completed).toBe(2);
-    expect(counts.shippedToday).toBe(0);
+    expect(counts.shipWithinDays).toBe(0);
   });
 
-  it('counts shipped/completed orders updated today regardless of date filter', () => {
+  it('counts processing orders due to ship within 3 days regardless of date filter', () => {
     const orders = [
       {
-        status: 'shipped',
-        updated_at: '2026-09-06 14:30:00',
+        status: 'processing',
         created_at: '2026-01-01',
-        fields: { order_type: NESTIEE_ORDER_TYPE },
-      },
-      {
-        status: 'completed',
-        updated_at: '2026-09-06 09:00:00',
-        created_at: '2026-01-01',
-        fields: { order_type: NESTIEE_ORDER_TYPE },
-      },
-      {
-        status: 'shipped',
-        updated_at: '2026-09-05 18:00:00',
-        created_at: '2026-01-01',
-        fields: { order_type: NESTIEE_ORDER_TYPE },
+        fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-06' },
       },
       {
         status: 'processing',
-        updated_at: '2026-09-06 10:00:00',
         created_at: '2026-01-01',
-        fields: { order_type: NESTIEE_ORDER_TYPE },
+        fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-08' },
+      },
+      {
+        status: 'processing',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-09' },
+      },
+      {
+        status: 'shipped',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-07' },
       },
     ];
     const counts = summarizeNestieeOrderStatusCounts(orders, {
@@ -144,7 +140,7 @@ describe('summarizeNestieeOrderStatusCounts', () => {
       dateFilterType: 'order_date',
       today: '2026-09-06',
     });
-    expect(counts.shippedToday).toBe(2);
+    expect(counts.shipWithinDays).toBe(2);
     expect(counts.processing).toBe(0);
     expect(counts.completed).toBe(0);
   });
@@ -183,30 +179,52 @@ describe('summarizeNestieeOrderStatusCounts', () => {
   });
 });
 
-describe('orderMatchesNestieeShippedToday', () => {
-  it('matches shipped/completed orders updated today only', () => {
+describe('orderMatchesNestieeShipWithinDays', () => {
+  it('matches processing orders with delivery date within 3 calendar days', () => {
+    const today = '2026-09-06';
     expect(
-      orderMatchesNestieeShippedToday(
-        { status: 'shipped', updated_at: '2026-09-06 12:00:00' },
-        '2026-09-06',
+      orderMatchesNestieeShipWithinDays(
+        {
+          status: 'processing',
+          fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-06' },
+        },
+        today,
       ),
     ).toBe(true);
     expect(
-      orderMatchesNestieeShippedToday(
-        { status: 'completed', updated_at: '2026-09-06 08:15:00' },
-        '2026-09-06',
+      orderMatchesNestieeShipWithinDays(
+        {
+          status: 'processing',
+          fields: { order_type: NESTIEE_ORDER_TYPE, client_delivery_date: '2026-09-08' },
+        },
+        today,
       ),
     ).toBe(true);
     expect(
-      orderMatchesNestieeShippedToday(
-        { status: 'shipped', updated_at: '2026-09-05 23:59:00' },
-        '2026-09-06',
+      orderMatchesNestieeShipWithinDays(
+        {
+          status: 'processing',
+          fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-09' },
+        },
+        today,
       ),
     ).toBe(false);
     expect(
-      orderMatchesNestieeShippedToday(
-        { status: 'processing', updated_at: '2026-09-06 12:00:00' },
-        '2026-09-06',
+      orderMatchesNestieeShipWithinDays(
+        {
+          status: 'shipped',
+          fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-07' },
+        },
+        today,
+      ),
+    ).toBe(false);
+    expect(
+      orderMatchesNestieeShipWithinDays(
+        {
+          status: 'processing',
+          fields: { order_type: NESTIEE_ORDER_TYPE },
+        },
+        today,
       ),
     ).toBe(false);
   });

@@ -266,11 +266,11 @@ describe('giftCountForOrderShippingBoxes', () => {
 describe('mapShippingBoxesForGiftCount', () => {
   it('maps 1–10 gift boxes to shipping outer boxes', () => {
     expect(mapShippingBoxesForGiftCount(0)).toEqual({ small: 0, single: 0, double: 0, triple: 0 });
-    expect(mapShippingBoxesForGiftCount(1)).toEqual({ small: 1, single: 0, double: 0, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(1)).toEqual({ small: 0, single: 1, double: 0, triple: 0 });
     expect(mapShippingBoxesForGiftCount(2)).toEqual({ small: 0, single: 1, double: 0, triple: 0 });
     expect(mapShippingBoxesForGiftCount(3)).toEqual({ small: 0, single: 0, double: 1, triple: 0 });
     expect(mapShippingBoxesForGiftCount(4)).toEqual({ small: 0, single: 0, double: 0, triple: 1 });
-    expect(mapShippingBoxesForGiftCount(5)).toEqual({ small: 1, single: 0, double: 1, triple: 0 });
+    expect(mapShippingBoxesForGiftCount(5)).toEqual({ small: 0, single: 1, double: 1, triple: 0 });
     expect(mapShippingBoxesForGiftCount(6)).toEqual({ small: 0, single: 1, double: 1, triple: 0 });
     expect(mapShippingBoxesForGiftCount(7)).toEqual({ small: 0, single: 0, double: 2, triple: 0 });
     expect(mapShippingBoxesForGiftCount(8)).toEqual({ small: 0, single: 0, double: 2, triple: 0 });
@@ -279,7 +279,7 @@ describe('mapShippingBoxesForGiftCount', () => {
   });
 
   it('recursively applies mapping for counts above 10', () => {
-    expect(mapShippingBoxesForGiftCount(11)).toEqual({ small: 1, single: 0, double: 1, triple: 1 });
+    expect(mapShippingBoxesForGiftCount(11)).toEqual({ small: 0, single: 1, double: 1, triple: 1 });
     expect(mapShippingBoxesForGiftCount(12)).toEqual({ small: 0, single: 1, double: 1, triple: 1 });
     expect(mapShippingBoxesForGiftCount(20)).toEqual({ small: 0, single: 0, double: 2, triple: 2 });
   });
@@ -547,13 +547,13 @@ describe('summarizeNestieeProcessingDemand', () => {
       GIFT_BOX_BOMS,
     );
 
-    // Order 1: 3 gift boxes → 1 雙套; order 2: 5 gift boxes → 1 雙套 + 1 細箱
-    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(1);
-    expect(demand.shippingBoxes.find((b) => b.id === 'single')?.qty).toBe(0);
+    // Order 1: 3 gift boxes → 1 雙套; order 2: 5 gift boxes → 1 雙套 + 1 單套
+    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(0);
+    expect(demand.shippingBoxes.find((b) => b.id === 'single')?.qty).toBe(1);
     expect(demand.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(2);
     expect(demand.shippingBoxes.find((b) => b.id === 'triple')?.qty).toBe(0);
-    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.label).toBe('細箱');
-    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.size).toBe('24x15x13cm');
+    expect(demand.shippingBoxes.find((b) => b.id === 'single')?.label).toBe('單套');
+    expect(demand.shippingBoxes.find((b) => b.id === 'single')?.size).toBe('25x25x12.5cm');
   });
 
   it('counts at least one outer box per included order even when 所需禮盒 is empty', () => {
@@ -578,9 +578,10 @@ describe('summarizeNestieeProcessingDemand', () => {
       GIFT_BOX_BOMS,
     );
 
-    // Order 1: 3 gift boxes → 1 雙套; order 2: no qty → minimum 1 細箱
+    // Order 1: 3 gift boxes → 1 雙套; order 2: no qty → minimum 1 單套
     expect(demand.orderCount).toBe(2);
-    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(1);
+    expect(demand.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(0);
+    expect(demand.shippingBoxes.find((b) => b.id === 'single')?.qty).toBe(1);
     expect(demand.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(1);
     expect(
       demand.shippingBoxes.reduce((sum, box) => sum + box.qty, 0),
@@ -664,7 +665,8 @@ describe('summarizeNestieeUsedShippingBoxes', () => {
     );
 
     expect(summary.orderCount).toBe(2);
-    expect(summary.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(1);
+    expect(summary.shippingBoxes.find((b) => b.id === 'small')?.qty).toBe(0);
+    expect(summary.shippingBoxes.find((b) => b.id === 'single')?.qty).toBe(1);
     expect(summary.shippingBoxes.find((b) => b.id === 'double')?.qty).toBe(2);
   });
 });

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
+import KitchenUsedShippingBoxes from '@/components/KitchenUsedShippingBoxes';
 import TapButton from '@/components/TapButton';
 import { tapProps } from '@/lib/tap-action';
 import {
@@ -45,7 +46,7 @@ type Modal = 'gift' | 'return' | 'restock' | null;
 type AdjustStockMode = 'set' | 'add';
 
 type AdjustStockTarget = {
-  kind: 'raw' | 'finished' | 'gift_box';
+  kind: 'raw' | 'finished' | 'gift_box' | 'shipping_box';
   key: string;
   label: string;
   current: number;
@@ -174,6 +175,10 @@ function mergeOrdersSlice(
     demand,
     giftBoxes: prev.giftBoxes.map((g) => ({ ...g, needed: demand.giftBoxes[g.boxType] || 0 })),
     finished: prev.finished.map((f) => ({ ...f, needed: demand.finished[f.sku] || 0 })),
+    shippingBoxes: (prev.shippingBoxes ?? []).map((b) => ({
+      ...b,
+      needed: demand.shippingBoxes?.[b.boxId] || 0,
+    })),
     raw: prev.raw.map((r) => ({ ...r, needed: demand.raw[r.name] ?? 0 })),
   };
 }
@@ -1036,6 +1041,8 @@ export default function KitchenPage() {
         />
       )}
 
+      <KitchenUsedShippingBoxes />
+
       {/* Inventory — collapsed by default; fetches stock on first expand */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
         <button
@@ -1136,7 +1143,9 @@ export default function KitchenPage() {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-5 lg:col-span-1">
-          <h2 className="font-semibold text-gray-900 mb-3">{bi('Finished bottles', '成品樽')}</h2>
+          <h2 className="font-semibold text-gray-900 mb-3">
+            {bi('Finished bottles / Boxes', '成品樽 / Boxes 紙箱')}
+          </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -1178,6 +1187,51 @@ export default function KitchenPage() {
                   </tr>
                   );
                 })}
+                {(state.shippingBoxes ?? []).length > 0 && (
+                  <>
+                    <tr aria-hidden="true">
+                      <td colSpan={state.isAdmin ? 4 : 3} className="p-0 h-0 border-t-2 border-gray-300" />
+                    </tr>
+                    <tr>
+                      <td
+                        colSpan={state.isAdmin ? 4 : 3}
+                        className="py-2 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                      >
+                        {bi('Shipping outer boxes', '物流外箱')}
+                      </td>
+                    </tr>
+                    {(state.shippingBoxes ?? []).map((box) => {
+                      const have = box.quantity;
+                      const needed = box.needed;
+                      return (
+                        <tr key={box.boxId} className="border-b border-gray-50 bg-gray-50/50">
+                          <td className="py-2 pr-2">{box.label}</td>
+                          <td className="py-2 pr-2 text-right font-medium">{have}</td>
+                          <td className={`py-2 text-right ${shortfall(have, needed)}`}>{needed}</td>
+                          {state.isAdmin && (
+                            <td className="py-2 text-right">
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  openAdjustStock({
+                                    kind: 'shipping_box',
+                                    key: box.boxId,
+                                    label: box.label,
+                                    current: box.quantity,
+                                  })
+                                }
+                                className="text-xs text-brand-600 hover:underline disabled:opacity-40"
+                              >
+                                設定
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </>
+                )}
               </tbody>
             </table>
           </div>

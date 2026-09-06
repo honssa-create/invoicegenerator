@@ -132,10 +132,17 @@ This repo includes `railpack.json` and `railway.json` so Railpack detects **Node
 
 Incremental WooCommerce, QuickBooks (if connected), and ClickUp (if API token + List ID are set) import runs via `GET|POST /api/cron/hub-sync` with `Authorization: Bearer $CRON_SECRET`. The app pulls from the store using Railway’s **static outbound IPv4** addresses — allowlist **all** of them on the webstore host / CDN / WAF if API access is IP-restricted.
 
-**Railway**
+**Railway cron services** (recommended — see [`services/cron-hub-sync/`](services/cron-hub-sync/README.md), [`services/cron-orphan-receipt-sweep/`](services/cron-orphan-receipt-sweep/README.md), [`services/cron-rental-invoices/`](services/cron-rental-invoices/README.md))
+
+1. On each cron service, set **Root Directory** to the matching `services/cron-*` folder and redeploy.
+2. **Cron Schedule** in Settings: hub-sync `*/15 * * * *`; orphan receipts `0 19 * * *`; rental `15 16 * * *` (all UTC).
+3. Variables on each cron service: `CRON_SECRET` (same as main app) and `APP_URL` (e.g. `https://${{invoice-generator.RAILWAY_PUBLIC_DOMAIN}}`).
+4. Orphan sweep path is **`/api/cron/orphan-receipts`** — not `orphan-receipt-sweep` (404 if wrong).
+
+**Railway (main app)**
 1. Set `CRON_SECRET` (and optional `HUB_OWNER_USER_ID`).
 2. Configure each store under **Settings → API Integrations**, or set `WOOCOMMERCE_{NESTIEE|HONOUR|CUPMOKA}_{URL,KEY,SECRET}`.
 
-**GitHub Actions** (workflow [`.github/workflows/hub-sync-cron.yml`](.github/workflows/hub-sync-cron.yml) — every 15 minutes + manual dispatch)
+**GitHub Actions** (optional backup — workflow [`.github/workflows/hub-sync-cron.yml`](.github/workflows/hub-sync-cron.yml) — every 15 minutes + manual dispatch)
 1. Repo → Settings → Secrets and variables → Actions: add `APP_URL` (e.g. `https://your-app.up.railway.app`, no trailing slash required) and `CRON_SECRET` (same value as Railway).
 2. Actions → **Hub sync cron** → Run workflow once; confirm Order Hub “Last import” updates.

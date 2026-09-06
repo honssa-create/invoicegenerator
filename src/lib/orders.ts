@@ -1387,8 +1387,16 @@ function parseNestieeNBoxQty(haystack: string): number | null {
     return Number.isFinite(n) && n > 0 ? n : null;
   }
   const cn = haystack.match(/([一二三四五六七八])\s*盒/);
-  if (!cn) return null;
-  return NESTIEE_HUA_YUE_CN_QTY[cn[1]] ?? null;
+  if (cn) return NESTIEE_HUA_YUE_CN_QTY[cn[1]] ?? null;
+  return null;
+}
+
+/** Box count for 秋燕飛躍 / 金燕秋曜 — also accepts storefront 兩盒 / 两盒. */
+function parseNestieeQiuYanFeiYueBoxQty(haystack: string): number | null {
+  const standard = parseNestieeNBoxQty(haystack);
+  if (standard != null) return standard;
+  if (/(?:兩|两)\s*盒/.test(haystack)) return 2;
+  return null;
 }
 
 function parseNestieeStarGiftBoxQtys(
@@ -1423,7 +1431,7 @@ function isNestieeQiuYanFeiYueProduct(nameForProduct: string): boolean {
 
 function parseNestieeQiuYanFeiYueQty(nameForProduct: string, haystack: string): number | null {
   if (!isNestieeQiuYanFeiYueProduct(nameForProduct)) return null;
-  return parseNestieeNBoxQty(haystack) ?? 1;
+  return parseNestieeQiuYanFeiYueBoxQty(haystack) ?? 1;
 }
 
 /** 心意禮盒: 紅棗x盒 → 紅色金, 冰糖x盒 → 紅色銀, x套y盒 → x on both. */

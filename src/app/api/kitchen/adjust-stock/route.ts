@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const ownerId = await resolveKitchenOwnerUserId();
   try {
     const body = await request.json();
-    const kind = body.kind as 'raw' | 'finished' | 'gift_box';
+    const kind = body.kind as 'raw' | 'finished' | 'gift_box' | 'shipping_box';
     const key = String(body.key || '');
     const quantity = Number(body.quantity);
     const result = await adjustStock(ownerId, session.userId, true, { kind, key, quantity });

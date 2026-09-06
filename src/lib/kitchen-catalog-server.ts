@@ -265,4 +265,13 @@ export async function ensureCatalogStockRows(userId: number, catalog: KitchenCat
       )
       .run(...params);
   }
+
+  const shippingIds = ['small', 'single', 'double', 'triple'];
+  if (shippingIds.length > 0) {
+    const placeholders = shippingIds.map(() => '(?, ?, 0)').join(', ');
+    const params = shippingIds.flatMap((id) => [userId, id]);
+    await db
+      .prepare(`INSERT OR IGNORE INTO kitchen_shipping_boxes (user_id, box_id, quantity) VALUES ${placeholders}`)
+      .run(...params);
+  }
 }

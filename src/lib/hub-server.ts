@@ -647,7 +647,7 @@ export async function listHubCronOwnerUserIds(): Promise<number[]> {
   if (ids.size === 0) {
     ids.add(await resolveHubOwnerUserId());
   }
-  return [...ids];
+  return Array.from(ids);
 }
 
 export async function resolveHubOwnerUserId(): Promise<number> {

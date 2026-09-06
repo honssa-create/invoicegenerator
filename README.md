@@ -75,6 +75,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
 | `CRON_SECRET` | Bearer token for external schedulers: `/api/cron/payment-reminders`, `/api/cron/hub-sync`, and other `/api/cron/*` routes | _(unset)_ |
 | `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks / ClickUp integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |
+| `WOO_HTTP_USER_AGENT` | User-Agent for server-side Woo API calls. SiteGround WAF 403s incomplete/old UAs; default is a full Chrome 140 string | _(unset)_ |
 | `RECEIPTS_DIR` | Local/volume receipt image folder (use `/data/receipts` on Railway with a volume) | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
 | `R2_ACCESS_KEY_ID` | R2 access key | _(unset)_ |

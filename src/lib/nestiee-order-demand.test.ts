@@ -111,7 +111,7 @@ describe('summarizeNestieeOrderStatusCounts', () => {
     expect(counts.shipWithinDays).toBe(0);
   });
 
-  it('counts processing orders due to ship within 3 days regardless of date filter', () => {
+  it('counts processing orders due to ship within 4 days regardless of date filter', () => {
     const orders = [
       {
         status: 'processing',
@@ -140,7 +140,7 @@ describe('summarizeNestieeOrderStatusCounts', () => {
       dateFilterType: 'order_date',
       today: '2026-09-06',
     });
-    expect(counts.shipWithinDays).toBe(2);
+    expect(counts.shipWithinDays).toBe(3);
     expect(counts.processing).toBe(0);
     expect(counts.completed).toBe(0);
   });
@@ -180,7 +180,7 @@ describe('summarizeNestieeOrderStatusCounts', () => {
 });
 
 describe('orderMatchesNestieeShipWithinDays', () => {
-  it('matches processing orders with delivery date within 3 calendar days', () => {
+  it('matches processing orders with delivery date within 4 calendar days', () => {
     const today = '2026-09-06';
     expect(
       orderMatchesNestieeShipWithinDays(
@@ -205,6 +205,15 @@ describe('orderMatchesNestieeShipWithinDays', () => {
         {
           status: 'processing',
           fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-09' },
+        },
+        today,
+      ),
+    ).toBe(true);
+    expect(
+      orderMatchesNestieeShipWithinDays(
+        {
+          status: 'processing',
+          fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-10' },
         },
         today,
       ),

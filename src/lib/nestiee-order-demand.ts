@@ -26,7 +26,7 @@ export const NESTIEE_DEMAND_SCOPES: readonly NestieeDemandScope[] = [
 export const NESTIEE_SHIP_TODAY_DAYS = 4;
 
 /** Status-summary card: processing orders due to ship within this many calendar days (inclusive). */
-export const NESTIEE_STATUS_SHIP_WITHIN_DAYS = 3;
+export const NESTIEE_STATUS_SHIP_WITHIN_DAYS = 4;
 
 export function parseNestieeDemandScope(raw: string | null | undefined): NestieeDemandScope {
   const v = String(raw || '').trim();
@@ -117,7 +117,7 @@ export function orderMatchesNestieeShipToday(
   });
 }
 
-/** Delivery window for the status-summary 「三日內要出貨」 card (today inclusive). */
+/** Delivery window for the status-summary 「四日內要出貨」 card (today inclusive). */
 export function nestieeShipWithinDaysDateRange(
   today: string = localDateYmd(),
   withinDays: number = NESTIEE_STATUS_SHIP_WITHIN_DAYS,

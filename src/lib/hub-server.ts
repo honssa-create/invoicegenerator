@@ -625,6 +625,31 @@ async function firstUserIdWithWooStores(userIds: number[]): Promise<number | nul
   return null;
 }
 
+/** InvoiceFlow accounts cron should sync — never only the first admin. */
+export async function listHubCronOwnerUserIds(): Promise<number[]> {
+  const ids = new Set<number>();
+  const configured = Number(process.env.HUB_OWNER_USER_ID);
+  if (Number.isFinite(configured) && configured > 0) ids.add(configured);
+
+  const nestieeSyncUser = await userIdWithLatestWooSync('nestiee');
+  if (nestieeSyncUser) ids.add(nestieeSyncUser);
+
+  const anyWooSyncUser = await userIdWithLatestWooSync();
+  if (anyWooSyncUser) ids.add(anyWooSyncUser);
+
+  const orgRoots = (
+    await db.prepare('SELECT id FROM users WHERE owner_user_id IS NULL ORDER BY id').all()
+  ) as { id: number }[];
+  for (const row of orgRoots) {
+    if ((await getWooStoreConfigs(row.id)).length > 0) ids.add(row.id);
+  }
+
+  if (ids.size === 0) {
+    ids.add(await resolveHubOwnerUserId());
+  }
+  return [...ids];
+}
+
 export async function resolveHubOwnerUserId(): Promise<number> {
   const configured = Number(process.env.HUB_OWNER_USER_ID);
   if (Number.isFinite(configured) && configured > 0) return configured;

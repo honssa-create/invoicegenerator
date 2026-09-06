@@ -13,16 +13,15 @@ const ALLOWED_EXT: Record<string, string> = {
 };
 
 /**
- * Receipt files directory. Co-located with SQLite when DB_PATH is set (Railway volume).
- * Override with RECEIPTS_DIR. Production should prefer R2 (see saveReceipt).
+ * Receipt files directory. Prefer RECEIPTS_DIR; on Railway use /data/receipts when present.
+ * Production should prefer R2 (see saveReceipt).
  */
 export function resolveReceiptsDir(): string {
   if (process.env.RECEIPTS_DIR?.trim()) {
     return process.env.RECEIPTS_DIR.trim();
   }
-  const dbPath = process.env.DB_PATH?.trim();
-  if (dbPath && process.env.NEXT_PHASE !== 'phase-production-build') {
-    return path.join(path.dirname(dbPath), 'receipts');
+  if (process.env.NEXT_PHASE !== 'phase-production-build' && fs.existsSync('/data')) {
+    return '/data/receipts';
   }
   return path.join(process.cwd(), 'data', 'receipts');
 }
@@ -39,7 +38,7 @@ export function ensureReceiptsDir() {
   receiptsDir();
 }
 
-/** Save an image to R2 (production) or local disk (dev fallback). Returns public URL or bare filename. */
+/** Save a file to R2 (production) or local disk (dev fallback). Returns public URL or bare filename. */
 export async function saveReceipt(
   buffer: Buffer,
   mimeType: string,
@@ -50,7 +49,9 @@ export async function saveReceipt(
   }
 
   ensureReceiptsDir();
-  const ext = ALLOWED_EXT[mimeType] || '.png';
+  const fromName = path.extname(originalName || '').toLowerCase();
+  const safeExt = /^\.[a-z0-9]{1,8}$/i.test(fromName) ? fromName : '';
+  const ext = ALLOWED_EXT[mimeType] || safeExt || '.bin';
   const filename = `${crypto.randomUUID()}${ext}`;
   fs.writeFileSync(path.join(receiptsDir(), filename), buffer);
   return filename;
@@ -73,6 +74,14 @@ export function receiptContentType(filename: string): string {
     '.jpeg': 'image/jpeg',
     '.webp': 'image/webp',
     '.gif': 'image/gif',
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.csv': 'text/csv',
+    '.txt': 'text/plain',
+    '.zip': 'application/zip',
   };
   return map[ext] || 'application/octet-stream';
 }
@@ -175,7 +184,7 @@ export function extractAmounts(text: string): { hkd: number | null; rmb: number 
 
 async function ocrExtract(buffer: Buffer): Promise<string> {
   const { createWorker } = await import('tesseract.js');
-  const langs = process.env.OCR_LANGS || 'eng';
+  const langs = process.env.OCR_LANGS || 'eng+chi_sim';
   const worker = await createWorker(langs);
   try {
     const { data } = await worker.recognize(buffer);

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     let deleted = 0;
     const not_found: number[] = [];
     for (const id of uniqueIds) {
-      if (trashExpense(session, id)) deleted++;
+      if (await trashExpense(session, id)) deleted++;
       else not_found.push(id);
     }
 

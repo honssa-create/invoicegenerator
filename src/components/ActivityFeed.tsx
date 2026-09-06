@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { KITCHEN_COMPLETION_ACTIVITY_PREFIX } from '@/lib/kitchen-prep';
+import { BTN, bi } from '@/lib/ui-labels';
 
 interface Activity {
   id: number;
@@ -78,13 +79,13 @@ export default function ActivityFeed({ entityType, entityId, className = '' }: A
   return (
     <div className={`bg-white rounded-xl border border-gray-200 flex flex-col ${className}`}>
       <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="font-semibold text-gray-900">Activity</h2>
+        <h2 className="font-semibold text-gray-900">{bi('Activity', '動態')}</h2>
         <span className="text-xs text-gray-400">{activities.length}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {activities.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-8">No activity yet. Start the conversation below.</p>
+          <p className="text-sm text-gray-400 text-center py-8">{bi('No activity yet. Start the conversation below.', '尚無動態。在下方開始對話。')}</p>
         ) : (
           activities.map((a) => (
             <div key={a.id} className="flex gap-2">
@@ -117,7 +118,7 @@ export default function ActivityFeed({ entityType, entityId, className = '' }: A
             onChange={(e) => setComment(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) post(); }}
             rows={2}
-            placeholder="Write a comment…"
+            placeholder={bi('Write a comment…', '撰寫留言…')}
             className="w-full px-3 py-2 text-sm outline-none resize-none rounded-t-lg"
           />
           <div className="flex items-center justify-between px-2 py-1.5 border-t border-gray-100">
@@ -128,7 +129,7 @@ export default function ActivityFeed({ entityType, entityId, className = '' }: A
               <button type="button" title="Image" className="hover:text-gray-600 px-1">🖼️</button>
             </div>
             <button onClick={post} disabled={posting || !comment.trim()} className="px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50">
-              {posting ? '…' : 'Send'}
+              {posting ? '…' : BTN.send}
             </button>
           </div>
         </div>

@@ -47,22 +47,22 @@ export const DOCUMENT_TYPES: DocumentTypeDef[] = [
     id: 'quotation',
     label: 'Quotation',
     labelZh: '報價單',
-    enabled: false,
-    description: 'Coming soon.',
+    enabled: true,
+    description: 'Customer quotation with billing/shipping addresses and line items.',
   },
   {
     id: 'invoice',
     label: 'Invoice',
     labelZh: '發票',
-    enabled: false,
-    description: 'Coming soon.',
+    enabled: true,
+    description: 'Customer invoice — standard, deposit, and balance layouts.',
   },
   {
     id: 'delivery_note',
     label: 'Delivery Note',
     labelZh: '出貨單',
-    enabled: false,
-    description: 'Coming soon.',
+    enabled: true,
+    description: 'Delivery note — with or without company chop.',
   },
   {
     id: 'purchase_order',
@@ -101,6 +101,31 @@ export const DEBIT_NOTE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
     shortLabel: 'Joint 聯合',
   },
 ];
+
+/** Quotation company variants (Honour Label first). */
+export const QUOTATION_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
+];
+
+/** Invoice company variants (Honour Label first). */
+export const INVOICE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
+];
+
+/** Delivery note company variants (Honour Label first). */
+export const DELIVERY_NOTE_COMPANY_VARIANTS: TemplateCompanyVariantDef[] = [
+  { id: 'label', label: 'Honour Label Limited 鴻宇商標有限公司', shortLabel: 'Honour Label' },
+];
+
+export function companyVariantsForDocumentType(
+  documentType: DocumentTypeId,
+): TemplateCompanyVariantDef[] {
+  if (documentType === 'debit_note') return DEBIT_NOTE_COMPANY_VARIANTS;
+  if (documentType === 'quotation') return QUOTATION_COMPANY_VARIANTS;
+  if (documentType === 'invoice') return INVOICE_COMPANY_VARIANTS;
+  if (documentType === 'delivery_note') return DELIVERY_NOTE_COMPANY_VARIANTS;
+  return [];
+}
 
 export function isTemplateCompanyVariantId(value: string): value is TemplateCompanyVariantId {
   return value === 'label' || value === 'elite' || value === 'joint';
@@ -267,8 +292,11 @@ export function buildDebitNotePreviewDocument(
       id: 0,
       user_id: 0,
       name: vars.customer_name,
+      contact_name: '',
+      company_name: '',
       phone: '9123 4567',
       email: 'tenant@example.com',
+      address: '',
       notes: '',
       utilityBillingMode: 'company_shared_meter',
       created_at: '',

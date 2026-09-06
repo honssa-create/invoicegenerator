@@ -9,9 +9,10 @@ import {
   type TrashEntityType,
   type TrashListItem,
 } from '@/lib/trash-constants';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 const TYPE_OPTIONS: { value: '' | TrashEntityType; label: string }[] = [
-  { value: '', label: 'All types' },
+  { value: '', label: bi('All types', '全部類型') },
   ...Object.entries(TRASH_ENTITY_LABELS).map(([value, label]) => ({
     value: value as TrashEntityType,
     label,
@@ -87,13 +88,13 @@ export default function TrashPage() {
       const res = await fetch(`/api/trash/${record.id}/restore`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) {
-        setToast({ msg: data.error || 'Restore failed', kind: 'error' });
+        setToast({ msg: data.error || MSG.restoreFailed, kind: 'error' });
         return;
       }
       setToast({ msg: `Restored ${data.entity_label}: ${record.label}`, kind: 'success' });
       load();
     } catch {
-      setToast({ msg: 'Restore failed', kind: 'error' });
+      setToast({ msg: MSG.restoreFailed, kind: 'error' });
     } finally {
       setBusyId(null);
     }
@@ -102,9 +103,9 @@ export default function TrashPage() {
   return (
     <AppLayout>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Deleted Records 已刪除紀錄</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{TITLE.trash}</h1>
         <p className="text-gray-500 mt-1 text-sm sm:text-base">
-          Deleted items are kept for {TRASH_RETENTION_DAYS} days. Find and restore them here before they expire.
+          {bi(`Deleted items are kept for ${TRASH_RETENTION_DAYS} days. Find and restore them here before they expire.`, `已刪除項目保留 ${TRASH_RETENTION_DAYS} 天。請在此還原，逾期後將無法恢復。`)}
         </p>
       </div>
 
@@ -121,7 +122,7 @@ export default function TrashPage() {
 
       <div className="bg-white border border-gray-200 rounded-xl p-3 mb-6 flex flex-col sm:flex-row sm:flex-wrap gap-3">
         <div className="flex flex-col min-w-0 sm:min-w-[180px]">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Type</label>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Type', '類型')}</label>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as '' | TrashEntityType)}
@@ -135,11 +136,11 @@ export default function TrashPage() {
           </select>
         </div>
         <div className="flex flex-col flex-1 min-w-0">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Search</label>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{BTN.search}</label>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search label or summary…"
+            placeholder={bi('Search label or summary…', '搜尋標籤或摘要…')}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
           />
         </div>
@@ -190,12 +191,12 @@ export default function TrashPage() {
                           disabled={busyId === r.id}
                           className="text-brand-600 hover:text-brand-700 font-medium disabled:opacity-50"
                         >
-                          {busyId === r.id ? 'Restoring…' : '↩ Restore'}
+                          {busyId === r.id ? BTN.restoring : `↩ ${BTN.restore}`}
                         </button>
                       )}
                       {href && r.can_restore && (
                         <Link href={href} className="text-gray-500 hover:text-gray-700">
-                          Open
+                          {BTN.open}
                         </Link>
                       )}
                     </td>

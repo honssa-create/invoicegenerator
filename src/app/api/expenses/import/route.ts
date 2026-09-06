@@ -8,8 +8,11 @@ import {
   hyperlinkUrlsByDataRow,
   hyperlinkUrlsFromAllColumns,
   resolveImportReceiptPaths,
+  storeImportImageBuffer,
+  type ImportReceiptRef,
   type ReceiptFetchWarning,
 } from '@/lib/expense-import-receipts';
+import { scanXlsxReceiptAssets } from '@/lib/expense-import-xlsx-assets';
 import { getDataOwnerId } from '@/lib/org-server';
 import { legacyPaymentToFundingSource } from '@/lib/expenses';
 import type { FundingSourceId } from '@/lib/expenses';
@@ -97,7 +100,7 @@ interface PreparedRow {
   platform: string | null;
   notes: string | null;
   specialNotes: string | null;
-  receiptPaths: string[];
+  receiptRefs: ImportReceiptRef[];
 }
 
 export async function POST(request: Request) {
@@ -117,7 +120,6 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
   }
-  const singleBatch = formData.get('single_batch') === '1' || formData.get('single_batch') === 'true';
   if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: 'File too large (max 15 MB)' }, { status: 400 });
   }
@@ -129,9 +131,17 @@ export async function POST(request: Request) {
   let rows: Record<string, unknown>[];
   let hyperlinkByRow = new Map<number, string[]>();
   let worksheet: XLSX.WorkSheet | undefined;
+  let xlsxAssets: Awaited<ReturnType<typeof scanXlsxReceiptAssets>> | null = null;
   const isCsv = name.endsWith('.csv');
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (!isCsv) {
+      try {
+        xlsxAssets = await scanXlsxReceiptAssets(buffer);
+      } catch {
+        xlsxAssets = null;
+      }
+    }
     const wb = isCsv
       ? XLSX.read(buffer.toString('utf8'), { type: 'string' })
       : XLSX.read(buffer, { type: 'buffer', cellDates: true, cellFormula: true });
@@ -150,7 +160,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Could not parse the file' }, { status: 400 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const errors: string[] = [];
   const receiptWarnings: ReceiptFetchWarning[] = [];
   const seenInBatch = new Set<string>();
@@ -196,47 +206,72 @@ export async function POST(request: Request) {
       skipped++;
       continue;
     }
-    const existing = db
-      .prepare(
-        `SELECT 1 FROM expenses
-         WHERE user_id = ? AND IFNULL(paid_date, '') = ?
-           AND IFNULL(amount_hkd, -1) = IFNULL(?, -1)
-           AND IFNULL(amount_rmb, -1) = IFNULL(?, -1)
-           AND IFNULL(merchant, '') = ?
-           AND IFNULL(supplier_input, '') = ?`
-      )
-      .get(ownerId, date || '', amountHkd, amountRmb, merchant || '', supplierInput || '');
-    if (existing) {
+    try {
+      const existing = await db
+        .prepare(
+          `SELECT 1 FROM expenses
+           WHERE user_id = ? AND COALESCE(paid_date, '') = ?
+             AND COALESCE(amount_hkd, -1) = COALESCE(?, -1)
+             AND COALESCE(amount_rmb, -1) = COALESCE(?, -1)
+             AND COALESCE(merchant, '') = ?
+             AND COALESCE(supplier_input, '') = ?`
+        )
+        .get(ownerId, date || '', amountHkd, amountRmb, merchant || '', supplierInput || '');
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      seenInBatch.add(dupKey);
+
+      const { refs: urlRefs, warnings } = await resolveImportReceiptPaths(
+        sheetRow,
+        row,
+        [
+          ...(hyperlinkByRow.get(idx) || []),
+          ...(xlsxAssets?.urlsByDataRow.get(idx) || []),
+        ],
+        isCsv ? undefined : worksheet,
+        isCsv ? undefined : idx,
+      );
+      const receiptRefs = [...urlRefs];
+      receiptWarnings.push(...warnings);
+      receiptFetched += urlRefs.length;
+      receiptFailed += warnings.length;
+
+      for (const embedded of xlsxAssets?.imagesByDataRow.get(idx) || []) {
+        try {
+          const stored = await storeImportImageBuffer(embedded.buffer, embedded.mimeType, embedded.name);
+          receiptRefs.push({ path: stored, sourceUrl: null });
+          receiptFetched++;
+        } catch {
+          receiptFailed++;
+          receiptWarnings.push({
+            row: sheetRow,
+            url: embedded.name,
+            message: `Row ${sheetRow}: embedded receipt image could not be saved`,
+          });
+        }
+      }
+
+      candidates.push({
+        sheetRow,
+        date,
+        amountHkd,
+        amountRmb,
+        merchant,
+        supplierInput,
+        paymentMethod,
+        reason,
+        platform,
+        notes,
+        specialNotes,
+        receiptRefs,
+      });
+    } catch (e) {
       skipped++;
-      continue;
+      const detail = e instanceof Error ? e.message : 'unknown error';
+      errors.push(`Row ${sheetRow}: failed to prepare (${detail})`);
     }
-    seenInBatch.add(dupKey);
-
-    const { paths, warnings } = await resolveImportReceiptPaths(
-      sheetRow,
-      row,
-      hyperlinkByRow.get(idx) || [],
-      isCsv ? undefined : worksheet,
-      isCsv ? undefined : idx,
-    );
-    receiptWarnings.push(...warnings);
-    receiptFetched += paths.length;
-    receiptFailed += warnings.length;
-
-    candidates.push({
-      sheetRow,
-      date,
-      amountHkd,
-      amountRmb,
-      merchant,
-      supplierInput,
-      paymentMethod,
-      reason,
-      platform,
-      notes,
-      specialNotes,
-      receiptPaths: paths,
-    });
   }
 
   const tagsAdded: string[] = [];
@@ -248,27 +283,24 @@ export async function POST(request: Request) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertReceipt = db.prepare(
-    'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
+    'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
   );
 
-  let sharedBatchId: string | null = null;
-
-  const persist = db.transaction(() => {
+  try {
+    await db.transaction(async () => {
     for (const row of candidates) {
-      if (syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
-      if (syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
-      if (syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
-      if (row.merchant && syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
+      if (await syncOption(ownerId, 'payment_method', row.paymentMethod)) tagsAdded.push(row.paymentMethod!);
+      if (await syncOption(ownerId, 'category', row.reason)) tagsAdded.push(row.reason!);
+      if (await syncOption(ownerId, 'platform', row.platform)) tagsAdded.push(row.platform!);
+      if (row.merchant && await syncOption(ownerId, 'supplier', row.merchant)) tagsAdded.push(row.merchant);
 
       const fundingSource = (legacyPaymentToFundingSource(row.paymentMethod) || 'cash') as FundingSourceId;
-      const { batchId: reportBatchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, row.date!, {
-        batchId: singleBatch ? sharedBatchId : null,
+      const { batchId: reportBatchId, receiptNo } = await assignExpenseNumbersAtomic(ownerId, row.date!, {
         fundingSource,
       });
-      if (singleBatch) sharedBatchId = reportBatchId;
 
-      const primaryPath = row.receiptPaths[0] || null;
-      const result = insertExpense.run(
+      const primaryPath = row.receiptRefs[0]?.path || null;
+      const result = await insertExpense.run(
         ownerId,
         session.userId,
         receiptNo,
@@ -291,17 +323,15 @@ export async function POST(request: Request) {
         primaryPath,
       );
       const expenseId = result.lastInsertRowid as number;
-      for (const p of row.receiptPaths) {
-        insertReceipt.run(expenseId, ownerId, p);
+      for (const ref of row.receiptRefs) {
+        await insertReceipt.run(expenseId, ownerId, ref.path, ref.sourceUrl ?? null);
       }
       imported++;
     }
-  });
-
-  try {
-    persist.immediate();
-  } catch {
-    return NextResponse.json({ error: 'Import failed while saving rows' }, { status: 500 });
+    });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'unknown error';
+    return NextResponse.json({ error: `Import failed while saving rows: ${detail}` }, { status: 500 });
   }
 
   return NextResponse.json({

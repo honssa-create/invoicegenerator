@@ -97,15 +97,15 @@ function defaultCompany(templateKey: string): Partial<DebitNoteCompanyProfile> |
   return null;
 }
 
-export function ensureDefaultRentalTemplates(userId: number): void {
+export async function ensureDefaultRentalTemplates(userId: number): Promise<void> {
   for (const key of BUILTIN_KEYS) {
-    const existing = db.prepare(
+    const existing = await db.prepare(
       'SELECT id FROM rental_document_templates WHERE user_id = ? AND template_key = ?'
     ).get(userId, key);
     if (existing) continue;
     const company = defaultCompany(key);
     const draft = defaultDebitNoteNotesDraft(key);
-    db.prepare(
+    await db.prepare(
       `INSERT INTO rental_document_templates
         (user_id, template_key, name, payment_instructions, footer_remark, rent_invoice_note, company_json)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -121,23 +121,23 @@ export function ensureDefaultRentalTemplates(userId: number): void {
   }
 }
 
-export function listRentalTemplates(userId: number): RentalDocumentTemplate[] {
-  ensureDefaultRentalTemplates(userId);
-  const rows = db.prepare(
+export async function listRentalTemplates(userId: number): Promise<RentalDocumentTemplate[]> {
+  await ensureDefaultRentalTemplates(userId);
+  const rows = await db.prepare(
     'SELECT * FROM rental_document_templates WHERE user_id = ? ORDER BY template_key'
   ).all(userId) as TemplateRow[];
   return rows.map(hydrate);
 }
 
-export function getRentalTemplate(userId: number, templateKey: string): RentalDocumentTemplate | null {
-  ensureDefaultRentalTemplates(userId);
-  const row = db.prepare(
+export async function getRentalTemplate(userId: number, templateKey: string): Promise<RentalDocumentTemplate | null> {
+  await ensureDefaultRentalTemplates(userId);
+  const row = await db.prepare(
     'SELECT * FROM rental_document_templates WHERE user_id = ? AND template_key = ?'
   ).get(userId, templateKey) as TemplateRow | undefined;
   return row ? hydrate(row) : null;
 }
 
-export function updateRentalTemplate(
+export async function updateRentalTemplate(
   userId: number,
   templateKey: string,
   input: {
@@ -147,11 +147,11 @@ export function updateRentalTemplate(
     rentInvoiceNote?: string;
     company?: Partial<DebitNoteCompanyProfile> | null;
   },
-): RentalDocumentTemplate {
-  ensureDefaultRentalTemplates(userId);
-  const existing = getRentalTemplate(userId, templateKey);
+): Promise<RentalDocumentTemplate> {
+  await ensureDefaultRentalTemplates(userId);
+  const existing = await getRentalTemplate(userId, templateKey);
   if (!existing) {
-    db.prepare(
+    await db.prepare(
       `INSERT INTO rental_document_templates
         (user_id, template_key, name, payment_instructions, footer_remark, rent_invoice_note, company_json)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -164,9 +164,9 @@ export function updateRentalTemplate(
       input.rentInvoiceNote ?? DEFAULT_RENT_INVOICE_NOTE,
       input.company ? JSON.stringify(input.company) : null,
     );
-    return getRentalTemplate(userId, templateKey)!;
+    return (await getRentalTemplate(userId, templateKey))!;
   }
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_document_templates SET
       name = ?, payment_instructions = ?, footer_remark = ?, rent_invoice_note = ?,
       company_json = ?, updated_at = datetime('now')
@@ -182,7 +182,7 @@ export function updateRentalTemplate(
     userId,
     templateKey,
   );
-  return getRentalTemplate(userId, templateKey)!;
+  return (await getRentalTemplate(userId, templateKey))!;
 }
 
 export function resolveCompanyFromTemplate(

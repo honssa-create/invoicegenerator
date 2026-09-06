@@ -17,9 +17,9 @@ export async function POST(
     if (!allocations.length) {
       return NextResponse.json({ error: 'allocations array required' }, { status: 400 });
     }
-    const result = allocatePayment(
+    const result = await allocatePayment(
       params.id,
-      rentalOwnerId(session.userId),
+      await rentalOwnerId(session),
       allocations.map((a: { chargeItemId: number; amount: number }) => ({
         chargeItemId: Number(a.chargeItemId),
         amount: Number(a.amount),

@@ -23,7 +23,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const buffer = Buffer.from(await file.arrayBuffer());
   try {
-    const result = await extractRentalReceipt(params.id, rentalOwnerId(session.userId), buffer, file.type);
+    const result = await extractRentalReceipt(params.id, await rentalOwnerId(session), buffer, file.type);
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to process receipt';

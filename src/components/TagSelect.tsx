@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { BTN, bi } from '@/lib/ui-labels';
 
 interface TagSelectProps {
   value: string;
@@ -58,7 +59,7 @@ export default function TagSelect({ value, options = [], onChange, onAdd, placeh
         className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm text-left bg-white"
       >
         <span className={value ? 'text-gray-900' : 'text-gray-400'}>
-          {value || placeholder || 'Select…'}
+          {value || placeholder || bi('Select…', '選擇…')}
         </span>
         <span className="text-gray-400 ml-2">▾</span>
       </button>
@@ -77,13 +78,13 @@ export default function TagSelect({ value, options = [], onChange, onAdd, placeh
                   else if (filtered[0]) select(filtered[0]);
                 }
               }}
-              placeholder="Search or add options…"
+              placeholder={bi('Search or add options…', '搜尋或新增選項…')}
               className="w-full px-2 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 outline-none"
             />
           </div>
           <div className="max-h-52 overflow-y-auto py-1">
             {filtered.length === 0 && !q && (
-              <div className="px-3 py-2 text-xs text-gray-400">No options yet</div>
+              <div className="px-3 py-2 text-xs text-gray-400">{bi('No options yet', '尚無選項')}</div>
             )}
             {filtered.map((o) => (
               <button
@@ -104,7 +105,7 @@ export default function TagSelect({ value, options = [], onChange, onAdd, placeh
                 disabled={adding}
                 className="w-full text-left px-3 py-2 text-sm text-brand-700 font-medium hover:bg-brand-50 border-t border-gray-100 disabled:opacity-50"
               >
-                {adding ? 'Adding…' : `+ Add “${q}”`}
+                {adding ? bi('Adding…', '新增中…') : `+ ${bi('Add', '新增')} "${q}"`}
               </button>
             )}
           </div>

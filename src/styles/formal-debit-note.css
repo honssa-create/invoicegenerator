@@ -239,6 +239,10 @@
   margin: 0;
 }
 
+.dn-footer-instructions + .dn-footer-instructions {
+  margin-top: 0.75rem;
+}
+
 .dn-footer-remark {
   margin-top: 0.75rem;
   padding-top: 0.75rem;
@@ -246,13 +250,32 @@
   font-weight: 500;
 }
 
+.dn-meta-right {
+  text-align: right;
+}
+
 @media print {
   .formal-debit-note {
     font-size: 10pt !important;
   }
 
-  .dn-total-box {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+  .formal-debit-note .dn-print-keep,
+  .formal-debit-note .dn-meta {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  .formal-debit-note .dn-total-box table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .formal-debit-note a[href]::after {
+    content: none !important;
+  }
+
+  .formal-debit-note a[href] {
+    color: inherit !important;
+    text-decoration: none !important;
   }
 }

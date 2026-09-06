@@ -20,7 +20,7 @@ export async function requireApiSession(
 export async function requireApiAdmin(request: Request): Promise<SessionPayload | NextResponse> {
   const session = await requireApiSession(request);
   if (session instanceof NextResponse) return session;
-  if (!requireAdmin(session.userId)) {
+  if (!(await requireAdmin(session.userId))) {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
   return session;
@@ -49,7 +49,7 @@ export function denyReadOnlyWrite(
   method: string
 ): NextResponse | null {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
-  if (isSectionReadOnly(session.role, section)) {
+  if (isSectionReadOnly(session.role, section, session.readOnlySections)) {
     return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
   }
   return null;

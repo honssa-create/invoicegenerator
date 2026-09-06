@@ -1,354 +1,565 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
-import { compressImage } from '@/lib/imageCompression';
-import { compressPdfToImages } from '@/lib/pdfCompression';
-import { orderFileUrl, orderPaymentReceiptUrl } from '@/lib/image-url';
+import CustomerSelect from '@/components/CustomerSelect';
+import OrderDetailTypePanel from '@/components/orders/OrderDetailTypePanel';
+import PaymentDetailSection from '@/components/orders/sections/PaymentDetailSection';
+import { labeled, nonNeg, readOnly, ORDER_DETAIL_SOFT_INPUT } from '@/components/orders/order-detail-ui';
+import OrderPropertyBar from '@/components/OrderPropertyBar';
+import { useOrderDetail } from '@/hooks/orders/useOrderDetail';
+import { orderFileUrl } from '@/lib/image-url';
+import EntityAttachments from '@/components/EntityAttachments';
 import {
-  ORDER_FIELDS,
-  ORDER_STATUSES,
+  ORDER_SHIPPING_METHODS,
   ORDER_TYPES,
-  PAYMENT_STATUS_LABELS,
-  BIRD_NEST_FLAVORS,
   computeBirdNestTotals,
-  STATUS_COLORS,
+  computeOrderDueTotal,
+  computeOrderPaidTotal,
+  computeHonourLineTotals,
+  computeWeddingGiftTotal,
+  derivePaymentStatusLabel,
+  ensureHonourSupplierCount,
+  honourLinesDerivedFields,
+  honourProductLineCount,
+  honourSuppliersDerivedFields,
+  computeWeddingGiftMaterials,
+  computeWeddingGiftPacking,
+  parseHonourLines,
+  parseHonourSuppliers,
+  parseAssigneeIds,
+  parseOrderTags,
+  parseOrderDueDateField,
+  serializeAssigneeIds,
+  serializeOrderTags,
   orderTitle,
+  isBadgeOrderType,
+  isWeddingGiftOrderType,
+  type HonourLineItem,
+  type HonourSupplierItem,
+  type CupmokaLineItem,
   type Order,
-  type OrderFieldDef,
 } from '@/lib/orders';
+import { displayInvoiceNumber, displayQuotationNumber } from '@/lib/record-numbering-core';
+import type { Customer } from '@/lib/types';
+import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
+import { BTN, bi } from '@/lib/ui-labels';
 
-interface InvoiceOption {
-  id: number;
-  invoice_number: string;
-  status: string;
-}
+const SfExpressShipmentModal = dynamic(
+  () => import('@/components/SfExpressShipmentModal'),
+  { loading: () => null },
+);
 
-interface QuotationOption {
-  id: number;
-  quote_number: string;
-  status: string;
-}
+const WeddingGiftConfirmPasteModal = dynamic(
+  () => import('@/components/orders/WeddingGiftConfirmPasteModal'),
+  { loading: () => null },
+);
 
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
-  const [order, setOrder] = useState<Order | null>(null);
-  const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
-  const [quotations, setQuotations] = useState<QuotationOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    order,
+    setOrder,
+    loading,
+    invoices,
+    quotations,
+    quoteToast,
+    setQuoteToast,
+    accountUsers,
+    tagSuggestions,
+    setTagSuggestions,
+    supplierOptions,
+    setSupplierOptions,
+    nestieeGiftBoxes,
+    bigDayPersistedRef,
+    bigDaySavedOnChangeRef,
+    patch,
+    setCoreLocal,
+    setFieldLocal,
+    updatedAtRef,
+  } = useOrderDetail(id);
+
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const paymentInputRef = useRef<HTMLInputElement>(null);
-  const [paymentPreview, setPaymentPreview] = useState<string | null>(null);
-  const [paymentScanMsg, setPaymentScanMsg] = useState('');
+  const [convertingQuote, setConvertingQuote] = useState(false);
+  const [confirmPasteOpen, setConfirmPasteOpen] = useState(false);
+  const [confirmPasteText, setConfirmPasteText] = useState('');
+  const [confirmPasteError, setConfirmPasteError] = useState('');
+  const [sfModalOpen, setSfModalOpen] = useState(false);
 
-  useEffect(() => {
-    fetch(`/api/orders/${id}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setOrder(d?.order || null))
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  useEffect(() => {
-    fetch('/api/invoices')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setInvoices((d?.invoices || []).map((i: InvoiceOption) => ({ id: i.id, invoice_number: i.invoice_number, status: i.status }))))
-      .catch(() => {});
-    fetch('/api/quotations')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setQuotations((d?.quotations || []).map((q: QuotationOption) => ({ id: q.id, quote_number: q.quote_number, status: q.status }))))
-      .catch(() => {});
-  }, []);
-
-  const patch = async (payload: { core?: Record<string, unknown>; fields?: Record<string, unknown>; linked_invoice_id?: string | number | null; linked_quotation_id?: string | number | null }) => {
-    const res = await fetch(`/api/orders/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.order) setOrder(data.order);
-    }
-  };
-
-  const setCoreLocal = (col: string, value: unknown) =>
-    setOrder((o) => (o ? ({ ...o, [col]: value } as Order) : o));
-  const setFieldLocal = (key: string, value: unknown) =>
-    setOrder((o) => (o ? { ...o, fields: { ...o.fields, [key]: value as string | boolean } } : o));
-
-  const [uploadMsg, setUploadMsg] = useState('');
-  const uploadFiles = async (files: FileList) => {
-    setUploadMsg('Optimising files…');
-    // Compress images (≤1600px JPEG) and convert heavy PDFs (>2MB) into compressed
-    // JPEG page images so we store a lightweight image array, never the raw monster PDF.
-    const prepared: File[] = [];
-    for (const f of Array.from(files)) {
+  const convertToQuotation = async () => {
+    setConvertingQuote(true);
+    setQuoteToast(null);
+    try {
+      const res = await fetch(`/api/orders/${id}/convert-to-quotation`, { method: 'POST' });
+      let data: { error?: string; quote_number?: string; id?: number } = {};
       try {
-        if (f.type === 'application/pdf') {
-          setUploadMsg(`Compressing PDF “${f.name}” pages…`);
-          const pages = await compressPdfToImages(f);
-          prepared.push(...pages);
-        } else if (f.type.startsWith('image/')) {
-          const c = await compressImage(f, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg' });
-          prepared.push(c.file);
-        } else {
-          prepared.push(f);
-        }
+        data = await res.json();
       } catch {
-        prepared.push(f);
+        setQuoteToast({
+          text: `Failed to convert order (HTTP ${res.status}). Try refreshing or restarting the app.`,
+          kind: 'error',
+        });
+        return;
       }
-    }
-    if (!prepared.length) { setUploadMsg(''); return; }
-
-    setUploadMsg(`Uploading ${prepared.length} image(s)…`);
-    const fd = new FormData();
-    prepared.forEach((f) => fd.append('file', f));
-    const res = await fetch(`/api/orders/${id}/files`, { method: 'POST', body: fd });
-    if (res.ok) {
-      const data = await res.json();
-      setOrder((o) => (o ? { ...o, files: data.files } : o));
-    }
-    setUploadMsg('');
-  };
-
-  const deleteFile = async (fileId: number) => {
-    const res = await fetch(`/api/order-files/${fileId}`, { method: 'DELETE' });
-    if (res.ok) setOrder((o) => (o ? { ...o, files: o.files.filter((f) => f.id !== fileId) } : o));
-  };
-
-  const handlePaymentReceipt = async (rawFile: File) => {
-    setPaymentScanMsg('Compressing & scanning receipt…');
-    // Compress with the receipt rule: 1600px, quality 0.65, < 300KB. Heavy PDFs → first page image.
-    let file = rawFile;
-    try {
-      if (rawFile.type === 'application/pdf') {
-        const pages = await compressPdfToImages(rawFile, { quality: 0.65, maxWidthOrHeight: 1600 });
-        if (pages[0]) file = pages[0];
-      } else {
-        const c = await compressImage(rawFile, { maxDim: 1600, targetBytes: 300 * 1024, mimeType: 'image/jpeg', quality: 0.65 });
-        file = c.file;
+      if (!res.ok) {
+        setQuoteToast({ text: data.error || `Failed to convert order (HTTP ${res.status})`, kind: 'error' });
+        return;
       }
+      if (!data.id) {
+        setQuoteToast({ text: 'Failed to convert order — no quotation id returned', kind: 'error' });
+        return;
+      }
+      setQuoteToast({ text: `Created ${displayQuotationNumber(data.quote_number)}`, kind: 'success' });
+      const orderRes = await fetch(`/api/orders/${id}`);
+      const orderData = await orderRes.json();
+      if (orderData.order) {
+        setOrder(orderData.order);
+        updatedAtRef.current = orderData.order.updated_at || '';
+      }
+      setTimeout(() => router.push(`/quotations/${data.id}`), 800);
     } catch {
-      /* fall back to original */
-    }
-    setPaymentPreview(URL.createObjectURL(file));
-
-    const fd = new FormData();
-    fd.append('receipt', file);
-    try {
-      const res = await fetch('/api/payments/scan', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) { setPaymentScanMsg(data.error || 'Scan failed'); return; }
-      const r = data.result;
-      const upd: Record<string, string> = { payment_receipt_path: r.receipt_path || '' };
-      if (r.payment_date) upd.payment_date = r.payment_date;
-      if (r.amount != null) {
-        upd.payment_amount = String(r.amount);
-        if (Number(r.amount) > 0) upd.payment_status_label = '部分付款 Partly Paid';
-      }
-      if (r.bank) upd.payment_bank = r.bank;
-      if (r.method) upd.payment_method_detail = r.method;
-      if (r.reference) upd.payment_reference = r.reference;
-      setOrder((o) => (o ? { ...o, fields: { ...o.fields, ...upd } } : o));
-      patch({ fields: upd });
-      const via = r.source === 'ai' ? 'AI vision (Gemini)' : 'on-device OCR';
-      const found = [r.payment_date && 'date', r.amount != null && 'amount', r.bank && 'bank', r.method && 'method', r.reference && 'ref'].filter(Boolean);
-      setPaymentScanMsg(found.length ? `Extracted via ${via}: ${found.join(', ')}. Please verify.` : `No fields auto-extracted (${via}). Enter manually.`);
-    } catch {
-      setPaymentScanMsg('Scan failed');
+      setQuoteToast({ text: 'Failed to convert order', kind: 'error' });
+    } finally {
+      setConvertingQuote(false);
     }
   };
 
-  const paymentBadge = () => {
-    const inv = order?.linked_invoice;
-    const fieldStatus = String(order?.fields.payment_status_label || '');
-    if (inv?.status === 'paid') return { text: '✓ Paid · 100% Payment (全數付清)', cls: 'bg-green-100 text-green-700' };
-    if (fieldStatus.includes('部分付款') || fieldStatus.toLowerCase().includes('part')) {
-      return { text: '部分付款 Partly Paid', cls: 'bg-amber-100 text-amber-700' };
+  const deleteOrder = async () => {
+    if (!confirm(bi(
+      'Move this order to Deleted Records? You can restore it within 60 days.',
+      '將此訂單移至已刪除紀錄？可於 60 天內還原。',
+    ))) return;
+    const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setQuoteToast({ text: data.error || bi('Failed to delete order', '刪除訂單失敗'), kind: 'error' });
+      return;
     }
-    if (!inv) return { text: 'No invoice linked', cls: 'bg-gray-100 text-gray-600' };
-    if (inv.status === 'overdue') return { text: '⚠ Overdue / 逾期未付', cls: 'bg-red-100 text-red-700' };
-    return { text: '未付款 / 待核對 Unpaid', cls: 'bg-red-100 text-red-700' };
+    router.push('/orders');
+  };
+
+  /** Keep status-bar receipt date and Shipment 客人收貨日期 in sync. */
+  const setLinkedDeliveryDatesLocal = (next: string) =>
+    setOrder((o) =>
+      o
+        ? {
+            ...o,
+            fields: {
+              ...o.fields,
+              due_date: next,
+              client_delivery_date: next,
+            },
+          }
+        : o
+    );
+  const commitLinkedDeliveryDates = (next: string) => {
+    setLinkedDeliveryDatesLocal(next);
+    patch({ fields: { due_date: next, client_delivery_date: next } });
   };
 
   if (loading) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>
+        <div className="page-header">
+          <div>
+            <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
+            <div className="h-4 w-64 bg-gray-100 rounded mt-2 animate-pulse" />
+          </div>
+        </div>
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 h-96 bg-gray-100 rounded-xl animate-pulse" />
+          <div className="h-96 bg-gray-100 rounded-xl animate-pulse" />
+        </div>
       </AppLayout>
     );
   }
   if (!order) {
     return (
       <AppLayout>
-        <div className="p-12 text-center text-gray-500">Order not found. <button onClick={() => router.push('/orders')} className="text-brand-600 underline">Back to orders</button></div>
+        <div className="p-12 text-center text-gray-500">{bi('Order not found.', '找不到訂單。')} <button onClick={() => router.push('/orders')} className="text-brand-600 underline">{bi('Back to orders', '返回訂單')}</button></div>
       </AppLayout>
     );
   }
 
-  const cellCls = 'w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 rounded px-2 py-1 text-sm outline-none transition-colors';
-
   // Helpers for the structured section boxes (values stored in fields_json).
-  const softInput = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-colors';
+  const softInput = ORDER_DETAIL_SOFT_INPUT;
   const fVal = (k: string) => (order.fields[k] as string) ?? '';
+
+  const applyCustomerFromList = (c: Customer) => {
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            name: c.name,
+            phone: c.phone || '',
+            customer_email: c.email || '',
+            shipping_address: c.address || '',
+            fields: {
+              ...prev.fields,
+              company_name: c.company_name || '',
+              ...(c.ordered ? { order_type: c.ordered } : {}),
+            },
+          }
+        : prev
+    );
+    patch({
+      core: {
+        name: c.name,
+        phone: c.phone || null,
+        customer_email: c.email || null,
+        shipping_address: c.address || null,
+      },
+      fields: {
+        company_name: c.company_name || '',
+        ...(c.ordered ? { order_type: c.ordered } : {}),
+      },
+    });
+  };
+
+  /** Clamp typed quantity to ≥ 0 (empty stays empty). */
   const fInput = (key: string, type = 'text', placeholder = '') => (
     <input
       type={type}
+      min={type === 'number' ? 0 : undefined}
       value={fVal(key)}
-      onChange={(e) => setFieldLocal(key, e.target.value)}
-      onBlur={(e) => patch({ fields: { [key]: e.target.value } })}
+      onChange={(e) => setFieldLocal(key, type === 'number' ? nonNeg(e.target.value) : e.target.value)}
+      onBlur={(e) => {
+        const v = type === 'number' ? nonNeg(e.target.value) : e.target.value;
+        if (type === 'number' && v !== e.target.value) setFieldLocal(key, v);
+        patch({ fields: { [key]: v } });
+      }}
       placeholder={placeholder}
       className={softInput}
     />
   );
-  const partialPaymentFields = (key: 'payment_amount' | 'payment1_amount', value: string) => {
-    const amount = Number(value);
-    const fields: Record<string, string> = { [key]: value };
-    if (Number.isFinite(amount) && amount > 0 && fVal('payment_status_label') !== 'Full Paid') {
-      fields.payment_status_label = '部分付款 Partly Paid';
-      setFieldLocal('payment_status_label', fields.payment_status_label);
-    }
-    patch({ fields });
-  };
-  const paymentAmountInput = (
-    <input
-      type="number"
-      value={fVal('payment_amount')}
-      onChange={(e) => setFieldLocal('payment_amount', e.target.value)}
-      onBlur={(e) => partialPaymentFields('payment_amount', e.target.value)}
-      placeholder="0.00"
-      className={softInput}
-    />
-  );
-  const payment1AmountInput = (
-    <input
-      type="number"
-      value={fVal('payment1_amount')}
-      onChange={(e) => setFieldLocal('payment1_amount', e.target.value)}
-      onBlur={(e) => partialPaymentFields('payment1_amount', e.target.value)}
-      placeholder="0.00"
-      className={softInput}
-    />
-  );
-  const labeled = (label: string, node: React.ReactNode, hint?: string) => (
-    <div>
-      <label className="block text-xs font-medium text-gray-500 mb-1.5">
-        {label}
-        {hint ? <span className="text-gray-400 font-normal"> · {hint}</span> : null}
-      </label>
-      {node}
-    </div>
-  );
-  const readOnly = (label: string, value: React.ReactNode) => (
-    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{value}</p>
-    </div>
-  );
   const orderType = fVal('order_type');
+  const honourLines = isBadgeOrderType(orderType) ? parseHonourLines(order.fields) : [];
+  const honourTotals = computeHonourLineTotals(honourLines);
+  const honourSuppliers = isBadgeOrderType(orderType)
+    ? parseHonourSuppliers(order.fields, {
+        minCount: honourProductLineCount(honourLines),
+        cartonCountCore: order.carton_count,
+        productLines: honourLines,
+      })
+    : [];
+  const weddingGiftTotal = isWeddingGiftOrderType(orderType) ? computeWeddingGiftTotal(order.fields) : 0;
+  const dueTotal = computeOrderDueTotal(order);
+  const paidTotal = computeOrderPaidTotal(order.fields);
+  const autoStatus = derivePaymentStatusLabel(paidTotal, dueTotal);
+
   const bn = computeBirdNestTotals(order.fields);
 
-  const renderField = (f: OrderFieldDef) => {
-    const value = f.col ? (order[f.col] as string) : order.fields[f.key];
-    if (f.type === 'checkbox') {
-      return (
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => { setFieldLocal(f.key, e.target.checked); patch({ fields: { [f.key]: e.target.checked } }); }}
-          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-        />
-      );
-    }
-    if (f.type === 'select') {
-      const commit = (val: string) => (f.col ? (setCoreLocal(f.col, val), patch({ core: { [f.col]: val } })) : (setFieldLocal(f.key, val), patch({ fields: { [f.key]: val } })));
-      return (
-        <select value={(value as string) || ''} onChange={(e) => commit(e.target.value)} className={cellCls}>
-          <option value="">—</option>
-          {f.options?.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-      );
-    }
-    const commitText = (val: string) => (f.col ? patch({ core: { [f.col]: val } }) : patch({ fields: { [f.key]: val } }));
-    const onChange = (val: string) => (f.col ? setCoreLocal(f.col, val) : setFieldLocal(f.key, val));
-    if (f.type === 'textarea') {
-      return (
-        <textarea value={(value as string) || ''} rows={4} onChange={(e) => onChange(e.target.value)} onBlur={(e) => commitText(e.target.value)} placeholder={f.placeholder} className={`${cellCls} resize-y whitespace-pre-wrap`} />
-      );
-    }
-    return (
-      <input value={(value as string) || ''} onChange={(e) => onChange(e.target.value)} onBlur={(e) => commitText(e.target.value)} placeholder={f.placeholder} className={cellCls} />
-    );
+  const commitHonourLines = (lines: HonourLineItem[]) => {
+    let patchPayload: {
+      fields: Record<string, string>;
+      core?: { total_amount: number };
+    } | null = null;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const derived = honourLinesDerivedFields(lines);
+      const { totalAmount } = computeHonourLineTotals(lines);
+      const productCount = honourProductLineCount(lines);
+      const currentSuppliers = parseHonourSuppliers(prev.fields, {
+        minCount: 1,
+        cartonCountCore: prev.carton_count,
+        productLines: lines,
+      });
+      const padded = ensureHonourSupplierCount(currentSuppliers, productCount);
+      const supplierDerived =
+        padded.length !== currentSuppliers.length ? honourSuppliersDerivedFields(padded) : {};
+      patchPayload = {
+        fields: { ...derived, ...supplierDerived },
+        ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
+      };
+      return {
+        ...prev,
+        fields: { ...prev.fields, ...derived, ...supplierDerived },
+        total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
+      };
+    });
+    if (patchPayload) patch(patchPayload);
   };
 
-  const fieldsBox = (
-    <div className="rounded-xl border border-gray-200 p-5 bg-gray-50/40">
-      <h3 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h3>
-      <div className="divide-y divide-gray-100">
-        {ORDER_FIELDS.map((f) => (
-          <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
-            <div className="text-sm text-gray-500">{f.label}</div>
-            <div>{renderField(f)}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  const commitCupmokaLines = (lines: CupmokaLineItem[]) => {
+    const serialized = JSON.stringify(lines);
+    const totalAmount = Math.round(
+      lines.reduce((sum, line) => sum + (Number(line.line_total) || 0), 0) * 100
+    ) / 100;
+    setOrder((prev) =>
+      prev
+        ? {
+            ...prev,
+            fields: { ...prev.fields, cupmoka_lines: serialized },
+            total_amount: totalAmount > 0 ? totalAmount : prev.total_amount,
+          }
+        : prev
+    );
+    patch({
+      fields: { cupmoka_lines: serialized },
+      ...(totalAmount > 0 ? { core: { total_amount: totalAmount } } : {}),
+    });
+  };
+
+  /** Apply supplier-card edits from latest order state (avoids stale rapid-click overwrites). */
+  const applyHonourSuppliers = (
+    updater: (suppliers: HonourSupplierItem[]) => HonourSupplierItem[],
+    commit: boolean,
+  ) => {
+    // Declared without a null initializer so TS does not permanently narrow to `null`
+    // (assignments inside setState updaters are invisible to control-flow analysis).
+    let toCommit: HonourSupplierItem[] | undefined;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const orderType = String(prev.fields.order_type ?? '');
+      if (!isBadgeOrderType(orderType)) return prev;
+      const lines = parseHonourLines(prev.fields);
+      const current = parseHonourSuppliers(prev.fields, {
+        minCount: honourProductLineCount(lines),
+        cartonCountCore: prev.carton_count,
+        productLines: lines,
+      });
+      const next = updater(current);
+      const derived = honourSuppliersDerivedFields(next);
+      const firstCarton = next[0]?.carton_count ?? '';
+      if (commit) toCommit = next;
+      return {
+        ...prev,
+        fields: { ...prev.fields, ...derived },
+        carton_count: firstCarton,
+      };
+    });
+    if (toCommit) {
+      const derived = honourSuppliersDerivedFields(toCommit);
+      patch({
+        fields: derived,
+        core: { carton_count: toCommit[0]?.carton_count ?? '' },
+      });
+    }
+  };
+
+  const syncWeddingGiftTotalAmount = (fieldsPatch: Record<string, string> = {}) => {
+    let patchPayload: { fields: Record<string, string>; core?: { total_amount: number } } | null = null;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const nextFields = { ...prev.fields, ...fieldsPatch };
+      const total = computeWeddingGiftTotal(nextFields);
+      patchPayload =
+        total > 0
+          ? { fields: fieldsPatch, core: { total_amount: total } }
+          : Object.keys(fieldsPatch).length
+            ? { fields: fieldsPatch }
+            : null;
+      return total > 0 ? { ...prev, total_amount: total } : prev;
+    });
+    if (patchPayload) patch(patchPayload);
+  };
+
+  /** Recalc 材料 + 包裝 from capacity / flavor qtys; keeps fields editable afterward. */
+  const syncWeddingGiftDerived = (fieldsPatch: Record<string, string> = {}) => {
+    let patchPayload: { fields: Record<string, string>; core?: { total_amount: number } } | null = null;
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const nextFields = { ...prev.fields, ...fieldsPatch };
+      const materials = computeWeddingGiftMaterials(nextFields);
+      const packing = computeWeddingGiftPacking(nextFields);
+      const derived = { ...fieldsPatch, ...materials, ...packing };
+      const total = computeWeddingGiftTotal(nextFields);
+      patchPayload =
+        total > 0
+          ? { fields: derived, core: { total_amount: total } }
+          : { fields: derived };
+      return {
+        ...prev,
+        fields: { ...prev.fields, ...derived },
+        ...(total > 0 ? { total_amount: total } : {}),
+      };
+    });
+    if (patchPayload) patch(patchPayload);
+  };
+
+  /** Apply pasted 即食燕窩回禮 confirmation → core + fields + derived materials/packing. */
+  const applyWeddingGiftConfirmation = () => {
+    if (!order) return;
+    const parsed = parseWeddingGiftConfirmation(confirmPasteText);
+    const fieldsPatch: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed.fields)) {
+      if (!v) continue;
+      // Derived from Big Day — applied only when Big Day itself changes (below).
+      if (k === 'expiry_date' || k === 'production_date') continue;
+      fieldsPatch[k] = v;
+    }
+    if (fieldsPatch.big_day && fieldsPatch.big_day !== fVal('big_day')) {
+      // Big Day change always refreshes derived dates (overrides prior edits).
+      fieldsPatch.expiry_date = addCalendarDays(fieldsPatch.big_day, 28);
+      fieldsPatch.production_date = addCalendarDays(fieldsPatch.big_day, -10);
+    }
+
+    const corePatch: Record<string, unknown> = {};
+    if (parsed.core.name) corePatch.name = parsed.core.name;
+    if (parsed.core.phone) corePatch.phone = parsed.core.phone;
+    if (parsed.core.shipping_address) corePatch.shipping_address = parsed.core.shipping_address;
+    if (parsed.core.notes) {
+      const existing = (order.notes || '').trim();
+      corePatch.notes = existing ? `${existing}\n\n${parsed.core.notes}` : parsed.core.notes;
+    }
+
+    if (!Object.keys(fieldsPatch).length && !Object.keys(corePatch).length) {
+      setConfirmPasteError(
+        parsed.warnings[0] || bi('No recognizable fields found', '未能辨識任何欄位')
+      );
+      return;
+    }
+
+    const nextFields = { ...order.fields, ...fieldsPatch };
+    const materials = computeWeddingGiftMaterials(nextFields);
+    const packing = computeWeddingGiftPacking(nextFields);
+    const derived = { ...fieldsPatch, ...materials, ...packing };
+    const total = computeWeddingGiftTotal(nextFields);
+    if (total > 0) corePatch.total_amount = total;
+
+    setOrder((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        ...(corePatch as Partial<Order>),
+        fields: { ...prev.fields, ...derived },
+      };
+    });
+    patch({
+      fields: derived,
+      ...(Object.keys(corePatch).length ? { core: corePatch } : {}),
+    });
+    setConfirmPasteOpen(false);
+    setConfirmPasteText('');
+    setConfirmPasteError('');
+    setQuoteToast({
+      text: bi('Confirmation applied — review fields', '已套用確認訊息 — 請核對欄位'),
+      kind: 'success',
+    });
+  };
+
+  const openConfirmPaste = () => {
+    setConfirmPasteText('');
+    setConfirmPasteError('');
+    setConfirmPasteOpen(true);
+  };
 
   return (
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← Back to orders</button>
-        <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
-          🚚 Generate Delivery Note
-        </Link>
+        <button onClick={() => router.push('/orders')} className="text-sm text-brand-600 hover:text-brand-700 font-medium min-h-[44px] sm:min-h-0 text-left">← {bi('Back to orders', '返回訂單')}</button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={convertToQuotation}
+            disabled={convertingQuote}
+            className="btn bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 w-full sm:w-auto"
+          >
+            {convertingQuote ? bi('Converting…', '轉換中…') : `→ ${bi('Convert to Quotation', '轉換為報價單')}`}
+          </button>
+          <Link href={`/orders/${order.id}/delivery-note`} className="btn bg-brand-600 text-white hover:bg-brand-700 w-full sm:w-auto">
+            🚚 {bi('Generate Delivery Note', '產生出貨單')}
+          </Link>
+          <button
+            type="button"
+            onClick={() => setSfModalOpen(true)}
+            className="btn bg-orange-600 text-white hover:bg-orange-700 w-full sm:w-auto"
+          >
+            {bi('Create SF Express', '建立順豐運單')}
+          </button>
+          {isBadgeOrderType(orderType) && (
+            <Link
+              href={`/orders/${order.id}/production-note`}
+              className="btn bg-slate-800 text-white hover:bg-slate-900 w-full sm:w-auto"
+            >
+              {bi('Prepare Production Note', '準備生產單')}
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={deleteOrder}
+            className="btn text-red-600 border border-red-200 hover:bg-red-50 w-full sm:w-auto"
+          >
+            {BTN.delete}
+          </button>
+        </div>
       </div>
+      {quoteToast && (
+        <div
+          className={`mb-4 px-3 py-2 rounded-lg text-sm ${
+            quoteToast.kind === 'success'
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : 'bg-red-50 text-red-800 border border-red-200'
+          }`}
+        >
+          {quoteToast.text}
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)]">
         {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}
         <div className="w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2">
           {/* Header */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center gap-3 flex-wrap mb-3">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Task</span>
-              <select
-                value={order.status}
-                onChange={(e) => { setCoreLocal('status', e.target.value); patch({ core: { status: e.target.value } }); }}
-                className={`text-xs font-medium rounded-full px-3 py-1 border-0 cursor-pointer ${STATUS_COLORS[order.status] || 'bg-gray-100 text-gray-700'}`}
-              >
-                {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <span className="inline-flex items-center gap-1 text-xs font-medium bg-red-50 text-red-600 rounded-full px-3 py-1">
-                🚚 交貨
-                <input value={order.delivery_date} onChange={(e) => setCoreLocal('delivery_date', e.target.value)} onBlur={(e) => patch({ core: { delivery_date: e.target.value } })} placeholder="22/1" className="w-16 bg-transparent outline-none text-red-600 placeholder-red-300" />
-              </span>
-              {(() => { const b = paymentBadge(); return (
-                order.linked_invoice ? (
-                  <Link href={`/invoices/${order.linked_invoice.id}`} className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-3 py-1 ${b.cls}`}>
-                    💳 {b.text}
-                  </Link>
-                ) : (
-                  <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-3 py-1 ${b.cls}`}>💳 {b.text}</span>
-                )
-              ); })()}
+            <div className="flex items-start justify-between gap-4">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 min-w-0">{orderTitle(order)}</h1>
+              <div className="text-right shrink-0">
+                <p className="text-[11px] uppercase tracking-wide text-gray-900">{bi('Total', '總額')}</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 tabular-nums leading-tight">
+                  {dueTotal != null
+                    ? `$${dueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </p>
+              </div>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{orderTitle(order)}</h1>
+            <OrderPropertyBar
+              orderType={orderType}
+              status={order.status}
+              paymentStatusLabel={autoStatus}
+              dueDate={parseOrderDueDateField(order.fields)}
+              assigneeIds={parseAssigneeIds(order.fields)}
+              tags={parseOrderTags(order.fields)}
+              users={accountUsers}
+              tagSuggestions={tagSuggestions}
+              onStatusChange={(next) => {
+                const prev = order.status;
+                setCoreLocal('status', next);
+                patch({ core: { status: next } }, { revertStatusTo: prev });
+              }}
+              onDueDateChange={(next) => {
+                commitLinkedDeliveryDates(next);
+              }}
+              onAssigneesChange={(ids) => {
+                const serialized = serializeAssigneeIds(ids);
+                setFieldLocal('assignee_ids', serialized);
+                patch({ fields: { assignee_ids: serialized } });
+              }}
+              onTagsChange={(nextTags) => {
+                const serialized = serializeOrderTags(nextTags);
+                setFieldLocal('tags', serialized);
+                patch({ fields: { tags: serialized } });
+                setTagSuggestions((prev) => {
+                  const merged = new Set([...prev, ...nextTags]);
+                  return Array.from(merged).sort((a, b) => a.localeCompare(b, 'zh'));
+                });
+              }}
+            />
             <input
               value={order.description}
               onChange={(e) => setCoreLocal('description', e.target.value)}
               onBlur={(e) => patch({ core: { description: e.target.value } })}
               placeholder="Description 描述 (e.g. 4款亞加力)"
-              className="mt-2 w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 rounded px-2 py-1 text-sm outline-none"
+              className="mt-3 w-full bg-transparent hover:bg-gray-50 focus:bg-white border border-transparent hover:border-gray-200 focus:border-brand-400 rounded px-2 py-1 text-sm outline-none"
             />
             <div className="mt-4">
-              <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
+              <label className="block text-xs font-medium text-gray-900 mb-1">Notes 備註</label>
               <textarea value={order.notes} onChange={(e) => setCoreLocal('notes', e.target.value)} onBlur={(e) => patch({ core: { notes: e.target.value } })} rows={2} placeholder="Add notes… (manually input or edited)" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
             </div>
           </div>
@@ -361,7 +572,7 @@ export default function OrderDetailPage() {
                 <div className="space-y-2">
                   {order.linked_quotation ? (
                     <Link href={`/quotations/${order.linked_quotation.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
-                      🔗 {order.linked_quotation.quote_number} · {order.linked_quotation.status}
+                      🔗 {displayQuotationNumber(order.linked_quotation.quote_number)} · {order.linked_quotation.status}
                     </Link>
                   ) : (
                     <p className="text-sm text-gray-400">No quotation linked.</p>
@@ -372,7 +583,7 @@ export default function OrderDetailPage() {
                     className={softInput}
                   >
                     <option value="">— Not linked —</option>
-                    {quotations.map((q) => <option key={q.id} value={q.id}>{q.quote_number} · {q.status}</option>)}
+                    {quotations.map((q) => <option key={q.id} value={q.id}>{displayQuotationNumber(q.quote_number)} · {q.status}</option>)}
                   </select>
                 </div>
               )}
@@ -381,7 +592,7 @@ export default function OrderDetailPage() {
                 <div className="space-y-2">
                   {order.linked_invoice ? (
                     <Link href={`/invoices/${order.linked_invoice.id}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium hover:bg-brand-100">
-                      🔗 {order.linked_invoice.invoice_number} · {order.linked_invoice.status}
+                      🔗 {displayInvoiceNumber(order.linked_invoice.invoice_number)} · {order.linked_invoice.status}
                     </Link>
                   ) : (
                     <p className="text-sm text-gray-400">No invoice linked.</p>
@@ -392,188 +603,84 @@ export default function OrderDetailPage() {
                     className={softInput}
                   >
                     <option value="">— Not linked —</option>
-                    {invoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoice_number} · {inv.status}</option>)}
+                    {invoices.map((inv) => <option key={inv.id} value={inv.id}>{displayInvoiceNumber(inv.invoice_number)} · {inv.status}</option>)}
                   </select>
                 </div>
               )}
             </div>
           </section>
 
-          {/* BOX 1 — Order Detail (dynamic by Order Type) */}
-          <section className="bg-white rounded-2xl border border-gray-200 p-8">
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 1</p>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Order Detail 訂單詳情</h2>
-
-            <div className="max-w-sm mb-8">
-              {labeled(
-                'Order Type 訂單類型',
-                <select
-                  value={orderType}
-                  onChange={(e) => { setFieldLocal('order_type', e.target.value); patch({ fields: { order_type: e.target.value } }); }}
-                  className={softInput}
-                >
-                  <option value="">Select type…</option>
-                  {ORDER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              )}
-            </div>
-
-            {orderType === '訂製襟章' && (
-              <div className="space-y-6">
-                <div className="grid md:grid-cols-2 gap-5">
-                  {labeled('Badge Style 襟章款式', fInput('badge_style', 'text', 'e.g. 亞加力雙面'))}
-                  {labeled('Quantity 數量', fInput('badge_quantity', 'number', 'e.g. 100'))}
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-2">Image Preview 圖片預覽</p>
-                  {order.files.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {order.files.map((f) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={f.id} src={orderFileUrl(f)} alt="preview" onClick={() => setLightbox(orderFileUrl(f))} className="h-16 w-16 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400">Upload proofs in the “Design Proofs” section below.</p>
-                  )}
-                </div>
-                {fieldsBox}
-              </div>
-            )}
-
-            {orderType === '燕窩回禮燉製' && (
-              <div className="space-y-8">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Dates 日期</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
-                    {labeled(
-                      'Big Day',
-                      <input
-                        type="date"
-                        value={fVal('big_day')}
-                        onChange={(e) => setFieldLocal('big_day', e.target.value)}
-                        onBlur={(e) => {
-                          const v = e.target.value;
-                          const upd: Record<string, string> = { big_day: v };
-                          if (v && !fVal('expiry_date')) {
-                            const d = new Date(v);
-                            d.setDate(d.getDate() + 28);
-                            const iso = d.toISOString().slice(0, 10);
-                            upd.expiry_date = iso;
-                            setFieldLocal('expiry_date', iso);
-                          }
-                          patch({ fields: upd });
-                        }}
-                        className={softInput}
-                      />
-                    )}
-                    {labeled('到期日', fInput('expiry_date', 'date'), 'Big Day後4星期')}
-                    {labeled('生產日期', fInput('production_date', 'date'))}
-                    {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Client Quantities 客人訂購數量</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-end">
-                    {BIRD_NEST_FLAVORS.map((f) => (
-                      <div key={f.key}>{labeled(f.label, fInput(f.key, 'number', '0'))}</div>
-                    ))}
-                    {readOnly('客人訂總數量', bn.totalOrdered)}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Inventory & Production 本地模擬計算</h3>
-                  <div className="max-w-xs mb-4">
-                    {labeled('總生產樽數', fInput('production_bottles', 'number', `default ${bn.totalOrdered}`), 'defaults to 客人訂總數量')}
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                    {readOnly('燕餅 (g)', `${bn.birdCakeGrams} g`)}
-                    {readOnly('圓形tag', bn.roundTag)}
-                    {readOnly('貼紙', bn.sticker)}
-                    {readOnly('金繩', bn.goldString)}
-                    {readOnly('Wedding Logo Tag', bn.weddingLogoTag)}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-3">Auto-derived from 總生產樽數 (= {bn.productionBottles}) to simplify Tracy’s packing checklist. 燕餅 = 樽數 × {`${0.8}`}g.</p>
-                </div>
-              </div>
-            )}
-
-            {!orderType && <p className="text-sm text-gray-400">Choose an Order Type to reveal its fields.</p>}
-          </section>
-
-          {/* BOX 2 — Payment Detail */}
-          <section className="bg-white rounded-2xl border border-gray-200 p-8">
-            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 2</p>
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Payment Detail 付款詳情</h2>
-
-            {/* Payment receipt upload + AI scan */}
-            <div className="grid md:grid-cols-[200px_1fr] gap-5 mb-6">
+          {/* Client info */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="font-semibold text-gray-900 mb-4">Client 客戶</h2>
+            <div className="grid md:grid-cols-2 gap-4">
               <div>
-                <div
-                  onClick={() => paymentInputRef.current?.click()}
-                  onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.[0]) handlePaymentReceipt(e.dataTransfer.files[0]); }}
-                  onDragOver={(e) => e.preventDefault()}
-                  className="border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/40 transition-colors h-full flex flex-col items-center justify-center min-h-[130px]"
-                >
-                  <input ref={paymentInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handlePaymentReceipt(e.target.files[0]); e.target.value = ''; }} />
-                  {paymentPreview || order.fields.payment_receipt_path ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={paymentPreview || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || '')) || ''}
-                      alt="Payment receipt"
-                      onClick={(e) => { e.stopPropagation(); setLightbox(paymentPreview || orderPaymentReceiptUrl(order.id, String(order.fields.payment_receipt_path || '')) || ''); }}
-                      className="max-h-28 rounded-lg cursor-zoom-in"
-                    />
-                  ) : (
-                    <><div className="text-2xl mb-1">🧾</div><p className="text-xs font-medium text-gray-600">付款收據 Payment Receipt</p><p className="text-[11px] text-gray-400 mt-0.5">Drop / snap · AI auto-fills</p></>
-                  )}
-                </div>
-                {paymentScanMsg && <p className="text-[11px] text-brand-700 mt-2">{paymentScanMsg}</p>}
+                <label className="block text-xs font-medium text-gray-900 mb-1">Name 客戶</label>
+                <CustomerSelect
+                  value={order.name}
+                  orderType={fVal('order_type')}
+                  requireOrderType
+                  onSelect={applyCustomerFromList}
+                  placeholder={bi('Select or add customer…', '選擇或新增客戶…')}
+                />
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
-                {labeled('支付日期 Payment Date', fInput('payment_date', 'date'))}
-                {labeled('銀碼 Amount', paymentAmountInput, 'auto-sets 部分付款 Partly Paid')}
-                {labeled('銀行 / 平台 Bank/Platform', fInput('payment_bank', 'text', 'e.g. 匯豐 / PayMe / FPS'))}
-                {labeled('支付方式 Payment Method', fInput('payment_method_detail', 'text', 'e.g. FPS 轉數快'))}
-                <div className="sm:col-span-2">{labeled('參考編號 Reference Number', fInput('payment_reference', 'text', 'Transaction / 流水號'))}</div>
+              <div>
+                <label className="block text-xs font-medium text-gray-900 mb-1">公司名</label>
+                <input
+                  value={fVal('company_name')}
+                  onChange={(e) => setFieldLocal('company_name', e.target.value)}
+                  onBlur={(e) => patch({ fields: { company_name: e.target.value } })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-900 mb-1">電話 Phone</label>
+                <input value={order.phone} onChange={(e) => setCoreLocal('phone', e.target.value)} onBlur={(e) => patch({ core: { phone: e.target.value } })} placeholder="+852…" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-900 mb-1">E-mail</label>
+                <input value={order.customer_email} onChange={(e) => setCoreLocal('customer_email', e.target.value)} onBlur={(e) => patch({ core: { customer_email: e.target.value } })} placeholder="name@email.com" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
               </div>
             </div>
-
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5 border-t border-gray-100 pt-6">
-              {labeled(
-                'Payment Status 付款狀態',
-                <select
-                  value={fVal('payment_status_label')}
-                  onChange={(e) => { setFieldLocal('payment_status_label', e.target.value); patch({ fields: { payment_status_label: e.target.value } }); }}
-                  className={softInput}
-                >
-                  <option value="">—</option>
-                  {PAYMENT_STATUS_LABELS.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              )}
-              <div className="hidden lg:block" />
-              <div className="hidden lg:block" />
-              {labeled('第一次Payment 日期', fInput('payment1_date', 'date'))}
-              {labeled('第一次Payment 金額', payment1AmountInput, 'auto-sets 部分付款 Partly Paid')}
-              <div className="hidden lg:block" />
-              {labeled('第二次Payment 日期', fInput('payment2_date', 'date'))}
-              {labeled('第二次Payment 金額', fInput('payment2_amount', 'number', '0.00'))}
-            </div>
-          </section>
+          </div>
 
           {/* BOX 3 — Shipment Detail */}
           <section className="bg-white rounded-2xl border border-gray-200 p-8">
             <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 3</p>
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Shipment Detail 送貨詳情</h2>
             <div className="grid md:grid-cols-2 gap-5">
-              {labeled('客人送貨日期', fInput('client_delivery_date', 'date'))}
+              {labeled(
+                '客人收貨日期',
+                <input
+                  type="date"
+                  value={parseOrderDueDateField(order.fields)}
+                  onChange={(e) => setLinkedDeliveryDatesLocal(e.target.value)}
+                  onBlur={(e) => commitLinkedDeliveryDates(e.target.value)}
+                  className={softInput}
+                />
+              )}
               {labeled('客人收件時間', fInput('receiving_time', 'text', 'e.g. 2-6pm'))}
               {labeled('聯絡方式', fInput('contact_method', 'text', 'Phone / WhatsApp / WeChat'))}
               {labeled('Tracking Number 運單號', fInput('tracking_no', 'text', 'e.g. SF5120793357800'))}
               <div className="md:col-span-2">
+                {labeled(
+                  'Shipping Method 寄出方式',
+                  <select
+                    value={fVal('shipping_method')}
+                    onChange={(e) => {
+                      setFieldLocal('shipping_method', e.target.value);
+                      patch({ fields: { shipping_method: e.target.value } });
+                    }}
+                    className={softInput}
+                  >
+                    <option value="">—</option>
+                    {ORDER_SHIPPING_METHODS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
                 {labeled(
                   '送貨地址 Shipping Address',
                   <textarea
@@ -585,73 +692,105 @@ export default function OrderDetailPage() {
                   />
                 )}
               </div>
+              <div>
+                {labeled(
+                  '帳單地址 Billing Address',
+                  <textarea
+                    value={String(order.fields.billing_address ?? '')}
+                    onChange={(e) => setFieldLocal('billing_address', e.target.value)}
+                    onBlur={(e) => patch({ fields: { billing_address: e.target.value } })}
+                    rows={3}
+                    className={softInput}
+                  />
+                )}
+              </div>
             </div>
           </section>
 
-          {/* Client / Shipping info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Client / Shipping 客戶及寄送</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Name 客戶</label>
-                <input value={order.name} onChange={(e) => setCoreLocal('name', e.target.value)} onBlur={(e) => patch({ core: { name: e.target.value } })} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">電話 Phone</label>
-                <input value={order.phone} onChange={(e) => setCoreLocal('phone', e.target.value)} onBlur={(e) => patch({ core: { phone: e.target.value } })} placeholder="+852…" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">E-mail</label>
-                <input value={order.customer_email} onChange={(e) => setCoreLocal('customer_email', e.target.value)} onBlur={(e) => patch({ core: { customer_email: e.target.value } })} placeholder="name@email.com" className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Shipping Address 寄出地址</label>
-                <textarea value={order.shipping_address} onChange={(e) => setCoreLocal('shipping_address', e.target.value)} onBlur={(e) => patch({ core: { shipping_address: e.target.value } })} rows={3} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm" />
-              </div>
-            </div>
-          </div>
+          {/* BOX 1 — Order Detail (dynamic by Order Type) */}
+          <section className="bg-white rounded-2xl border border-gray-200 p-8">
+            <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold mb-1">Box 1</p>
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Order Detail 訂單詳情</h2>
 
-          {/* Visual assets / image grid */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-semibold text-gray-900">Design Proofs 設計圖 / Image Preview</h2>
-                {uploadMsg && <p className="text-xs text-brand-700 mt-0.5">{uploadMsg}</p>}
-              </div>
-              <button onClick={() => fileInputRef.current?.click()} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Upload images / PDF</button>
-              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) uploadFiles(e.target.files); e.target.value = ''; }} />
+            <div className="grid md:grid-cols-2 gap-5 mb-8">
+              {labeled(
+                'PO# 訂單號碼',
+                <input
+                  value={order.po_number}
+                  onChange={(e) => setCoreLocal('po_number', e.target.value)}
+                  onBlur={(e) => patch({ core: { po_number: e.target.value } })}
+                  placeholder="e.g. PO-1001"
+                  className={softInput}
+                />
+              )}
+              {labeled(
+                'Order Type 訂單種類',
+                <select
+                  value={orderType}
+                  onChange={(e) => { setFieldLocal('order_type', e.target.value); patch({ fields: { order_type: e.target.value } }); }}
+                  className={softInput}
+                >
+                  <option value="">Select type…</option>
+                  {ORDER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
             </div>
-            {order.files.length === 0 ? (
-              <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400 text-sm cursor-pointer hover:border-brand-400 hover:bg-brand-50/40">
-                Click to upload product design proofs (images or PDF — heavy PDFs are auto-compressed to page images)
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                {order.files.map((f) => (
-                  <div key={f.id} className="relative group">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={orderFileUrl(f)} alt={f.original_name || 'proof'} onClick={() => setLightbox(orderFileUrl(f))} className="h-20 w-full object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
-                    <button onClick={() => deleteFile(f.id)} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100" aria-label="Delete image">×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Structured custom fields — for 訂製襟章 this lives inside Box 1. */}
-          {orderType !== '訂製襟章' && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="font-semibold text-gray-900 mb-4">Fields 自訂欄位</h2>
-              <div className="divide-y divide-gray-100">
-                {ORDER_FIELDS.map((f) => (
-                  <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 sm:gap-3 py-2 items-center">
-                    <div className="text-sm text-gray-500">{f.label}</div>
-                    <div>{renderField(f)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            <OrderDetailTypePanel
+              orderType={orderType}
+              order={order}
+              form={{ softInput, fVal, fInput, labeled, readOnly, nonNeg, setFieldLocal, patch, setOrder }}
+              honourLines={honourLines}
+              honourTotals={honourTotals}
+              honourSuppliers={honourSuppliers}
+              supplierOptions={supplierOptions}
+              setSupplierOptions={setSupplierOptions}
+              commitHonourLines={commitHonourLines}
+              applyHonourSuppliers={applyHonourSuppliers}
+              weddingGiftTotal={weddingGiftTotal}
+              birdNestTotals={bn}
+              bigDayPersistedRef={bigDayPersistedRef}
+              bigDaySavedOnChangeRef={bigDaySavedOnChangeRef}
+              onOpenConfirmPaste={openConfirmPaste}
+              syncWeddingGiftDerived={syncWeddingGiftDerived}
+              syncWeddingGiftTotalAmount={syncWeddingGiftTotalAmount}
+              nestieeGiftBoxes={nestieeGiftBoxes}
+              commitCupmokaLines={commitCupmokaLines}
+            />
+
+          </section>
+
+          <PaymentDetailSection
+            order={order}
+            dueTotal={dueTotal}
+            form={{ softInput, fVal, fInput, labeled, readOnly, nonNeg, setFieldLocal, patch, setOrder }}
+            onReceiptPreview={setLightbox}
+          />
+
+                    <EntityAttachments
+            className="bg-white rounded-xl border border-gray-200 p-6"
+            title="Design Proofs 設計圖 / Image Preview"
+            files={order.files}
+            fileUrl={orderFileUrl}
+            uploadUrl={`/api/orders/${id}/files`}
+            fileApiBase="/api/order-files"
+            thumbnailFileId={order.fields.thumbnail_file_id}
+            onFilesChange={(files) => setOrder((o) => (o ? { ...o, files } : o))}
+            onSetThumbnail={(fileId) => {
+              setOrder((o) =>
+                o
+                  ? {
+                      ...o,
+                      fields: {
+                        ...o.fields,
+                        thumbnail_file_id: fileId ? String(fileId) : '',
+                      },
+                    }
+                  : o
+              );
+              patch({ fields: { thumbnail_file_id: fileId ? String(fileId) : '' } });
+            }}
+          />
         </div>
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}
@@ -663,8 +802,51 @@ export default function OrderDetailPage() {
       {lightbox && (
         <div onClick={() => setLightbox(null)} className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 cursor-zoom-out">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={lightbox} alt="Proof" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
+          <img src={lightbox} alt="" className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white" />
         </div>
+      )}
+
+      <WeddingGiftConfirmPasteModal
+        open={confirmPasteOpen}
+        text={confirmPasteText}
+        error={confirmPasteError}
+        onClose={() => setConfirmPasteOpen(false)}
+        onTextChange={(text) => {
+          setConfirmPasteText(text);
+          if (confirmPasteError) setConfirmPasteError('');
+        }}
+        onApply={applyWeddingGiftConfirmation}
+      />
+      {sfModalOpen && (
+        <SfExpressShipmentModal
+          orderId={order.id}
+          onClose={() => setSfModalOpen(false)}
+          onSuccess={(updated, meta) => {
+            setOrder(updated);
+            setSfModalOpen(false);
+            if (meta.pdfUrl) {
+              window.open(meta.pdfUrl, '_blank', 'noopener,noreferrer');
+            }
+            if (meta.printError) {
+              setQuoteToast({
+                kind: 'error',
+                text: bi(
+                  `Waybill ${meta.waybill} saved, but label print failed: ${meta.printError}`,
+                  `運單 ${meta.waybill} 已儲存，但面單列印失敗：${meta.printError}`
+                ),
+              });
+            } else {
+              setQuoteToast({
+                kind: 'success',
+                text: bi(
+                  `SF Express waybill ${meta.waybill} created.`,
+                  `已建立順豐運單 ${meta.waybill}。`
+                ),
+              });
+            }
+            setTimeout(() => setQuoteToast(null), 6000);
+          }}
+        />
       )}
     </AppLayout>
   );

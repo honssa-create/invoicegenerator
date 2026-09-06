@@ -16,7 +16,7 @@ interface Props {
 const MODE_HINTS: Record<UtilityBillingMode, string> = {
   tenant_pays: 'Water & electricity excluded from company debit notes.',
   company_sub_meter: 'Simple meter: (current − previous) × rate per unit.',
-  company_shared_meter: 'Shared meter split (213A): net usage after other units.',
+  company_shared_meter: 'Shared meter split: net usage after configured other units.',
 };
 
 export default function UtilityBillingPicker({ value, onChange, disabled, compact }: Props) {

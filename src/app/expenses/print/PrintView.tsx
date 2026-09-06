@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { categoryLabel, expensePaymentDisplay, expenseSupplierName, formatMoney } from '@/lib/expenses';
-import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
+import { expenseReceiptUrl } from '@/lib/image-url';
 import type { Expense } from '@/lib/types';
+import { BTN, bi } from '@/lib/ui-labels';
 
 type PrintPage = {
   key: string;
@@ -17,16 +18,10 @@ type PrintPage = {
 };
 
 function receiptSrc(expense: Expense, receipt: { id: number; path: string }): string {
-  if (receipt.id > 0) {
-    const url = expenseReceiptUrl(receipt);
-    if (url.startsWith('http')) return url;
-    if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
-    return url;
-  }
-  if (isStoredImageUrl(receipt.path)) return receipt.path;
-  const legacy = `/api/expenses/${expense.id}/receipt`;
-  if (typeof window !== 'undefined') return `${window.location.origin}${legacy}`;
-  return legacy;
+  const url = expenseReceiptUrl(receipt, expense.id);
+  if (url.startsWith('http')) return url;
+  if (typeof window !== 'undefined') return `${window.location.origin}${url}`;
+  return url;
 }
 
 function receiptsForExpense(e: Expense): { id: number; path: string }[] {
@@ -42,7 +37,7 @@ function ExpenseSummary({ e }: { e: Expense }) {
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider opacity-80">Receipt No.</p>
           <p className="text-xl sm:text-2xl font-bold font-mono truncate">{e.receipt_no || `EXP-${e.id}`}</p>
-          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Batch ID {e.batch_id}</p>}
+          {e.batch_id && <p className="text-xs opacity-80 font-mono mt-0.5">Expense ID {e.batch_id}</p>}
         </div>
         <div className="text-right text-sm shrink-0">
           <p className="font-semibold max-w-[12rem] truncate">{expenseSupplierName(e) || 'Unnamed merchant'}</p>
@@ -295,7 +290,7 @@ export default function PrintView() {
             onClick={() => router.push('/expenses')}
             className="text-sm text-brand-600 hover:text-brand-700 font-medium"
           >
-            ← Back to expenses
+            ← {bi('Back to expenses', '返回支出紀錄')}
           </button>
           <p className="text-xs text-gray-500 mt-0.5">
             {expenses.length} expense{expenses.length === 1 ? '' : 's'} · {printPages.length} print page
@@ -308,7 +303,7 @@ export default function PrintView() {
           disabled={!allImagesReady || printPages.length === 0}
           className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          🖨 Print
+          🖨 {BTN.print}
         </button>
       </div>
 

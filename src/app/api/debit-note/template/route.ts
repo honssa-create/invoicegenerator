@@ -17,22 +17,22 @@ function parseCompanyKey(raw: string | null): TemplateCompanyVariantId | null {
 export async function GET(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   const { searchParams } = new URL(request.url);
   const company = parseCompanyKey(searchParams.get('company'));
   if (company) {
-    return NextResponse.json({ company, style: getDebitNoteStyleTemplate(ownerId, company) });
+    return NextResponse.json({ company, style: await getDebitNoteStyleTemplate(ownerId, company) });
   }
-  return NextResponse.json({ styles: listDebitNoteStyleTemplates(ownerId) });
+  return NextResponse.json({ styles: await listDebitNoteStyleTemplates(ownerId) });
 }
 
 export async function PUT(request: Request) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  if (isSectionReadOnly(session.role, 'rentals')) {
+  if (isSectionReadOnly(session.role, 'rentals', session.readOnlySections)) {
     return NextResponse.json({ error: 'Read-only access' }, { status: 403 });
   }
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   let body: { company?: string; style?: Partial<DebitNoteStyleTemplate> };
   try {
     body = await request.json();
@@ -43,6 +43,6 @@ export async function PUT(request: Request) {
   if (!company) {
     return NextResponse.json({ error: 'company must be label, elite, or joint' }, { status: 400 });
   }
-  const style = saveDebitNoteStyleTemplate(ownerId, company, normalizeDebitNoteStyle(body.style));
+  const style = await saveDebitNoteStyleTemplate(ownerId, company, normalizeDebitNoteStyle(body.style));
   return NextResponse.json({ company, style, saved: true });
 }

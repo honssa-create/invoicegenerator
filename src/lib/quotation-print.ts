@@ -1,0 +1,83 @@
+import {
+  DEFAULT_QUOTATION_PREVIEW,
+  type QuotationPreviewModel,
+} from '@/components/FormalQuotationDocument';
+import type { QuotationWithDetails } from '@/lib/quotations';
+import { formatCustomerPartyBlock } from '@/lib/customer-party';
+import { formatQuotationDate, formatQuotationMoney } from '@/lib/quotation-style';
+
+export interface QuotationPrintBusiness {
+  name: string;
+  company_name: string | null;
+  email: string;
+}
+
+function customerBillingFallback(q: QuotationWithDetails): string {
+  return formatCustomerPartyBlock({
+    name: q.customer_name,
+    companyName: q.customer_company_name,
+    phone: q.customer_phone,
+    email: q.email?.trim() || q.customer_email,
+    address: q.customer_address,
+  });
+}
+
+
+/** Map a saved quotation into the Honour Label formal print/preview model. */
+export function quotationToFormalPreview(
+  q: QuotationWithDetails,
+  _business?: QuotationPrintBusiness | null,
+): QuotationPreviewModel {
+  const currency = q.currency || 'HKD';
+  const money = (n: number) => formatQuotationMoney(n, currency);
+
+  const companyAddressLines = [...DEFAULT_QUOTATION_PREVIEW.companyAddressLines];
+
+  const items = (q.items || [])
+    .filter((i) => String(i.description || i.product_service || '').trim())
+    .map((i) => {
+      const product = (i.product_service || '').trim();
+      const desc = (i.description || '').trim();
+      let name: string;
+      let description: string;
+      if (product) {
+        name = product;
+        description = desc && desc !== product ? desc : '';
+      } else if (desc) {
+        const lines = desc.split(/\n/);
+        name = lines[0]?.trim() || '—';
+        description = lines.slice(1).join('\n').trim();
+      } else {
+        name = '—';
+        description = '';
+      }
+      const amount = Number(i.amount) || Number(i.quantity) * Number(i.unit_price) || 0;
+      return {
+        name,
+        description,
+        qty: String(i.quantity ?? ''),
+        rate: money(Number(i.unit_price) || 0),
+        amount: money(amount),
+      };
+    });
+
+  return {
+    companyAddressLines,
+    billingAddress: q.billing_address?.trim() || customerBillingFallback(q) || '—',
+    shippingAddress: q.shipping_address?.trim() || '—',
+    orderNo: q.order_no?.trim() || '—',
+    quotationNo: q.quote_number || '—',
+    date: formatQuotationDate(q.issue_date) || '—',
+    items: items.length
+      ? items
+      : [{ name: '—', description: '', qty: '0', rate: money(0), amount: money(0) }],
+    message: q.notes?.trim() || '',
+    remarks: [...DEFAULT_QUOTATION_PREVIEW.remarks],
+    subtotal: money(Number(q.subtotal) || 0),
+    discount: money(Number(q.discount_amount) || 0),
+    total: money(Number(q.total) || 0),
+    companySignName: companyAddressLines[0],
+    logoSrc: '/company-logo.png',
+    chopSrc: '/company-chop.png',
+  };
+}

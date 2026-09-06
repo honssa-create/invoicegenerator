@@ -3,10 +3,11 @@ import type { Expense } from './types';
 import { DEFAULT_SUPPLIERS } from './expense-suppliers';
 import {
   fundingSourceToCode,
+  legacyPaymentToFundingSource,
   type FundingSourceId,
 } from './expenses';
 
-/** Parent Batch ID: EXP-0000001 (global 7-digit serial, never resets). */
+/** Expense ID (stored in batch_id): EXP-0000001 — global upload-order serial, never resets. */
 export const EXPENSE_REPORT_ID_RE = /^EXP-\d{7}$/;
 
 /** @deprecated Prior 6-digit parent IDs (EXP-000001). */
@@ -14,12 +15,6 @@ export const LEGACY_EXPENSE_REPORT_ID_RE = /^EXP-\d{6}$/;
 
 /** Child Receipt No.: EXP-YYYYMM-{CCS|CCC|AB|PB|CS}001 */
 export const EXPENSE_RECEIPT_RE = /^EXP-(\d{6})-(CCS|CCC|AB|PB|CS)(\d{3})$/;
-
-/** @deprecated Legacy batch format kept for old rows. */
-export const LEGACY_EXPENSE_BATCH_RE = /^EXP-\d{6}-\d{3}$/;
-
-/** @deprecated Legacy receipt format kept for old rows. */
-export const LEGACY_EXPENSE_RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
 
 export function normalizeNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -55,20 +50,20 @@ export function parseReceiptSequence(receiptNo: string | null | undefined): numb
   return null;
 }
 
-function maxReceiptSerialForPrefix(
+async function maxReceiptSerialForPrefix(
   userId: number,
   prefix: string,
   excludeExpenseId?: number,
-): number {
+): Promise<number> {
   const like = `${prefix}%`;
   const rows = (
     excludeExpenseId != null
-      ? db
+      ? await db
           .prepare(
             'SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ? AND id != ?',
           )
           .all(userId, like, excludeExpenseId)
-      : db.prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?').all(userId, like)
+      : await db.prepare('SELECT receipt_no FROM expenses WHERE user_id = ? AND receipt_no LIKE ?').all(userId, like)
   ) as { receipt_no: string | null }[];
 
   let max = 0;
@@ -83,25 +78,139 @@ function isExpenseReportId(id: string): boolean {
   return EXPENSE_REPORT_ID_RE.test(id) || LEGACY_EXPENSE_REPORT_ID_RE.test(id);
 }
 
+export function isValidExpenseReportId(id: string | null | undefined): boolean {
+  return Boolean(id?.trim() && isExpenseReportId(id.trim()));
+}
+
+export function isValidExpenseReceiptNo(receiptNo: string | null | undefined): boolean {
+  return Boolean(receiptNo?.trim() && EXPENSE_RECEIPT_RE.test(receiptNo.trim()));
+}
+
+let numberingBootDone = false;
+
+async function ensureExpenseNumberingBoot(): Promise<void> {
+  if (numberingBootDone) return;
+  numberingBootDone = true;
+  await syncExpenseReportSequenceFromDb();
+  await migrateExpenseNumberingOnce();
+}
+
 /**
- * Allocate the next global Batch ID (EXP-0000001…).
+ * Keep expense_report_sequence at or above max allocated Expense ID.
+ * Safe to run on every boot — only advances, never rewrites expense rows.
+ */
+export async function syncExpenseReportSequenceFromDb(): Promise<void> {
+  const row = await db.prepare('SELECT next_serial FROM expense_report_sequence WHERE id = 1').get() as
+    | { next_serial: number }
+    | undefined;
+  if (!row) return;
+
+  let maxAllocated = 0;
+  const batchRows = await db
+    .prepare('SELECT batch_id FROM expenses WHERE batch_id IS NOT NULL')
+    .all() as { batch_id: string }[];
+
+  for (const { batch_id } of batchRows) {
+    const id = batch_id.trim();
+    if (EXPENSE_REPORT_ID_RE.test(id) || LEGACY_EXPENSE_REPORT_ID_RE.test(id)) {
+      const n = parseInt(id.slice(4), 10);
+      if (Number.isFinite(n) && n >= 1) maxAllocated = Math.max(maxAllocated, n);
+    }
+  }
+
+  const next = Math.max(row.next_serial, maxAllocated + 1);
+  if (next > row.next_serial) {
+    await db.prepare('UPDATE expense_report_sequence SET next_serial = ? WHERE id = 1').run(next);
+  }
+}
+
+/**
+ * One-time migration from legacy EXP-YYYYMM-XXX numbering to Expense ID + Receipt No rules.
+ * Guarded by app_migrations — does not run again on redeploy.
+ */
+export async function migrateExpenseNumberingOnce(): Promise<void> {
+  const done = await db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get('expense_numbering_v2');
+  if (done) return;
+
+  const rows = await db
+    .prepare(
+      `SELECT id, user_id, batch_id, receipt_no, payment_method, funding_source, paid_date, created_at
+       FROM expenses ORDER BY id ASC`,
+    )
+    .all() as {
+    id: number;
+    user_id: number;
+    batch_id: string | null;
+    receipt_no: string | null;
+    payment_method: string | null;
+    funding_source: string | null;
+    paid_date: string | null;
+    created_at: string | null;
+  }[];
+
+  const needsFix = rows.filter((row) => {
+    const batchOk = isValidExpenseReportId(row.batch_id);
+    const receiptOk = isValidExpenseReceiptNo(row.receipt_no);
+    return !batchOk || !receiptOk;
+  });
+
+  const markDone = async () => {
+    await db.prepare('INSERT OR IGNORE INTO app_migrations (key) VALUES (?)').run('expense_numbering_v2');
+  };
+
+  if (!needsFix.length) {
+    await markDone();
+    return;
+  }
+
+  const update = db.prepare('UPDATE expenses SET batch_id = ?, receipt_no = ? WHERE id = ?');
+  await db.transaction(async () => {
+    for (const row of needsFix) {
+      let batchId = row.batch_id?.trim() || '';
+      if (!isExpenseReportId(batchId)) {
+        batchId = await allocateExpenseReportIdAtomic();
+      }
+
+      let receiptNo = row.receipt_no?.trim() || '';
+      if (!EXPENSE_RECEIPT_RE.test(receiptNo)) {
+        const paidDate =
+          row.paid_date && /^\d{4}-\d{2}-\d{2}$/.test(row.paid_date)
+            ? row.paid_date
+            : row.created_at?.slice(0, 10) || '1970-01-01';
+        const fundingSource = (
+          row.funding_source ||
+          legacyPaymentToFundingSource(row.payment_method) ||
+          'cash'
+        ) as FundingSourceId;
+        receiptNo = await generateReceiptNumberAtomic(row.user_id, paidDate, fundingSource);
+      }
+
+      await update.run(batchId, receiptNo, row.id);
+    }
+    await markDone();
+  });
+  await syncExpenseReportSequenceFromDb();
+}
+
+/**
+ * Allocate the next global Expense ID (EXP-0000001…).
  * Must run inside an IMMEDIATE transaction.
  */
-export function allocateExpenseReportIdAtomic(): string {
-  const row = db.prepare('SELECT next_serial FROM expense_report_sequence WHERE id = 1').get() as
+export async function allocateExpenseReportIdAtomic(): Promise<string> {
+  const row = await db.prepare('SELECT next_serial FROM expense_report_sequence WHERE id = 1').get() as
     | { next_serial: number }
     | undefined;
   if (!row) {
     throw new Error('expense_report_sequence not initialized');
   }
   const allocated = row.next_serial;
-  db.prepare('UPDATE expense_report_sequence SET next_serial = next_serial + 1 WHERE id = 1').run();
+  await db.prepare('UPDATE expense_report_sequence SET next_serial = next_serial + 1 WHERE id = 1').run();
   return `EXP-${String(allocated).padStart(7, '0')}`;
 }
 
-/** Latest parent Batch ID for a user (EXP-0000001 format, or legacy 6-digit). */
-export function getLatestExpenseReportId(userId: number): string | null {
-  const rows = db
+/** Latest Expense ID for a user (EXP-0000001 format, or legacy 6-digit). */
+export async function getLatestExpenseReportId(userId: number): Promise<string | null> {
+  const rows = await db
     .prepare(
       `SELECT batch_id FROM expenses
        WHERE user_id = ? AND batch_id LIKE 'EXP-%' AND batch_id NOT LIKE '%-%-%'
@@ -119,70 +228,72 @@ export function getLatestExpenseReportId(userId: number): string | null {
  * Generate the next Receipt No. for YYYYMM + funding source code.
  * Must run inside an IMMEDIATE transaction.
  */
-export function generateReceiptNumberAtomic(
+export async function generateReceiptNumberAtomic(
   userId: number,
   paidDate: string,
   fundingSource: FundingSourceId,
   excludeExpenseId?: number,
-): string {
+): Promise<string> {
   const ym = requirePaidYearMonth(paidDate);
   const code = fundingSourceToCode(fundingSource);
   if (!code) {
     throw new Error('Invalid funding source for receipt numbering');
   }
   const prefix = receiptPrefix(ym, code);
-  const next = maxReceiptSerialForPrefix(userId, prefix, excludeExpenseId) + 1;
+  const next = await maxReceiptSerialForPrefix(userId, prefix, excludeExpenseId) + 1;
   return `${prefix}${String(next).padStart(3, '0')}`;
 }
 
 export interface AssignExpenseNumbersOptions {
-  /** Reuse this parent Batch ID (e.g. import batch or explicit). */
+  /** Reuse this Expense ID (e.g. explicit). */
   batchId?: string | null;
-  /** Continue the user's latest Batch ID instead of allocating a new one. */
+  /** Continue the user's latest Expense ID instead of allocating a new one. */
   reuseBatch?: boolean;
   fundingSource: FundingSourceId;
 }
 
 export interface AssignedExpenseNumbers {
-  /** Parent Batch ID (stored in batch_id). */
+  /** Expense ID (stored in batch_id). */
   batchId: string;
-  /** Child Receipt No. */
+  /** Receipt No. */
   receiptNo: string;
 }
 
 /**
- * Assign parent Batch ID + child Receipt No.
- * Call only inside db.transaction(...).immediate().
+ * Assign Expense ID + Receipt No.
+ * Call only inside an awaited db.transaction(async () => { ... }).
  */
-export function assignExpenseNumbersAtomic(
+export async function assignExpenseNumbersAtomic(
   userId: number,
   paidDate: string,
   options: AssignExpenseNumbersOptions,
-): AssignedExpenseNumbers {
+): Promise<AssignedExpenseNumbers> {
+  await ensureExpenseNumberingBoot();
+
   let batchId = options.batchId?.trim() || '';
   if (batchId && !isExpenseReportId(batchId)) {
     batchId = '';
   }
   if (!batchId) {
     if (options.reuseBatch) {
-      batchId = getLatestExpenseReportId(userId) || allocateExpenseReportIdAtomic();
+      batchId = await getLatestExpenseReportId(userId) || await allocateExpenseReportIdAtomic();
     } else {
-      batchId = allocateExpenseReportIdAtomic();
+      batchId = await allocateExpenseReportIdAtomic();
     }
   }
 
-  const receiptNo = generateReceiptNumberAtomic(userId, paidDate, options.fundingSource);
+  const receiptNo = await generateReceiptNumberAtomic(userId, paidDate, options.fundingSource);
   return { batchId, receiptNo };
 }
 
 /** Re-issue receipt when paid_date or funding source changes on update. */
-export function reissueReceiptNumberAtomic(
+export async function reissueReceiptNumberAtomic(
   userId: number,
   expenseId: number,
   paidDate: string,
   fundingSource: FundingSourceId,
-): string {
-  return generateReceiptNumberAtomic(userId, paidDate, fundingSource, expenseId);
+): Promise<string> {
+  return await generateReceiptNumberAtomic(userId, paidDate, fundingSource, expenseId);
 }
 
 export function receiptNumberPrefix(
@@ -195,30 +306,6 @@ export function receiptNumberPrefix(
   return receiptPrefix(ym, code);
 }
 
-// ---------------------------------------------------------------------------
-// Legacy helpers (import / old payment_method rows)
-// ---------------------------------------------------------------------------
-
-export type ExpensePaymentCode = 'CC' | 'CS' | 'BT' | 'OT';
-
-/** @deprecated Use fundingSourceToCode for new receipt numbers. */
-export function paymentMethodCode(
-  method: string | null | undefined,
-  fundingSource?: string | null | undefined,
-): ExpensePaymentCode {
-  if (fundingSource) {
-    const code = fundingSourceToCode(fundingSource);
-    if (code === 'CCS' || code === 'CCC') return 'CC';
-    if (code === 'CS') return 'CS';
-    return 'OT';
-  }
-  const m = (method || '').toLowerCase();
-  if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
-  if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
-  if (/bank|transfer|轉帳|转账|fps|payme|wire|cheque|check/.test(m)) return 'BT';
-  return 'OT';
-}
-
 // Insert a custom dropdown option if it is not already a default or existing value.
 const DEFAULTS: Record<string, string[]> = {
   payment_method: ['Credit Card 0860', '現金', '淘寶', '拼多多', '其他，請註明', 'Hing現金'],
@@ -227,15 +314,15 @@ const DEFAULTS: Record<string, string[]> = {
   supplier: [...DEFAULT_SUPPLIERS],
 };
 
-export function syncOption(userId: number, type: string, value: string | null | undefined): boolean {
+export async function syncOption(userId: number, type: string, value: string | null | undefined): Promise<boolean> {
   const trimmed = (value || '').trim();
   if (!trimmed || !DEFAULTS[type]) return false;
   if (DEFAULTS[type].includes(trimmed)) return false;
-  const existing = db
+  const existing = await db
     .prepare('SELECT 1 FROM expense_options WHERE user_id = ? AND type = ? AND value = ?')
     .get(userId, type, trimmed);
   if (existing) return false;
-  db.prepare('INSERT OR IGNORE INTO expense_options (user_id, type, value) VALUES (?, ?, ?)').run(
+  await db.prepare('INSERT OR IGNORE INTO expense_options (user_id, type, value) VALUES (?, ?, ?)').run(
     userId,
     type,
     trimmed,
@@ -252,26 +339,70 @@ export function receiptPathsFromBody(body: Record<string, unknown>): string[] {
   return Array.from(new Set(paths));
 }
 
-export function attachReceipts(expenses: Expense[]): Expense[] {
+export async function attachReceipts(expenses: Expense[]): Promise<Expense[]> {
   if (!expenses.length) return expenses;
   const ids = expenses.map((e) => e.id);
   const placeholders = ids.map(() => '?').join(',');
-  const rows = db
+  const rows = await db
     .prepare(
-      `SELECT id, expense_id, path FROM expense_receipts WHERE expense_id IN (${placeholders}) ORDER BY id`,
+      `SELECT id, expense_id, path, source_url FROM expense_receipts WHERE expense_id IN (${placeholders}) ORDER BY id`,
     )
-    .all(...ids) as { id: number; expense_id: number; path: string }[];
-  const map = new Map<number, { id: number; path: string }[]>();
+    .all(...ids) as { id: number; expense_id: number; path: string; source_url: string | null }[];
+  const map = new Map<number, { id: number; path: string; source_url: string | null }[]>();
   for (const r of rows) {
     if (!map.has(r.expense_id)) map.set(r.expense_id, []);
-    map.get(r.expense_id)!.push({ id: r.id, path: r.path });
+    map.get(r.expense_id)!.push({ id: r.id, path: r.path, source_url: r.source_url });
   }
   for (const e of expenses) {
     const attached = map.get(e.id) || [];
     if (attached.length > 0) {
       e.receipts = attached;
     } else if (e.receipt_path?.trim()) {
-      e.receipts = [{ id: 0, path: e.receipt_path.trim() }];
+      const legacyPath = e.receipt_path.trim();
+      e.receipts = [
+        {
+          id: 0,
+          path: legacyPath,
+          source_url: /^https?:\/\//i.test(legacyPath) ? legacyPath : null,
+        },
+      ];
+    } else {
+      e.receipts = [];
+    }
+  }
+  return expenses;
+}
+
+/** List view: only the first receipt per expense (table thumbnails). */
+export async function attachPrimaryReceipts(expenses: Expense[]): Promise<Expense[]> {
+  if (!expenses.length) return expenses;
+  const ids = expenses.map((e) => e.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await db
+    .prepare(
+      `SELECT DISTINCT ON (expense_id) id, expense_id, path, source_url
+       FROM expense_receipts
+       WHERE expense_id IN (${placeholders})
+       ORDER BY expense_id, id`,
+    )
+    .all(...ids) as { id: number; expense_id: number; path: string; source_url: string | null }[];
+  const map = new Map<number, { id: number; path: string; source_url: string | null }>();
+  for (const r of rows) {
+    map.set(r.expense_id, { id: r.id, path: r.path, source_url: r.source_url });
+  }
+  for (const e of expenses) {
+    const primary = map.get(e.id);
+    if (primary) {
+      e.receipts = [primary];
+    } else if (e.receipt_path?.trim()) {
+      const legacyPath = e.receipt_path.trim();
+      e.receipts = [
+        {
+          id: 0,
+          path: legacyPath,
+          source_url: /^https?:\/\//i.test(legacyPath) ? legacyPath : null,
+        },
+      ];
     } else {
       e.receipts = [];
     }

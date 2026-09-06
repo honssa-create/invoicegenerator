@@ -12,11 +12,11 @@ export async function GET(
 ) {
   const session = await requireApiAccess(request, 'rentals');
   if (session instanceof NextResponse) return session;
-  const ownerId = rentalOwnerId(session.userId);
-  const unit = getRentalUnit(params.id, ownerId);
+  const ownerId = await rentalOwnerId(session);
+  const unit = await getRentalUnit(params.id, ownerId);
   if (!unit) return NextResponse.json({ error: 'Unit not found' }, { status: 404 });
 
-  const tenantId = getTenantIdForUnit(params.id, ownerId);
+  const tenantId = await getTenantIdForUnit(params.id, ownerId);
   if (!tenantId) {
     return NextResponse.json(
       { error: 'This unit has no linked tenant yet. Save the lease with a tenant name first.' },
@@ -33,7 +33,7 @@ export async function GET(
   const paidLookbackRaw = searchParams.get('paid_lookback');
   const paidLookbackMonths = paidLookbackRaw ? Number(paidLookbackRaw) : undefined;
 
-  const matrix = buildRentPaymentNoticeForUnit(params.id, ownerId, targetPeriod, {
+  const matrix = await buildRentPaymentNoticeForUnit(params.id, ownerId, targetPeriod, {
     fromPeriod: from,
     paidLookbackMonths: Number.isFinite(paidLookbackMonths) ? paidLookbackMonths : undefined,
   });

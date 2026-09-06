@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { generateInvoiceNumber, getInvoiceWithDetails } from '@/lib/invoices';
+import { generateInvoiceNumber, getInvoiceWithDetails, listInvoices, listInvoiceOptions } from '@/lib/invoices';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
 
@@ -12,23 +12,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get('status');
-
-  let query = 'SELECT id FROM invoices WHERE user_id = ?';
-  const queryParams: (string | number)[] = [ownerId];
-
-  if (status) {
-    query += ' AND status = ?';
-    queryParams.push(status);
+  if (searchParams.get('fields') === 'options') {
+    return NextResponse.json({ invoices: await listInvoiceOptions(ownerId) });
   }
+  const status = searchParams.get('status') || undefined;
 
-  query += ' ORDER BY created_at DESC';
-
-  const rows = db.prepare(query).all(...queryParams) as { id: number }[];
-  const invoices = rows.map((r) => getInvoiceWithDetails(r.id, ownerId)).filter(Boolean);
-
+  const invoices = await listInvoices(ownerId, status ? { status } : {});
   return NextResponse.json({ invoices });
 }
 
@@ -41,7 +32,7 @@ export async function POST(request: Request) {
   const denied = denyReadOnlyWrite(session, 'invoices', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
 
   try {
     const body = await request.json();
@@ -63,7 +54,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const customer = db
+    const customer = await db
       .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
       .get(customer_id, ownerId);
 
@@ -71,14 +62,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    if (!items.length) {
+    const lineItems = (Array.isArray(items) ? items : [])
+      .map((item: {
+        product_service?: unknown;
+        description?: unknown;
+        quantity?: unknown;
+        unit_price?: unknown;
+        class_name?: unknown;
+      }) => {
+        const product = String(item?.product_service ?? '').trim();
+        const description = String(item?.description ?? '').trim();
+        return {
+          product_service: product || null,
+          description: description || product,
+          quantity: Number(item?.quantity) || 0,
+          unit_price: Number(item?.unit_price) || 0,
+          class_name: String(item?.class_name ?? '').trim() || null,
+        };
+      })
+      .filter((item) => item.description || item.product_service);
+
+    if (!lineItems.length) {
       return NextResponse.json({ error: 'At least one line item is required' }, { status: 400 });
     }
 
-    const invoiceNumber = generateInvoiceNumber(ownerId);
-
-    const createInvoice = db.transaction(() => {
-      const result = db
+    const { invoiceId, invoiceNumber } = await db.transaction(async () => {
+      const invoiceNumber = await generateInvoiceNumber(ownerId);
+      const result = await db
         .prepare(
           `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -95,27 +105,40 @@ export async function POST(request: Request) {
           terms?.trim() || null
         );
 
-      const invoiceId = result.lastInsertRowid as number;
+      const invoiceId = Number(result.lastInsertRowid);
+      if (!invoiceId) {
+        throw new Error('Invoice insert did not return an id');
+      }
       const insertItem = db.prepare(
-        `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO invoice_items (
+           invoice_id, product_service, description, quantity, unit_price, amount, class_name
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       );
 
-      for (const item of items) {
-        const qty = Number(item.quantity) || 0;
-        const price = Number(item.unit_price) || 0;
-        insertItem.run(invoiceId, item.description.trim(), qty, price, qty * price);
+      for (const item of lineItems) {
+        await insertItem.run(
+          invoiceId,
+          item.product_service,
+          item.description,
+          item.quantity,
+          item.unit_price,
+          item.quantity * item.unit_price,
+          item.class_name,
+        );
       }
 
-      return invoiceId;
+      return { invoiceId, invoiceNumber };
     });
 
-    const invoiceId = createInvoice();
-    logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
-    const invoice = getInvoiceWithDetails(invoiceId, ownerId);
+    await logActivity('invoice', invoiceId, session.userId, 'activity', session.name, `created this invoice (${invoiceNumber})`);
+    const invoice = await getInvoiceWithDetails(invoiceId, ownerId);
+    if (!invoice) {
+      throw new Error('Invoice was created but could not be reloaded');
+    }
 
     return NextResponse.json({ invoice }, { status: 201 });
-  } catch {
+  } catch (err) {
+    console.error('[POST /api/invoices]', err);
     return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
   }
 }

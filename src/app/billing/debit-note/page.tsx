@@ -3,25 +3,46 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
-import DebitNoteTemplateEditor, { useDebitNoteStyleTemplate } from '@/components/DebitNoteTemplateEditor';
+import { useDebitNoteStyleTemplate } from '@/components/DebitNoteTemplateEditor';
 import FormalDebitNoteDocument from '@/components/FormalDebitNoteDocument';
-import { useAuth } from '@/components/AuthProvider';
-import { isSectionReadOnly } from '@/lib/permissions';
 import {
+  DEBIT_NOTE_COMPANY_VARIANTS,
+  isTemplateCompanyVariantId,
+  paymentTemplateIdForVariant,
+  variantToCompanyIds,
+  type TemplateCompanyVariantId,
+} from '@/lib/document-templates';
+import type { RentalDocumentTemplate } from '@/lib/rental-templates';
+import {
+  buildDebitNotePaymentInstructionsText,
   currentBillingPeriod,
   formatDueDateChinese,
+  renderDebitNoteFooterRemark,
+  resolveDebitNoteCompanyHeader,
   type DebitNoteMode,
-  type DebitNotePaymentTemplateId,
   type FormalDebitNote,
 } from '@/lib/rentals';
+import { BTN, bi } from '@/lib/ui-labels';
+
+const TEMPLATE_STORAGE_KEY = 'debit-note-preview-template';
+
+const TEMPLATE_OPTIONS = DEBIT_NOTE_COMPANY_VARIANTS.map((v) => ({
+  id: v.id,
+  label: v.shortLabel,
+}));
+
+function loadStoredTemplate(): TemplateCompanyVariantId | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(TEMPLATE_STORAGE_KEY);
+    return raw && isTemplateCompanyVariantId(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
 
 function DebitNoteContent() {
   const searchParams = useSearchParams();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
-  const [paymentTemplate, setPaymentTemplate] = useState<DebitNotePaymentTemplateId>('label');
-  const { style, setStyle, saving: savingStyle, saveMessage, save: saveStyle } = useDebitNoteStyleTemplate(paymentTemplate, readOnly);
   const tenantId = searchParams.get('tenantId') || searchParams.get('tenant_id');
   const unitId = searchParams.get('unitId') || searchParams.get('unit_id');
   const unitIds = searchParams.get('unitIds') || searchParams.get('unit_ids');
@@ -33,16 +54,53 @@ function DebitNoteContent() {
   const mode = (searchParams.get('mode') || 'grouped') as DebitNoteMode;
   const paidLookback = searchParams.get('paid_lookback') || '2';
   const from = searchParams.get('from') || '';
-  const initialTemplate = searchParams.get('paymentTemplate') || searchParams.get('payment_template');
+  const initialTemplateRaw = searchParams.get('paymentTemplate') || searchParams.get('payment_template');
+  const urlTemplate = initialTemplateRaw && isTemplateCompanyVariantId(initialTemplateRaw)
+    ? initialTemplateRaw
+    : null;
+
+  const [templateVariant, setTemplateVariant] = useState<TemplateCompanyVariantId>(
+    urlTemplate || 'label',
+  );
+  const { style } = useDebitNoteStyleTemplate(templateVariant);
+  const [notesByKey, setNotesByKey] = useState<Partial<Record<TemplateCompanyVariantId, RentalDocumentTemplate>>>({});
 
   const [doc, setDoc] = useState<FormalDebitNote | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [paymentInstructionsText, setPaymentInstructionsText] = useState('');
-  const [footerRemark, setFooterRemark] = useState('');
   const [sending, setSending] = useState(false);
-  const [savingTemplate, setSavingTemplate] = useState(false);
   const [sendToast, setSendToast] = useState('');
+
+  useEffect(() => {
+    if (urlTemplate) {
+      setTemplateVariant(urlTemplate);
+      return;
+    }
+    const stored = loadStoredTemplate();
+    if (stored) setTemplateVariant(stored);
+  }, [urlTemplate]);
+
+  const setTemplatePersist = (id: TemplateCompanyVariantId) => {
+    setTemplateVariant(id);
+    try {
+      localStorage.setItem(TEMPLATE_STORAGE_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    fetch('/api/rental-templates')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const next: Partial<Record<TemplateCompanyVariantId, RentalDocumentTemplate>> = {};
+        for (const t of (d?.templates || []) as RentalDocumentTemplate[]) {
+          if (isTemplateCompanyVariantId(t.templateKey)) next[t.templateKey] = t;
+        }
+        setNotesByKey(next);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!tenantId) {
@@ -76,37 +134,62 @@ function DebitNoteContent() {
       .then((d) => {
         if (d?.tenant) {
           setDoc(d);
-          if (initialTemplate === 'label' || initialTemplate === 'elite') {
-            setPaymentTemplate(initialTemplate);
-          } else {
-            setPaymentTemplate(d.paymentTemplateId || 'label');
+          if (!urlTemplate && !loadStoredTemplate() && (d.paymentTemplateId === 'label' || d.paymentTemplateId === 'elite')) {
+            setTemplateVariant(d.paymentTemplateId);
           }
-          setPaymentInstructionsText(d.paymentInstructionsText || '');
-          setFooterRemark(d.footerRemark || '');
         } else {
           setError('Debit note not available');
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
-  }, [tenantId, unitId, unitIds, targetPeriod, mode, paidLookback, from, initialTemplate]);
-
-  const dueDateChinese = useMemo(() => {
-    if (!doc) return 'yyyy年mm月dd日';
-    return formatDueDateChinese(doc.dueDateDisplay, doc.targetPeriod.split('-')[0]);
-  }, [doc]);
+  }, [tenantId, unitId, unitIds, targetPeriod, mode, paidLookback, from, urlTemplate]);
 
   const displayDoc = useMemo(() => {
     if (!doc) return null;
-    const instructions = paymentInstructionsText || doc.paymentInstructionsText;
+    const notes = notesByKey[templateVariant];
+    const companyIds = variantToCompanyIds(templateVariant);
+    const resolved = resolveDebitNoteCompanyHeader(companyIds);
+    const companyOverride = notes?.company || null;
+    const company = {
+      ...resolved,
+      ...(companyOverride
+        ? {
+            nameZh: companyOverride.nameZh?.trim() || resolved.nameZh,
+            nameEn: companyOverride.nameEn?.trim() || resolved.nameEn,
+            address: companyOverride.address?.trim() || resolved.address,
+            phone: companyOverride.phone?.trim() || resolved.phone,
+            taxId: companyOverride.taxId?.trim() || resolved.taxId,
+            chequePayee: companyOverride.chequePayee?.trim() || resolved.chequePayee,
+          }
+        : {}),
+    };
+    const dueDateChinese = formatDueDateChinese(doc.dueDateDisplay, doc.targetPeriod.split('-')[0]);
+    const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+      paymentTemplateIdForVariant(templateVariant),
+      doc.noteNo,
+      dueDateChinese,
+      null,
+      notes?.paymentInstructions,
+      companyOverride,
+    );
+    const footerRemark = renderDebitNoteFooterRemark(
+      notes?.footerRemark,
+      doc.targetPeriod,
+      doc.dueDateDisplay,
+      doc.arrearRows.map((r) => r.period),
+      doc.grandTotal,
+    );
     return {
       ...doc,
-      paymentTemplateId: paymentTemplate,
-      paymentInstructionsText: instructions,
-      paymentInstructions: instructions.split('\n').filter((l) => l !== ''),
-      footerRemark: footerRemark || doc.footerRemark,
+      company,
+      companyIds,
+      paymentTemplateId: paymentTemplateIdForVariant(templateVariant),
+      paymentInstructionsText,
+      paymentInstructions: paymentInstructionsText.split('\n').filter((l) => l !== ''),
+      footerRemark,
     };
-  }, [doc, paymentTemplate, paymentInstructionsText, footerRemark]);
+  }, [doc, notesByKey, templateVariant]);
 
   const sendDebitNote = async () => {
     if (!tenantId || !doc || !displayDoc) return;
@@ -123,7 +206,7 @@ function DebitNoteContent() {
         unitIds,
         fromPeriod: from || undefined,
         paidLookbackMonths: Number(paidLookback) || 2,
-        paymentTemplate,
+        paymentTemplate: displayDoc.paymentTemplateId,
         paymentInstructionsText: displayDoc.paymentInstructionsText,
         footerRemark: displayDoc.footerRemark,
       }),
@@ -137,107 +220,84 @@ function DebitNoteContent() {
     setSendToast(data.sent ? 'Debit note sent by email ✓' : 'Logged (no email provider configured)');
   };
 
-  const saveTemplate = async () => {
-    if (!displayDoc) return;
-    setSavingTemplate(true);
-    setSendToast('');
-    const res = await fetch(`/api/rental-templates/${encodeURIComponent(paymentTemplate)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        paymentInstructions: displayDoc.paymentInstructionsText,
-        footerRemark: displayDoc.footerRemark,
-      }),
-    });
-    setSavingTemplate(false);
-    setSendToast(res.ok ? 'Template saved to Templates section ✓' : 'Failed to save template');
-  };
-
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
+    return <div className="min-h-screen flex items-center justify-center text-gray-400">{BTN.loading}</div>;
   }
 
   if (error || !doc || !displayDoc) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-gray-500 px-6 text-center">
         <p>{error || 'Debit note unavailable'}</p>
-        <Link href="/rentals" className="text-brand-600 text-sm font-medium">← Back to Rentals</Link>
+        <Link href="/rentals" className="text-brand-600 text-sm font-medium">← {bi('Back to Rentals', '返回租金管理')}</Link>
       </div>
     );
   }
 
   return (
-    <div className="rent-notice-print-root min-h-screen bg-gray-100 print:bg-white">
-      <div className="no-print bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-5xl mx-auto flex flex-wrap justify-between items-start gap-4">
-          <Link href={unitId ? `/rentals/${unitId}` : `/rentals/tenants/${tenantId}`} className="text-sm text-brand-600 font-medium">
-            ← Back
-          </Link>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/rentals/templates"
-              className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
-            >
-              Templates 範本
-            </Link>
-            <button
-              type="button"
-              onClick={saveTemplate}
-              disabled={savingTemplate}
-              className="px-4 py-2 border border-brand-300 text-brand-700 text-sm rounded-lg hover:bg-brand-50 disabled:opacity-50"
-            >
-              {savingTemplate ? 'Saving…' : 'Save Template 儲存範本'}
-            </button>
-            <button
-              type="button"
-              onClick={sendDebitNote}
-              disabled={sending}
-              className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg disabled:opacity-50"
-            >
-              {sending ? 'Sending…' : 'Send Debit Note 發送'}
-            </button>
-            <button onClick={() => window.print()} className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg">
-              Print / Save PDF
-            </button>
+    <div className="debit-note-print-root min-h-screen bg-gray-100 print:bg-white">
+      <div className="no-print bg-white border-b border-gray-200 px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href={unitId ? `/rentals/${unitId}` : `/rentals/tenants/${tenantId}`}
+          className="text-sm text-brand-600 hover:text-brand-700 font-medium print:hidden"
+        >
+          ← {BTN.back}
+        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <div
+            className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5"
+            role="group"
+            aria-label={bi('Debit note template', '繳費通知單範本')}
+          >
+            {TEMPLATE_OPTIONS.map((opt) => {
+              const active = templateVariant === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setTemplatePersist(opt.id)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    active
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
-        </div>
-        {sendToast && <p className="max-w-5xl mx-auto mt-2 text-sm text-brand-700">{sendToast}</p>}
-        <div className="max-w-5xl mx-auto mt-4 space-y-4">
-          <DebitNotePaymentOptions
-            templateId={paymentTemplate}
-            onTemplateId={setPaymentTemplate}
-            noteNo={doc.noteNo}
-            dueDateChinese={dueDateChinese}
-            instructionsText={paymentInstructionsText}
-            onInstructionsText={setPaymentInstructionsText}
-            footerRemark={footerRemark}
-            onFooterRemark={setFooterRemark}
-          />
-          <DebitNoteTemplateEditor
-            companyKey={paymentTemplate}
-            style={style}
-            onChange={setStyle}
-            onSave={saveStyle}
-            readOnly={readOnly}
-            saving={savingStyle}
-            saveMessage={saveMessage}
-          />
+          <button
+            type="button"
+            onClick={sendDebitNote}
+            disabled={sending}
+            className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+          >
+            {sending ? 'Sending…' : 'Send Debit Note 發送'}
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 print:hidden"
+          >
+            {BTN.printPdf}
+          </button>
         </div>
       </div>
 
-      <main
-        className="a4-page my-8 shadow print:shadow-none print:my-0"
-        style={{ padding: style.pagePadding }}
-      >
-        <FormalDebitNoteDocument doc={displayDoc} styleTemplate={style} />
-      </main>
+      {sendToast ? (
+        <p className="no-print px-6 py-2 text-sm text-brand-700 bg-white border-b border-gray-200">{sendToast}</p>
+      ) : null}
+
+      <div className="py-8 print:py-0">
+        <FormalDebitNoteDocument doc={displayDoc} styleTemplate={style} printMode />
+      </div>
     </div>
   );
 }
 
 export default function BillingDebitNotePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">{BTN.loading}</div>}>
       <DebitNoteContent />
     </Suspense>
   );

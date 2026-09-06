@@ -11,6 +11,8 @@ import {
   normalizeStoredDate,
   outstandingBalance,
   pastLeaseStatusLabel,
+  isVacantUnitName,
+  VACANT_TENANT_NAME,
   type PreviousLeaseRecord,
   type LeaseDocumentType,
   type LeaseStoredStatus,
@@ -61,41 +63,159 @@ function hydrateDoc(row: DocRow): RentalLeaseDocument {
   };
 }
 
-function persistLeaseStatus(lease: RentalLease): LeaseStoredStatus {
+async function persistLeaseStatus(lease: RentalLease): Promise<LeaseStoredStatus> {
   const display = computeLeaseDisplayStatus(lease);
   let stored: LeaseStoredStatus = lease.status;
   if (lease.isCurrent && display === 'ending_soon' && stored === 'active') stored = 'ending_soon';
   if (lease.isCurrent && display === 'ended' && (stored === 'active' || stored === 'ending_soon')) stored = 'ended';
   if (stored !== lease.status) {
-    db.prepare(`UPDATE rental_leases SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(stored, lease.id);
+    await db.prepare(`UPDATE rental_leases SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(stored, lease.id);
   }
   return stored;
 }
 
-export function syncAllLeaseStatuses(userId: number) {
-  const rows = db.prepare('SELECT * FROM rental_leases WHERE user_id = ? AND is_current = 1').all(userId) as LeaseRow[];
-  for (const row of rows) persistLeaseStatus(hydrateLease(row));
+export async function syncAllLeaseStatuses(userId: number) {
+  await syncAndLoadCurrentLeases(userId);
 }
 
-export function getCurrentLeaseForUnit(unitId: number | string, userId: number): RentalLease | null {
-  const row = db.prepare(
+/** Read current leases without persisting derived status (dashboard / detail GET). */
+export async function loadCurrentLeases(userId: number): Promise<Map<number, RentalLease>> {
+  const rows = await db.prepare(
+    'SELECT * FROM rental_leases WHERE user_id = ? AND is_current = 1'
+  ).all(userId) as LeaseRow[];
+  const map = new Map<number, RentalLease>();
+  for (const row of rows) {
+    const lease = hydrateLease(row);
+    map.set(lease.unitId, lease);
+  }
+  return map;
+}
+
+/** Sync current-lease statuses once and return them keyed by unit id. */
+export async function syncAndLoadCurrentLeases(userId: number): Promise<Map<number, RentalLease>> {
+  const rows = await db.prepare(
+    'SELECT * FROM rental_leases WHERE user_id = ? AND is_current = 1'
+  ).all(userId) as LeaseRow[];
+  const map = new Map<number, RentalLease>();
+  for (const row of rows) {
+    const lease = hydrateLease(row);
+    const status = await persistLeaseStatus(lease);
+    map.set(lease.unitId, { ...lease, status });
+  }
+  return map;
+}
+
+/** Current lease for a unit without writing derived status. */
+export async function getCurrentLeaseForUnitReadOnly(
+  unitId: number | string,
+  userId: number,
+): Promise<RentalLease | null> {
+  const row = await db.prepare(
+    `SELECT * FROM rental_leases WHERE unit_id = ? AND user_id = ? AND is_current = 1 ORDER BY id DESC LIMIT 1`
+  ).get(unitId, userId) as LeaseRow | undefined;
+  return row ? hydrateLease(row) : null;
+}
+
+export async function getCurrentLeaseForUnit(unitId: number | string, userId: number): Promise<RentalLease | null> {
+  const row = await db.prepare(
     `SELECT * FROM rental_leases WHERE unit_id = ? AND user_id = ? AND is_current = 1 ORDER BY id DESC LIMIT 1`
   ).get(unitId, userId) as LeaseRow | undefined;
   if (!row) return null;
   const lease = hydrateLease(row);
-  const status = persistLeaseStatus(lease);
+  const status = await persistLeaseStatus(lease);
   return { ...lease, status };
 }
 
-export function getLeaseHistory(unitId: number | string, userId: number): RentalLease[] {
-  return (db.prepare(
+export function buildRentalDashboardAlerts(
+  units: Array<{ id: number; unitName: string }>,
+  leaseByUnitId: Map<number, RentalLease>,
+  recordByUnitId: Map<number, { actualAmount: number; amountPaid: number }>,
+  _period: string,
+): RentalDashboardAlert[] {
+  const alerts: RentalDashboardAlert[] = [];
+
+  for (const unit of units) {
+    const lease = leaseByUnitId.get(unit.id);
+    if (!lease) {
+      alerts.push({
+        type: 'vacant', unitId: unit.id, unitName: unit.unitName, tenantName: '—',
+        message: `${unit.unitName} has no active lease (空置)`,
+      });
+      continue;
+    }
+
+    const display = computeLeaseDisplayStatus(lease);
+    const days = daysRemainingForLease(lease);
+
+    if (display === 'ending_soon') {
+      alerts.push({
+        type: 'ending_soon', unitId: unit.id, unitName: unit.unitName,
+        tenantName: lease.tenantName, leaseId: lease.id, daysRemaining: days,
+        message: `${unit.unitName} · ${lease.tenantName} — contract ends ${lease.leaseEndDate} (${days} days)`,
+      });
+    }
+
+    const endIso = normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate);
+    if (endIso && new Date().toISOString().slice(0, 10) > endIso && lease.status === 'active') {
+      alerts.push({
+        type: 'ended_stale', unitId: unit.id, unitName: unit.unitName,
+        tenantName: lease.tenantName, leaseId: lease.id,
+        message: `${unit.unitName} — lease ended but still marked active; run End Contract`,
+      });
+    }
+
+    if (display === 'ended' || display === 'terminated') {
+      const rec = recordByUnitId.get(unit.id);
+      if (rec) {
+        const bal = outstandingBalance(rec);
+        if (bal > 0) {
+          alerts.push({
+            type: 'outstanding_at_end', unitId: unit.id, unitName: unit.unitName,
+            tenantName: lease.tenantName, leaseId: lease.id,
+            message: `${unit.unitName} — ${formatMoney(bal)} outstanding at contract end`,
+          });
+        }
+      }
+    }
+  }
+
+  return alerts;
+}
+
+export async function getRentalDashboardAlerts(userId: number, period = currentBillingPeriod()): Promise<RentalDashboardAlert[]> {
+  const leaseByUnitId = await syncAndLoadCurrentLeases(userId);
+  const units = await db.prepare(
+    'SELECT id, unit_name FROM rental_units WHERE user_id = ?'
+  ).all(userId) as { id: number; unit_name: string }[];
+
+  const recordRows = await db.prepare(
+    `SELECT unit_id, actual_amount, amount_paid FROM rental_records
+     WHERE user_id = ? AND billing_period = ?`
+  ).all(userId, period) as { unit_id: number; actual_amount: number; amount_paid: number }[];
+  const recordByUnitId = new Map(
+    recordRows.map((r) => [
+      r.unit_id,
+      { actualAmount: Number(r.actual_amount) || 0, amountPaid: Number(r.amount_paid) || 0 },
+    ]),
+  );
+
+  return buildRentalDashboardAlerts(
+    units.map((u) => ({ id: u.id, unitName: u.unit_name })),
+    leaseByUnitId,
+    recordByUnitId,
+    period,
+  );
+}
+
+export async function getLeaseHistory(unitId: number | string, userId: number): Promise<RentalLease[]> {
+  return (await db.prepare(
     `SELECT * FROM rental_leases WHERE unit_id = ? AND user_id = ? ORDER BY lease_start_date DESC, id DESC`
   ).all(unitId, userId) as LeaseRow[]).map(hydrateLease);
 }
 
 /** All ended / terminated leases across units (master-panel history). */
-export function getPreviousLeasesForUser(userId: number): PreviousLeaseRecord[] {
-  const rows = db.prepare(
+export async function getPreviousLeasesForUser(userId: number): Promise<PreviousLeaseRecord[]> {
+  const rows = await db.prepare(
     `SELECT l.*, u.unit_name
      FROM rental_leases l
      JOIN rental_units u ON u.id = l.unit_id AND u.user_id = l.user_id
@@ -118,27 +238,38 @@ export function getPreviousLeasesForUser(userId: number): PreviousLeaseRecord[] 
   }));
 }
 
-export function getLeaseById(leaseId: number | string, userId: number): RentalLease | null {
-  const row = db.prepare('SELECT * FROM rental_leases WHERE id = ? AND user_id = ?').get(leaseId, userId) as LeaseRow | undefined;
+export async function getLeaseById(leaseId: number | string, userId: number): Promise<RentalLease | null> {
+  const row = await db.prepare('SELECT * FROM rental_leases WHERE id = ? AND user_id = ?').get(leaseId, userId) as LeaseRow | undefined;
   return row ? hydrateLease(row) : null;
 }
 
-export function getLeaseDocuments(leaseId: number, userId: number): RentalLeaseDocument[] {
-  return (db.prepare(
+export async function getLeaseDocuments(leaseId: number, userId: number): Promise<RentalLeaseDocument[]> {
+  return (await db.prepare(
     'SELECT * FROM rental_lease_documents WHERE lease_id = ? AND user_id = ? ORDER BY created_at DESC'
   ).all(leaseId, userId) as DocRow[]).map(hydrateDoc);
 }
 
-function syncUnitFromLease(unitId: number, userId: number, lease: RentalLease | null) {
+async function clearUnitForVacancy(unitId: number, userId: number) {
+  await db.prepare(
+    `UPDATE rental_units SET
+      tenant_name = ?, tenant_id = NULL,
+      tenant_contact_name = NULL, tenant_company_name = NULL,
+      tenant_notes = NULL, tenant_phone = NULL, tenant_email = NULL,
+      tenant_address = NULL,
+      lease_start_date = NULL, lease_end_date = NULL,
+      current_lease_id = NULL,
+      automation_enabled = 0, auto_send_receipt_email = 0,
+      updated_at = datetime('now')
+     WHERE id = ? AND user_id = ?`
+  ).run(VACANT_TENANT_NAME, unitId, userId);
+}
+
+async function syncUnitFromLease(unitId: number, userId: number, lease: RentalLease | null) {
   if (!lease) {
-    db.prepare(
-      `UPDATE rental_units SET tenant_name = '', tenant_phone = NULL, tenant_email = NULL,
-        tenant_id = NULL, current_lease_id = NULL, automation_enabled = 0, updated_at = datetime('now')
-       WHERE id = ? AND user_id = ?`
-    ).run(unitId, userId);
+    await clearUnitForVacancy(unitId, userId);
     return;
   }
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_units SET tenant_name = ?, tenant_phone = ?, tenant_email = ?,
       current_year_rent = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
@@ -152,7 +283,7 @@ function syncUnitFromLease(unitId: number, userId: number, lease: RentalLease | 
   );
 }
 
-export function createLeaseForUnit(
+export async function createLeaseForUnit(
   userId: number,
   unitId: number,
   input: {
@@ -167,12 +298,12 @@ export function createLeaseForUnit(
     autoSendReceiptEmail?: boolean;
     automationEnabled?: boolean;
   },
-): RentalLease {
-  db.prepare('UPDATE rental_leases SET is_current = 0, updated_at = datetime(\'now\') WHERE unit_id = ? AND user_id = ? AND is_current = 1')
+): Promise<RentalLease> {
+  await db.prepare('UPDATE rental_leases SET is_current = 0, updated_at = datetime(\'now\') WHERE unit_id = ? AND user_id = ? AND is_current = 1')
     .run(unitId, userId);
 
-  const tenant = findOrCreateTenant(userId, input.tenantName, input.tenantPhone, input.tenantEmail);
-  const res = db.prepare(
+  const tenant = await findOrCreateTenant(userId, input.tenantName, input.tenantPhone, input.tenantEmail);
+  const res = await db.prepare(
     `INSERT INTO rental_leases
       (user_id, unit_id, tenant_id, tenant_name, tenant_phone, tenant_email,
        lease_start_date, lease_end_date, base_rent, due_date_day, deposit_amount,
@@ -189,17 +320,17 @@ export function createLeaseForUnit(
     input.automationEnabled !== false ? 1 : 0,
   );
 
-  const lease = getLeaseById(Number(res.lastInsertRowid), userId)!;
-  syncUnitFromLease(unitId, userId, lease);
-  db.prepare('UPDATE rental_units SET tenant_id = ? WHERE id = ? AND user_id = ?').run(tenant.id, unitId, userId);
+  const lease = (await getLeaseById(Number(res.lastInsertRowid), userId))!;
+  await syncUnitFromLease(unitId, userId, lease);
+  await db.prepare('UPDATE rental_units SET tenant_id = ? WHERE id = ? AND user_id = ?').run(tenant.id, unitId, userId);
   return lease;
 }
 
-export function ensureCurrentLeaseFromUnit(unit: RentalUnit): RentalLease | null {
-  const existing = getCurrentLeaseForUnit(unit.id, unit.user_id);
+export async function ensureCurrentLeaseFromUnit(unit: RentalUnit): Promise<RentalLease | null> {
+  const existing = await getCurrentLeaseForUnit(unit.id, unit.user_id);
   if (existing) return existing;
-  if (!unit.tenantName?.trim()) return null;
-  return createLeaseForUnit(unit.user_id, unit.id, {
+  if (isVacantUnitName(unit.tenantName)) return null;
+  return await createLeaseForUnit(unit.user_id, unit.id, {
     tenantName: unit.tenantName,
     tenantPhone: unit.tenantPhone,
     tenantEmail: unit.tenantEmail,
@@ -212,14 +343,14 @@ export function ensureCurrentLeaseFromUnit(unit: RentalUnit): RentalLease | null
   });
 }
 
-export function updateCurrentLeaseFromUnit(unit: RentalUnit, extra?: { depositAmount?: number }) {
-  const lease = ensureCurrentLeaseFromUnit(unit);
+export async function updateCurrentLeaseFromUnit(unit: RentalUnit, extra?: { depositAmount?: number }) {
+  const lease = await ensureCurrentLeaseFromUnit(unit);
   if (!lease) return null;
-  const tenant = ensureUnitTenantLink(unit);
+  const tenant = await ensureUnitTenantLink(unit);
   const depositAmount = extra?.depositAmount !== undefined
     ? Number(extra.depositAmount) || 0
     : lease.depositAmount;
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_leases SET tenant_id = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?,
       lease_start_date = ?, lease_end_date = ?, base_rent = ?, due_date_day = ?,
       deposit_amount = ?, auto_send_receipt_email = ?, automation_enabled = ?, updated_at = datetime('now')
@@ -233,10 +364,10 @@ export function updateCurrentLeaseFromUnit(unit: RentalUnit, extra?: { depositAm
     unit.autoSendReceiptEmail ? 1 : 0, unit.automationEnabled ? 1 : 0,
     lease.id, unit.user_id,
   );
-  return getLeaseById(lease.id, unit.user_id);
+  return await getLeaseById(lease.id, unit.user_id);
 }
 
-export function endRentalContract(
+export async function endRentalContract(
   userId: number,
   unitId: number,
   input: {
@@ -259,7 +390,7 @@ export function endRentalContract(
     };
   },
 ) {
-  const lease = getCurrentLeaseForUnit(unitId, userId);
+  const lease = await getCurrentLeaseForUnit(unitId, userId);
   if (!lease) throw new Error('No active lease for this unit');
 
   const actualEnd = normalizeStoredDate(input.actualEndDate) || new Date().toISOString().slice(0, 10);
@@ -268,7 +399,7 @@ export function endRentalContract(
   const reason = input.endReason || (actualEnd < endIso ? 'terminated' : 'expired');
   const status: LeaseStoredStatus = reason === 'terminated' ? 'terminated' : 'ended';
 
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_leases SET is_current = 0, status = ?, actual_end_date = ?,
       deposit_refund = ?, deposit_deductions = ?, end_reason = ?, end_notes = ?,
       automation_enabled = 0, updated_at = datetime('now')
@@ -280,23 +411,45 @@ export function endRentalContract(
     lease.id, userId,
   );
 
-  syncUnitFromLease(unitId, userId, null);
-  db.prepare(
-    `UPDATE rental_units SET tenant_id = NULL, tenant_name = 'Vacant 空置',
-      tenant_phone = NULL, tenant_email = NULL, automation_enabled = 0,
-      current_lease_id = NULL, updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(unitId, userId);
+  await syncUnitFromLease(unitId, userId, null);
 
   let newLease: RentalLease | null = null;
   if (input.startNewLease?.tenantName?.trim()) {
-    newLease = createLeaseForUnit(userId, unitId, input.startNewLease);
+    newLease = await createLeaseForUnit(userId, unitId, input.startNewLease);
   }
 
   return {
-    endedLease: getLeaseById(lease.id, userId)!,
+    endedLease: (await getLeaseById(lease.id, userId))!,
     newLease,
   };
+}
+
+export async function deleteRentalLease(
+  leaseId: number | string,
+  userId: number,
+): Promise<
+  | { ok: true; unitId: number; tenantName: string }
+  | { ok: false; status: 404 | 400; error: string }
+> {
+  const lease = await getLeaseById(leaseId, userId);
+  if (!lease) return { ok: false, status: 404, error: 'Lease not found' };
+  if (lease.isCurrent) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Cannot delete the current lease — use End Contract instead',
+    };
+  }
+
+  await db.prepare(
+    `UPDATE rental_units SET current_lease_id = NULL, updated_at = datetime('now')
+     WHERE id = ? AND user_id = ? AND current_lease_id = ?`
+  ).run(lease.unitId, userId, lease.id);
+
+  const res = await db.prepare('DELETE FROM rental_leases WHERE id = ? AND user_id = ?').run(lease.id, userId);
+  if (!res.changes) return { ok: false, status: 404, error: 'Lease not found' };
+
+  return { ok: true, unitId: lease.unitId, tenantName: lease.tenantName };
 }
 
 export async function addLeaseDocument(
@@ -307,72 +460,15 @@ export async function addLeaseDocument(
   docType: LeaseDocumentType,
   label?: string | null,
 ): Promise<RentalLeaseDocument> {
-  const lease = getLeaseById(leaseId, userId);
+  const lease = await getLeaseById(leaseId, userId);
   if (!lease) throw new Error('Lease not found');
   const filePath = await saveReceipt(buffer, mimeType, 'lease-doc');
-  const res = db.prepare(
+  const res = await db.prepare(
     `INSERT INTO rental_lease_documents (user_id, lease_id, doc_type, file_path, label) VALUES (?, ?, ?, ?, ?)`
   ).run(userId, leaseId, docType, filePath, label?.trim() || null);
   return hydrateDoc(
-    db.prepare('SELECT * FROM rental_lease_documents WHERE id = ?').get(Number(res.lastInsertRowid)) as DocRow
+    await db.prepare('SELECT * FROM rental_lease_documents WHERE id = ?').get(Number(res.lastInsertRowid)) as DocRow
   );
-}
-
-export function getRentalDashboardAlerts(userId: number, period = currentBillingPeriod()): RentalDashboardAlert[] {
-  syncAllLeaseStatuses(userId);
-  const alerts: RentalDashboardAlert[] = [];
-
-  const units = db.prepare('SELECT id, unit_name FROM rental_units WHERE user_id = ?').all(userId) as { id: number; unit_name: string }[];
-
-  for (const unit of units) {
-    const lease = getCurrentLeaseForUnit(unit.id, userId);
-    if (!lease) {
-      alerts.push({
-        type: 'vacant', unitId: unit.id, unitName: unit.unit_name, tenantName: '—',
-        message: `${unit.unit_name} has no active lease (空置)`,
-      });
-      continue;
-    }
-
-    const display = computeLeaseDisplayStatus(lease);
-    const days = daysRemainingForLease(lease);
-
-    if (display === 'ending_soon') {
-      alerts.push({
-        type: 'ending_soon', unitId: unit.id, unitName: unit.unit_name,
-        tenantName: lease.tenantName, leaseId: lease.id, daysRemaining: days,
-        message: `${unit.unit_name} · ${lease.tenantName} — contract ends ${lease.leaseEndDate} (${days} days)`,
-      });
-    }
-
-    const endIso = normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate);
-    if (endIso && new Date().toISOString().slice(0, 10) > endIso && lease.status === 'active') {
-      alerts.push({
-        type: 'ended_stale', unitId: unit.id, unitName: unit.unit_name,
-        tenantName: lease.tenantName, leaseId: lease.id,
-        message: `${unit.unit_name} — lease ended but still marked active; run End Contract`,
-      });
-    }
-
-    if (display === 'ended' || display === 'terminated') {
-      const rec = db.prepare(
-        `SELECT actual_amount, amount_paid, status FROM rental_records
-         WHERE unit_id = ? AND user_id = ? AND billing_period = ?`
-      ).get(unit.id, userId, period) as { actual_amount: number; amount_paid: number; status: string } | undefined;
-      if (rec) {
-        const bal = Math.max(0, (rec.actual_amount || 0) - (rec.amount_paid || 0));
-        if (bal > 0) {
-          alerts.push({
-            type: 'outstanding_at_end', unitId: unit.id, unitName: unit.unit_name,
-            tenantName: lease.tenantName, leaseId: lease.id,
-            message: `${unit.unit_name} — ${formatMoney(bal)} outstanding at contract end`,
-          });
-        }
-      }
-    }
-  }
-
-  return alerts;
 }
 
 function daysRemainingForLease(lease: RentalLease): number | null {
@@ -384,12 +480,12 @@ function daysRemainingForLease(lease: RentalLease): number | null {
   return Math.ceil((endDate.getTime() - Date.now()) / 86400000);
 }
 
-export function shouldAutoDispatchInvoice(
+export async function shouldAutoDispatchInvoice(
   userId: number,
   unitId: number,
   period: string,
-): { allowed: boolean; reason?: string } {
-  const lease = getCurrentLeaseForUnit(unitId, userId);
+): Promise<{ allowed: boolean; reason?: string }> {
+  const lease = await getCurrentLeaseForUnit(unitId, userId);
   if (!lease) return { allowed: false, reason: 'No active lease' };
   if (!isLeaseBillingActive(lease, period)) {
     const endDate = lease.actualEndDate || lease.leaseEndDate;
@@ -406,8 +502,8 @@ export function shouldAutoDispatchInvoice(
   return { allowed: true };
 }
 
-export function unitOutstandingTotal(unitId: number, userId: number): number {
-  const rows = db.prepare(
+export async function unitOutstandingTotal(unitId: number, userId: number): Promise<number> {
+  const rows = await db.prepare(
     `SELECT actual_amount, amount_paid, status FROM rental_records WHERE unit_id = ? AND user_id = ?`
   ).all(unitId, userId) as { actual_amount: number; amount_paid: number; status: string }[];
   return rows.reduce((s, r) => {
@@ -418,8 +514,8 @@ export function unitOutstandingTotal(unitId: number, userId: number): number {
 }
 
 /** All leases (current + past) for a tenant across every unit they occupied. */
-export function getTenantLeaseHistory(tenantId: number | string, userId: number) {
-  const rows = db.prepare(
+export async function getTenantLeaseHistory(tenantId: number | string, userId: number) {
+  const rows = await db.prepare(
     `SELECT l.*, u.unit_name
      FROM rental_leases l
      JOIN rental_units u ON u.id = l.unit_id AND u.user_id = l.user_id
@@ -427,13 +523,13 @@ export function getTenantLeaseHistory(tenantId: number | string, userId: number)
      ORDER BY l.lease_start_date DESC, l.id DESC`
   ).all(tenantId, userId) as (LeaseRow & { unit_name: string })[];
 
-  return rows.map((row) => {
+  return await Promise.all(rows.map(async (row) => {
     const lease = hydrateLease(row);
-    const status = row.is_current ? persistLeaseStatus(lease) : lease.status;
+    const status = row.is_current ? await persistLeaseStatus(lease) : lease.status;
     return {
       ...lease,
       status,
       unitName: row.unit_name || `Unit ${row.unit_id}`,
     };
-  });
+  }));
 }

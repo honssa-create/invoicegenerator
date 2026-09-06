@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import {
   assignExpenseNumbersAtomic,
+  attachPrimaryReceipts,
   attachReceipts,
   normalizeNumber,
   receiptPathsFromBody,
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
   const status = searchParams.get('status');
   const idsParam = searchParams.get('ids');
 
-  const ownerId = getDataOwnerId(session.userId);
+  const ownerId = await getDataOwnerId(session);
   let query = 'SELECT * FROM expenses WHERE user_id = ?';
   const params: (string | number)[] = [ownerId];
 
@@ -33,12 +34,14 @@ export async function GET(request: Request) {
     params.push(session.userId);
   }
 
+  let idsFilter = false;
   if (idsParam) {
     const ids = idsParam
       .split(',')
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0);
     if (ids.length) {
+      idsFilter = true;
       query += ` AND id IN (${ids.map(() => '?').join(',')})`;
       params.push(...ids);
     }
@@ -55,8 +58,13 @@ export async function GET(request: Request) {
 
   query += ' ORDER BY COALESCE(paid_date, created_at) DESC, id DESC';
 
-  const expenses = db.prepare(query).all(...params) as Expense[];
-  attachReceipts(expenses);
+  const expenses = await db.prepare(query).all(...params) as Expense[];
+  // Print view needs every receipt; list only needs the primary thumbnail.
+  if (idsFilter) {
+    await attachReceipts(expenses);
+  } else {
+    await attachPrimaryReceipts(expenses);
+  }
   return NextResponse.json({ expenses });
 }
 
@@ -70,10 +78,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const category = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : 'other';
     const payment_status = STATUSES.includes(body.payment_status) ? body.payment_status : 'paid';
-    const amount_hkd = normalizeNumber(body.amount_hkd);
-    const amount_rmb = normalizeNumber(body.amount_rmb);
-    const receiptPaths = receiptPathsFromBody(body);
-    const ownerId = getDataOwnerId(session.userId);
+    const amount_hkd = await normalizeNumber(body.amount_hkd);
+    const amount_rmb = await normalizeNumber(body.amount_rmb);
+    const receiptPaths = await receiptPathsFromBody(body);
+    const ownerId = await getDataOwnerId(session);
     const paidDate = body.paid_date?.trim() || '';
 
     if (amount_hkd === null && amount_rmb === null) {
@@ -89,13 +97,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Paid date is required for receipt numbering 請填寫支出日期' }, { status: 400 });
     }
 
-    const create = db.transaction(() => {
-      const { batchId, receiptNo } = assignExpenseNumbersAtomic(ownerId, paidDate, {
+    const expenseId = await db.transaction(async () => {
+      const { batchId, receiptNo } = await assignExpenseNumbersAtomic(ownerId, paidDate, {
         reuseBatch: Boolean(body.reuse_batch),
         fundingSource: payment.fields.funding_source!,
       });
 
-      const result = db
+      const result = await db
         .prepare(
           `INSERT INTO expenses
             (user_id, created_by_user_id, receipt_no, batch_id, category, merchant, supplier_input, amount_hkd, amount_rmb, paid_date, order_no, platform, payment_method, payment_channel, funding_source, card_last4, notes, special_notes, payment_status, receipt_path)
@@ -125,15 +133,14 @@ export async function POST(request: Request) {
         );
       const expenseId = result.lastInsertRowid as number;
       const insertReceipt = db.prepare(
-        'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)',
+        'INSERT INTO expense_receipts (expense_id, user_id, path, source_url) VALUES (?, ?, ?, ?)',
       );
-      for (const p of receiptPaths) insertReceipt.run(expenseId, ownerId, p);
+      for (const p of receiptPaths) await insertReceipt.run(expenseId, ownerId, p, null);
       return expenseId;
     });
 
-    const expenseId = create.immediate();
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId) as Expense;
-    attachReceipts([expense]);
+    const expense = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId) as Expense;
+    await attachReceipts([expense]);
     return NextResponse.json({ expense }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to create expense';

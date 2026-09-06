@@ -1,0 +1,37 @@
+name: Hub sync cron
+
+on:
+  schedule:
+    # Every 15 minutes — Railway pulls WooCommerce, QuickBooks, and ClickUp when connected.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  hub-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Order Hub sync
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "Missing GitHub secrets: APP_URL and/or CRON_SECRET"
+            exit 1
+          fi
+          # Strip trailing slash from APP_URL
+          BASE="${APP_URL%/}"
+          HTTP_CODE=$(curl -sS -o /tmp/hub-sync-body.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE}/api/cron/hub-sync")
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/hub-sync-body.json
+          echo
+          case "${HTTP_CODE}" in
+            2??) ;;
+            *)
+              echo "Hub sync failed with HTTP ${HTTP_CODE}"
+              exit 1
+              ;;
+          esac

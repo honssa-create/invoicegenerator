@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { useAuth } from './AuthProvider';
 import Sidebar from './Sidebar';
+import { tapProps } from '@/lib/tap-action';
+import { APP } from '@/lib/ui-labels';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { loading } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -21,14 +21,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [menuOpen]);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-brand-600" />
-      </div>
-    );
-  }
-
+  // Middleware already gates routes; render shell + children immediately so
+  // page data fetches run in parallel with /api/auth/me (not behind it).
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
@@ -37,9 +31,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {menuOpen && (
         <button
           type="button"
-          aria-label="Close menu"
+          aria-label={APP.closeMenu}
           className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-          onClick={() => setMenuOpen(false)}
+          {...tapProps(() => setMenuOpen(false))}
         />
       )}
 
@@ -47,15 +41,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 lg:hidden">
           <button
             type="button"
-            aria-label="Open menu"
-            onClick={() => setMenuOpen(true)}
+            aria-label={APP.openMenu}
             className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-700 hover:bg-gray-50"
+            {...tapProps(() => setMenuOpen(true))}
           >
             ☰
           </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-gray-900">InvoiceFlow</p>
-            <p className="truncate text-xs text-gray-500">Finance Manager</p>
+            <p className="truncate text-xs text-gray-500">{APP.financeManager}</p>
           </div>
         </header>
 

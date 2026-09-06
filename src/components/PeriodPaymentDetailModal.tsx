@@ -11,6 +11,7 @@ import {
   periodLedgerStatusLabel,
   type UnitLeasePaymentLedgerRow,
 } from '@/lib/rentals';
+import { BTN } from '@/lib/ui-labels';
 
 interface Props {
   row: UnitLeasePaymentLedgerRow;
@@ -35,7 +36,7 @@ export default function PeriodPaymentDetailModal({ row, onClose }: Props) {
               )}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none px-1">✕</button>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" aria-label={BTN.close}>✕</button>
         </div>
 
         <div className="mb-4">

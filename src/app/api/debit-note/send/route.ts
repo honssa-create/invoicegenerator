@@ -3,7 +3,7 @@ import { denyReadOnlyWrite, requireApiAccess } from '@/lib/api-guard';
 import { sendEmail } from '@/lib/email';
 import { rentalOwnerId } from '@/lib/org-server';
 import { buildFormalDebitNote } from '@/lib/rental-ledger-server';
-import { currentBillingPeriod, formatMoney, type DebitNoteMode, type DebitNotePaymentTemplateId } from '@/lib/rentals';
+import { currentBillingPeriod, formatMoney, formatTenantDisplayName, type DebitNoteMode, type DebitNotePaymentTemplateId } from '@/lib/rentals';
 
 function parseUnitIds(raw: string | null): number[] | undefined {
   if (!raw) return undefined;
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
 
   try {
     const body = await request.json();
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'unitId is required when mode is single' }, { status: 400 });
     }
 
-    const doc = buildFormalDebitNote(tenantId, ownerId, targetPeriod, {
+    const doc = await buildFormalDebitNote(tenantId, ownerId, targetPeriod, {
       fromPeriod: body.fromPeriod || body.from,
       paidLookbackMonths: body.paidLookbackMonths ?? body.paid_lookback,
       mode,
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     }
 
     const subject = `繳費通知單 Debit Note ${doc.noteNo} — ${doc.targetPeriodLabel}`;
-    const html = `<p>Dear ${doc.tenant.name},</p>
+    const html = `<p>Dear ${formatTenantDisplayName(doc.tenant)},</p>
       <p>Please find your debit note for <strong>${doc.targetPeriodLabel}</strong>.</p>
       <p><strong>Note No.:</strong> ${doc.noteNo}<br/>
       <strong>Total Amount Due:</strong> ${formatMoney(doc.grandTotal)}<br/>
@@ -74,7 +74,10 @@ export async function POST(request: Request) {
       ${doc.footerRemark ? `<p><em>${doc.footerRemark}</em></p>` : ''}
       <p>Thank you.</p>`;
 
-    const email = await sendEmail(doc.tenant.email.trim(), subject, html);
+    const email = await sendEmail(doc.tenant.email.trim(), subject, html, {
+      userId: ownerId,
+      brand: 'honour',
+    });
 
     return NextResponse.json({ sent: email.sent, provider: email.provider, noteNo: doc.noteNo, email });
   } catch (e) {

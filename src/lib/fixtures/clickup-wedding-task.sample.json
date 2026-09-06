@@ -1,0 +1,58 @@
+{
+  "id": "86eyp7m63",
+  "name": "Jxxxxxx Cxxx & Jxx Vxxxxx  5xxx 5xxx 06122026 45ml 50樽, 100%",
+  "text_content": "【📩即食燕窩回禮 𝑪𝒐𝒏𝒇𝒊𝒓𝒎𝒂𝒕𝒊𝒐𝒏】\n\n👰🤵🏻日期 𝑻𝒉𝒆 𝑩𝒊𝒈 𝑫𝒂𝒚：\n2026年12月6日 (Sunday) ⁠午宴\nJxxxxxx Cxxx & Jxx Vxxxxx (6123 4567)\n\n🎀🕊️ 45ml 即食燕窩回禮\n數量：50樽\n包裝：金色蝴蝶結紗袋包裝 x 50\n味道：紅棗 X 50\n\n✨💍𝑺𝒑𝒆𝒄𝒊𝒂𝒍 𝑷𝒓𝒊𝒄𝒆 專享優惠: \n$2,095@$41.90/樽 (原價$45)\n總額：$2,095\n\n--\n\n📍 收件人 & 送貨地址：\n2026年12月4日 / 12 - 5pm 送貨, \n\n九龍xxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "description": "【📩即食燕窩回禮 𝑪𝒐𝒏𝒇𝒊𝒓𝒎𝒂𝒕𝒊𝒐𝒏】\n\n👰🤵🏻日期 𝑻𝒉𝒆 𝑩𝒊𝒈 𝑫𝒂𝒚：\n2026年12月6日 (Sunday) ⁠午宴\nJxxxxxx Cxxx & Jxx Vxxxxx (6123 4567)\n\n🎀🕊️ 45ml 即食燕窩回禮\n數量：50樽\n味道：紅棗 X 50\n\n$2,095@$41.90/樽\n\n📍 收件人 & 送貨地址：\n2026年12月4日 / 12 - 5pm 送貨, \n\n九龍xxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "status": {
+    "status": "已跟客人確認基本資料"
+  },
+  "date_created": "1787149879827",
+  "custom_fields": [
+    {
+      "id": "31f583c2-02a0-4644-915c-db7537a6e1cb",
+      "name": "聯絡方式",
+      "type": "short_text",
+      "value": "5xxx 5xxx"
+    },
+    {
+      "id": "7be59dbd-2fd2-4b91-82c4-553f9e9f7f33",
+      "name": "即食燕窩容量",
+      "type": "labels",
+      "type_config": {
+        "options": [
+          {
+            "id": "4b0e27db-35e1-4def-9b29-9288cb4cb607",
+            "label": "即食燕窩 (45ml)"
+          }
+        ]
+      },
+      "value": ["4b0e27db-35e1-4def-9b29-9288cb4cb607"]
+    },
+    {
+      "id": "613b87fb-b5b2-4b08-a80b-f794d365a7fd",
+      "name": "客人訂紅棗味 (樽)",
+      "type": "number",
+      "value": 50
+    },
+    {
+      "id": "923f5c16-ebdb-46e6-9777-84d10c034b6d",
+      "name": "第一次Payment ($)",
+      "type": "number",
+      "value": "2095"
+    },
+    {
+      "id": "e2f46c67-5a85-444b-8157-2af90e207bf9",
+      "name": "Payment",
+      "type": "labels",
+      "type_config": {
+        "options": [
+          {
+            "id": "0cd3e159-713e-4dd6-8716-2bf280d14046",
+            "label": "Full Paid"
+          }
+        ]
+      },
+      "value": ["0cd3e159-713e-4dd6-8716-2bf280d14046"]
+    }
+  ]
+}

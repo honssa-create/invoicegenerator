@@ -4,18 +4,18 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 import LeaseStatusBadge from '@/components/LeaseStatusBadge';
 import RentPaymentNoticeMatrix from '@/components/RentPaymentNoticeMatrix';
-import ChargeAllocationGrid, {
-  chargeRowsByType,
-  distributeByChargeType,
-  fillOutstandingValues,
-  fillRentOnlyValues,
-  sumAllocationValues,
-} from '@/components/ChargeAllocationGrid';
 import PaymentHistoryTable from '@/components/PaymentHistoryTable';
+import PaymentPeriodTable, {
+  emptyPaymentPeriodLine,
+  sumPaymentPeriodLine,
+  sumPaymentPeriodLines,
+  type PaymentPeriodLine,
+} from '@/components/PaymentPeriodTable';
 import PaymentAllocationLedger from '@/components/PaymentAllocationLedger';
-import DebitNotePaymentOptions from '@/components/DebitNotePaymentOptions';
 import { useAuth } from '@/components/AuthProvider';
 import {
   CHARGE_TYPE_LABELS,
@@ -26,14 +26,14 @@ import {
   chargeOutstanding,
   computeLeaseDisplayStatus,
   currentBillingPeriod,
-  defaultPaymentTemplateForUnits,
   formatDisplayDate,
   formatMoney,
   formatUtilityAmount,
+  isoFromDisplayDate,
+  toFormDate,
   todayFormDate,
   RENTAL_PAYMENT_METHODS,
   RENTAL_PAYMENT_METHOD_LABELS,
-  type DebitNotePaymentTemplateId,
   type RentalChargeItem,
   type RentalChargeType,
   type RentalPayment,
@@ -45,23 +45,6 @@ import {
   type TenantLeaseHistoryRow,
   type TenantProfileSummary,
 } from '@/lib/rentals';
-import { isSectionReadOnly } from '@/lib/permissions';
-
-type TenantPeriodBreakdownRow = {
-  unitId: number;
-  billingPeriod: string;
-  rent: string;
-  electricity: string;
-  water: string;
-};
-
-function sumTenantPeriodRow(row: TenantPeriodBreakdownRow): number {
-  return Number(row.rent || 0) + Number(row.electricity || 0) + Number(row.water || 0);
-}
-
-function sumTenantPeriodRows(rows: TenantPeriodBreakdownRow[]): number {
-  return rows.reduce((s, r) => s + sumTenantPeriodRow(r), 0);
-}
 
 function tenantChargeTypeTotal(
   charges: RentalChargeItem[],
@@ -92,8 +75,9 @@ interface TenantDetail {
 
 export default function TenantDetailPage() {
   const { id } = useParams();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { isSectionReadOnly, user } = useAuth();
+  const readOnly = isSectionReadOnly('rentals');
+  const isAdmin = user?.role === 'admin';
   const [period, setPeriod] = useState(currentBillingPeriod());
   const [fromPeriod, setFromPeriod] = useState(''); // optional override; auto-detect arrears when empty
   const [paidLookback, setPaidLookback] = useState(2);
@@ -107,18 +91,18 @@ export default function TenantDetailPage() {
   const [paymentModal, setPaymentModal] = useState(false);
   const [allocateModal, setAllocateModal] = useState<RentalPayment | null>(null);
   const [paymentForm, setPaymentForm] = useState({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
-  const [chargeAllocValues, setChargeAllocValues] = useState<Record<string, string>>({});
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [selectedUnitIds, setSelectedUnitIds] = useState<number[]>([]);
-  const [contactForm, setContactForm] = useState({ name: '', phone: '', email: '', notes: '' });
+  const [contactForm, setContactForm] = useState({
+    name: '', contact_name: '', company_name: '', phone: '', email: '', address: '', notes: '',
+  });
   const [contactSaving, setContactSaving] = useState(false);
   const [contactEditing, setContactEditing] = useState(false);
-  const [paymentMode, setPaymentMode] = useState<'byPeriod' | 'byType'>('byPeriod');
-  const [periodRows, setPeriodRows] = useState<TenantPeriodBreakdownRow[]>([]);
-  const [showDebitNoteModal, setShowDebitNoteModal] = useState(false);
-  const [debitNoteTemplate, setDebitNoteTemplate] = useState<DebitNotePaymentTemplateId>('label');
-  const [debitNoteRemark, setDebitNoteRemark] = useState('');
-  const [debitNoteSending, setDebitNoteSending] = useState(false);
+  const [periodRows, setPeriodRows] = useState<PaymentPeriodLine[]>([]);
+
+  useModalUnsavedWarning(contactEditing, contactForm, !readOnly);
+  useModalUnsavedWarning(paymentModal, { paymentForm, periodRows }, !readOnly);
+  useModalUnsavedWarning(Boolean(allocateModal), allocations, !readOnly);
 
   const load = () => {
     setLoading(true);
@@ -140,8 +124,11 @@ export default function TenantDetailPage() {
           setDetail(d);
           setContactForm({
             name: d.tenant.name || '',
+            contact_name: d.tenant.contact_name || '',
+            company_name: d.tenant.company_name || '',
             phone: d.tenant.phone || '',
             email: d.tenant.email || '',
+            address: d.tenant.address || '',
             notes: d.tenant.notes || '',
           });
           setSelectedUnitIds((prev) => {
@@ -176,17 +163,54 @@ export default function TenantDetailPage() {
     load();
   };
 
+  const deleteLeaseRecord = async (leaseId: number, tenantLabel: string) => {
+    if (!window.confirm(bi(`Delete lease record for ${tenantLabel}? This cannot be undone.`, `刪除 ${tenantLabel} 的租約紀錄？此操作無法復原。`))) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch(`/api/rentals/leases/${leaseId}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setToast(d.error || bi('Failed to delete lease record', '刪除租約紀錄失敗'));
+      return;
+    }
+    setToast(bi('Lease record deleted', '租約紀錄已刪除'));
+    load();
+  };
+
+  const applyPeriodRows = (rows: PaymentPeriodLine[]) => {
+    setPeriodRows(rows);
+    setPaymentForm((f) => ({ ...f, amount: String(sumPaymentPeriodLines(rows) || '') }));
+  };
+
+  const buildOutstandingPeriodRows = (): PaymentPeriodLine[] => {
+    if (!detail) return [];
+    const seen = new Set<string>();
+    const rows: PaymentPeriodLine[] = [];
+    const charges = [...detail.outstandingCharges]
+      .filter((c) => chargeOutstanding(c) > 0)
+      .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod) || a.unitId - b.unitId);
+    for (const c of charges) {
+      const key = `${c.unitId}:${c.billingPeriod}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        unitId: c.unitId,
+        billingPeriod: c.billingPeriod,
+        rent: formatBreakdownAmount(tenantChargeTypeTotal(charges, c.unitId, c.billingPeriod, 'rent')),
+        electricity: formatBreakdownAmount(tenantChargeTypeTotal(charges, c.unitId, c.billingPeriod, 'electricity')),
+        water: formatBreakdownAmount(tenantChargeTypeTotal(charges, c.unitId, c.billingPeriod, 'water')),
+      });
+    }
+    return rows;
+  };
+
   const openPaymentModal = () => {
     if (!detail) return;
-    const rows = chargeRowsByType(detail.outstandingCharges);
-    const filled = fillOutstandingValues(rows);
-    setChargeAllocValues(filled);
-    setPaymentMode('byPeriod');
-    setPeriodRows([]);
-    setPaymentForm((f) => ({
-      ...f,
-      amount: String(sumAllocationValues(filled) || ''),
-    }));
+    const outstanding = buildOutstandingPeriodRows();
+    const unitId = selectedUnitIds[0] || detail.units[0]?.id;
+    applyPeriodRows(outstanding.length ? outstanding : [emptyPaymentPeriodLine({ unitId, billingPeriod: currentBillingPeriod() })]);
     setPaymentModal(true);
   };
 
@@ -207,33 +231,18 @@ export default function TenantDetailPage() {
   };
 
   const fillOutstandingPeriodRows = () => {
-    if (!detail) return;
-    const seen = new Set<string>();
-    const rows: TenantPeriodBreakdownRow[] = [];
-    const charges = [...detail.outstandingCharges]
-      .filter((c) => chargeOutstanding(c) > 0)
-      .sort((a, b) => a.billingPeriod.localeCompare(b.billingPeriod) || a.unitId - b.unitId);
-    for (const c of charges) {
-      const key = `${c.unitId}:${c.billingPeriod}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      rows.push({
-        unitId: c.unitId,
-        billingPeriod: c.billingPeriod,
-        rent: formatBreakdownAmount(tenantChargeTypeTotal(charges, c.unitId, c.billingPeriod, 'rent')),
-        electricity: formatBreakdownAmount(tenantChargeTypeTotal(charges, c.unitId, c.billingPeriod, 'electricity')),
-        water: formatBreakdownAmount(tenantChargeTypeTotal(charges, c.unitId, c.billingPeriod, 'water')),
-      });
-    }
-    setPeriodRows(rows);
-    setPaymentForm((f) => ({ ...f, amount: String(sumTenantPeriodRows(rows)) }));
+    const rows = buildOutstandingPeriodRows();
+    applyPeriodRows(rows.length ? rows : [emptyPaymentPeriodLine({
+      unitId: selectedUnitIds[0] || detail?.units[0]?.id,
+      billingPeriod: currentBillingPeriod(),
+    })]);
   };
 
   const fillAdvanceMonths = (months: number) => {
     if (!detail) return;
     const targetUnits = detail.units.filter((u) => selectedUnitIds.includes(u.id));
     const unitsToFill = targetUnits.length ? targetUnits : detail.units;
-    const rows: TenantPeriodBreakdownRow[] = [];
+    const rows: PaymentPeriodLine[] = [];
     for (const u of unitsToFill) {
       let p = startPeriodForUnit(u.id);
       const rent = monthlyRentForUnit(u.id);
@@ -248,31 +257,8 @@ export default function TenantDetailPage() {
         p = addBillingMonths(p, 1);
       }
     }
-    setPeriodRows(rows);
-    setPaymentForm((f) => ({ ...f, amount: String(sumTenantPeriodRows(rows)) }));
+    applyPeriodRows(rows);
   };
-
-  const addPeriodRow = () => {
-    const unitId = selectedUnitIds[0] || detail?.units[0]?.id;
-    if (!unitId) return;
-    setPeriodRows((prev) => [...prev, {
-      unitId,
-      billingPeriod: startPeriodForUnit(unitId),
-      rent: '',
-      electricity: '',
-      water: '',
-    }]);
-  };
-
-  const updateTenantPeriodRow = (idx: number, patch: Partial<TenantPeriodBreakdownRow>) => {
-    setPeriodRows((prev) => {
-      const next = prev.map((r, i) => (i === idx ? { ...r, ...patch } : r));
-      setPaymentForm((f) => ({ ...f, amount: String(sumTenantPeriodRows(next)) }));
-      return next;
-    });
-  };
-
-  const chargeTypeRows = detail ? chargeRowsByType(detail.outstandingCharges) : [];
 
   const savePayment = async () => {
     if (!detail) return;
@@ -282,7 +268,7 @@ export default function TenantDetailPage() {
       return;
     }
 
-    let body: Record<string, unknown> = {
+    const body: Record<string, unknown> = {
       tenantId: detail.tenant.id,
       paymentDate: paymentForm.paymentDate,
       amount,
@@ -292,38 +278,19 @@ export default function TenantDetailPage() {
       unitIds: selectedUnitIds.length ? selectedUnitIds : undefined,
     };
 
-    if (paymentMode === 'byPeriod') {
-      const periodAllocations = periodRows
-        .filter((r) => r.billingPeriod && sumTenantPeriodRow(r) > 0)
-        .map((r) => ({
-          unitId: r.unitId,
-          billingPeriod: r.billingPeriod,
-          rent: Number(r.rent) || undefined,
-          electricity: Number(r.electricity) || undefined,
-          water: Number(r.water) || undefined,
-        }));
-      if (periodAllocations.length) {
-        body.periodAllocations = periodAllocations;
-      } else {
-        body.autoAllocate = true;
-      }
+    const periodAllocations = periodRows
+      .filter((r) => r.billingPeriod && sumPaymentPeriodLine(r) > 0)
+      .map((r) => ({
+        unitId: r.unitId,
+        billingPeriod: r.billingPeriod,
+        rent: Number(r.rent) || undefined,
+        electricity: Number(r.electricity) || undefined,
+        water: Number(r.water) || undefined,
+      }));
+    if (periodAllocations.length) {
+      body.periodAllocations = periodAllocations;
     } else {
-      const allocSum = sumAllocationValues(chargeAllocValues);
-      if (allocSum > amount + 0.01) {
-        setToast('Allocated total exceeds payment amount');
-        return;
-      }
-      const allocations = distributeByChargeType(detail.outstandingCharges, chargeAllocValues);
-      if (allocations.length && Math.abs(allocSum - amount) < 0.02) {
-        body.allocations = allocations;
-      } else if (allocations.length && allocSum < amount) {
-        body.periodAllocations = undefined;
-        body.autoAllocate = true;
-      } else if (allocations.length) {
-        body.allocations = allocations;
-      } else {
-        body.autoAllocate = true;
-      }
+      body.autoAllocate = true;
     }
 
     setBusy(true);
@@ -339,7 +306,6 @@ export default function TenantDetailPage() {
       return;
     }
     setPaymentModal(false);
-    setChargeAllocValues({});
     setPeriodRows([]);
     setPaymentForm({ paymentDate: todayFormDate(), amount: '', method: '', reference: '', notes: '' });
     setToast('Payment recorded — outstanding balance updated');
@@ -368,14 +334,14 @@ export default function TenantDetailPage() {
   const inp = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm';
 
   if (loading && !detail) {
-    return <AppLayout><div className="p-12 text-center text-gray-400">Loading…</div></AppLayout>;
+    return <AppLayout><div className="p-12 text-center text-gray-400">{BTN.loading}</div></AppLayout>;
   }
   if (loadError || !detail) {
     return (
       <AppLayout>
         <div className="p-12 text-center">
           <p className="text-gray-500">{loadError || 'Tenant not found'}</p>
-          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← Back to Rentals</Link>
+          <Link href="/rentals" className="text-brand-600 text-sm font-medium mt-3 inline-block">← {bi('Back to Rentals', '返回租金管理')}</Link>
         </div>
       </AppLayout>
     );
@@ -426,7 +392,7 @@ export default function TenantDetailPage() {
     setBusy(false);
     if (!res.ok) {
       const d = await res.json();
-      setToast(d.error || 'Allocation failed');
+      setToast(d.error || MSG.allocationFailed);
       return;
     }
     setAllocateModal(null);
@@ -440,7 +406,7 @@ export default function TenantDetailPage() {
     );
   };
 
-  const debitNoteHref = (extra?: { paymentTemplate?: string; paymentRemark?: string }) => {
+  const debitNoteHref = () => {
     const qs = new URLSearchParams({
       tenantId: String(id),
       targetPeriod: period,
@@ -451,42 +417,7 @@ export default function TenantDetailPage() {
     if (selectedUnitIds.length && selectedUnitIds.length < units.length) {
       qs.set('unitIds', selectedUnitIds.join(','));
     }
-    if (extra?.paymentTemplate) qs.set('paymentTemplate', extra.paymentTemplate);
-    if (extra?.paymentRemark) qs.set('paymentRemark', extra.paymentRemark);
     return `/billing/debit-note?${qs}`;
-  };
-
-  const openDebitNoteModal = () => {
-    const selectedNames = units.filter((u) => selectedUnitIds.includes(u.id)).map((u) => u.unitName);
-    setDebitNoteTemplate(defaultPaymentTemplateForUnits(selectedNames));
-    setDebitNoteRemark('');
-    setShowDebitNoteModal(true);
-  };
-
-  const sendDebitNote = async () => {
-    setDebitNoteSending(true);
-    const res = await fetch('/api/debit-note/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: Number(id),
-        targetPeriod: period,
-        mode: 'grouped',
-        unitIds: selectedUnitIds.length && selectedUnitIds.length < units.length ? selectedUnitIds.join(',') : undefined,
-        fromPeriod: fromPeriod || undefined,
-        paidLookbackMonths: paidLookback,
-        paymentTemplate: debitNoteTemplate,
-        paymentRemark: debitNoteRemark || undefined,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setDebitNoteSending(false);
-    if (!res.ok) {
-      setToast(data.error || 'Failed to send debit note');
-      return;
-    }
-    setShowDebitNoteModal(false);
-    setToast(data.sent ? 'Debit note sent by email ✓' : 'Debit note logged (no email provider)');
   };
 
   return (
@@ -502,20 +433,36 @@ export default function TenantDetailPage() {
             {readOnly && <span className="ml-2 text-amber-600">(Read-only)</span>}
           </p>
         </div>
-        <div className="page-actions flex-wrap">
-          <input type="month" value={fromPeriod} onChange={(e) => setFromPeriod(e.target.value)} className={`${inp} w-auto`} title="From period (optional — auto-detects arrears)" placeholder="From (auto)" />
-          <span className="text-gray-400 self-center">→</span>
-          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} title="Target period" />
-          <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} title="Paid lookback months" />
-          <span className="text-xs text-gray-400 self-center">paid mo.</span>
-          <button
-            type="button"
-            onClick={openDebitNoteModal}
-            disabled={!selectedUnitIds.length}
-            className={`btn border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40`}
-          >
-            繳費通知單 Debit Note
-          </button>
+        <div className="page-actions flex-wrap items-end">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-gray-500">{bi('From period', '起始帳期')}</span>
+            <input type="month" value={fromPeriod} onChange={(e) => setFromPeriod(e.target.value)} className={`${inp} w-auto`} />
+          </label>
+          <span className="text-gray-400 self-end pb-2">→</span>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-gray-500">{bi('Target period', '目標帳期')}</span>
+            <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className={`${inp} w-auto`} />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-gray-500">{bi('Paid lookback (months)', '已付回溯月數')}</span>
+            <input type="number" min={0} max={12} value={paidLookback} onChange={(e) => setPaidLookback(Number(e.target.value) || 0)} className={`${inp} w-16`} />
+          </label>
+          {selectedUnitIds.length ? (
+            <Link
+              href={debitNoteHref()}
+              className="btn border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              繳費通知單 Debit Note
+            </Link>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="btn border border-gray-300 text-gray-700 opacity-40 cursor-not-allowed"
+            >
+              繳費通知單 Debit Note
+            </button>
+          )}
           {!readOnly && (
             <button onClick={openPaymentModal} className="btn bg-brand-600 text-white hover:bg-brand-700">
               + Record Payment
@@ -541,7 +488,7 @@ export default function TenantDetailPage() {
               onClick={() => setContactEditing(true)}
               className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50"
             >
-              Edit 編輯
+              {BTN.edit}
             </button>
           )}
         </div>
@@ -550,8 +497,16 @@ export default function TenantDetailPage() {
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Name 姓名</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Tenant Name 租單位人士</label>
                   <input className={inp} value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">聯絡人姓名</label>
+                  <input className={inp} value={contactForm.contact_name} onChange={(e) => setContactForm({ ...contactForm, contact_name: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">公司名稱</label>
+                  <input className={inp} value={contactForm.company_name} onChange={(e) => setContactForm({ ...contactForm, company_name: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Phone 電話</label>
@@ -561,6 +516,15 @@ export default function TenantDetailPage() {
                   <label className="block text-xs font-medium text-gray-500 mb-1">Email 電郵</label>
                   <input type="email" className={inp} value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">租客地址</label>
+                <textarea
+                  className={`${inp} min-h-[72px] resize-y`}
+                  value={contactForm.address}
+                  onChange={(e) => setContactForm({ ...contactForm, address: e.target.value })}
+                  rows={2}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Notes 備註</label>
@@ -573,14 +537,17 @@ export default function TenantDetailPage() {
                     setContactEditing(false);
                     setContactForm({
                       name: tenant.name || '',
+                      contact_name: tenant.contact_name || '',
+                      company_name: tenant.company_name || '',
                       phone: tenant.phone || '',
                       email: tenant.email || '',
+                      address: tenant.address || '',
                       notes: tenant.notes || '',
                     });
                   }}
                   className="px-4 py-2 border rounded-lg text-sm"
                 >
-                  Cancel
+                  {BTN.cancel}
                 </button>
                 <button
                   type="button"
@@ -588,12 +555,24 @@ export default function TenantDetailPage() {
                   disabled={contactSaving}
                   className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50"
                 >
-                  {contactSaving ? 'Saving…' : 'Save 儲存'}
+                  {contactSaving ? BTN.saving : BTN.save}
                 </button>
               </div>
             </div>
           ) : (
             <dl className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">Tenant Name 租單位人士</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">聯絡人姓名</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.contact_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500 uppercase">公司名稱</dt>
+                <dd className="mt-1 font-medium text-gray-900">{tenant.company_name || '—'}</dd>
+              </div>
               <div>
                 <dt className="text-xs text-gray-500 uppercase">Phone 電話</dt>
                 <dd className="mt-1 font-medium text-gray-900">{tenant.phone || '—'}</dd>
@@ -601,6 +580,10 @@ export default function TenantDetailPage() {
               <div>
                 <dt className="text-xs text-gray-500 uppercase">Email 電郵</dt>
                 <dd className="mt-1 font-medium text-gray-900 break-all">{tenant.email || '—'}</dd>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-4">
+                <dt className="text-xs text-gray-500 uppercase">租客地址</dt>
+                <dd className="mt-1 font-medium text-gray-900 whitespace-pre-wrap">{tenant.address || '—'}</dd>
               </div>
               <div>
                 <dt className="text-xs text-gray-500 uppercase">Last Payment 最近交租</dt>
@@ -683,6 +666,7 @@ export default function TenantDetailPage() {
                   checked={selectedUnitIds.includes(u.id)}
                   onChange={() => toggleUnit(u.id)}
                   className="h-4 w-4 rounded border-gray-300"
+                  aria-label={bi(`Include ${u.unitName}`, `納入 ${u.unitName}`)}
                 />
                 <Link href={`/rentals/${u.id}`} className="text-brand-600 hover:underline font-medium">{u.unitName}</Link>
               </li>
@@ -701,13 +685,25 @@ export default function TenantDetailPage() {
           </div>
           <div className="p-4 space-y-3 max-h-80 overflow-y-auto">
             {(leaseHistory).length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">No contract history yet</p>
+              <p className="text-sm text-gray-400 text-center py-4">{bi('No contract history yet', '尚無合約紀錄')}</p>
             ) : (
               leaseHistory.map((l) => (
                 <div key={l.id} className={`rounded-xl border p-3 text-sm ${l.isCurrent ? 'border-brand-200 bg-brand-50/40' : 'border-gray-100'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Link href={`/rentals/${l.unitId}`} className="font-semibold text-brand-700 hover:underline">{l.unitName}</Link>
-                    <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                    <div className="flex items-center gap-2">
+                      <LeaseStatusBadge status={computeLeaseDisplayStatus(l)} />
+                      {isAdmin && !l.isCurrent && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => deleteLeaseRecord(l.id, l.tenantName || tenant.name)}
+                          className="text-xs font-medium text-red-600 hover:text-red-800 hover:underline disabled:opacity-50"
+                        >
+                          {bi('Delete', '刪除')}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     {formatDisplayDate(l.leaseStartDate)} → {formatDisplayDate(l.actualEndDate || l.leaseEndDate)}
@@ -818,7 +814,7 @@ export default function TenantDetailPage() {
                 </tr>
               ))}
               {(!billingHistory || billingHistory.length === 0) && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No billing history yet</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{bi('No billing history yet', '尚無帳單紀錄')}</td></tr>
               )}
             </tbody>
           </table>
@@ -837,32 +833,22 @@ export default function TenantDetailPage() {
 
       {paymentModal && detail && (
         <div className="modal-overlay">
-          <div className="modal-panel sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+          <div className="modal-panel sm:max-w-3xl max-h-[92vh] overflow-y-auto">
             <h2 className="text-lg font-bold mb-1">Record Payment 記錄收款</h2>
-            <p className="text-sm text-gray-500 mb-4">Enter paid date, amount and period breakdown — advance rent (半年／一年) auto-deducts outstanding</p>
-
-            <div className="flex gap-2 mb-4">
-              <button
-                type="button"
-                onClick={() => setPaymentMode('byPeriod')}
-                className={`text-xs px-3 py-1.5 rounded-lg border ${paymentMode === 'byPeriod' ? 'bg-brand-600 text-white border-brand-600' : 'hover:bg-gray-50'}`}
-              >
-                按期數 By Period
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentMode('byType')}
-                className={`text-xs px-3 py-1.5 rounded-lg border ${paymentMode === 'byType' ? 'bg-brand-600 text-white border-brand-600' : 'hover:bg-gray-50'}`}
-              >
-                按類型 By Type
-              </button>
-            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              {bi('Each line is one period. Edit rent, electricity and water, then add or remove lines as needed.', '每列為一個帳期。可編輯租金、電費、水費，並增刪列數。')}
+            </p>
 
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-gray-500">Paid Date 交租日</label>
-                  <input className={inp} value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} placeholder="DD/MM/YYYY" />
+                  <input
+                    type="date"
+                    className={inp}
+                    value={isoFromDisplayDate(paymentForm.paymentDate) || ''}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: toFormDate(e.target.value) })}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Total Amount 收款總額</label>
@@ -892,170 +878,38 @@ export default function TenantDetailPage() {
                 </div>
               </div>
 
-              {paymentMode === 'byPeriod' ? (
-                <div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <label className="text-xs font-semibold text-gray-600 uppercase">Period breakdown 帳期明細</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={fillOutstandingPeriodRows}>
-                        填未付 Fill arrears
-                      </button>
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(3)}>
-                        預付3個月
-                      </button>
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
-                        預付6個月
-                      </button>
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(12)}>
-                        預付12個月
-                      </button>
-                      <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={addPeriodRow}>
-                        + Row
-                      </button>
-                    </div>
-                  </div>
-                  {periodRows.length === 0 ? (
-                    <p className="text-sm text-gray-400 border border-dashed rounded-lg p-4 text-center">
-                      Add period rows, or enter total only — system will auto-allocate FIFO (including future months for advance rent)
-                    </p>
-                  ) : (
-                    <div className="border rounded-lg overflow-x-auto">
-                      <table className="w-full text-sm min-w-[42rem]">
-                        <thead className="bg-gray-50 text-xs text-gray-500">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Unit</th>
-                            <th className="px-3 py-2 text-left">Period 帳期</th>
-                            <th className="px-3 py-2 text-right">Rent 租金</th>
-                            <th className="px-3 py-2 text-right">Electricity 電費</th>
-                            <th className="px-3 py-2 text-right">Water 水費</th>
-                            <th className="w-8" />
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {periodRows.map((row, idx) => (
-                            <tr key={idx}>
-                              <td className="px-3 py-2">
-                                {units.length > 1 ? (
-                                  <select
-                                    className="w-full text-xs border rounded px-1 py-1"
-                                    value={row.unitId}
-                                    onChange={(e) => updateTenantPeriodRow(idx, { unitId: Number(e.target.value) })}
-                                  >
-                                    {units.map((u) => (
-                                      <option key={u.id} value={u.id}>{u.unitName}</option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <span className="text-xs">{units[0]?.unitName}</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  type="month"
-                                  className="w-full text-xs border rounded px-2 py-1"
-                                  value={row.billingPeriod}
-                                  onChange={(e) => updateTenantPeriodRow(idx, { billingPeriod: e.target.value })}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  type="number"
-                                  className="w-full text-xs border rounded px-2 py-1 text-right"
-                                  value={row.rent}
-                                  onChange={(e) => updateTenantPeriodRow(idx, { rent: e.target.value })}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  type="number"
-                                  className="w-full text-xs border rounded px-2 py-1 text-right"
-                                  value={row.electricity}
-                                  onChange={(e) => updateTenantPeriodRow(idx, { electricity: e.target.value })}
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <input
-                                  type="number"
-                                  className="w-full text-xs border rounded px-2 py-1 text-right"
-                                  value={row.water}
-                                  onChange={(e) => updateTenantPeriodRow(idx, { water: e.target.value })}
-                                />
-                              </td>
-                              <td className="px-1 py-2">
-                                <button
-                                  type="button"
-                                  className="text-gray-400 hover:text-red-600 text-xs"
-                                  onClick={() => {
-                                    setPeriodRows((prev) => {
-                                      const next = prev.filter((_, i) => i !== idx);
-                                      setPaymentForm((f) => ({ ...f, amount: String(sumTenantPeriodRows(next)) }));
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  ✕
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <p className="text-xs text-gray-500 mt-2">
-                    Period total: {formatMoney(sumTenantPeriodRows(periodRows))}
-                    {paymentForm.amount && ` · Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
-                  </p>
-                </div>
-              ) : (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-gray-600 uppercase">Payment split 分拆收款</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-                      onClick={() => {
-                        const filled = fillRentOnlyValues(chargeTypeRows);
-                        setChargeAllocValues(filled);
-                        setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
-                      }}
-                    >
-                      Rent only 只交租金
+              <PaymentPeriodTable
+                rows={periodRows}
+                onChange={applyPeriodRows}
+                units={units}
+                defaultUnitId={selectedUnitIds[0] || units[0]?.id}
+                defaultPeriod={currentBillingPeriod()}
+                extraActions={(
+                  <>
+                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={fillOutstandingPeriodRows}>
+                      {bi('Fill arrears', '填未付')}
                     </button>
-                    <button
-                      type="button"
-                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-                      onClick={() => {
-                        const filled = fillOutstandingValues(chargeTypeRows);
-                        setChargeAllocValues(filled);
-                        setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(filled) || f.amount) }));
-                      }}
-                    >
-                      Fill all 填滿未付
+                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(3)}>
+                      {bi('3 months', '預付3個月')}
                     </button>
-                  </div>
-                </div>
-                <ChargeAllocationGrid
-                  rows={chargeTypeRows}
-                  values={chargeAllocValues}
-                  onChange={(v) => {
-                    setChargeAllocValues(v);
-                    setPaymentForm((f) => ({ ...f, amount: String(sumAllocationValues(v) || '') }));
-                  }}
-                  threeRow
-                />
-                <p className="text-xs text-gray-500 mt-2">
-                  Allocated: {formatMoney(sumAllocationValues(chargeAllocValues))}
-                  {paymentForm.amount && ` / Payment ${formatMoney(Number(paymentForm.amount) || 0)}`}
-                </p>
-              </div>
-              )}
+                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(6)}>
+                      {bi('6 months', '預付6個月')}
+                    </button>
+                    <button type="button" className="text-xs px-2 py-1 border rounded hover:bg-gray-50" onClick={() => fillAdvanceMonths(12)}>
+                      {bi('12 months', '預付12個月')}
+                    </button>
+                  </>
+                )}
+              />
+              <p className="text-xs text-gray-500">
+                {bi('Period total', '帳期合計')}: {formatMoney(sumPaymentPeriodLines(periodRows))}
+                {paymentForm.amount && ` · ${bi('Payment', '收款')} ${formatMoney(Number(paymentForm.amount) || 0)}`}
+              </p>
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setPaymentModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setPaymentModal(false)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={savePayment} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
-                {busy ? 'Saving…' : 'Save & Allocate'}
+                {busy ? BTN.saving : bi('Save & Allocate', '儲存並分配')}
               </button>
             </div>
           </div>
@@ -1086,55 +940,18 @@ export default function TenantDetailPage() {
                       max={outstanding}
                       value={allocations[c.id] || ''}
                       onChange={(e) => setAllocations({ ...allocations, [c.id]: e.target.value })}
+                      aria-label={bi(`Allocate ${CHARGE_TYPE_LABELS[c.chargeType]}`, `分配${CHARGE_TYPE_LABELS[c.chargeType]}`)}
                     />
                   </div>
                 );
               })}
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setAllocateModal(null)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+              <button onClick={() => setAllocateModal(null)} className="px-4 py-2 border rounded-lg text-sm">{BTN.cancel}</button>
               <button onClick={saveAllocation} disabled={busy} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50">
-                {busy ? 'Saving…' : 'Allocate'}
+                {busy ? BTN.saving : bi('Allocate', '分配')}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showDebitNoteModal && (
-        <div className="modal-overlay">
-          <div className="modal-panel sm:max-w-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-1">繳費通知單 Debit Note</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              {period} · {selectedUnitIds.length} unit{selectedUnitIds.length !== 1 ? 's' : ''} selected
-            </p>
-            <DebitNotePaymentOptions
-              templateId={debitNoteTemplate}
-              onTemplateId={setDebitNoteTemplate}
-              manualRemark={debitNoteRemark}
-              onManualRemark={setDebitNoteRemark}
-            />
-            <div className="flex flex-wrap justify-between gap-3 mt-6">
-              <Link
-                href={debitNoteHref({ paymentTemplate: debitNoteTemplate, paymentRemark: debitNoteRemark })}
-                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50"
-                onClick={() => setShowDebitNoteModal(false)}
-              >
-                Preview & Print 預覽列印
-              </Link>
-              <div className="flex gap-3">
-                <button type="button" onClick={() => setShowDebitNoteModal(false)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-                <button
-                  type="button"
-                  onClick={() => void sendDebitNote()}
-                  disabled={debitNoteSending || readOnly}
-                  className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm disabled:opacity-50"
-                >
-                  {debitNoteSending ? 'Sending…' : 'Send Debit Note 發送'}
-                </button>
-              </div>
-            </div>
-            <p className="text-xs text-gray-400 mt-3">Send to: {tenant.email || 'No email — will log only'}</p>
           </div>
         </div>
       )}

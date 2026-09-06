@@ -16,6 +16,7 @@
 # misc
 .DS_Store
 *.pem
+*.traineddata
 
 # debug
 npm-debug.log*
@@ -41,3 +42,6 @@ next-env.d.ts
 *.tsbuildinfo
 dev-server.log
 data/.next-build.sqlite*
+
+# generated docs (regenerate with: npm run docs:onboarding)
+/docs/*.docx

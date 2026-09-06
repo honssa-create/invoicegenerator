@@ -1,19 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import DebitNoteTemplateWorkspace from '@/components/document-templates/DebitNoteTemplateWorkspace';
+import QuotationTemplateWorkspace from '@/components/document-templates/QuotationTemplateWorkspace';
+import InvoiceTemplateWorkspace from '@/components/document-templates/InvoiceTemplateWorkspace';
+import DeliveryNoteTemplateWorkspace from '@/components/document-templates/DeliveryNoteTemplateWorkspace';
 import TemplateHierarchyNav from '@/components/document-templates/TemplateHierarchyNav';
 import { useAuth } from '@/components/AuthProvider';
-import type { DocumentTypeId, TemplateCompanyVariantId } from '@/lib/document-templates';
-import { isSectionReadOnly } from '@/lib/permissions';
+import {
+  companyVariantsForDocumentType,
+  type DocumentTypeId,
+  type TemplateCompanyVariantId,
+} from '@/lib/document-templates';
+import { NAV, bi } from '@/lib/ui-labels';
 
 export default function RentalTemplatesPage() {
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'rentals') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('rentals');
   const [documentType, setDocumentType] = useState<DocumentTypeId>('debit_note');
   const [companyVariant, setCompanyVariant] = useState<TemplateCompanyVariantId>('label');
+
+  useEffect(() => {
+    const variants = companyVariantsForDocumentType(documentType);
+    if (variants.length && !variants.some((v) => v.id === companyVariant)) {
+      setCompanyVariant(variants[0].id);
+    }
+  }, [documentType, companyVariant]);
 
   return (
     <AppLayout>
@@ -22,13 +36,13 @@ export default function RentalTemplatesPage() {
           <div className="max-w-[1600px] mx-auto space-y-6">
             <div>
               <Link href="/rentals" className="text-sm text-brand-600 font-medium">
-                ← Back to Rentals
+                ← {bi('Back to Rentals', '返回租金管理')}
               </Link>
-              <h1 className="text-xl font-bold text-gray-900 mt-2">Document Templates 文件範本</h1>
+              <h1 className="text-xl font-bold text-gray-900 mt-2">{NAV.templates}</h1>
               <p className="text-sm text-gray-500 mt-1 max-w-3xl">
                 Edit document templates with a live preview. Hierarchy: Document Type → Company Variant →
-                template details (header, payment notes, layout).
-                左側編輯、右側即時預覽；支援動態變數如 {'{{customer_name}}'}。
+                template details. Debit Note, Quotation, Invoice, and Delivery Note are available.
+                左側編輯、右側即時預覽。
               </p>
             </div>
 
@@ -41,15 +55,43 @@ export default function RentalTemplatesPage() {
 
             {documentType === 'debit_note' && (
               <DebitNoteTemplateWorkspace
-                key={companyVariant}
+                key={`debit-${companyVariant}`}
                 variant={companyVariant}
                 readOnly={readOnly}
               />
             )}
 
-            {documentType !== 'debit_note' && (
+            {documentType === 'quotation' && (
+              <QuotationTemplateWorkspace
+                key={`quo-${companyVariant}`}
+                variant={companyVariant}
+                readOnly={readOnly}
+              />
+            )}
+
+            {documentType === 'invoice' && (
+              <InvoiceTemplateWorkspace
+                key={`inv-${companyVariant}`}
+                variant={companyVariant}
+                readOnly={readOnly}
+              />
+            )}
+
+            {documentType === 'delivery_note' && (
+              <DeliveryNoteTemplateWorkspace
+                key={`dn-${companyVariant}`}
+                variant={companyVariant}
+                readOnly={readOnly}
+              />
+            )}
+
+            {documentType !== 'debit_note' &&
+              documentType !== 'quotation' &&
+              documentType !== 'invoice' &&
+              documentType !== 'delivery_note' && (
               <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-                This document type is not available yet. Debit Note is implemented first.
+                This document type is not available yet. Debit Note, Quotation, Invoice, and Delivery
+                Note are implemented.
               </div>
             )}
           </div>

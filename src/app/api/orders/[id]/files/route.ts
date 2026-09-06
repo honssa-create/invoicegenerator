@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { denyReadOnlyWrite } from '@/lib/api-guard';
+import { getDataOwnerId } from '@/lib/org-server';
 import { saveReceipt } from '@/lib/receipt';
 
-const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+const MAX_BYTES = 20 * 1024 * 1024;
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -12,9 +13,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const order = db
+  const denied = denyReadOnlyWrite(session, 'orders', request.method);
+  if (denied) return denied;
+
+  const ownerId = await getDataOwnerId(session);
+
+  const order = await db
     .prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
   let formData: FormData;
@@ -25,25 +31,25 @@ export async function POST(request: Request, { params }: { params: { id: string 
   }
 
   const files = formData.getAll('file').filter((f): f is File => f instanceof File);
-  if (!files.length) return NextResponse.json({ error: 'No image uploaded' }, { status: 400 });
+  if (!files.length) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
   const insert = db.prepare(
     'INSERT INTO order_files (order_id, user_id, path, original_name) VALUES (?, ?, ?, ?)'
   );
 
   for (const file of files) {
-    if (!ALLOWED.includes(file.type)) {
-      return NextResponse.json({ error: 'Only image files are supported' }, { status: 400 });
-    }
     if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: 'Each image must be under 10 MB' }, { status: 400 });
+      return NextResponse.json({ error: 'Each file must be under 20 MB' }, { status: 400 });
+    }
+    if (file.size <= 0) {
+      return NextResponse.json({ error: 'Empty files are not allowed' }, { status: 400 });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
-    const path = await saveReceipt(buffer, file.type, file.name);
-    insert.run(params.id, session.userId, path, file.name || null);
+    const path = await saveReceipt(buffer, file.type || 'application/octet-stream', file.name);
+    await insert.run(params.id, ownerId, path, file.name || null);
   }
 
-  const list = db
+  const list = await db
     .prepare('SELECT id, path, original_name FROM order_files WHERE order_id = ? ORDER BY id')
     .all(params.id);
   return NextResponse.json({ files: list }, { status: 201 });

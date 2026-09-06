@@ -7,6 +7,7 @@ import {
   paymentMethodLabel,
   type RentalPaymentAllocationDetail,
 } from '@/lib/rentals';
+import { bi } from '@/lib/ui-labels';
 
 interface Props {
   rows: RentalPaymentAllocationDetail[];
@@ -17,7 +18,7 @@ export default function PaymentAllocationLedger({ rows, compact }: Props) {
   if (!rows.length) {
     return (
       <p className="text-sm text-gray-400 py-6 text-center">
-        No payment allocations yet — record a payment and split across billing items.
+        {bi('No payment allocations yet — record a payment and split across billing items.', '尚無收款分配 — 請記錄收款並分拆至帳單項目。')}
       </p>
     );
   }

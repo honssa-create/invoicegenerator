@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
 import TagSelect from '@/components/TagSelect';
 import SupplierSelect from '@/components/SupplierSelect';
 import FilterBar from '@/components/FilterBar';
+import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import {
   DEFAULT_OPTIONS,
   OPTION_TYPES,
@@ -24,7 +25,14 @@ import {
   legacyPaymentToFundingSource,
   paymentChannelLabel,
   type OptionType,
+  type FundingSourceId,
 } from '@/lib/expenses';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
+import {
+  EMPTY_EXPENSE_EXPORT_FILTERS,
+  buildExpenseExportQuery,
+  type ExpenseExportFilters,
+} from '@/lib/expense-export';
 import {
   matchSupplierFromOcr,
   mergeSupplierLists,
@@ -32,7 +40,9 @@ import {
   type SupplierMatch,
 } from '@/lib/expense-suppliers';
 import type { Expense } from '@/lib/types';
-import { expenseReceiptUrl, isStoredImageUrl } from '@/lib/image-url';
+import { expenseReceiptUrl, formReceiptPreviewUrl } from '@/lib/image-url';
+import ExpenseDetailPanel from '@/components/ExpenseDetailPanel';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 const EMPTY_FORM = {
   category: '',
@@ -56,8 +66,16 @@ type Options = Record<OptionType, string[]>;
 type SortKey = 'batch' | 'number' | 'reason' | 'supplier' | 'paymentChannel' | 'fundingSource' | 'hkd' | 'rmb' | 'date' | 'platform' | 'status';
 
 const EMPTY_FILTERS = { dateStart: '', dateEnd: '', fundingSource: '', reason: '', platform: '', search: '' };
+const EXPENSES_LIST_UI_KEY = 'expenses-list-ui';
 const PAGE_SIZES = [10, 20, 30, 50] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
+
+type ExpensesListUiState = {
+  filters: typeof EMPTY_FILTERS;
+  sort: { key: SortKey; dir: 'asc' | 'desc' };
+  pageSize: PageSize;
+  page: number;
+};
 
 function buildPageNumbers(current: number, total: number): (number | '…')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -92,12 +110,16 @@ function normalizeOptions(raw?: Partial<Options>): Options {
 
 export default function ExpensesPage() {
   const router = useRouter();
+  const savedUi = useMemo(() => readListUi<ExpensesListUiState>(EXPENSES_LIST_UI_KEY), []);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formReceipts, setFormReceipts] = useState<FormReceipt[]>([]);
+
+  useModalUnsavedWarning(showForm, { form, formReceipts });
+
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -107,18 +129,37 @@ export default function ExpensesPage() {
   const [supplierOcrMatch, setSupplierOcrMatch] = useState<SupplierMatch | null>(null);
   const [supplierInputOcrHint, setSupplierInputOcrHint] = useState(false);
 
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
-  const [pageSize, setPageSize] = useState<PageSize>(20);
-  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState(() => ({
+    ...EMPTY_FILTERS,
+    ...(savedUi?.filters ?? {}),
+  }));
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && dir && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'date', dir: 'desc' };
+  });
+  const [pageSize, setPageSize] = useState<PageSize>(() => {
+    const n = savedUi?.pageSize;
+    return n && PAGE_SIZES.includes(n) ? n : 20;
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const skipPageResetRef = useRef(true);
 
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
   const [continueBatch, setContinueBatch] = useState(false);
-  const [importSingleBatch, setImportSingleBatch] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFilters, setExportFilters] = useState<ExpenseExportFilters>(EMPTY_EXPENSE_EXPORT_FILTERS);
+  const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -272,6 +313,14 @@ export default function ExpensesPage() {
   const pagedRows = displayed.slice(pageStart, pageEnd);
 
   useEffect(() => {
+    writeListUi(EXPENSES_LIST_UI_KEY, { filters, sort, pageSize, page });
+  }, [filters, sort, pageSize, page]);
+
+  useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [filters, sort, pageSize]);
 
@@ -331,7 +380,7 @@ export default function ExpensesPage() {
     setShowForm(true);
   };
 
-  const openEdit = (e: Expense) => {
+  const fillEditForm = (e: Expense) => {
     setForm({
       category: e.category || '',
       merchant: e.merchant || '',
@@ -347,7 +396,7 @@ export default function ExpensesPage() {
       notes: e.notes || '',
       special_notes: e.special_notes || '',
     });
-    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r) })));
+    setFormReceipts((e.receipts || []).map((r) => ({ id: r.id, path: r.path, url: expenseReceiptUrl(r, e.id) })));
     setEditingId(e.id);
     setScanMessage('');
     setSupplierOcrMatch(null);
@@ -356,11 +405,24 @@ export default function ExpensesPage() {
     setShowForm(true);
   };
 
+  /** List payload only has the primary receipt — fetch full expense before edit/detail. */
+  const fetchFullExpense = async (id: number): Promise<Expense | null> => {
+    const res = await fetch(`/api/expenses/${id}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.expense as Expense) || null;
+  };
+
+  const openEdit = async (e: Expense) => {
+    const full = (await fetchFullExpense(e.id)) || e;
+    fillEditForm(full);
+  };
+
   const handleFiles = async (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
     if (!files.length) return;
     setScanning(true);
-    setScanMessage(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning the first…`);
+    setScanMessage(bi(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} & scanning the first…`, `上傳 ${files.length} 個檔案並掃描第一個…`));
     setError('');
 
     const localUrls = files.map((f) => URL.createObjectURL(f));
@@ -378,7 +440,7 @@ export default function ExpensesPage() {
       const newReceipts: FormReceipt[] = (data.receipts || []).map(
         (r: { path: string }, i: number) => ({
           path: r.path,
-          url: isStoredImageUrl(r.path) ? r.path : (localUrls[i] || r.path),
+          url: formReceiptPreviewUrl(r.path, localUrls[i]),
         })
       );
       setFormReceipts((prev) => [...prev, ...newReceipts]);
@@ -459,12 +521,11 @@ export default function ExpensesPage() {
     setImporting(true);
     const fd = new FormData();
     fd.append('file', file);
-    if (importSingleBatch) fd.append('single_batch', '1');
     try {
       const res = await fetch('/api/expenses/import', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) {
-        setToast({ msg: data.error || 'Import failed', kind: 'error' });
+        setToast({ msg: data.error || MSG.importFailed, kind: 'error' });
         return;
       }
       let msg = `Imported ${data.imported} row(s), skipped ${data.skipped}`;
@@ -486,7 +547,7 @@ export default function ExpensesPage() {
       loadOptions();
       loadExpenses();
     } catch {
-      setToast({ msg: 'Import failed', kind: 'error' });
+      setToast({ msg: MSG.importFailed, kind: 'error' });
     } finally {
       setImporting(false);
     }
@@ -546,7 +607,7 @@ export default function ExpensesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Move this expense to Deleted Records? You can restore it within 60 days.')) return;
+    if (!confirm(bi('Move this expense to Deleted Records? You can restore it within 60 days.', '將此支出移至已刪除紀錄？可於 60 天內還原。'))) return;
     const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
     if (res.ok) {
       setSelected((prev) => {
@@ -574,13 +635,17 @@ export default function ExpensesPage() {
         : new Set([...Array.from(selected), ...pagedRows.map((e) => e.id)])
     );
 
-  const openDetail = (e: Expense) => setDetail(e);
+  const openDetail = async (e: Expense) => {
+    setDetail(e);
+    const full = await fetchFullExpense(e.id);
+    if (full) setDetail(full);
+  };
 
   const openLightbox = (expense: Expense, index: number) => {
     const receipts = expense.receipts || [];
     if (!receipts[index]) return;
     setLightbox({
-      urls: receipts.map((r) => expenseReceiptUrl(r)),
+      urls: receipts.map((r) => expenseReceiptUrl(r, expense.id)),
       index,
     });
   };
@@ -602,7 +667,10 @@ export default function ExpensesPage() {
     const ids = displayed.filter((e) => selected.has(e.id)).map((e) => e.id);
     if (
       !confirm(
-        `Move ${ids.length} expense(s) to Deleted Records? You can restore them within 60 days.`
+        bi(
+          `Move ${ids.length} expense(s) to Deleted Records? You can restore them within 60 days.`,
+          `將 ${ids.length} 筆支出移至已刪除紀錄？可於 60 天內還原。`,
+        )
       )
     ) {
       return;
@@ -616,7 +684,7 @@ export default function ExpensesPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setToast({ msg: data.error || 'Bulk delete failed', kind: 'error' });
+        setToast({ msg: data.error || MSG.bulkDeleteFailed, kind: 'error' });
         return;
       }
       setSelected(new Set());
@@ -626,7 +694,7 @@ export default function ExpensesPage() {
       if (data.not_found?.length) msg += ` · ${data.not_found.length} skipped (not found or no access)`;
       setToast({ msg, kind: 'success' });
     } catch {
-      setToast({ msg: 'Bulk delete failed', kind: 'error' });
+      setToast({ msg: MSG.bulkDeleteFailed, kind: 'error' });
     } finally {
       setBulkDeleting(false);
     }
@@ -646,7 +714,7 @@ export default function ExpensesPage() {
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={r.id}
-            src={expenseReceiptUrl(r)}
+            src={expenseReceiptUrl(r, e.id)}
             alt="Receipt"
             onClick={() => openLightbox(e, i)}
             className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 transition"
@@ -666,19 +734,65 @@ export default function ExpensesPage() {
     );
   };
 
-  const detailField = (label: string, value: ReactNode) => (
-    <div>
-      <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{label}</p>
-      <p className="text-sm text-gray-900 mt-0.5">{value || '—'}</p>
-    </div>
-  );
+  const printDetail = () => {
+    if (!detail) return;
+    router.push(`/expenses/${detail.id}/detail-print`);
+  };
+
+  const openExportModal = () => {
+    setExportFilters({
+      paidFrom: filters.dateStart,
+      paidTo: filters.dateEnd,
+      createdFrom: '',
+      createdTo: '',
+      fundingSource: (filters.fundingSource as FundingSourceId) || '',
+    });
+    setShowExportModal(true);
+  };
+
+  const runExport = async () => {
+    if (exportFilters.paidFrom && exportFilters.paidTo && exportFilters.paidFrom > exportFilters.paidTo) {
+      setToast({ msg: 'Paid date range is invalid (start after end)', kind: 'error' });
+      return;
+    }
+    if (exportFilters.createdFrom && exportFilters.createdTo && exportFilters.createdFrom > exportFilters.createdTo) {
+      setToast({ msg: 'Created date range is invalid (start after end)', kind: 'error' });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/expenses/export${buildExpenseExportQuery(exportFilters)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setToast({ msg: data.error || MSG.exportFailed, kind: 'error' });
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] || `expenses-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+      setToast({ msg: 'Excel export downloaded', kind: 'success' });
+    } catch {
+      setToast({ msg: MSG.exportFailed, kind: 'error' });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Expenses 支出紀錄</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Track costs, scan receipts, import sheets, and export your books</p>
+          <h1 className="page-title">{TITLE.expenses}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Track costs, scan receipts, import sheets, and export your books', '追蹤成本、掃描收據、匯入表格及匯出帳簿')}</p>
         </div>
         <div className="page-actions">
           <button
@@ -686,50 +800,40 @@ export default function ExpensesPage() {
             disabled={selected.size === 0 || bulkDeleting}
             className="px-4 py-2 bg-white border border-red-200 text-red-700 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {bulkDeleting ? 'Deleting…' : `🗑 Delete Selected${selected.size > 0 ? ` (${selected.size})` : ''}`}
+            {bulkDeleting ? BTN.deleting : `🗑 ${bi('Delete Selected', '刪除所選')}${selected.size > 0 ? ` (${selected.size})` : ''}`}
           </button>
           <button
             onClick={printSelected}
             disabled={selected.size === 0}
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            🖨 Print Selected{selected.size > 0 ? ` (${selected.size})` : ''}
+            🖨 {bi('Print Selected', '列印所選')}{selected.size > 0 ? ` (${selected.size})` : ''}
           </button>
-          <div className="flex flex-col gap-1.5">
-            <div
-              onClick={() => importInputRef.current?.click()}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
-              title="Drag a .csv / .xlsx / .xls file here or click to select"
-            >
-              {importing ? 'Importing…' : '📥 Import Expense (CSV/Excel)'}
-              <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
-            </div>
-            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none px-1">
-              <input
-                type="checkbox"
-                checked={importSingleBatch}
-                onChange={(e) => setImportSingleBatch(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-              />
-              Group import as one Batch ID 整批共用同一報銷單編號
-            </label>
+          <div
+            onClick={() => importInputRef.current?.click()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (e.dataTransfer.files?.[0]) handleImport(e.dataTransfer.files[0]);
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            className="px-4 py-2 bg-white border border-dashed border-brand-300 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors cursor-pointer"
+            title="Drag a .csv / .xlsx / .xls file here or click to select"
+          >
+            {importing ? bi('Importing…', '匯入中…') : `📥 ${bi('Import Expense (CSV/Excel)', '匯入支出 (CSV/Excel)')}`}
+            <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onImportChange} />
           </div>
-          <a
-            href="/api/expenses/export"
+          <button
+            type="button"
+            onClick={openExportModal}
             className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
-            ⬇ Export to Excel
-          </a>
+            ⬇ {BTN.exportExcel}
+          </button>
           <button
             onClick={openCreate}
             className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
           >
-            + Add Expense
+            + {bi('Add Expense', '新增支出')}
           </button>
         </div>
       </div>
@@ -748,7 +852,7 @@ export default function ExpensesPage() {
         onDateEnd={(v) => setFilters((f) => ({ ...f, dateEnd: v }))}
         search={filters.search}
         onSearch={(v) => setFilters((f) => ({ ...f, search: v }))}
-        searchPlaceholder="Search number, supplier, platform…"
+        searchPlaceholder={bi('Search number, supplier, platform…', '搜尋編號、供應商、平台…')}
         onClear={() => setFilters(EMPTY_FILTERS)}
       >
         <div className="flex flex-col">
@@ -844,7 +948,7 @@ export default function ExpensesPage() {
           </div>
         ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No expenses match. Add one, import a sheet, or clear filters.</p>
+            <p>{bi('No expenses match. Add one, import a sheet, or clear filters.', '沒有符合的支出。新增一筆、匯入試算表或清除篩選。')}</p>
           </div>
         ) : (
           <table className="w-full min-w-[1520px] border-separate border-spacing-0">
@@ -853,7 +957,7 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3 sticky left-0 z-20 bg-white w-14 min-w-14 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" aria-label="Select all" />
                 </th>
-                {sortTh('batch', 'Batch ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
+                {sortTh('batch', 'Expense ID', 'sticky left-14 z-20 bg-white min-w-[8rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('number', 'Receipt No.', 'sticky left-[11.5rem] z-20 bg-white min-w-[10rem] shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]')}
                 {sortTh('date', 'Paid Date')}
                 {sortTh('platform', 'Platform 消費平台')}
@@ -906,9 +1010,9 @@ export default function ExpensesPage() {
                     </span>
                   </td>
                   <td className={`px-4 py-3 sticky right-0 z-10 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)] text-sm space-x-3 whitespace-nowrap ${stickyCell}`} onClick={(ev) => ev.stopPropagation()}>
-                    <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">View</button>
-                    <button onClick={() => openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">Edit</button>
-                    <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
+                    <button onClick={() => openDetail(e)} className="text-gray-600 hover:text-gray-900 font-medium">{BTN.view}</button>
+                    <button onClick={() => void openEdit(e)} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.edit}</button>
+                    <button onClick={() => handleDelete(e.id)} className="text-red-600 hover:text-red-700 font-medium">{BTN.delete}</button>
                   </td>
                 </tr>
               );
@@ -977,7 +1081,7 @@ export default function ExpensesPage() {
       {showForm && (
         <div className="modal-overlay overflow-y-auto py-4">
           <div className="modal-panel sm:max-w-2xl my-0 sm:my-8 !overflow-visible max-h-none">
-            <h2 className="text-lg font-semibold mb-4">{editingId ? 'Edit Expense' : 'New Expense'}</h2>
+            <h2 className="text-lg font-semibold mb-4">{editingId ? bi('Edit Expense', '編輯支出') : bi('New Expense', '新增支出')}</h2>
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
 
             <div
@@ -1026,7 +1130,7 @@ export default function ExpensesPage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date 支出日期</label>
                   <input type="date" value={form.paid_date} onChange={(ev) => setForm({ ...form, paid_date: ev.target.value })} className={inputCls} />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Receipt No. uses paid date month + funding source (e.g. EXP-202604-CCS001). Batch ID assigned on submit.
+                    Receipt No. uses paid date month + funding source (e.g. EXP-202604-CCS001). Expense ID assigned on submit.
                   </p>
                   {!editingId && (
                     <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
@@ -1036,7 +1140,7 @@ export default function ExpensesPage() {
                         onChange={(e) => setContinueBatch(e.target.checked)}
                         className="rounded border-gray-300 text-brand-600"
                       />
-                      Continue previous report 繼續上一份報銷單 (same Batch ID, new Receipt No.)
+                      Continue previous report 繼續上一份報銷單 (same Expense ID, new Receipt No.)
                     </label>
                   )}
                 </div>
@@ -1170,10 +1274,10 @@ export default function ExpensesPage() {
 
               <div className="flex gap-3 pt-2">
                 <button type="submit" disabled={saving} className="flex-1 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
-                  {saving ? 'Saving…' : editingId ? 'Update Expense' : 'Create Expense'}
+                  {saving ? BTN.saving : editingId ? bi('Update Expense', '更新支出') : bi('Create Expense', '建立支出')}
                 </button>
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">
-                  Cancel
+                  {BTN.cancel}
                 </button>
               </div>
             </form>
@@ -1187,106 +1291,36 @@ export default function ExpensesPage() {
             className="modal-panel sm:max-w-3xl my-0 sm:my-8"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <p className="text-[11px] uppercase tracking-widest text-brand-600 font-semibold">Expense Detail 支出詳情</p>
-                <h2 className="text-xl sm:text-2xl font-bold font-mono text-gray-900 mt-1">{detail.receipt_no || `EXP-${detail.id}`}</h2>
-                {detail.batch_id && (
-                  <p className="text-sm font-mono text-gray-500 mt-0.5">Batch ID {detail.batch_id}</p>
-                )}
-                <p className="text-sm text-gray-500 mt-1">{expenseSupplierName(detail) || 'Unnamed supplier'}</p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setDetail(null); openEdit(detail); }}
-                  className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDetail(null)}
-                  className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
-              {detailField('Receipt No. 收據編號', detail.receipt_no || `EXP-${detail.id}`)}
-              {detail.batch_id && detailField('Batch ID 報銷單編號', detail.batch_id)}
-              {detailField('Paid Date 支出日期', detail.paid_date)}
-              {detailField('Platform 消費平台', detail.platform)}
-              {detailField('Supplier 供應商', detail.merchant)}
-              {detail.supplier_input && detailField('供應商 (input)', detail.supplier_input)}
-              {detailField('支出金額(RMB)', formatMoney(detail.amount_rmb, 'CNY'))}
-              {detailField('支出金額(HKD)', formatMoney(detail.amount_hkd, 'HKD'))}
-              {detailField('Payment Channel 支付渠道', paymentChannelLabel(detail.payment_channel))}
-              {detailField('Funding Source 扣款來源', fundingSourceLabel(detail.funding_source))}
-              {detail.funding_source === FUNDING_SOURCE_CC_SELF && detail.card_last4
-                ? detailField('Card Last 4 信用卡尾四位', detail.card_last4)
-                : null}
-              {!detail.funding_source && detail.payment_method
-                ? detailField('Payment 支付方式 [legacy]', detail.payment_method)
-                : null}
-              {detailField('Reason 支出原因', categoryLabel(detail.category))}
-              {detailField('Order No. 訂單編號', detail.order_no)}
-              <div>
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Status 付款狀態</p>
-                <span className={`inline-flex mt-1 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${EXPENSE_STATUS_COLORS[detail.payment_status]}`}>
-                  {detail.payment_status}
-                </span>
-              </div>
-            </div>
-
-            {detail.notes && (
-              <div className="mb-4">
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Notes 注意事項</p>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.notes}</p>
-              </div>
-            )}
-
-            {detail.special_notes && (
-              <div className="mb-6">
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Special Notes 特別事項</p>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-3">{detail.special_notes}</p>
-              </div>
-            )}
-
-            {!detail.notes && !detail.special_notes && <div className="mb-6" />}
-
-            <div>
-              <p className="text-sm font-semibold text-gray-900 mb-3">
-                Receipt Images 付款收據 ({(detail.receipts || []).length})
-              </p>
-              {(detail.receipts || []).length === 0 ? (
-                <p className="text-gray-400 text-sm py-8 text-center border border-dashed border-gray-200 rounded-xl">No receipt images attached.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {(detail.receipts || []).map((r, i) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => openLightbox(detail, i)}
-                      className="group text-left border border-gray-200 rounded-xl overflow-hidden hover:ring-2 hover:ring-brand-400 transition-shadow bg-white"
-                    >
-                      <div className="bg-brand-50 px-3 py-1.5 text-xs font-mono font-semibold text-brand-800 border-b border-brand-100 flex items-center justify-between">
-                        <span>{detail.receipt_no || `EXP-${detail.id}`} · #{i + 1}</span>
-                        <span className="text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">🔍 Enlarge</span>
-                      </div>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={expenseReceiptUrl(r)}
-                        alt={`Receipt ${i + 1}`}
-                        className="w-full object-contain max-h-[45vh] bg-gray-50"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ExpenseDetailPanel
+              expense={detail}
+              interactive
+              onReceiptClick={(i) => openLightbox(detail, i)}
+              actions={
+                <>
+                  <button
+                    type="button"
+                    onClick={printDetail}
+                    className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    🖨 {BTN.print}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setDetail(null); void openEdit(detail); }}
+                    className="px-3 py-2 text-sm font-medium text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50"
+                  >
+                    {BTN.edit}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetail(null)}
+                    className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    {BTN.close}
+                  </button>
+                </>
+              }
+            />
           </div>
         </div>
       )}
@@ -1300,7 +1334,7 @@ export default function ExpensesPage() {
             type="button"
             onClick={() => setLightbox(null)}
             className="absolute top-4 right-4 z-10 h-10 w-10 rounded-full bg-white/10 text-white text-xl hover:bg-white/20"
-            aria-label="Close"
+            aria-label={BTN.close}
           >
             ×
           </button>
@@ -1334,6 +1368,118 @@ export default function ExpensesPage() {
             onClick={(ev) => ev.stopPropagation()}
             className="max-h-[92vh] max-w-[92vw] object-contain rounded-lg shadow-2xl bg-white cursor-default"
           />
+        </div>
+      )}
+
+      {showExportModal && (
+        <div className="modal-overlay" onClick={() => !exporting && setShowExportModal(false)}>
+          <div
+            className="modal-panel sm:max-w-lg"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-gray-900">{BTN.exportExcel}</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Optional filters — leave blank to export all expenses. Prefilled from current table paid-date / funding filters.
+            </p>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">Paid Date Range 支出日期</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-gray-500">From</label>
+                    <input
+                      type="date"
+                      value={exportFilters.paidFrom}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, paidFrom: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-gray-500">To</label>
+                    <input
+                      type="date"
+                      value={exportFilters.paidTo}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, paidTo: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">Created Date Range 建立日期</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-gray-500">From</label>
+                    <input
+                      type="date"
+                      value={exportFilters.createdFrom}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, createdFrom: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-gray-500">To</label>
+                    <input
+                      type="date"
+                      value={exportFilters.createdTo}
+                      onChange={(e) => setExportFilters((f) => ({ ...f, createdTo: e.target.value }))}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Funding Source 扣款來源</label>
+                <select
+                  value={exportFilters.fundingSource}
+                  onChange={(e) =>
+                    setExportFilters((f) => ({
+                      ...f,
+                      fundingSource: e.target.value as FundingSourceId | '',
+                    }))
+                  }
+                  className={selectCls + ' w-full'}
+                >
+                  <option value="">All 全部</option>
+                  {fundingSourceOptions.map((o) => (
+                    <option key={o} value={o}>
+                      {fundingSourceLabel(o)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setExportFilters(EMPTY_EXPENSE_EXPORT_FILTERS)}
+                disabled={exporting}
+                className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                {BTN.clearFilters}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                disabled={exporting}
+                className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                {BTN.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={runExport}
+                disabled={exporting}
+                className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 disabled:opacity-50"
+              >
+                {exporting ? BTN.exporting : BTN.downloadExcel}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -1,11 +1,12 @@
 export type RentalStatus = 'pending' | 'paid' | 'overdue';
-export type RentalDisplayStatus = RentalStatus | 'partial';
+export type RentalDisplayStatus = RentalStatus | 'partial' | 'vacant';
 
 export const RENTAL_STATUS_LABELS: Record<RentalDisplayStatus, string> = {
   pending: '待付款 Pending',
   paid: '已付款 Paid',
   overdue: '遲交 Overdue',
   partial: '部分付款 Partial',
+  vacant: '空置 Vacant',
 };
 
 export const RENTAL_STATUS_BADGE: Record<RentalDisplayStatus, string> = {
@@ -13,10 +14,8 @@ export const RENTAL_STATUS_BADGE: Record<RentalDisplayStatus, string> = {
   paid: 'bg-green-100 text-green-800 border border-green-200',
   overdue: 'bg-red-100 text-red-800 border border-red-200',
   partial: 'bg-orange-100 text-orange-800 border border-orange-200',
+  vacant: 'bg-slate-100 text-slate-600 border border-slate-200',
 };
-
-// Legacy alias kept for backward-compat in existing card UI
-export const RENTAL_STATUS_COLORS = RENTAL_STATUS_BADGE;
 
 export interface PreviousYearRent {
   year: number;
@@ -29,6 +28,8 @@ export interface RentalUnit {
   unitName: string;
   tenantName: string;
   tenantId: number | null;
+  tenantContactName: string;
+  tenantCompanyName: string;
   tenantPhone: string;
   tenantEmail: string;
   currentYearRent: number;
@@ -41,7 +42,14 @@ export interface RentalUnit {
   utilityBillingMode: UtilityBillingMode;
   /** Honour Label vs Honour Elite debit note company; null = auto from unit name. */
   billingCompany: DebitNoteCompanyId | null;
+  /** Unit premises address 單位地址 */
   address: string;
+  /** Tenant mailing address 租客地址 */
+  tenantAddress: string;
+  /** Tenant notes 備註 */
+  tenantNotes: string;
+  /** For company_shared_meter: other unit ids whose usage inputs are deducted from the main dial. */
+  sharedMeterDeductionUnitIds: number[];
   created_at: string;
   updated_at: string;
 }
@@ -130,6 +138,15 @@ export const LEASE_STATUS_BADGE: Record<LeaseDisplayStatus, string> = {
   terminated: 'bg-red-100 text-red-800 border border-red-200',
   vacant: 'bg-slate-100 text-slate-600 border border-slate-200',
 };
+
+/** Display / stored tenant label when a unit has no occupant. */
+export const VACANT_TENANT_NAME = 'Vacant 空置';
+
+/** True when name is empty or the vacant placeholder (never a real tenant). */
+export function isVacantUnitName(name: string | null | undefined): boolean {
+  const trimmed = (name || '').trim();
+  return !trimmed || trimmed.toLowerCase() === VACANT_TENANT_NAME.toLowerCase();
+}
 
 export type LeaseDocumentType = 'agreement' | 'handover' | 'deposit_receipt' | 'other';
 
@@ -279,12 +296,6 @@ export function debitNoteDueDate(issuedDate: string): string {
   return addDaysToIsoDate(issuedDate, 7);
 }
 
-/** @alias formatDateToDDMMYYYY */
-export function formatPeriodDate(iso: string): string {
-  const f = formatDateToDDMMYYYY(iso);
-  return f === '—' ? iso : f;
-}
-
 export function formatUtilityPeriod(from: string | null | undefined, to: string | null | undefined): string {
   if (from && to) {
     const f = formatDateToDDMMYYYY(from);
@@ -294,10 +305,6 @@ export function formatUtilityPeriod(from: string | null | undefined, to: string 
   if (from) return `from ${formatDateToDDMMYYYY(from)}`;
   if (to) return `to ${formatDateToDDMMYYYY(to)}`;
   return '';
-}
-
-export function formatRentPeriodRange(from: string, to: string): string {
-  return `${formatDateToDDMMYYYY(from)} - ${formatDateToDDMMYYYY(to)}`;
 }
 
 /**
@@ -348,16 +355,6 @@ export function calculateBasicRentPeriod(
 export function defaultRentPeriod(billingPeriod: string, rentPaymentDay: number): { from: string; to: string } {
   const [year, month] = billingPeriod.split('-').map(Number);
   const { isoFrom, isoTo } = calculateBasicRentPeriod(rentPaymentDay, year, month - 1);
-  return { from: isoFrom, to: isoTo };
-}
-
-/** @deprecated Use calculateBasicRentPeriod */
-export function computeRentPeriod(
-  rentPaymentDay: number,
-  targetYear: number,
-  targetMonth: number,
-): { from: string; to: string } {
-  const { isoFrom, isoTo } = calculateBasicRentPeriod(rentPaymentDay, targetYear, targetMonth);
   return { from: isoFrom, to: isoTo };
 }
 
@@ -421,6 +418,57 @@ export function utilityLineLabel(
   return period ? `${base} (${period})` : base;
 }
 
+/** Default subject for rental invoice email (editable before send, like invoice reminders). */
+export function defaultRentInvoiceSubject(unitName: string, billingPeriod: string): string {
+  return `租金單 ${unitName} ${billingPeriod}`;
+}
+
+/** Plain-text body draft for rental invoice email (editable before send). */
+export function defaultRentInvoiceBody(input: {
+  tenantName: string;
+  unitName: string;
+  record: Pick<
+    RentRecord,
+    | 'billingPeriod'
+    | 'baseRent'
+    | 'waterFee'
+    | 'electricityFee'
+    | 'actualAmount'
+    | 'baseRentPeriodFrom'
+    | 'baseRentPeriodTo'
+    | 'waterPeriodFrom'
+    | 'waterPeriodTo'
+    | 'electricityPeriodFrom'
+    | 'electricityPeriodTo'
+  >;
+  dueDateDay: number;
+  note?: string | null;
+  paymentInstructionsText?: string | null;
+}): string {
+  const { tenantName, unitName, record, dueDateDay, note, paymentInstructionsText } = input;
+  const due = formatDisplayDate(dueDateForPeriod(record.billingPeriod, dueDateDay));
+  const lines = [
+    `Dear ${tenantName},`,
+    '',
+    `Rent invoice for ${unitName} — ${record.billingPeriod}.`,
+    '',
+    `${baseRentLineLabel(record)}: ${formatMoney(record.baseRent)}`,
+    `${utilityLineLabel('water', record)}: ${formatUtilityAmount(record.waterFee)}`,
+    `${utilityLineLabel('electricity', record)}: ${formatUtilityAmount(record.electricityFee)}`,
+    `Total: ${formatMoney(record.actualAmount)}`,
+    '',
+    `Due: ${due}`,
+  ];
+  if (note?.trim()) {
+    lines.push('', note.trim());
+  }
+  if (paymentInstructionsText?.trim()) {
+    lines.push('', '---', '', paymentInstructionsText.trim());
+  }
+  lines.push('', 'Thank you.');
+  return lines.join('\n');
+}
+
 export function daysRemaining(leaseEndDate: string): number | null {
   const iso = isoFromDisplayDate(leaseEndDate) || leaseEndDate;
   if (!iso) return null;
@@ -458,6 +506,24 @@ export function applyTemplatePlaceholders(body: string, vars: Record<string, str
 }
 
 const ENDING_SOON_DAYS = 60;
+
+/** Stored status marks lease as closed (End Contract was run). */
+export function isLeaseFormallyEnded(
+  lease: Pick<RentalLease, 'status'> | null | undefined,
+): boolean {
+  if (!lease) return false;
+  return lease.status === 'ended' || lease.status === 'terminated';
+}
+
+/** End date passed but lease not yet archived — needs End Contract. */
+export function isLeaseStaleEnded(
+  lease: Pick<RentalLease, 'leaseEndDate' | 'actualEndDate' | 'status' | 'isCurrent'> | null | undefined,
+): boolean {
+  if (!lease || !lease.isCurrent || isLeaseFormallyEnded(lease)) return false;
+  const endIso = normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate) || '';
+  const today = new Date().toISOString().slice(0, 10);
+  return Boolean(endIso && today > endIso);
+}
 
 /** Derive display status from lease dates + stored status. */
 export function computeLeaseDisplayStatus(
@@ -505,10 +571,153 @@ export function outstandingBalance(record: Pick<RentRecord, 'actualAmount' | 'am
   return Math.max(0, (record.actualAmount || 0) - (record.amountPaid || 0));
 }
 
-export function displayRentalStatus(record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'>): RentalDisplayStatus {
+/** Options to derive overdue on read without a prior DB status UPDATE. */
+export interface DisplayRentalStatusOpts {
+  dueDateDay?: number;
+  period?: string;
+  today?: string;
+}
+
+export function displayRentalStatus(
+  record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'> & { billingPeriod?: string },
+  opts?: DisplayRentalStatusOpts,
+): RentalDisplayStatus {
   if (record.status === 'paid' || outstandingBalance(record) <= 0) return 'paid';
   if ((record.amountPaid || 0) > 0) return 'partial';
-  return record.status;
+  const period = opts?.period || record.billingPeriod;
+  const dueDay = opts?.dueDateDay;
+  if (period && dueDay != null && Number.isFinite(dueDay)) {
+    const today = opts?.today || new Date().toISOString().slice(0, 10);
+    if (today > dueDateForPeriod(period, dueDay)) return 'overdue';
+  }
+  return record.status === 'overdue' ? 'overdue' : 'pending';
+}
+
+/** True when the period card is not yet persisted (`rental_records` row missing). */
+export function isVirtualRentRecord(record: Pick<RentRecord, 'id'> | null | undefined): boolean {
+  return !record || !record.id;
+}
+
+/** True when the unit has no active occupant for billing purposes. */
+export function isVacantRentalUnit(
+  unit: Pick<RentalUnit, 'tenantName'>,
+  lease?: Pick<RentalLease, 'isCurrent'> | null,
+): boolean {
+  return isVacantUnitName(unit.tenantName) && !lease?.isCurrent;
+}
+
+/** Zero-amount placeholder — vacant units are not billable for the period. */
+export function buildVacantRentRecord(
+  unit: Pick<RentalUnit, 'id' | 'user_id'>,
+  period: string,
+): RentRecord {
+  const now = new Date().toISOString();
+  return {
+    id: 0,
+    user_id: unit.user_id,
+    unitId: unit.id,
+    billingPeriod: period,
+    baseRent: 0,
+    baseRentPeriodFrom: null,
+    baseRentPeriodTo: null,
+    waterFee: 0,
+    electricityFee: 0,
+    waterPeriodFrom: null,
+    waterPeriodTo: null,
+    electricityPeriodFrom: null,
+    electricityPeriodTo: null,
+    actualAmount: 0,
+    amountPaid: 0,
+    status: 'paid',
+    paidDate: null,
+    invoiceRef: null,
+    receiptRef: null,
+    receiptImagePath: null,
+    invoiceSentAt: null,
+    receiptSentAt: null,
+    paidAt: null,
+    customInvoiceNote: null,
+    customReceiptNote: null,
+    electricityMeter: null,
+    waterMeter: null,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+/** Dashboard/detail card for a unit × period (vacant → non-billable placeholder). */
+export function resolveUnitPeriodRecord(
+  unit: Pick<RentalUnit, 'id' | 'user_id' | 'tenantName' | 'currentYearRent' | 'dueDateDay'>,
+  period: string,
+  persisted: RentRecord | undefined,
+  lease: Pick<RentalLease, 'baseRent' | 'dueDateDay' | 'leaseStartDate' | 'leaseEndDate' | 'isCurrent'> | null | undefined,
+): RentRecord {
+  if (isVacantRentalUnit(unit, lease)) {
+    return buildVacantRentRecord(unit, period);
+  }
+  return persisted ?? buildVirtualRentRecord(unit, period, lease ?? null);
+}
+
+export function displayRentalStatusForUnit(
+  unit: Pick<RentalUnit, 'tenantName' | 'dueDateDay'>,
+  record: Pick<RentRecord, 'status' | 'actualAmount' | 'amountPaid'> & { billingPeriod?: string },
+  lease: Pick<RentalLease, 'isCurrent'> | null | undefined,
+  opts?: DisplayRentalStatusOpts,
+): RentalDisplayStatus {
+  if (isVacantRentalUnit(unit, lease)) return 'vacant';
+  return displayRentalStatus(record, opts);
+}
+
+/**
+ * In-memory pending card for a unit × period with no DB row yet.
+ * Materialized by cron or the first write (ensureRentRecord).
+ */
+export function buildVirtualRentRecord(
+  unit: Pick<RentalUnit, 'id' | 'user_id' | 'tenantName' | 'currentYearRent' | 'dueDateDay'>,
+  period: string,
+  lease?: Pick<RentalLease, 'baseRent' | 'dueDateDay' | 'leaseStartDate' | 'leaseEndDate'> | null,
+): RentRecord {
+  if (isVacantUnitName(unit.tenantName)) {
+    return buildVacantRentRecord(unit, period);
+  }
+  const dueDay = lease?.dueDateDay || unit.dueDateDay || 1;
+  const defaults = defaultRentPeriod(period, dueDay);
+  let base = unit.currentYearRent || 0;
+  if (lease && billingPeriodWithinLease(period, lease.leaseStartDate, lease.leaseEndDate)) {
+    base = lease.baseRent || base;
+  }
+  const now = new Date().toISOString();
+  return {
+    id: 0,
+    user_id: unit.user_id,
+    unitId: unit.id,
+    billingPeriod: period,
+    baseRent: base,
+    baseRentPeriodFrom: defaults.from,
+    baseRentPeriodTo: defaults.to,
+    waterFee: 0,
+    electricityFee: 0,
+    waterPeriodFrom: null,
+    waterPeriodTo: null,
+    electricityPeriodFrom: null,
+    electricityPeriodTo: null,
+    actualAmount: base,
+    amountPaid: 0,
+    status: 'pending',
+    paidDate: null,
+    invoiceRef: null,
+    receiptRef: null,
+    receiptImagePath: null,
+    invoiceSentAt: null,
+    receiptSentAt: null,
+    paidAt: null,
+    customInvoiceNote: null,
+    customReceiptNote: null,
+    electricityMeter: null,
+    waterMeter: null,
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 /** Normalize optional date field from API (ISO) → DD/MM/YYYY for form state */
@@ -606,18 +815,38 @@ export const DEFAULT_RENTAL_UNITS: DefaultRentalUnitSeed[] = [
 
 export type ElectricityFormula = '213a' | 'stock_room';
 
+/** Legacy JSON field names mapped from fixed portfolio unit names (pre-config era). */
+export const LEGACY_OTHER_UNIT_METER_FIELDS: Record<string, 'meter213B' | 'meterStockRoom1' | 'meterStockRoom2'> = {
+  '213b': 'meter213B',
+  'stock room 1': 'meterStockRoom1',
+  'stock room 2': 'meterStockRoom2',
+};
+
 export interface ElectricityMeterData {
   prevReading: number | null;
   currReading: number | null;
-  /** 213B meter usage (度數) for 213A other-units sum */
+  /** 213B meter usage (度數) for 213A other-units sum — legacy */
   meter213B?: number | null;
-  /** Stock Room 1 meter usage (度數) */
+  /** Stock Room 1 meter usage (度數) — legacy */
   meterStockRoom1?: number | null;
-  /** Stock Room 2 meter usage (度數) */
+  /** Stock Room 2 meter usage (度數) — legacy */
   meterStockRoom2?: number | null;
+  /** Configurable other-unit usages keyed by rental_units.id string */
+  otherUnitUsages?: Record<string, number | null>;
   /** Total other units usage — auto sum of breakdown fields when present */
   otherUnitsUsage?: number | null;
   ratePerUnit: number | null;
+}
+
+export function parseSharedMeterDeductionUnitIds(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const p = JSON.parse(raw);
+    if (!Array.isArray(p)) return [];
+    return p.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0);
+  } catch {
+    return [];
+  }
 }
 
 export function electricityFormulaForUnit(unitName: string): ElectricityFormula | null {
@@ -634,6 +863,7 @@ export function resolveElectricityFormula(
 ): ElectricityFormula | null {
   if (mode === 'tenant_pays') return null;
   if (mode === 'company_sub_meter') return 'stock_room';
+  if (mode === 'company_shared_meter') return '213a';
   return electricityFormulaForUnit(unitName);
 }
 
@@ -642,12 +872,20 @@ export function parseElectricityMeterJson(raw: string | null | undefined): Elect
   try {
     const p = JSON.parse(raw) as Record<string, unknown>;
     if (!p || typeof p !== 'object') return null;
+    let otherUnitUsages: Record<string, number | null> | undefined;
+    if (p.otherUnitUsages && typeof p.otherUnitUsages === 'object' && !Array.isArray(p.otherUnitUsages)) {
+      otherUnitUsages = {};
+      for (const [k, v] of Object.entries(p.otherUnitUsages as Record<string, unknown>)) {
+        otherUnitUsages[k] = v != null && v !== '' ? Number(v) : null;
+      }
+    }
     const meter: ElectricityMeterData = {
       prevReading: p.prevReading != null ? Number(p.prevReading) : null,
       currReading: p.currReading != null ? Number(p.currReading) : null,
       meter213B: p.meter213B != null ? Number(p.meter213B) : null,
       meterStockRoom1: p.meterStockRoom1 != null ? Number(p.meterStockRoom1) : null,
       meterStockRoom2: p.meterStockRoom2 != null ? Number(p.meterStockRoom2) : null,
+      otherUnitUsages,
       otherUnitsUsage: p.otherUnitsUsage != null ? Number(p.otherUnitsUsage) : null,
       ratePerUnit: p.ratePerUnit != null ? Number(p.ratePerUnit) : null,
     };
@@ -659,8 +897,38 @@ export function parseElectricityMeterJson(raw: string | null | undefined): Elect
   }
 }
 
-/** Sum 213B + Stock Room 1 + Stock Room 2 meter readings; falls back to stored otherUnitsUsage. */
-export function otherUnitsUsageTotal(meter: Pick<ElectricityMeterData, 'meter213B' | 'meterStockRoom1' | 'meterStockRoom2' | 'otherUnitsUsage'>): number {
+/** Merge legacy named fields into otherUnitUsages using the unit's deduction config. */
+export function hydrateOtherUnitUsagesFromLegacy(
+  meter: ElectricityMeterData,
+  deductionUnits: { id: number; unitName: string }[],
+): ElectricityMeterData {
+  if (!deductionUnits.length) return meter;
+  const next: Record<string, number | null> = { ...(meter.otherUnitUsages || {}) };
+  for (const u of deductionUnits) {
+    const key = String(u.id);
+    if (next[key] != null && Number.isFinite(next[key]!)) continue;
+    const legacyField = LEGACY_OTHER_UNIT_METER_FIELDS[u.unitName.trim().toLowerCase()];
+    if (!legacyField) continue;
+    const legacyVal = meter[legacyField];
+    if (legacyVal != null && Number.isFinite(legacyVal)) next[key] = legacyVal;
+  }
+  const merged = { ...meter, otherUnitUsages: next };
+  const total = otherUnitsUsageTotal(merged);
+  merged.otherUnitsUsage = total > 0 ? total : null;
+  return merged;
+}
+
+/** Sum configurable otherUnitUsages + legacy fields; falls back to stored otherUnitsUsage. */
+export function otherUnitsUsageTotal(meter: Pick<
+  ElectricityMeterData,
+  'meter213B' | 'meterStockRoom1' | 'meterStockRoom2' | 'otherUnitUsages' | 'otherUnitsUsage'
+>): number {
+  const fromMap = meter.otherUnitUsages
+    ? Object.values(meter.otherUnitUsages).filter((v) => v != null && Number.isFinite(v)) as number[]
+    : [];
+  if (fromMap.length) {
+    return fromMap.reduce((a, b) => a + b, 0);
+  }
   const parts: (number | null | undefined)[] = [meter.meter213B, meter.meterStockRoom1, meter.meterStockRoom2];
   const hasBreakdown = parts.some((v) => v != null && Number.isFinite(v));
   if (hasBreakdown) {
@@ -699,15 +967,28 @@ export function meterDataFromInputs(
   prev: string,
   curr: string,
   rate: string,
-  breakdown?: { meter213B?: string; meterStockRoom1?: string; meterStockRoom2?: string },
+  breakdown?: {
+    meter213B?: string;
+    meterStockRoom1?: string;
+    meterStockRoom2?: string;
+    otherUnitUsages?: Record<string, string>;
+  },
 ): ElectricityMeterData {
   const num = (s?: string) => (s !== undefined && s.trim() !== '' ? Number(s) : null);
+  let otherUnitUsages: Record<string, number | null> | undefined;
+  if (breakdown?.otherUnitUsages) {
+    otherUnitUsages = {};
+    for (const [k, v] of Object.entries(breakdown.otherUnitUsages)) {
+      otherUnitUsages[k] = num(v);
+    }
+  }
   const meter: ElectricityMeterData = {
     prevReading: prev.trim() === '' ? null : Number(prev),
     currReading: curr.trim() === '' ? null : Number(curr),
     meter213B: num(breakdown?.meter213B),
     meterStockRoom1: num(breakdown?.meterStockRoom1),
     meterStockRoom2: num(breakdown?.meterStockRoom2),
+    otherUnitUsages,
     ratePerUnit: rate.trim() === '' ? null : Number(rate),
   };
   const total = otherUnitsUsageTotal(meter);
@@ -759,6 +1040,103 @@ export function waterMeterDataFromInputs(prev: string, curr: string, rate: strin
   };
 }
 
+export const UTILITY_METER_DEFINITIONS = [
+  {
+    key: 'stock_room_1_elec',
+    label: 'Stock Room 1 電錶 - 2樓走廊',
+    kind: 'electricity',
+    billingUnitName: 'Stock Room 1',
+    feedsSharedMeterDeduction: true,
+  },
+  {
+    key: 'stock_room_2_elec',
+    label: 'Stock Room 2 電錶 - 2樓走廊',
+    kind: 'electricity',
+    billingUnitName: 'Stock Room 2',
+    feedsSharedMeterDeduction: true,
+  },
+  {
+    key: 'elec_213a_main',
+    label: '213A 大電錶 - 2樓走廊',
+    kind: 'electricity',
+    billingUnitName: '213A',
+    isSharedMeterMain: true,
+  },
+  {
+    key: 'water_213a',
+    label: '213A 水錶 - 213男廁內',
+    kind: 'water',
+    billingUnitName: '213A',
+  },
+  {
+    key: 'water_213b',
+    label: '213B 水錶 - 天台',
+    kind: 'water',
+    billingUnitName: '213B',
+  },
+  {
+    key: 'elec_213b',
+    label: '213B 電錶 - 213室門口位置',
+    kind: 'electricity',
+    billingUnitName: '213B',
+    feedsSharedMeterDeduction: true,
+  },
+] as const;
+
+export type UtilityMeterKey = (typeof UTILITY_METER_DEFINITIONS)[number]['key'];
+
+export type UtilityMeterDefinition = {
+  key: UtilityMeterKey;
+  label: string;
+  kind: 'electricity' | 'water';
+  billingUnitName: string;
+  feedsSharedMeterDeduction?: boolean;
+  isSharedMeterMain?: boolean;
+};
+
+export function utilityMeterDefinition(key: UtilityMeterKey): UtilityMeterDefinition {
+  return UTILITY_METER_DEFINITIONS.find((d) => d.key === key)!;
+}
+
+/** Legacy electricity_meter_json field for a deduction source unit name, if any. */
+export function legacyOtherUnitMeterField(
+  unitName: string,
+): 'meter213B' | 'meterStockRoom1' | 'meterStockRoom2' | null {
+  return LEGACY_OTHER_UNIT_METER_FIELDS[unitName.trim().toLowerCase()] ?? null;
+}
+
+export const UTILITY_METER_KEYS: readonly UtilityMeterKey[] = UTILITY_METER_DEFINITIONS.map((d) => d.key);
+
+export function isUtilityMeterKey(value: string): value is UtilityMeterKey {
+  return (UTILITY_METER_KEYS as readonly string[]).includes(value);
+}
+
+export interface UtilityMeterRoundItem {
+  id: number;
+  meter_key: UtilityMeterKey;
+  reading_value: number | null;
+  photo_path: string | null;
+  ocr_text: string | null;
+  synced_record_id: number | null;
+}
+
+export interface UtilityMeterRound {
+  id: number;
+  user_id: number;
+  reading_date: string;
+  period: string;
+  notes: string;
+  items: UtilityMeterRoundItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export function periodFromReadingDate(dateStr: string): string {
+  const raw = (dateStr || '').trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 7);
+  return currentBillingPeriod();
+}
+
 export function companyBillsUtilities(mode: UtilityBillingMode): boolean {
   return mode === 'company_sub_meter' || mode === 'company_shared_meter';
 }
@@ -766,10 +1144,6 @@ export function companyBillsUtilities(mode: UtilityBillingMode): boolean {
 /** Charge types included on tenant bills / debit notes for this utility mode. */
 export function utilityChargeTypesForMode(mode: UtilityBillingMode): RentalChargeType[] {
   return companyBillsUtilities(mode) ? ['rent', 'water', 'electricity'] : ['rent'];
-}
-
-export function tenantBillsUtilities(mode: UtilityBillingMode): boolean {
-  return companyBillsUtilities(mode);
 }
 
 /** Unit-level setting with optional tenant fallback (legacy). */
@@ -790,13 +1164,22 @@ export interface RentalTenant {
   id: number;
   user_id: number;
   name: string;
+  contact_name: string;
+  company_name: string;
   phone: string;
   email: string;
+  /** Tenant mailing address 租客地址 */
+  address: string;
   notes: string;
   utilityBillingMode: UtilityBillingMode;
   unitCount?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Tenant-facing document label — tenant name only. */
+export function formatTenantDisplayName(t: { name?: string | null }): string {
+  return String(t.name ?? '').trim();
 }
 
 export interface RentalChargeItem {
@@ -1106,8 +1489,6 @@ export function resolveDebitNoteCompanyHeader(companyIds: DebitNoteCompanyId[]):
   };
 }
 
-export const DEFAULT_DEBIT_NOTE_COMPANY: DebitNoteCompanyInfo = resolveDebitNoteCompanyHeader(['label', 'elite']);
-
 /** RM prefix for debit note line items e.g. RM 204 */
 export function formatDebitNoteUnitLabel(unitName: string): string {
   const trimmed = unitName.trim();
@@ -1170,6 +1551,26 @@ export function buildDebitNotePaymentInstructionsText(
   return lines.join('\n');
 }
 
+/** Split payment instructions into blocks separated by standalone "-" lines (cheque / bank / intro). */
+export function splitDebitNotePaymentBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  let current: string[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '-') {
+      if (current.some((l) => l.trim())) {
+        blocks.push(current.join('\n').replace(/\n+$/, ''));
+      }
+      current = [];
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.some((l) => l.trim())) {
+    blocks.push(current.join('\n').replace(/\n+$/, ''));
+  }
+  return blocks.length ? blocks : [text.trim()];
+}
+
 export interface FormalDebitNoteLine {
   unitName: string;
   description: string;
@@ -1225,7 +1626,7 @@ export interface TenantProfileSummary {
   lastPaymentDate: string | null;
 }
 
-/** Per-unit billing row for tenant payment history. */
+/** Manual allocation amounts for one unit × billing period. */
 export interface PeriodPaymentAllocation {
   unitId: number;
   billingPeriod: string;
@@ -1294,12 +1695,14 @@ export const PERIOD_LEDGER_STATUS_LABELS: Record<'paid' | 'partial' | 'unpaid', 
 };
 
 export function periodLedgerStatusLabel(status: RentalDisplayStatus): string {
+  if (status === 'vacant') return RENTAL_STATUS_LABELS.vacant;
   if (status === 'paid') return PERIOD_LEDGER_STATUS_LABELS.paid;
   if (status === 'partial') return PERIOD_LEDGER_STATUS_LABELS.partial;
   return PERIOD_LEDGER_STATUS_LABELS.unpaid;
 }
 
 export function periodLedgerStatusBadge(status: RentalDisplayStatus): string {
+  if (status === 'vacant') return RENTAL_STATUS_BADGE.vacant;
   if (status === 'paid') return RENTAL_STATUS_BADGE.paid;
   if (status === 'partial') return RENTAL_STATUS_BADGE.partial;
   return RENTAL_STATUS_BADGE.pending;
@@ -1345,19 +1748,6 @@ export function formatBillingPeriodLabel(period: string): string {
   const [y, m] = period.split('-');
   if (!y || !m) return period;
   return `${m}/${y}`;
-}
-
-/** Short period for reminder text e.g. 02-03/2026 */
-export function formatPeriodRangeShort(periods: string[]): string {
-  if (!periods.length) return '';
-  if (periods.length === 1) return formatBillingPeriodLabel(periods[0]);
-  const sorted = [...periods].sort();
-  const first = sorted[0].split('-');
-  const last = sorted[sorted.length - 1].split('-');
-  if (first[0] === last[0]) {
-    return `${first[1]}-${last[1]}/${first[0]}`;
-  }
-  return sorted.map(formatBillingPeriodLabel).join('、');
 }
 
 /** Arrear range for footer e.g. 02/2026-03/2026 (min–max unpaid past periods). */

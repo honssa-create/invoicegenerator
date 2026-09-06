@@ -11,13 +11,31 @@
     @apply antialiased text-gray-900 overflow-x-hidden;
   }
 
-  /* Prevent iOS Safari zoom-on-focus for form fields */
-  @media (max-width: 639px) {
+  /* Prevent iOS / iPad Safari zoom-on-focus (phones AND tablets). */
+  @media (pointer: coarse) {
     input,
     select,
     textarea {
       font-size: 16px;
     }
+  }
+
+  /*
+    iPad Safari: elements without cursor:pointer inside overflow scrollers often
+    swallow the first tap. touch-action:manipulation removes the 300ms delay.
+  */
+  button,
+  [type='button'],
+  [type='submit'],
+  [type='reset'],
+  a,
+  select,
+  input[type='date'],
+  input[type='month'],
+  summary,
+  [role='button'] {
+    cursor: pointer;
+    touch-action: manipulation;
   }
 }
 
@@ -86,22 +104,95 @@
     box-sizing: border-box;
     background: white;
   }
+
+  /* Print preview — line-item descriptions & notes match body text */
+  .quo-preview-page.quo-print-mode .muted {
+    color: var(--quo-color-text);
+  }
+
+  .prep-print-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
 }
 
 @media print {
+  /* Zero page margin so content fills one A4; browser header/footer metadata
+     (title, URL, date) needs margin space and otherwise forces a second page. */
   @page {
     size: A4 portrait;
-    margin: 8mm;
+    margin: 0;
+  }
+
+  /* Kitchen prep sheet — named page used by /kitchen-prep/[id]/print */
+  .prep-print-root .prep-print-sheet {
+    page: prep-landscape;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    padding: 10mm 8mm !important;
+    overflow: hidden;
+  }
+  @page prep-landscape {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  .prep-print-root .prep-print-table-wrap {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .prep-print-root .prep-summary-table--print {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .prep-print-root .prep-summary-table--print th,
+  .prep-print-root .prep-summary-table--print td {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
+  }
+
+  .prep-print-root .prep-summary-table--print thead {
+    display: table-header-group;
+  }
+
+  .prep-print-root .prep-summary-table--print tfoot {
+    display: table-footer-group;
+  }
+
+  .prep-print-root .prep-summary-table--print tr {
+    page-break-inside: avoid;
   }
 
   .no-print {
     display: none !important;
   }
-  .print-only {
-    display: block !important;
+
+  /* Quotation / invoice / delivery note — extra info lines print black */
+  .quo-preview-page .muted {
+    color: var(--quo-color-text) !important;
   }
 
-  /* Scoped expense print styles only */
+  .preview-page .quo-item-desc,
+  .preview-page .quo-message {
+    color: var(--quo-color-text) !important;
+  }
+
+  .debit-note-print-root .no-print,
+  .debit-note-print-root .print\\:hidden {
+    display: none !important;
+  }
+
+  .debit-note-print-root a[href]::after {
+    content: none !important;
+  }
+
+  /* Expense print styles only */
   .expense-print-root {
     min-height: 0 !important;
     padding: 0 !important;
@@ -232,6 +323,56 @@
     print-color-adjust: exact !important;
   }
 
+  /* Expense detail print — mirrors the detail modal layout */
+  .expense-detail-print-root {
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  .expense-detail-print-root .expense-detail-panel {
+    max-width: none !important;
+  }
+
+  .expense-detail-print-root .expense-detail-fields {
+    background: white !important;
+    border-color: #e5e7eb !important;
+    font-size: 10pt !important;
+    line-height: 1.35 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipts-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6mm !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipt-card {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipt-caption {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .expense-detail-print-root .expense-detail-receipt-img {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 130mm !important;
+    height: auto !important;
+    object-fit: contain !important;
+    object-position: top center !important;
+    background: white !important;
+  }
+
   /* Rent payment notice print */
   .rent-notice-print-root {
     background: white !important;
@@ -252,16 +393,13 @@
     position: static !important;
   }
 
-  /* Formal debit note — A4 page */
+  /* Formal A4 page helper (kept for any remaining screen wrappers) */
   .a4-page {
     width: 100% !important;
     max-width: none !important;
     min-height: auto !important;
     margin: 0 !important;
-    padding: 8mm !important;
     box-shadow: none !important;
-    page-break-after: always;
-    break-after: page;
   }
 
   .a4-page:last-child {

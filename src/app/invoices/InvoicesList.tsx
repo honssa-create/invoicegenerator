@@ -1,32 +1,110 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import AppLayout from '@/components/AppLayout';
+import { useRouter, useSearchParams } from 'next/navigation';
 import FilterBar from '@/components/FilterBar';
 import { useAuth } from '@/components/AuthProvider';
 import { StatusBadge, formatCurrency } from '@/components/ui';
-import { isSectionReadOnly } from '@/lib/permissions';
 import { formatDate } from '@/lib/utils';
 import type { InvoiceWithDetails } from '@/lib/types';
+import { displayInvoiceNumber } from '@/lib/record-numbering-core';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { invoiceFileUrl } from '@/lib/image-url';
+import { pickThumbnailFile } from '@/lib/attachment-files';
+import { ListThumb } from '@/components/EntityAttachments';
+import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 type SortKey = 'number' | 'customer' | 'date' | 'due' | 'amount' | 'status';
 const STATUSES = ['draft', 'sent', 'paid', 'overdue'];
+const PAGE_SIZE = 50;
+const INVOICES_LIST_UI_KEY = 'invoices-list-ui';
+const SORT_KEYS: SortKey[] = ['number', 'customer', 'date', 'due', 'amount', 'status'];
+
+type InvoicesListUiState = {
+  dateStart: string;
+  dateEnd: string;
+  client: string;
+  status: string;
+  search: string;
+  sort: { key: SortKey; dir: 'asc' | 'desc' };
+  page: number;
+};
+
+function PaginationBar({
+  page,
+  totalPages,
+  pageStart,
+  pageEnd,
+  total,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  pageStart: number;
+  pageEnd: number;
+  total: number;
+  onPage: (p: number) => void;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 text-sm">
+      <div className="text-gray-600">
+        {total === 0 ? 'No records' : `Showing ${pageStart + 1}–${pageEnd} of ${total}`}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPage(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          ← Prev
+        </button>
+        <span className="text-xs text-gray-500">
+          Page {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPage(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function InvoicesList() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useAuth();
-  const readOnly = user ? isSectionReadOnly(user.role, 'invoices') : false;
+  const { isSectionReadOnly } = useAuth();
+  const readOnly = isSectionReadOnly('invoices');
+  const savedUi = useMemo(() => readListUi<InvoicesListUiState>(INVOICES_LIST_UI_KEY), []);
+  const urlStatus = searchParams.get('status');
   const [invoices, setInvoices] = useState<InvoiceWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [dateStart, setDateStart] = useState('');
-  const [dateEnd, setDateEnd] = useState('');
-  const [client, setClient] = useState('');
-  const [status, setStatus] = useState(searchParams.get('status') || '');
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const [client, setClient] = useState(savedUi?.client ?? '');
+  const [status, setStatus] = useState(() => urlStatus || savedUi?.status || '');
+  const [search, setSearch] = useState(savedUi?.search ?? '');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(() => {
+    const key = savedUi?.sort?.key;
+    const dir = savedUi?.sort?.dir;
+    if (key && SORT_KEYS.includes(key) && (dir === 'asc' || dir === 'desc')) {
+      return { key, dir };
+    }
+    return { key: 'date', dir: 'desc' };
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(savedUi?.page);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const skipPageResetRef = useRef(true);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
 
   const loadInvoices = () => {
     setLoading(true);
@@ -82,6 +160,35 @@ export default function InvoicesList() {
     return list;
   }, [invoices, dateStart, dateEnd, client, status, search, sort]);
 
+  const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
+  const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
+  const pageEnd = Math.min(page * PAGE_SIZE, displayed.length);
+  const pageRows = displayed.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    writeListUi(INVOICES_LIST_UI_KEY, {
+      dateStart,
+      dateEnd,
+      client,
+      status,
+      search,
+      sort,
+      page,
+    });
+  }, [dateStart, dateEnd, client, status, search, sort, page]);
+
+  useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
+    setPage(1);
+  }, [dateStart, dateEnd, client, status, search, sort]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   const toggleSort = (key: SortKey) =>
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕');
@@ -101,6 +208,23 @@ export default function InvoicesList() {
     setInvoices((prev) => prev.filter((i) => i.id !== id));
   };
 
+  const handleDuplicate = async (id: number) => {
+    setDuplicatingId(id);
+    try {
+      const res = await fetch(`/api/invoices/${id}/duplicate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || bi('Failed to duplicate invoice', '複製發票失敗'));
+        return;
+      }
+      router.push(`/invoices/${data.id}`);
+    } catch {
+      alert(bi('Failed to duplicate invoice', '複製發票失敗'));
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
   const clearFilters = () => {
     setDateStart('');
     setDateEnd('');
@@ -109,44 +233,30 @@ export default function InvoicesList() {
     setSearch('');
   };
 
-  const [remindering, setRemindering] = useState(false);
-  const runReminders = async () => {
-    setRemindering(true);
-    try {
-      const res = await fetch('/api/cron/payment-reminders', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        const sentCount = (data.reminders || []).filter((r: { sent: boolean }) => r.sent).length;
-        alert(`Checked invoices ≥ ${data.days} days old.\nReminders processed: ${data.processed}\nEmails actually sent: ${sentCount}${sentCount === 0 && data.processed > 0 ? '\n(No email provider configured — reminders were logged to each record\u2019s activity feed.)' : ''}`);
-      } else {
-        alert(data.error || 'Failed to run reminders');
-      }
-    } finally {
-      setRemindering(false);
-    }
-  };
-
   const selectCls = 'px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none';
 
   return (
-    <AppLayout>
+    <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Invoices</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? 'View invoices (read-only)' : 'Create and manage your invoices'}</p>
+          <h1 className="page-title">{TITLE.invoices}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{readOnly ? bi('View invoices (read-only)', '查看發票（唯讀）') : bi('Create and manage your invoices', '建立及管理發票')}</p>
         </div>
         <div className="page-actions">
           {!readOnly && (
-            <button onClick={runReminders} disabled={remindering} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
-              {remindering ? 'Checking…' : '⏰ Run 30-day reminders'}
-            </button>
+            <Link
+              href="/invoices/reminders"
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              ⏰ {bi('Payment reminders', '催款郵件')}
+            </Link>
           )}
           <a href="/api/invoices/export" className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-            ⬇ Export to Excel
+            ⬇ {BTN.exportExcel}
           </a>
           {!readOnly && (
           <Link href="/invoices/new" className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
-            + New Invoice
+            + {TITLE.newInvoice}
           </Link>
           )}
         </div>
@@ -159,20 +269,20 @@ export default function InvoicesList() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Search invoice # or client…"
+        searchPlaceholder={bi('Search invoice # or client…', '搜尋發票編號或客戶…')}
         onClear={clearFilters}
       >
         <div className="flex flex-col">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Client</label>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Client', '客戶')}</label>
           <select value={client} onChange={(e) => setClient(e.target.value)} className={selectCls}>
-            <option value="">All</option>
+            <option value="">{BTN.all}</option>
             {clientOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div className="flex flex-col">
-          <label className="text-[11px] font-medium text-gray-500 mb-1">Status</label>
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
           <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
-            <option value="">All</option>
+            <option value="">{BTN.all}</option>
             {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
           </select>
         </div>
@@ -180,53 +290,112 @@ export default function InvoicesList() {
 
       <div className="bg-white rounded-xl border border-gray-200">
         {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
+          <div className="p-6 space-y-3 animate-pulse">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-10 bg-gray-100 rounded-lg" />
+            ))}
           </div>
         ) : displayed.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
-            <p>No invoices match your filters.</p>
-            {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">Create an invoice</Link>}
+            <p>{bi('No invoices match your filters.', '沒有符合篩選條件的發票。')}</p>
+            {!readOnly && <Link href="/invoices/new" className="mt-2 inline-block text-brand-600 font-medium text-sm">{bi('Create an invoice', '建立發票')}</Link>}
           </div>
         ) : (
+          <>
+          <PaginationBar
+            page={page}
+            totalPages={totalPages}
+            pageStart={pageStart}
+            pageEnd={pageEnd}
+            total={displayed.length}
+            onPage={setPage}
+          />
           <div className="table-scroll">
           <table className="w-full min-w-[720px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                {sortTh('number', 'Invoice #')}
-                {sortTh('customer', 'Customer')}
-                {sortTh('date', 'Issue Date')}
-                {sortTh('due', 'Due Date')}
-                {sortTh('amount', 'Amount')}
-                {sortTh('status', 'Status')}
-                <th className="px-6 py-3">Actions</th>
+                <th className="px-4 py-3 w-14">{bi('Thumb', '封面')}</th>
+                {sortTh('number', bi('Invoice #', '發票編號'))}
+                {sortTh('customer', bi('Customer', '客戶'))}
+                {sortTh('date', bi('Issue Date', '開立日期'))}
+                {sortTh('due', bi('Due Date', '到期日'))}
+                {sortTh('amount', bi('Amount', '金額'))}
+                {sortTh('status', bi('Status', '狀態'))}
+                <th className="px-6 py-3">{bi('Actions', '操作')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {displayed.map((inv) => (
+              {pageRows.map((inv) => (
                 <tr key={inv.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-4">
+                    {(() => {
+                      const thumb = pickThumbnailFile(inv.files || [], inv.thumbnail_file_id);
+                      return <ListThumb src={thumb ? invoiceFileUrl(thumb) : null} alt="" />;
+                    })()}
+                  </td>
                   <td className="px-6 py-4">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{inv.invoice_number}</Link>
+                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">{displayInvoiceNumber(inv.invoice_number)}</Link>
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700">{inv.customer_name}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.issue_date)}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatDate(inv.due_date)}</td>
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(inv.total)}</td>
                   <td className="px-6 py-4"><StatusBadge status={inv.status} /></td>
-                  <td className="px-6 py-4 text-sm space-x-3">
-                    <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">View</Link>
-                    <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">Print</Link>
-                    {!readOnly && (
-                    <button onClick={() => handleDelete(inv.id)} className="text-red-600 hover:text-red-700 font-medium">Delete</button>
-                    )}
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex flex-col items-start gap-1">
+                      <Link href={`/invoices/${inv.id}`} className="text-brand-600 hover:text-brand-700 font-medium">{BTN.view}</Link>
+                      <Link href={`/invoices/${inv.id}/print`} className="text-gray-600 hover:text-gray-800 font-medium">{BTN.print}</Link>
+                      {inv.status === 'paid' && (
+                        <Link
+                          href={`/invoices/${inv.id}/receipt`}
+                          className="text-gray-600 hover:text-gray-800 font-medium"
+                        >
+                          {bi('Receipt', '收據')}
+                        </Link>
+                      )}
+                      {!readOnly && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleDuplicate(inv.id)}
+                            disabled={duplicatingId === inv.id}
+                            className="text-gray-600 hover:text-gray-800 font-medium disabled:opacity-50"
+                          >
+                            {duplicatingId === inv.id
+                              ? bi('Duplicating…', '複製中…')
+                              : bi('Duplicate', '複製')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(inv.id)}
+                            className="text-red-600 hover:text-red-700 font-medium"
+                          >
+                            {BTN.delete}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           </div>
+          {displayed.length > PAGE_SIZE && (
+            <div className="border-t border-gray-100">
+              <PaginationBar
+                page={page}
+                totalPages={totalPages}
+                pageStart={pageStart}
+                pageEnd={pageEnd}
+                total={displayed.length}
+                onPage={setPage}
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 }

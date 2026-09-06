@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
+import { getDataOwnerId } from '@/lib/org-server';
+import { normalizeCustomerName } from '@/lib/customer-name';
 import { trashCustomer } from '@/lib/trash';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -9,9 +11,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const customer = db
+  const ownerId = await getDataOwnerId(session);
+  const customer = await db
     .prepare('SELECT * FROM customers WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
 
   if (!customer) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -26,37 +29,37 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const existing = db
+  const ownerId = await getDataOwnerId(session);
+  const existing = await db
     .prepare('SELECT id FROM customers WHERE id = ? AND user_id = ?')
-    .get(params.id, session.userId);
+    .get(params.id, ownerId);
 
   if (!existing) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
   }
 
   try {
-    const { name, email, phone, address, city, state, zip } = await request.json();
+    const { name, company_name, email, phone, address, ordered } = await request.json();
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'Customer name is required' }, { status: 400 });
     }
 
-    db.prepare(
-      `UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, city = ?, state = ?, zip = ?
+    await db.prepare(
+      `UPDATE customers SET name = ?, company_name = ?, email = ?, phone = ?, address = ?, ordered = ?
        WHERE id = ? AND user_id = ?`
     ).run(
-      name.trim(),
+      normalizeCustomerName(name.trim()) || name.trim(),
+      company_name?.trim() || null,
       email?.trim() || null,
       phone?.trim() || null,
       address?.trim() || null,
-      city?.trim() || null,
-      state?.trim() || null,
-      zip?.trim() || null,
+      ordered?.trim() || null,
       params.id,
-      session.userId
+      ownerId
     );
 
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(params.id);
+    const customer = await db.prepare('SELECT * FROM customers WHERE id = ?').get(params.id);
     return NextResponse.json({ customer });
   } catch {
     return NextResponse.json({ error: 'Failed to update customer' }, { status: 500 });
@@ -69,10 +72,11 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const ownerId = await getDataOwnerId(session);
   const invoiceCount = (
-    db
+    await db
       .prepare('SELECT COUNT(*) as count FROM invoices WHERE customer_id = ? AND user_id = ?')
-      .get(params.id, session.userId) as { count: number }
+      .get(params.id, ownerId) as { count: number }
   ).count;
 
   if (invoiceCount > 0) {
@@ -82,7 +86,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     );
   }
 
-  if (!trashCustomer(session.userId, Number(params.id))) {
+  if (!await trashCustomer(ownerId, Number(params.id))) {
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
   }
 

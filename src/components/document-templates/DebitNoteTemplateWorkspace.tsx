@@ -13,6 +13,7 @@ import {
   DEBIT_NOTE_COMPANY_VARIANTS,
   type TemplateCompanyVariantId,
 } from '@/lib/document-templates';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface EditorSectionProps {
   title: string;
@@ -128,7 +129,7 @@ export default function DebitNoteTemplateWorkspace({ variant, readOnly }: Props)
         disabled={styleSaving}
         className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
       >
-        {styleSaving ? 'Saving…' : 'Save layout 儲存樣式'}
+        {styleSaving ? BTN.saving : bi('Save layout', '儲存樣式')}
       </button>
       {styleSaveMessage && <span className="text-sm text-brand-700">{styleSaveMessage}</span>}
     </div>
@@ -142,7 +143,7 @@ export default function DebitNoteTemplateWorkspace({ variant, readOnly }: Props)
         disabled={notesSaving}
         className="px-3 py-1.5 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
       >
-        {notesSaving ? 'Saving…' : 'Save header & notes 儲存'}
+        {notesSaving ? BTN.saving : bi('Save header & notes', '儲存頁首與備註')}
       </button>
       {notesSaveMessage && <span className="text-sm text-brand-700">{notesSaveMessage}</span>}
     </div>
@@ -221,12 +222,9 @@ export default function DebitNoteTemplateWorkspace({ variant, readOnly }: Props)
         </>
       }
       preview={
-        <main
-          className="a4-page mx-auto shadow-lg print:shadow-none origin-top scale-[0.85] sm:scale-90 xl:scale-100"
-          style={{ padding: style.pagePadding }}
-        >
+        <div className="origin-top scale-[0.85] sm:scale-90 xl:scale-100">
           <FormalDebitNoteDocument doc={previewDoc} styleTemplate={style} />
-        </main>
+        </div>
       }
     />
   );

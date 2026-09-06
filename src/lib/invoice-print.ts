@@ -1,0 +1,254 @@
+import {
+  DEFAULT_QUOTATION_PREVIEW,
+  type QuotationPreviewModel,
+} from '@/components/FormalQuotationDocument';
+import {
+  DEFAULT_DEPOSIT_INVOICE_PREVIEW,
+  type DepositInvoicePreviewModel,
+} from '@/components/DepositInvoiceDocument';
+import {
+  DEFAULT_BALANCE_INVOICE_PREVIEW,
+  type BalanceInvoicePreviewModel,
+} from '@/components/BalanceInvoiceDocument';
+import type { InvoiceWithDetails } from '@/lib/types';
+import { formatCustomerPartyBlock } from '@/lib/customer-party';
+import { computeOrderPaidTotal } from '@/lib/orders';
+import { formatQuotationDate, formatQuotationMoney } from '@/lib/quotation-style';
+
+export interface InvoicePrintBusiness {
+  name: string;
+  company_name: string | null;
+  email: string;
+}
+
+/** Default payment block for invoice print (Invoice No. substituted). */
+export function defaultInvoicePaymentRemarks(invoiceNo: string): string {
+  return `We accept both cheque payment and bank transfer
+(Please remark the Invoice No: ${invoiceNo} on the cheque or in the bank transfer note.)
+-
+Crossed cheque made payable to “Honour Label Limited”
+And mail to above address
+-
+Bank transfer detail:
+374-279610-001
+HONOUR LABEL LIMITED
+HANG SENG BANK (bank code : 024)
+-`;
+}
+
+/** Thank-you block for paid-invoice receipt print. */
+export function defaultReceiptPaymentRemarks(): string {
+  return 'Thank you for your payment.';
+}
+
+function customerBillingFallback(inv: InvoiceWithDetails): string {
+  return formatCustomerPartyBlock({
+    name: inv.customer_name,
+    companyName: inv.customer_company_name,
+    phone: inv.customer_phone,
+    email: inv.email?.trim() || inv.customer_email,
+    address: inv.customer_address,
+  });
+}
+
+function invoiceLineItems(inv: InvoiceWithDetails, money: (n: number) => string) {
+  const items = (inv.items || [])
+    .filter((i) => String(i.description || i.product_service || '').trim())
+    .map((i) => {
+      const product = (i.product_service || '').trim();
+      const desc = (i.description || '').trim();
+      let name: string;
+      let description: string;
+      if (product) {
+        name = product;
+        description = desc && desc !== product ? desc : '';
+      } else if (desc) {
+        const lines = desc.split(/\n/);
+        name = lines[0]?.trim() || '—';
+        description = lines.slice(1).join('\n').trim();
+      } else {
+        name = '—';
+        description = '';
+      }
+      const amount = Number(i.amount) || Number(i.quantity) * Number(i.unit_price) || 0;
+      return {
+        name,
+        description,
+        qty: String(i.quantity ?? ''),
+        rate: money(Number(i.unit_price) || 0),
+        amount: money(amount),
+      };
+    });
+  return items.length
+    ? items
+    : [{ name: '—', description: '', qty: '0', rate: money(0), amount: money(0) }];
+}
+
+/** Default deposit: half of invoice total, rounded to cents. */
+export function defaultDepositAmount(total: number): number {
+  return Math.round((Number(total) / 2) * 100) / 100;
+}
+
+/** Stored deposit when set; otherwise half of total. */
+export function resolveInvoiceDepositAmount(
+  total: number,
+  depositAmount: number | null | undefined,
+): number {
+  if (depositAmount != null && Number.isFinite(Number(depositAmount))) {
+    return Math.round(Number(depositAmount) * 100) / 100;
+  }
+  return defaultDepositAmount(total);
+}
+
+/** Map a saved invoice into the Honour Label formal print/preview model. */
+export function invoiceToFormalPreview(
+  inv: InvoiceWithDetails,
+  _business?: InvoicePrintBusiness | null,
+): QuotationPreviewModel {
+  const currency = inv.currency || 'HKD';
+  const money = (n: number) => formatQuotationMoney(n, currency);
+  const invoiceNo = inv.invoice_number || '—';
+
+  const companyAddressLines = [...DEFAULT_QUOTATION_PREVIEW.companyAddressLines];
+  const paymentRemarks = defaultInvoicePaymentRemarks(invoiceNo);
+
+  return {
+    companyAddressLines,
+    billingAddress: inv.billing_address?.trim() || customerBillingFallback(inv) || '—',
+    shippingAddress: inv.shipping_address?.trim() || '—',
+    orderNo: inv.order_no?.trim() || '—',
+    quotationNo: invoiceNo,
+    paymentTerms: inv.term?.trim() || '—',
+    date: formatQuotationDate(inv.issue_date) || '—',
+    items: invoiceLineItems(inv, money),
+    message: inv.notes?.trim() || '',
+    remarks: [paymentRemarks],
+    subtotal: money(Number(inv.subtotal) || 0),
+    discount: money(Number(inv.discount_amount) || 0),
+    total: money(Number(inv.total) || 0),
+    companySignName: companyAddressLines[0],
+    logoSrc: '/company-logo.png',
+    chopSrc: '/company-chop.png',
+  };
+}
+
+/** Map a paid invoice into the standard formal layout with receipt remarks. */
+export function invoiceToReceiptPreview(
+  inv: InvoiceWithDetails,
+  business?: InvoicePrintBusiness | null,
+): QuotationPreviewModel {
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return {
+    ...invoiceToFormalPreview(inv, business),
+    date: formatQuotationDate(todayIso) || '—',
+    remarks: [defaultReceiptPaymentRemarks()],
+  };
+}
+
+export interface DepositInvoicePrintOptions {
+  /** Formatted deposit amount; defaults to half of total when omitted. */
+  depositDue?: string | number;
+}
+
+/** Map a saved invoice into the deposit-invoice-template.html print model. */
+export function invoiceToDepositPreview(
+  inv: InvoiceWithDetails,
+  _business?: InvoicePrintBusiness | null,
+  options?: DepositInvoicePrintOptions,
+): DepositInvoicePreviewModel {
+  const currency = inv.currency || 'HKD';
+  const money = (n: number) => formatQuotationMoney(n, currency);
+  const invoiceNo = inv.invoice_number || '—';
+  const companyAddressLines = [...DEFAULT_DEPOSIT_INVOICE_PREVIEW.companyAddressLines];
+  const total = Number(inv.total) || 0;
+
+  return {
+    companyAddressLines,
+    billingAddress: inv.billing_address?.trim() || customerBillingFallback(inv) || '—',
+    shippingAddress: inv.shipping_address?.trim() || '—',
+    orderNo: inv.order_no?.trim() || '—',
+    invoiceNo,
+    paymentTerms: inv.term?.trim() || '—',
+    date: formatQuotationDate(inv.issue_date) || '—',
+    items: invoiceLineItems(inv, money),
+    message: inv.notes?.trim() || '',
+    paymentRemarks: defaultInvoicePaymentRemarks(invoiceNo),
+    subtotal: money(Number(inv.subtotal) || 0),
+    discount: money(Number(inv.discount_amount) || 0),
+    total: money(total),
+    depositDue: money(
+      resolveInvoiceDepositAmount(
+        total,
+        options?.depositDue != null ? Number(options.depositDue) : inv.deposit_amount,
+      ),
+    ),
+    companySignName: companyAddressLines[0],
+    logoSrc: '/company-logo.png',
+    chopSrc: '/company-chop.png',
+  };
+}
+
+export interface BalanceInvoicePrintOptions {
+  /** Explicit balance override (wins over order-linked / half-total defaults). */
+  balanceDue?: string | number;
+  /**
+   * Linked order payment fields. When present (and no explicit balanceDue),
+   * balance = max(0, invoice total − sum of installment payments).
+   */
+  orderFields?: Record<string, string | boolean> | null;
+}
+
+/** Remaining unpaid for a balance invoice: total − order payments, floored at 0. */
+export function computeBalanceDueAmount(
+  invoiceTotal: number,
+  orderFields?: Record<string, string | boolean> | null,
+): number {
+  const total = Number(invoiceTotal) || 0;
+  if (!orderFields) return Math.round((total / 2) * 100) / 100;
+  const paid = computeOrderPaidTotal(orderFields);
+  return Math.max(0, Math.round((total - paid) * 100) / 100);
+}
+
+function resolveBalanceDue(
+  total: number,
+  money: (n: number) => string,
+  options?: BalanceInvoicePrintOptions,
+): string {
+  if (typeof options?.balanceDue === 'string') return options.balanceDue;
+  if (typeof options?.balanceDue === 'number') return money(options.balanceDue);
+  return money(computeBalanceDueAmount(total, options?.orderFields));
+}
+
+/** Map a saved invoice into the balance-invoice-template.html print model. */
+export function invoiceToBalancePreview(
+  inv: InvoiceWithDetails,
+  _business?: InvoicePrintBusiness | null,
+  options?: BalanceInvoicePrintOptions,
+): BalanceInvoicePreviewModel {
+  const currency = inv.currency || 'HKD';
+  const money = (n: number) => formatQuotationMoney(n, currency);
+  const invoiceNo = inv.invoice_number || '—';
+  const companyAddressLines = [...DEFAULT_BALANCE_INVOICE_PREVIEW.companyAddressLines];
+  const total = Number(inv.total) || 0;
+
+  return {
+    companyAddressLines,
+    billingAddress: inv.billing_address?.trim() || customerBillingFallback(inv) || '—',
+    shippingAddress: inv.shipping_address?.trim() || '—',
+    orderNo: inv.order_no?.trim() || '—',
+    invoiceNo,
+    paymentTerms: inv.term?.trim() || '—',
+    date: formatQuotationDate(inv.issue_date) || '—',
+    items: invoiceLineItems(inv, money),
+    message: inv.notes?.trim() || '',
+    paymentRemarks: defaultInvoicePaymentRemarks(invoiceNo),
+    subtotal: money(Number(inv.subtotal) || 0),
+    discount: money(Number(inv.discount_amount) || 0),
+    total: money(total),
+    balanceDue: resolveBalanceDue(total, money, options),
+    companySignName: companyAddressLines[0],
+    logoSrc: '/company-logo.png',
+    chopSrc: '/company-chop.png',
+  };
+}

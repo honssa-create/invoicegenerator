@@ -1,6 +1,7 @@
 import db from './db';
 import { sendEmail } from './email';
 import type { SendResult } from './email';
+import { plainTextToHtml } from './payment-reminders';
 import { saveReceipt } from './receipt';
 import { getRentalTemplate, resolveCompanyFromTemplate } from './rental-template-server';
 import {
@@ -19,34 +20,39 @@ import {
 import {
   ensureCurrentLeaseFromUnit,
   getCurrentLeaseForUnit,
+  getCurrentLeaseForUnitReadOnly,
   getLeaseDocuments,
   getLeaseHistory,
   getLeaseById,
   getPreviousLeasesForUser,
-  getRentalDashboardAlerts,
-  shouldAutoDispatchInvoice,
-  syncAllLeaseStatuses,
+  buildRentalDashboardAlerts,
+  loadCurrentLeases,
   updateCurrentLeaseFromUnit,
 } from './rental-lease-server';
 import {
   computeTotal,
   chargeOutstanding,
   computeLeaseDisplayStatus,
+  isLeaseFormallyEnded,
   currentBillingPeriod,
   displayRentalStatus,
+  displayRentalStatusForUnit,
+  buildVirtualRentRecord,
+  resolveUnitPeriodRecord,
+  isVacantRentalUnit,
   defaultRentPeriod,
   dueDateForPeriod,
   formatMoney,
-  formatUtilityAmount,
   formatDisplayDate,
   baseRentLineLabel,
+  defaultRentInvoiceBody,
+  defaultRentInvoiceSubject,
   buildDebitNotePaymentInstructionsText,
   debitNoteCompanyForUnit,
   resolveUnitBillingCompany,
   type DebitNoteCompanyId,
   debitNoteDueDate,
   formatDueDateChinese,
-  utilityLineLabel,
   outstandingBalance,
   normalizeStoredDate,
   billingPeriodAfterLeaseEnd,
@@ -60,9 +66,12 @@ import {
   DEFAULT_RENTAL_UNITS,
   parseElectricityMeterJson,
   parseWaterMeterJson,
+  parseSharedMeterDeductionUnitIds,
   calcElectricityFeeForFormula,
   unitHasWaterMeterFormula,
   calcWaterFeeFromMeter,
+  isVacantUnitName,
+  VACANT_TENANT_NAME,
   type ElectricityMeterData,
   type WaterMeterData,
   type PeriodPaymentAllocation,
@@ -78,7 +87,6 @@ import {
   type RentalUnit,
   type RentalUnitWithRecord,
   type UnitLeasePaymentLedgerRow,
-  type PreviousLeaseRecord,
 } from './rentals';
 
 // ---------------------------------------------------------------------------
@@ -88,13 +96,18 @@ import {
 interface UnitRow {
   id: number; user_id: number; unit_name: string; tenant_name: string;
   tenant_id: number | null;
+  tenant_contact_name?: string | null;
+  tenant_company_name?: string | null;
+  tenant_notes?: string | null;
   tenant_phone: string | null; tenant_email: string | null;
+  tenant_address?: string | null;
   current_year_rent: number; previous_years_rent_json: string | null;
   lease_start_date: string | null; lease_end_date: string | null;
   due_date_day: number; auto_send_receipt_email: number;
   automation_enabled: number;   utility_billing_mode?: string | null;
   address?: string | null;
   billing_company?: string | null;
+  shared_meter_deduction_unit_ids_json?: string | null;
   created_at: string; updated_at: string;
 }
 
@@ -136,7 +149,11 @@ function hydrateUnit(row: UnitRow): RentalUnit {
   return {
     id: row.id, user_id: row.user_id, unitName: row.unit_name, tenantName: row.tenant_name,
     tenantId: row.tenant_id ?? null,
+    tenantContactName: row.tenant_contact_name || '',
+    tenantCompanyName: row.tenant_company_name || '',
+    tenantNotes: row.tenant_notes || '',
     tenantPhone: row.tenant_phone || '', tenantEmail: row.tenant_email || '',
+    tenantAddress: row.tenant_address || '',
     currentYearRent: row.current_year_rent || 0,
     previousYearsRent: parsePrevious(row.previous_years_rent_json),
     leaseStartDate: row.lease_start_date || '', leaseEndDate: row.lease_end_date || '',
@@ -147,6 +164,7 @@ function hydrateUnit(row: UnitRow): RentalUnit {
       ? row.billing_company
       : null,
     address: row.address || '',
+    sharedMeterDeductionUnitIds: parseSharedMeterDeductionUnitIds(row.shared_meter_deduction_unit_ids_json),
     created_at: row.created_at, updated_at: row.updated_at,
   };
 }
@@ -203,29 +221,30 @@ function hydrateActivity(row: ActivityRow): RentalActivityLog {
 // Activity logging
 // ---------------------------------------------------------------------------
 
-export function logRentalActivity(
+export async function logRentalActivity(
   userId: number, unitId: number, action: string,
   note?: string | null, rentRecordId?: number | null
 ) {
-  db.prepare(
+  await db.prepare(
     'INSERT INTO rental_activity_logs (user_id, unit_id, rent_record_id, action, note) VALUES (?, ?, ?, ?, ?)'
   ).run(userId, unitId, rentRecordId ?? null, action, note?.trim() || null);
 }
 
-export function getRentalActivities(unitId: number, userId: number): RentalActivityLog[] {
-  return (db
+export async function getRentalActivities(unitId: number, userId: number): Promise<RentalActivityLog[]> {
+  return (await db
     .prepare('SELECT * FROM rental_activity_logs WHERE unit_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50')
     .all(unitId, userId) as ActivityRow[]).map(hydrateActivity);
 }
 
-export function getSuggestedPrevWaterReading(
+export async function getSuggestedPrevWaterReading(
   userId: number, unitId: number, beforePeriod: string,
-): number | null {
-  const rows = db.prepare(
+): Promise<number | null> {
+  const rows = await db.prepare(
     `SELECT water_meter_json FROM rental_records
      WHERE user_id = ? AND unit_id = ? AND billing_period < ?
        AND water_meter_json IS NOT NULL AND water_meter_json != ''
-     ORDER BY billing_period DESC`
+     ORDER BY billing_period DESC
+     LIMIT 24`
   ).all(userId, unitId, beforePeriod) as { water_meter_json: string }[];
   for (const row of rows) {
     const m = parseWaterMeterJson(row.water_meter_json);
@@ -240,30 +259,56 @@ export function getSuggestedPrevWaterReading(
 // Default unit seed (fixed portfolio)
 // ---------------------------------------------------------------------------
 
-export function ensureDefaultRentalUnits(userId: number) {
+export async function ensureDefaultRentalUnits(userId: number) {
+  const existingRows = await db.prepare(
+    'SELECT unit_name FROM rental_units WHERE user_id = ?'
+  ).all(userId) as { unit_name: string }[];
+  const existingNames = new Set(
+    existingRows.map((r) => r.unit_name.trim().toLowerCase()),
+  );
   for (const def of DEFAULT_RENTAL_UNITS) {
-    const existing = db.prepare(
-      'SELECT id FROM rental_units WHERE user_id = ? AND unit_name = ? COLLATE NOCASE'
-    ).get(userId, def.unitName) as { id: number } | undefined;
-    if (!existing) {
-      createRentalUnit(userId, {
-        unitName: def.unitName,
-        tenantName: def.tenantName || 'Vacant 空置',
-        utilityBillingMode: def.utilityBillingMode,
-        automationEnabled: true,
-      });
-    }
+    if (existingNames.has(def.unitName.trim().toLowerCase())) continue;
+    await createRentalUnit(userId, {
+      unitName: def.unitName,
+      tenantName: def.tenantName || VACANT_TENANT_NAME,
+      vacant: isVacantUnitName(def.tenantName),
+      utilityBillingMode: def.utilityBillingMode,
+      automationEnabled: !isVacantUnitName(def.tenantName),
+    });
   }
+  await seedSharedMeterDeductionIds(userId);
 }
 
-export function getSuggestedPrevElectricityReading(
+/** Ensure 213A (shared meter) has deduction unit ids for 213B + Stock Rooms when empty. */
+async function seedSharedMeterDeductionIds(userId: number) {
+  const rows = await db.prepare(
+    'SELECT id, unit_name, shared_meter_deduction_unit_ids_json FROM rental_units WHERE user_id = ?'
+  ).all(userId) as { id: number; unit_name: string; shared_meter_deduction_unit_ids_json?: string | null }[];
+  const byName = new Map(rows.map((r) => [r.unit_name.trim().toLowerCase(), r]));
+  const shared = byName.get('213a');
+  if (!shared) return;
+  const existing = parseSharedMeterDeductionUnitIds(shared.shared_meter_deduction_unit_ids_json);
+  if (existing.length) return;
+  const names = ['213b', 'stock room 1', 'stock room 2'];
+  const ids = names
+    .map((n) => byName.get(n)?.id)
+    .filter((id): id is number => id != null && Number.isFinite(id));
+  if (!ids.length) return;
+  await db.prepare(
+    `UPDATE rental_units SET shared_meter_deduction_unit_ids_json = ?, updated_at = datetime('now')
+     WHERE id = ? AND user_id = ?`
+  ).run(JSON.stringify(ids), shared.id, userId);
+}
+
+export async function getSuggestedPrevElectricityReading(
   userId: number, unitId: number, beforePeriod: string,
-): number | null {
-  const rows = db.prepare(
+): Promise<number | null> {
+  const rows = await db.prepare(
     `SELECT electricity_meter_json FROM rental_records
      WHERE user_id = ? AND unit_id = ? AND billing_period < ?
        AND electricity_meter_json IS NOT NULL AND electricity_meter_json != ''
-     ORDER BY billing_period DESC`
+     ORDER BY billing_period DESC
+     LIMIT 24`
   ).all(userId, unitId, beforePeriod) as { electricity_meter_json: string }[];
   for (const row of rows) {
     const m = parseElectricityMeterJson(row.electricity_meter_json);
@@ -278,38 +323,64 @@ export function getSuggestedPrevElectricityReading(
 // Unit CRUD
 // ---------------------------------------------------------------------------
 
-export function createRentalUnit(userId: number, input: Partial<RentalUnit>): RentalUnit {
-  const res = db.prepare(
+export async function createRentalUnit(
+  userId: number,
+  input: Partial<RentalUnit> & { vacant?: boolean },
+): Promise<RentalUnit> {
+  const vacant = input.vacant === true || isVacantUnitName(input.tenantName);
+  const tenantName = vacant ? VACANT_TENANT_NAME : (input.tenantName?.trim() || '');
+  if (!vacant && !tenantName) throw new Error('Tenant name is required');
+
+  const deductionIds = Array.isArray(input.sharedMeterDeductionUnitIds)
+    ? input.sharedMeterDeductionUnitIds.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+  const mode = normalizeUtilityBillingMode(input.utilityBillingMode);
+  const storedDeductionIds = mode === 'company_shared_meter' ? deductionIds : [];
+
+  const res = await db.prepare(
     `INSERT INTO rental_units
       (user_id, unit_name, tenant_name, tenant_phone, tenant_email, current_year_rent,
        previous_years_rent_json, lease_start_date, lease_end_date, due_date_day,
-       auto_send_receipt_email, automation_enabled, utility_billing_mode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       auto_send_receipt_email, automation_enabled, utility_billing_mode,
+       shared_meter_deduction_unit_ids_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    userId, input.unitName?.trim() || 'New Unit', input.tenantName?.trim() || 'Tenant',
-    input.tenantPhone?.trim() || null, input.tenantEmail?.trim() || null,
+    userId, input.unitName?.trim() || 'New Unit', tenantName,
+    vacant ? null : (input.tenantPhone?.trim() || null),
+    vacant ? null : (input.tenantEmail?.trim() || null),
     Number(input.currentYearRent) || 0, JSON.stringify(input.previousYearsRent || []),
     normalizeStoredDate(input.leaseStartDate) || null,
     normalizeStoredDate(input.leaseEndDate) || null,
-    Number(input.dueDateDay) || 1, input.autoSendReceiptEmail ? 1 : 0,
-    input.automationEnabled === false ? 0 : 1,
-    normalizeUtilityBillingMode(input.utilityBillingMode),
+    Number(input.dueDateDay) || 1,
+    vacant ? 0 : (input.autoSendReceiptEmail ? 1 : 0),
+    vacant ? 0 : (input.automationEnabled === false ? 0 : 1),
+    mode,
+    JSON.stringify(storedDeductionIds),
   );
-  const unit = getRentalUnit(Number(res.lastInsertRowid), userId)!;
-  logRentalActivity(userId, unit.id, 'Unit created');
-  ensureUnitTenantLink(unit);
-  ensureCurrentLeaseFromUnit(unit);
+  const unit = (await getRentalUnit(Number(res.lastInsertRowid), userId))!;
+  await logRentalActivity(userId, unit.id, vacant ? 'Vacant unit created' : 'Unit created');
+  if (!vacant) {
+    await ensureUnitTenantLink(unit);
+    await ensureCurrentLeaseFromUnit(unit);
+  }
+  return (await getRentalUnit(unit.id, userId))!;
+}
+
+export async function getRentalUnit(id: number | string, userId: number): Promise<RentalUnit | null> {
+  const row = await db.prepare('SELECT * FROM rental_units WHERE id = ? AND user_id = ?').get(id, userId) as UnitRow | undefined;
+  if (!row) return null;
+  const unit = hydrateUnit(row);
+  if (!unit.tenantNotes && unit.tenantId) {
+    const tenantRow = await db.prepare('SELECT notes FROM rental_tenants WHERE id = ? AND user_id = ?')
+      .get(unit.tenantId, userId) as { notes: string | null } | undefined;
+    if (tenantRow?.notes) unit.tenantNotes = tenantRow.notes;
+  }
   return unit;
 }
 
-export function getRentalUnit(id: number | string, userId: number): RentalUnit | null {
-  const row = db.prepare('SELECT * FROM rental_units WHERE id = ? AND user_id = ?').get(id, userId) as UnitRow | undefined;
-  return row ? hydrateUnit(row) : null;
-}
-
 /** Recalculate base-rent period dates for every billing record when 每月交租日 changes. */
-function syncRentPeriodsForUnit(unit: RentalUnit) {
-  const rows = db.prepare(
+async function syncRentPeriodsForUnit(unit: RentalUnit) {
+  const rows = await db.prepare(
     'SELECT id, billing_period FROM rental_records WHERE unit_id = ? AND user_id = ?'
   ).all(unit.id, unit.user_id) as { id: number; billing_period: string }[];
   const stmt = db.prepare(
@@ -317,53 +388,123 @@ function syncRentPeriodsForUnit(unit: RentalUnit) {
   );
   for (const row of rows) {
     const { from, to } = defaultRentPeriod(row.billing_period, unit.dueDateDay);
-    stmt.run(from, to, row.id);
+    await stmt.run(from, to, row.id);
   }
 }
 
-export function updateRentalUnit(id: number | string, userId: number, input: Partial<RentalUnit> & { depositAmount?: number }): RentalUnit | null {
-  const existing = getRentalUnit(id, userId);
+export async function updateRentalUnit(
+  id: number | string,
+  userId: number,
+  input: Partial<RentalUnit> & { depositAmount?: number; vacant?: boolean },
+): Promise<RentalUnit | null> {
+  const existing = await getRentalUnit(id, userId);
   if (!existing) return null;
+
+  const nextName = input.tenantName !== undefined ? input.tenantName : existing.tenantName;
+  const vacant = input.vacant === true || isVacantUnitName(nextName);
+  if (!vacant && !(nextName || '').trim()) throw new Error('Tenant name is required');
+
+  const tenantName = vacant ? VACANT_TENANT_NAME : nextName.trim();
+  const tenantContactName = vacant
+    ? null
+    : ((input.tenantContactName ?? existing.tenantContactName) || null);
+  const tenantCompanyName = vacant
+    ? null
+    : ((input.tenantCompanyName ?? existing.tenantCompanyName) || null);
+  const tenantAddress = vacant
+    ? null
+    : ((input.tenantAddress ?? existing.tenantAddress) || null);
+  const tenantNotes = vacant
+    ? null
+    : ((input.tenantNotes ?? existing.tenantNotes) || null);
+  const tenantPhone = vacant ? null : ((input.tenantPhone ?? existing.tenantPhone) || null);
+  const tenantEmail = vacant ? null : ((input.tenantEmail ?? existing.tenantEmail) || null);
+  const automationEnabled = vacant
+    ? false
+    : (input.automationEnabled ?? existing.automationEnabled);
+  const autoSendReceiptEmail = vacant
+    ? false
+    : (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail);
+
   const newDueDay = Number(input.dueDateDay ?? existing.dueDateDay) || 1;
-  db.prepare(
+  const nextMode = normalizeUtilityBillingMode(input.utilityBillingMode ?? existing.utilityBillingMode);
+  let deductionIds = existing.sharedMeterDeductionUnitIds;
+  if (input.sharedMeterDeductionUnitIds !== undefined) {
+    deductionIds = input.sharedMeterDeductionUnitIds.map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  }
+  if (nextMode !== 'company_shared_meter') deductionIds = [];
+  deductionIds = deductionIds.filter((uid) => uid !== Number(id));
+
+  await db.prepare(
     `UPDATE rental_units SET
-      unit_name = ?, tenant_name = ?, tenant_phone = ?, tenant_email = ?, current_year_rent = ?,
+      unit_name = ?, tenant_name = ?, tenant_contact_name = ?, tenant_company_name = ?,
+      tenant_notes = ?, tenant_phone = ?, tenant_email = ?, tenant_address = ?, current_year_rent = ?,
       previous_years_rent_json = ?, lease_start_date = ?, lease_end_date = ?,
       due_date_day = ?, auto_send_receipt_email = ?, automation_enabled = ?,
       utility_billing_mode = ?, address = ?, billing_company = ?,
+      shared_meter_deduction_unit_ids_json = ?,
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(
-    input.unitName ?? existing.unitName, input.tenantName ?? existing.tenantName,
-    (input.tenantPhone ?? existing.tenantPhone) || null,
-    (input.tenantEmail ?? existing.tenantEmail) || null,
+    input.unitName ?? existing.unitName, tenantName,
+    tenantContactName?.trim() || null, tenantCompanyName?.trim() || null,
+    tenantNotes?.trim() || null,
+    tenantPhone, tenantEmail, tenantAddress?.trim() || null,
     Number(input.currentYearRent ?? existing.currentYearRent) || 0,
     JSON.stringify(input.previousYearsRent ?? existing.previousYearsRent),
-    normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null,
-    normalizeStoredDate(input.leaseEndDate ?? existing.leaseEndDate) || null,
+    vacant ? null : (normalizeStoredDate(input.leaseStartDate ?? existing.leaseStartDate) || null),
+    vacant ? null : (normalizeStoredDate(input.leaseEndDate ?? existing.leaseEndDate) || null),
     Number(input.dueDateDay ?? existing.dueDateDay) || 1,
-    (input.autoSendReceiptEmail ?? existing.autoSendReceiptEmail) ? 1 : 0,
-    (input.automationEnabled ?? existing.automationEnabled) ? 1 : 0,
-    normalizeUtilityBillingMode(input.utilityBillingMode ?? existing.utilityBillingMode),
+    autoSendReceiptEmail ? 1 : 0,
+    automationEnabled ? 1 : 0,
+    nextMode,
     (input.address ?? existing.address)?.trim() || null,
     input.billingCompany !== undefined
       ? (input.billingCompany === 'label' || input.billingCompany === 'elite' ? input.billingCompany : null)
       : existing.billingCompany,
+    JSON.stringify(deductionIds),
     id, userId
   );
-  const updated = getRentalUnit(id, userId)!;
-  if (input.dueDateDay !== undefined && newDueDay !== existing.dueDateDay) {
-    syncRentPeriodsForUnit(updated);
+
+  if (vacant) {
+    await db.prepare(
+      `UPDATE rental_leases SET is_current = 0, status = 'vacant', automation_enabled = 0,
+        updated_at = datetime('now')
+       WHERE unit_id = ? AND user_id = ? AND is_current = 1`
+    ).run(id, userId);
+    await db.prepare(
+      `UPDATE rental_units SET tenant_id = NULL, current_lease_id = NULL, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    ).run(id, userId);
+    return await getRentalUnit(id, userId);
   }
-  ensureUnitTenantLink(updated);
-  updateCurrentLeaseFromUnit(updated, {
+
+  const updated = (await getRentalUnit(id, userId))!;
+  if (input.dueDateDay !== undefined && newDueDay !== existing.dueDateDay) {
+    await syncRentPeriodsForUnit(updated);
+  }
+  await ensureUnitTenantLink(updated);
+  if (updated.tenantId) {
+    await db.prepare(
+      `UPDATE rental_tenants SET contact_name = ?, company_name = ?, address = ?, notes = ?, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    ).run(
+      updated.tenantContactName?.trim() || null,
+      updated.tenantCompanyName?.trim() || null,
+      updated.tenantAddress?.trim() || null,
+      updated.tenantNotes?.trim() || null,
+      updated.tenantId,
+      userId,
+    );
+  }
+  await updateCurrentLeaseFromUnit(updated, {
     depositAmount: input.depositAmount !== undefined ? Number(input.depositAmount) || 0 : undefined,
   });
   if (input.currentYearRent !== undefined) {
-    const lease = getCurrentLeaseForUnit(updated.id, userId);
-    if (lease) syncLeaseBaseRentToRecords(userId, updated.id, lease);
+    const lease = await getCurrentLeaseForUnit(updated.id, userId);
+    if (lease) await syncLeaseBaseRentToRecords(userId, updated.id, lease);
   }
-  return updated;
+  return (await getRentalUnit(id, userId))!;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,14 +512,14 @@ export function updateRentalUnit(id: number | string, userId: number, input: Par
 // ---------------------------------------------------------------------------
 
 /** Apply lease base_rent to unpaid records within the lease month range. */
-export function syncLeaseBaseRentToRecords(
+async function syncLeaseBaseRentToRecords(
   userId: number,
   unitId: number,
   lease: Pick<RentalLease, 'baseRent' | 'leaseStartDate' | 'leaseEndDate' | 'actualEndDate'>,
 ) {
   const startMonth = (normalizeStoredDate(lease.leaseStartDate) || lease.leaseStartDate).slice(0, 7);
   const endMonth = (normalizeStoredDate(lease.actualEndDate || lease.leaseEndDate) || lease.leaseEndDate).slice(0, 7);
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_records SET
       base_rent = ?,
       actual_amount = ? + COALESCE(water_fee, 0) + COALESCE(electricity_fee, 0),
@@ -388,21 +529,26 @@ export function syncLeaseBaseRentToRecords(
        AND status != 'paid' AND COALESCE(amount_paid, 0) <= 0`
   ).run(lease.baseRent, lease.baseRent, userId, unitId, startMonth, endMonth);
 
-  const rows = db.prepare(
+  const rows = await db.prepare(
     `SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ?
      AND billing_period >= ? AND billing_period <= ?
      AND status != 'paid' AND COALESCE(amount_paid, 0) <= 0`
   ).all(userId, unitId, startMonth, endMonth) as { id: number }[];
   for (const row of rows) {
-    const rec = getRentRecord(row.id, userId);
-    if (rec) syncChargeItemsFromRecord(rec);
+    const rec = await getRentRecord(row.id, userId);
+    if (rec) await syncChargeItemsFromRecord(rec);
   }
 }
 
-function resolveBaseRentForPeriod(unit: RentalUnit, period: string, userId: number): number {
-  const lease = getCurrentLeaseForUnit(unit.id, userId);
-  if (lease && billingPeriodWithinLease(period, lease.leaseStartDate, lease.leaseEndDate)) {
-    return lease.baseRent;
+async function resolveBaseRentForPeriod(
+  unit: RentalUnit,
+  period: string,
+  userId: number,
+  lease?: RentalLease | null,
+): Promise<number> {
+  const current = lease === undefined ? await getCurrentLeaseForUnit(unit.id, userId) : lease;
+  if (current && billingPeriodWithinLease(period, current.leaseStartDate, current.leaseEndDate)) {
+    return current.baseRent;
   }
   return unit.currentYearRent || 0;
 }
@@ -411,13 +557,18 @@ function resolveBaseRentForPeriod(unit: RentalUnit, period: string, userId: numb
 // Record helpers
 // ---------------------------------------------------------------------------
 
-export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod()): RentRecord {
+export async function ensureRentRecord(
+  unit: RentalUnit,
+  period = currentBillingPeriod(),
+  opts?: { syncCharges?: boolean; lease?: RentalLease | null },
+): Promise<RentRecord> {
+  const syncCharges = opts?.syncCharges !== false;
   const defaults = defaultRentPeriod(period, unit.dueDateDay);
-  const found = db.prepare(
+  const found = await db.prepare(
     'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?'
   ).get(unit.user_id, unit.id, period) as RecordRow | undefined;
   if (found) {
-    const leaseRent = resolveBaseRentForPeriod(unit, period, unit.user_id);
+    const leaseRent = await resolveBaseRentForPeriod(unit, period, unit.user_id, opts?.lease);
     const updates: string[] = [];
     const vals: (string | number)[] = [];
     const targetRent = leaseRent || unit.currentYearRent || found.base_rent || 0;
@@ -438,34 +589,32 @@ export function ensureRentRecord(unit: RentalUnit, period = currentBillingPeriod
       const total = computeTotal(rent, found.water_fee || 0, found.electricity_fee || 0);
       updates.push('actual_amount = ?', "updated_at = datetime('now')");
       vals.push(total, found.id);
-      db.prepare(`UPDATE rental_records SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
-      const synced = getRentRecord(found.id, unit.user_id)!;
-      syncChargeItemsFromRecord(synced);
+      await db.prepare(`UPDATE rental_records SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
+      const synced = (await getRentRecord(found.id, unit.user_id))!;
+      if (syncCharges) await syncChargeItemsFromRecord(synced);
       return synced;
     }
-    const hydrated = hydrateRecord(found);
-    syncChargeItemsFromRecord(hydrated);
-    return hydrated;
+    return hydrateRecord(found);
   }
 
-  const base = resolveBaseRentForPeriod(unit, period, unit.user_id) || unit.currentYearRent;
-  const res = db.prepare(
+  const base = await resolveBaseRentForPeriod(unit, period, unit.user_id, opts?.lease) || unit.currentYearRent;
+  const res = await db.prepare(
     `INSERT INTO rental_records
       (user_id, unit_id, billing_period, base_rent, base_rent_period_from, base_rent_period_to,
        water_fee, electricity_fee, actual_amount, status)
      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 'pending')`
   ).run(unit.user_id, unit.id, period, base, defaults.from, defaults.to, base);
-  const created = getRentRecord(Number(res.lastInsertRowid), unit.user_id)!;
-  syncChargeItemsFromRecord(created);
+  const created = (await getRentRecord(Number(res.lastInsertRowid), unit.user_id))!;
+  if (syncCharges) await syncChargeItemsFromRecord(created);
   return created;
 }
 
-export function getRentRecord(id: number | string, userId: number): RentRecord | null {
-  const row = db.prepare('SELECT * FROM rental_records WHERE id = ? AND user_id = ?').get(id, userId) as RecordRow | undefined;
+export async function getRentRecord(id: number | string, userId: number): Promise<RentRecord | null> {
+  const row = await db.prepare('SELECT * FROM rental_records WHERE id = ? AND user_id = ?').get(id, userId) as RecordRow | undefined;
   return row ? hydrateRecord(row) : null;
 }
 
-export function updateRentRecordUtilities(
+export async function updateRentRecordUtilities(
   id: number | string, userId: number,
   input: {
     baseRent?: number;
@@ -481,11 +630,11 @@ export function updateRentRecordUtilities(
     electricityMeter?: ElectricityMeterData | null;
     waterMeter?: WaterMeterData | null;
   }
-): RentRecord | null {
-  const existing = getRentRecord(id, userId);
+): Promise<RentRecord | null> {
+  const existing = await getRentRecord(id, userId);
   if (!existing) return null;
-  const unit = getRentalUnit(existing.unitId, userId);
-  const lease = unit ? getCurrentLeaseForUnit(unit.id, userId) : null;
+  const unit = await getRentalUnit(existing.unitId, userId);
+  const lease = unit ? await getCurrentLeaseForUnit(unit.id, userId) : null;
   let base = Number(existing.baseRent) || 0;
   if (lease && billingPeriodWithinLease(existing.billingPeriod, lease.leaseStartDate, lease.leaseEndDate)) {
     base = lease.baseRent;
@@ -532,7 +681,7 @@ export function updateRentRecordUtilities(
   const rentTo = normalizeStoredDate(
     input.baseRentPeriodTo !== undefined ? input.baseRentPeriodTo : existing.baseRentPeriodTo,
   );
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_records SET base_rent = ?, base_rent_period_from = ?, base_rent_period_to = ?,
       water_fee = ?, electricity_fee = ?,
       water_period_from = ?, water_period_to = ?,
@@ -541,170 +690,275 @@ export function updateRentRecordUtilities(
       updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(base, rentFrom, rentTo, water, elec, waterFrom, waterTo, elecFrom, elecTo, total, input.customInvoiceNote ?? existing.customInvoiceNote, meterJson, waterMeterJson, id, userId);
-  const updated = getRentRecord(id, userId)!;
-  syncChargeItemsFromRecord(updated);
+  const updated = (await getRentRecord(id, userId))!;
+  await syncChargeItemsFromRecord(updated);
   return updated;
 }
 
-function applyOverdueStatuses(userId: number, period: string) {
-  const rows = db.prepare(
-    `SELECT r.id, u.due_date_day FROM rental_records r
+async function applyOverdueStatuses(userId: number, period: string) {
+  const rows = await db.prepare(
+    `SELECT r.id, u.due_date_day, r.actual_amount, r.amount_paid FROM rental_records r
      JOIN rental_units u ON u.id = r.unit_id
      WHERE r.user_id = ? AND r.billing_period = ? AND r.status != 'paid'`
-  ).all(userId, period) as { id: number; due_date_day: number }[];
+  ).all(userId, period) as {
+    id: number;
+    due_date_day: number;
+    actual_amount: number;
+    amount_paid: number;
+  }[];
   const today = new Date().toISOString().slice(0, 10);
   const mark = db.prepare("UPDATE rental_records SET status = 'overdue', updated_at = datetime('now') WHERE id = ?");
   for (const row of rows) {
-    const rec = getRentRecord(row.id, userId);
-    if (rec && outstandingBalance(rec) <= 0) continue;
-    if (today > dueDateForPeriod(period, row.due_date_day)) mark.run(row.id);
+    const balance = Math.max(0, (Number(row.actual_amount) || 0) - (Number(row.amount_paid) || 0));
+    if (balance <= 0) continue;
+    if (today > dueDateForPeriod(period, row.due_date_day)) await mark.run(row.id);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard / Detail
+// Dashboard / Detail (read-only GETs — no ensure / overdue writes)
 // ---------------------------------------------------------------------------
 
-export function listRentalDashboard(userId: number, period = currentBillingPeriod()) {
-  ensureDefaultRentalUnits(userId);
-  syncAllLeaseStatuses(userId);
-  const unitRows = db.prepare(
+export async function listRentalDashboard(userId: number, period = currentBillingPeriod()) {
+  const leaseByUnitId = await loadCurrentLeases(userId);
+
+  const unitRows = await db.prepare(
     'SELECT * FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE ASC'
   ).all(userId) as UnitRow[];
   const units = unitRows.map(hydrateUnit);
-  for (const unit of units) ensureRentRecord(unit, period);
-  applyOverdueStatuses(userId, period);
+
+  const recordRows = await db.prepare(
+    'SELECT * FROM rental_records WHERE user_id = ? AND billing_period = ?'
+  ).all(userId, period) as RecordRow[];
+  const recordByUnitId = new Map<number, RentRecord>();
+  for (const row of recordRows) {
+    recordByUnitId.set(row.unit_id, hydrateRecord(row));
+  }
 
   const withRecords: RentalUnitWithRecord[] = units.map((unit) => {
-    const currentRecord = hydrateRecord(
-      db.prepare('SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?')
-        .get(userId, unit.id, period) as RecordRow
-    );
-    const history = (db.prepare(
-      'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC LIMIT 24'
-    ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
-    const currentLease = getCurrentLeaseForUnit(unit.id, userId);
+    const currentLease = leaseByUnitId.get(unit.id) || null;
+    const persisted = recordByUnitId.get(unit.id);
+    const currentRecord = resolveUnitPeriodRecord(unit, period, persisted, currentLease);
     const leaseStatus = currentLease ? computeLeaseDisplayStatus(currentLease) : 'vacant';
-    return { ...unit, currentRecord, history, currentLease, leaseStatus };
+    return {
+      ...unit,
+      currentRecord,
+      history: [],
+      currentLease,
+      leaseStatus,
+    };
   });
 
-  const records = withRecords.map((u) => u.currentRecord);
-  const totalRevenue = records.reduce((s, r) => s + (r.amountPaid || 0), 0);
-  const outstanding = records.reduce((s, r) => s + outstandingBalance(r), 0);
-  const paidCount = records.filter((r) => displayRentalStatus(r) === 'paid').length;
-  const alerts = getRentalDashboardAlerts(userId, period);
-  const previousLeases = getPreviousLeasesForUser(userId);
-  return { units: withRecords, metrics: { totalRevenue, outstanding, paidCount, totalUnits: units.length }, period, alerts, previousLeases };
+  const billableUnits = withRecords.filter((u) => !isVacantRentalUnit(u, u.currentLease));
+  const totalRevenue = withRecords.reduce((s, u) => s + (u.currentRecord.amountPaid || 0), 0);
+  const outstanding = billableUnits.reduce(
+    (s, u) => s + outstandingBalance(u.currentRecord),
+    0,
+  );
+  const paidCount = billableUnits.filter(
+    (u) => displayRentalStatusForUnit(u, u.currentRecord, u.currentLease, { dueDateDay: u.dueDateDay, period }) === 'paid',
+  ).length;
+  const alerts = buildRentalDashboardAlerts(
+    units.map((u) => ({ id: u.id, unitName: u.unitName })),
+    leaseByUnitId,
+    recordByUnitId,
+    period,
+  );
+  const previousLeases = await getPreviousLeasesForUser(userId);
+  return {
+    units: withRecords,
+    metrics: { totalRevenue, outstanding, paidCount, totalUnits: billableUnits.length || units.length },
+    period,
+    alerts,
+    previousLeases,
+  };
 }
 
-export function getRentalUnitDetail(
+export async function getRentalUnitDetail(
   unitId: number | string,
   userId: number,
   period = currentBillingPeriod(),
   options?: { leaseId?: number | string },
 ) {
-  ensureDefaultRentalUnits(userId);
-  const unit = getRentalUnit(unitId, userId);
+  const unit = await getRentalUnit(unitId, userId);
   if (!unit) return null;
 
   const requestedLeaseId = options?.leaseId ? Number(options.leaseId) : null;
-  const requestedLease = requestedLeaseId ? getLeaseById(requestedLeaseId, userId) : null;
+  const [requestedLease, activeLease] = await Promise.all([
+    requestedLeaseId ? getLeaseById(requestedLeaseId, userId) : Promise.resolve(null),
+    getCurrentLeaseForUnitReadOnly(unit.id, userId),
+  ]);
   const isHistoricalView = Boolean(
     requestedLease && requestedLease.unitId === unit.id && !requestedLease.isCurrent,
   );
   if (requestedLeaseId && !isHistoricalView) return null;
 
-  const activeLease = getCurrentLeaseForUnit(unit.id, userId);
   const displayLease = isHistoricalView ? requestedLease! : activeLease;
   const readOnlyLease = isHistoricalView || (
-    displayLease != null && (
-      computeLeaseDisplayStatus(displayLease) === 'ended'
-      || computeLeaseDisplayStatus(displayLease) === 'terminated'
-    )
+    displayLease != null && isLeaseFormallyEnded(displayLease)
   );
 
-  if (!isHistoricalView) {
-    ensureRentRecord(unit, period);
-    applyOverdueStatuses(userId, period);
+  const recordIdRow = await db.prepare(
+    'SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?'
+  ).get(userId, unit.id, period) as { id: number } | undefined;
+  let currentRecord: RentRecord | null = recordIdRow?.id
+    ? await getRentRecord(recordIdRow.id, userId)
+    : null;
+  if (isVacantRentalUnit(unit, activeLease)) {
+    currentRecord = resolveUnitPeriodRecord(unit, period, currentRecord ?? undefined, activeLease);
+  } else if (!currentRecord) {
+    currentRecord = buildVirtualRentRecord(unit, period, activeLease);
   }
-  const suggestedPrevElectricityReading = getSuggestedPrevElectricityReading(userId, Number(unitId), period);
-  const suggestedPrevWaterReading = getSuggestedPrevWaterReading(userId, Number(unitId), period);
-  const currentRecord = getRentRecord(
-    (db.prepare('SELECT id FROM rental_records WHERE user_id = ? AND unit_id = ? AND billing_period = ?')
-      .get(userId, unit.id, period) as { id: number })?.id,
-    userId
-  );
+
+  // Charge items only for persisted rows (virtual has none until ensure).
   let chargeItems: RentalChargeItem[] = [];
-  if (currentRecord) {
-    syncChargeItemsFromRecord(currentRecord);
-    chargeItems = getChargeItemsForRecord(currentRecord.id, userId);
+  if (currentRecord.id > 0) {
+    chargeItems = await getChargeItemsForRecord(currentRecord.id, userId);
   }
-  const history = (db.prepare(
-    'SELECT * FROM rental_records WHERE user_id = ? AND unit_id = ? ORDER BY billing_period DESC'
-  ).all(userId, unit.id) as RecordRow[]).map(hydrateRecord);
-  const activities = getRentalActivities(unit.id, userId);
-  const latestReceipt = currentRecord
-    ? (db.prepare('SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1')
-        .get(currentRecord.id) as ReceiptRow | undefined)
-    : undefined;
-  const currentLease = activeLease;
-  let paymentHistory = getUnitPaymentHistory(unit.id, userId);
+
+  const [
+    suggestedPrevElectricityReading,
+    suggestedPrevWaterReading,
+    activities,
+    latestReceiptRow,
+    paymentHistoryRaw,
+    allUnitRows,
+    paymentLedger,
+    outstandingCharges,
+    leaseHistory,
+    leaseDocuments,
+  ] = await Promise.all([
+    getSuggestedPrevElectricityReading(userId, Number(unitId), period),
+    getSuggestedPrevWaterReading(userId, Number(unitId), period),
+    getRentalActivities(unit.id, userId),
+    currentRecord.id > 0
+      ? db.prepare(
+          'SELECT * FROM rental_payment_receipts WHERE rent_record_id = ? ORDER BY created_at DESC LIMIT 1'
+        ).get(currentRecord.id) as Promise<ReceiptRow | undefined>
+      : Promise.resolve(undefined),
+    getUnitPaymentHistory(unit.id, userId),
+    db.prepare(
+      'SELECT id, unit_name FROM rental_units WHERE user_id = ? ORDER BY unit_name COLLATE NOCASE'
+    ).all(userId) as Promise<{ id: number; unit_name: string }[]>,
+    getUnitLeasePaymentLedger(unit.id, userId, displayLease),
+    isHistoricalView ? Promise.resolve([] as RentalChargeItem[]) : getUnitOutstandingCharges(unit.id, userId),
+    getLeaseHistory(unit.id, userId),
+    displayLease ? getLeaseDocuments(displayLease.id, userId) : Promise.resolve([]),
+  ]);
+
+  let paymentHistory = paymentHistoryRaw;
   if (isHistoricalView && displayLease?.tenantId) {
     paymentHistory = paymentHistory.filter((p) => p.tenantId === displayLease.tenantId);
   }
+
+  const portfolioUnits = allUnitRows.map((r) => ({ id: r.id, unitName: r.unit_name }));
+  const byId = new Map(portfolioUnits.map((u) => [u.id, u]));
+  const sharedMeterDeductionUnits = unit.sharedMeterDeductionUnitIds
+    .map((uid) => byId.get(uid) || { id: uid, unitName: `#${uid}` });
+
   return {
-    unit, currentRecord, history, activities,
+    unit,
+    currentRecord,
+    // Detail UI uses paymentLedger, not history — keep empty to avoid shipping meter JSON blobs.
+    history: [] as RentRecord[],
+    activities,
     chargeItems,
     paymentHistory,
-    paymentLedger: getUnitLeasePaymentLedger(unit.id, userId, displayLease),
-    outstandingCharges: isHistoricalView ? [] : getUnitOutstandingCharges(unit.id, userId),
-    latestReceipt: latestReceipt ? hydrateReceipt(latestReceipt) : null,
-    currentLease,
+    paymentLedger,
+    outstandingCharges,
+    latestReceipt: latestReceiptRow ? hydrateReceipt(latestReceiptRow) : null,
+    currentLease: activeLease,
     viewingLease: isHistoricalView ? displayLease : null,
     displayLease,
     readOnlyLease,
     isHistoricalView,
-    leaseHistory: getLeaseHistory(unit.id, userId),
-    leaseDocuments: displayLease ? getLeaseDocuments(displayLease.id, userId) : [],
+    leaseHistory,
+    leaseDocuments,
     suggestedPrevElectricityReading,
     suggestedPrevWaterReading,
+    portfolioUnits,
+    sharedMeterDeductionUnits,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Email HTML builders
-// ---------------------------------------------------------------------------
-
-function invoiceHtml(
-  unit: RentalUnit,
-  record: RentRecord,
-  note?: string | null,
-  paymentInstructionsText?: string | null,
-): string {
-  const lineItems = [
-    `<tr><td>${baseRentLineLabel(record)}</td><td align="right"><strong>${formatMoney(record.baseRent)}</strong></td></tr>`,
-    `<tr><td>${utilityLineLabel('water', record)}</td><td align="right">${formatUtilityAmount(record.waterFee)}</td></tr>`,
-    `<tr><td>${utilityLineLabel('electricity', record)}</td><td align="right">${formatUtilityAmount(record.electricityFee)}</td></tr>`,
-    `<tr style="border-top:2px solid #000"><td><strong>Total</strong></td><td align="right"><strong>${formatMoney(record.actualAmount)}</strong></td></tr>`,
-  ].join('');
-  return `<p>Dear ${unit.tenantName},</p>
-    <p>Rent invoice for <strong>${unit.unitName}</strong> — ${record.billingPeriod}.</p>
-    <table style="width:100%;border-collapse:collapse">${lineItems}</table>
-    <p>Due: ${formatDisplayDate(dueDateForPeriod(record.billingPeriod, unit.dueDateDay))}</p>
-    ${note ? `<p>${note}</p>` : ''}
-    ${paymentInstructionsText ? `<hr/><pre style="font-family:sans-serif;white-space:pre-wrap;font-size:13px">${paymentInstructionsText}</pre>` : ''}
-    <p>Thank you.</p>`;
+/** Ensure a persisted period row exists for a unit (write-path / ensure-period API). */
+export async function ensureRentRecordForUnit(
+  unitId: number | string,
+  userId: number,
+  period = currentBillingPeriod(),
+  opts?: { syncCharges?: boolean },
+): Promise<RentRecord | null> {
+  const unit = await getRentalUnit(unitId, userId);
+  if (!unit) return null;
+  const lease = await getCurrentLeaseForUnitReadOnly(unit.id, userId);
+  return ensureRentRecord(unit, period, {
+    syncCharges: opts?.syncCharges !== false,
+    lease,
+  });
 }
 
-function receiptHtml(unit: RentalUnit, record: RentRecord, note?: string | null, paymentAmount?: number): string {
-  const paid = paymentAmount ?? (record.amountPaid || record.actualAmount);
-  const balance = outstandingBalance(record);
-  return `<p>Dear ${unit.tenantName},</p>
-    <p>Payment received for <strong>${unit.unitName}</strong> — ${record.billingPeriod}.</p>
-    <p><strong>Amount: ${formatMoney(paid)}</strong> · Paid: ${formatDisplayDate(record.paidDate || record.paidAt?.slice(0, 10) || null) || 'today'}</p>
-    ${balance > 0 ? `<p>Outstanding balance: ${formatMoney(balance)}</p>` : ''}
-    ${note ? `<p>${note}</p>` : ''}
-    <p>Thank you.</p>`;
+/**
+ * Materialize real rental_records (+ charge sync) for all units in a period.
+ * Used by cron — not by dashboard/detail GET.
+ */
+export async function materializeRentPeriod(userId: number | null, period = currentBillingPeriod()) {
+  const rows = await db.prepare(
+    `SELECT * FROM rental_units ${userId === null ? '' : 'WHERE user_id = ?'} ORDER BY user_id, unit_name`
+  ).all(...(userId === null ? [] : [userId])) as UnitRow[];
+
+  const leasesByUser = new Map<number, Map<number, RentalLease>>();
+  const userIds = Array.from(new Set(rows.map((r) => Number(r.user_id))));
+  for (const uid of userIds) {
+    leasesByUser.set(uid, await loadCurrentLeases(uid));
+  }
+
+  let createdOrUpdated = 0;
+  let skipped = 0;
+  const errors: { unit: string; userId: number; error: string }[] = [];
+
+  for (const unitRow of rows) {
+    const unit = hydrateUnit(unitRow);
+    if (isVacantUnitName(unit.tenantName) || unit.automationEnabled === false) {
+      skipped += 1;
+      continue;
+    }
+    const lease = leasesByUser.get(unit.user_id)?.get(unit.id) ?? null;
+    if (lease) {
+      const display = computeLeaseDisplayStatus(lease);
+      if (display === 'ended' || display === 'terminated' || display === 'vacant') {
+        skipped += 1;
+        continue;
+      }
+      if (billingPeriodAfterLeaseEnd(period, lease.actualEndDate || lease.leaseEndDate)) {
+        skipped += 1;
+        continue;
+      }
+    }
+    try {
+      await ensureRentRecord(unit, period, { syncCharges: true, lease });
+      createdOrUpdated += 1;
+    } catch (err) {
+      errors.push({
+        unit: unit.unitName,
+        userId: unit.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  for (const uid of userIds) {
+    try {
+      await applyOverdueStatuses(uid, period);
+    } catch (err) {
+      errors.push({
+        unit: `(overdue user ${uid})`,
+        userId: uid,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { period, units: createdOrUpdated, skipped, users: userIds.length, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -725,14 +979,18 @@ export async function sendRentInvoice(
     note?: string | null;
     paymentTemplate?: DebitNotePaymentTemplateId;
     paymentRemark?: string | null;
+    /** Editable email fields (invoice-reminders style). */
+    to?: string | null;
+    subject?: string | null;
+    body?: string | null;
   }
 ) {
-  const record = getRentRecord(recordId, userId);
+  const record = await getRentRecord(recordId, userId);
   if (!record) throw new Error('Rent record not found');
-  const unit = getRentalUnit(record.unitId, userId);
+  const unit = await getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
 
-  const lease = getCurrentLeaseForUnit(unit.id, userId);
+  const lease = await getCurrentLeaseForUnit(unit.id, userId);
   if (lease && billingPeriodAfterLeaseEnd(record.billingPeriod, lease.actualEndDate || lease.leaseEndDate)) {
     throw new Error(`Cannot send invoice for ${record.billingPeriod} — after lease end date`);
   }
@@ -760,44 +1018,78 @@ export async function sendRentInvoice(
     input.baseRentPeriodTo !== undefined ? input.baseRentPeriodTo : record.baseRentPeriodTo,
   );
 
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_records SET water_fee = ?, electricity_fee = ?,
       base_rent_period_from = ?, base_rent_period_to = ?,
       water_period_from = ?, water_period_to = ?,
       electricity_period_from = ?, electricity_period_to = ?,
       actual_amount = ?, invoice_ref = ?, custom_invoice_note = ?,
-      invoice_sent_at = datetime('now'), updated_at = datetime('now')
+      updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`
   ).run(water, elec, rentFrom, rentTo, waterFrom, waterTo, elecFrom, elecTo, total, invoiceRef, input.note?.trim() || null, record.id, userId);
 
-  const fresh = getRentRecord(record.id, userId)!;
-  syncChargeItemsFromRecord(fresh);
-  let email: SendResult = { sent: false, provider: 'log' };
-  if (unit.tenantEmail) {
-    const issuedDate = new Date().toISOString().slice(0, 10);
-    const dueDate = debitNoteDueDate(issuedDate);
-    const dueDisplay = formatDisplayDate(dueDate);
-    const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
-    const templateId = input.paymentTemplate ?? resolveUnitBillingCompany(unit);
-    const savedTpl = getRentalTemplate(userId, templateId);
-    const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
-    const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
-      templateId,
-      noteNo,
-      dueDateChinese,
-      input.paymentRemark,
-      savedTpl?.paymentInstructions,
-      resolveCompanyFromTemplate(templateId, savedTpl),
-    );
-    const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
-    email = await sendEmail(
-      unit.tenantEmail,
-      `租金單 ${unit.unitName} ${record.billingPeriod}`,
-      invoiceHtml(unit, fresh, invoiceNote, paymentInstructionsText)
-    );
+  const fresh = (await getRentRecord(record.id, userId))!;
+  await syncChargeItemsFromRecord(fresh);
+
+  const issuedDate = new Date().toISOString().slice(0, 10);
+  const dueDate = debitNoteDueDate(issuedDate);
+  const dueDisplay = formatDisplayDate(dueDate);
+  const dueDateChinese = formatDueDateChinese(dueDisplay, record.billingPeriod.split('-')[0]);
+  const templateId = input.paymentTemplate ?? resolveUnitBillingCompany(unit);
+  const savedTpl = await getRentalTemplate(userId, templateId);
+  const noteNo = `INV-${record.billingPeriod.replace('-', '')}-${record.id}`;
+  const paymentInstructionsText = buildDebitNotePaymentInstructionsText(
+    templateId,
+    noteNo,
+    dueDateChinese,
+    input.paymentRemark,
+    savedTpl?.paymentInstructions,
+    resolveCompanyFromTemplate(templateId, savedTpl),
+  );
+  const invoiceNote = input.note?.trim() || savedTpl?.rentInvoiceNote || null;
+
+  const to = (input.to || '').trim() || unit.tenantEmail.trim();
+  if (!to) {
+    throw Object.assign(new Error('No recipient email — add an address before sending'), { status: 400 });
   }
-  logRentalActivity(userId, unit.id, 'Invoice Sent', `Period ${record.billingPeriod} · Total ${formatMoney(total)}`, record.id);
-  return { record: fresh, email };
+
+  const subject =
+    (input.subject || '').trim() ||
+    defaultRentInvoiceSubject(unit.unitName, fresh.billingPeriod);
+  const textBody =
+    (input.body || '').trim() ||
+    defaultRentInvoiceBody({
+      tenantName: unit.tenantName,
+      unitName: unit.unitName,
+      record: fresh,
+      dueDateDay: unit.dueDateDay,
+      note: invoiceNote,
+      paymentInstructionsText,
+    });
+
+  const email = await sendEmail(to, subject, plainTextToHtml(textBody), {
+    userId,
+    brand: 'honour',
+  });
+
+  // Only mark invoice sent when email actually went out (same as invoice reminders).
+  if (email.sent) {
+    await db.prepare(
+      `UPDATE rental_records SET invoice_sent_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`
+    ).run(record.id, userId);
+  }
+
+  const sentRecord = (await getRentRecord(record.id, userId))!;
+  const today = new Date().toISOString().slice(0, 10);
+  const msg = email.sent
+    ? `Invoice email sent to ${to} on ${today} · Total ${formatMoney(total)}`
+    : email.provider === 'log'
+      ? `Invoice email prepared for ${to} on ${today} (no email provider — logged only)`
+      : `Invoice email to ${to} failed on ${today}: ${email.error || 'unknown error'}`;
+  await logRentalActivity(userId, unit.id, email.sent ? 'Invoice Sent' : 'Invoice Email Failed', msg, record.id);
+
+  return { record: sentRecord, email, to, subject };
 }
 
 // ---------------------------------------------------------------------------
@@ -861,9 +1153,9 @@ export async function extractRentalReceipt(
   recordId: number | string, userId: number,
   buffer: Buffer, mimeType: string
 ): Promise<{ receipt: RentalPaymentReceipt; matched: boolean; extracted: ReturnType<typeof ocrFallbackExtract> }> {
-  const record = getRentRecord(recordId, userId);
+  const record = await getRentRecord(recordId, userId);
   if (!record) throw new Error('Rent record not found');
-  const unit = getRentalUnit(record.unitId, userId);
+  const unit = await getRentalUnit(record.unitId, userId);
   if (!unit) throw new Error('Rental unit not found');
 
   const imagePath = await saveReceipt(buffer, mimeType, 'rental-receipt');
@@ -882,21 +1174,21 @@ export async function extractRentalReceipt(
     extracted = ocrFallbackExtract(text);
   }
 
-  db.prepare(
+  await db.prepare(
     `UPDATE rental_records SET receipt_image_path = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`
   ).run(imagePath, record.id, userId);
 
-  const res = db.prepare(
+  const res = await db.prepare(
     `INSERT INTO rental_payment_receipts (user_id, rent_record_id, image_path, extracted_method, extracted_transfer_date, extracted_receiving_account, extracted_amount, extraction_source)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(userId, record.id, imagePath, extracted.method, extracted.transfer_date, extracted.receiving_account, extracted.amount, source);
 
   const matched = extracted.amount !== null && Math.abs(extracted.amount - outstandingBalance(record)) < 0.01;
-  logRentalActivity(userId, unit.id, 'Payment Receipt Uploaded', `Source: ${source}, Amount: ${extracted.amount ?? '?'}, Matched: ${matched}`, record.id);
+  await logRentalActivity(userId, unit.id, 'Payment Receipt Uploaded', `Source: ${source}, Amount: ${extracted.amount ?? '?'}, Matched: ${matched}`, record.id);
 
   return {
     receipt: hydrateReceipt(
-      db.prepare('SELECT * FROM rental_payment_receipts WHERE id = ?').get(Number(res.lastInsertRowid)) as ReceiptRow
+      await db.prepare('SELECT * FROM rental_payment_receipts WHERE id = ?').get(Number(res.lastInsertRowid)) as ReceiptRow
     ),
     matched,
     extracted,
@@ -904,161 +1196,32 @@ export async function extractRentalReceipt(
 }
 
 // ---------------------------------------------------------------------------
-// Mark paid + auto receipt
-// ---------------------------------------------------------------------------
-
-export async function markRentPaid(
-  recordId: number | string, userId: number,
-  input: {
-    autoSendReceiptEmail?: boolean;
-    note?: string | null;
-    paidDate?: string | null;
-    amount?: number | null;
-    /** Per charge-type split (rent / water / electricity). Overrides FIFO when provided. */
-    chargeAllocations?: { chargeType: RentalChargeType; amount: number }[];
-    method?: string | null;
-    reference?: string | null;
-  }
-) {
-  const record = getRentRecord(recordId, userId);
-  if (!record) throw new Error('Rent record not found');
-  const unit = getRentalUnit(record.unitId, userId);
-  if (!unit) throw new Error('Rental unit not found');
-
-  syncChargeItemsFromRecord(record);
-  const chargeItems = getChargeItemsForRecord(record.id, userId);
-  const paidDate = normalizeStoredDate(input.paidDate) || new Date().toISOString().slice(0, 10);
-
-  const CHARGE_ORDER: RentalChargeType[] = CHARGE_DISPLAY_ORDER;
-  let allocations: { chargeItemId: number; amount: number }[] = [];
-
-  if (input.chargeAllocations?.length) {
-    for (const ca of input.chargeAllocations) {
-      if (!ca.amount || ca.amount <= 0) continue;
-      const item = chargeItems.find((c) => c.chargeType === ca.chargeType);
-      if (!item) continue;
-      const outstanding = chargeOutstanding(item);
-      if (ca.amount > outstanding + 0.01) {
-        throw new Error(`Allocation for ${ca.chargeType} exceeds outstanding ${outstanding}`);
-      }
-      allocations.push({ chargeItemId: item.id, amount: ca.amount });
-    }
-  } else {
-    const paymentAmount = input.amount !== undefined && input.amount !== null
-      ? Number(input.amount)
-      : outstandingBalance(record);
-    if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
-    let remaining = paymentAmount;
-    for (const type of CHARGE_ORDER) {
-      const item = chargeItems.find((c) => c.chargeType === type);
-      if (!item || remaining <= 0) continue;
-      const out = chargeOutstanding(item);
-      const alloc = Math.min(remaining, out);
-      if (alloc > 0) {
-        allocations.push({ chargeItemId: item.id, amount: alloc });
-        remaining -= alloc;
-      }
-    }
-  }
-
-  const paymentAmount = allocations.reduce((s, a) => s + a.amount, 0);
-  if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
-
-  const tenant = ensureUnitTenantLink(unit);
-  if (tenant && allocations.length) {
-    recordTenantPaymentWithAllocations(unit.user_id, {
-      tenantId: tenant.id,
-      paymentDate: paidDate,
-      amount: paymentAmount,
-      method: input.method,
-      reference: input.reference,
-      notes: input.note,
-    }, allocations);
-  } else if (allocations.length) {
-    allocateChargeItemsDirect(userId, allocations);
-  }
-
-  const freshCharges = getChargeItemsForRecord(record.id, userId);
-  const newAmountPaid = freshCharges.reduce((s, c) => s + (c.amountAllocated || 0), 0);
-  const fullyPaid = newAmountPaid >= record.actualAmount - 0.01;
-  const receiptRef = `/rentals/records/${record.id}/receipt`;
-  const shouldSend = input.autoSendReceiptEmail ?? unit.autoSendReceiptEmail;
-
-  db.prepare(
-    `UPDATE rental_records SET
-      amount_paid = ?, status = ?, receipt_ref = ?, paid_date = ?,
-      paid_at = CASE WHEN ? THEN datetime('now') ELSE paid_at END,
-      custom_receipt_note = ?, receipt_sent_at = CASE WHEN ? THEN datetime('now') ELSE receipt_sent_at END,
-      updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(
-    newAmountPaid,
-    fullyPaid ? 'paid' : record.status === 'overdue' ? 'overdue' : 'pending',
-    receiptRef,
-    paidDate,
-    fullyPaid ? 1 : 0,
-    input.note?.trim() || null,
-    shouldSend ? 1 : 0,
-    record.id,
-    userId
-  );
-
-  if (input.autoSendReceiptEmail !== undefined) {
-    updateRentalUnit(unit.id, userId, { autoSendReceiptEmail: input.autoSendReceiptEmail });
-  }
-
-  const fresh = getRentRecord(record.id, userId)!;
-  let email: SendResult = { sent: false, provider: 'log' };
-  if (shouldSend && unit.tenantEmail) {
-    email = await sendEmail(
-      unit.tenantEmail,
-      `租金收據 ${unit.unitName} ${record.billingPeriod}`,
-      receiptHtml(unit, fresh, input.note, paymentAmount)
-    );
-  }
-  const action = fullyPaid ? 'Payment Marked Paid' : 'Partial Payment Recorded';
-  const detail = fullyPaid
-    ? `Period ${record.billingPeriod} · Paid ${paidDate} · Total ${formatMoney(newAmountPaid)}`
-    : `Period ${record.billingPeriod} · +${formatMoney(paymentAmount)} · Paid ${formatMoney(newAmountPaid)} / ${formatMoney(record.actualAmount)}`;
-  logRentalActivity(userId, unit.id, action, `${detail} · Email: ${shouldSend}`, record.id);
-  return { record: fresh, email, paymentAmount, fullyPaid };
-}
-
-// ---------------------------------------------------------------------------
 // Scheduler
 // ---------------------------------------------------------------------------
 
 export async function runRentalInvoiceDispatch(userId: number | null, period = currentBillingPeriod()) {
-  const rows = db.prepare(
-    `SELECT * FROM rental_units WHERE automation_enabled = 1 ${userId === null ? '' : 'AND user_id = ?'}`
-  ).all(...(userId === null ? [] : [userId])) as UnitRow[];
-  const results: { unit: string; skipped?: string; record?: RentRecord }[] = [];
-  const skipped: { unit: string; reason: string }[] = [];
-
-  for (const unitRow of rows) {
-    const unit = hydrateUnit(unitRow);
-    const check = shouldAutoDispatchInvoice(unit.user_id, unit.id, period);
-    if (!check.allowed) {
-      skipped.push({ unit: unit.unitName, reason: check.reason || 'Not billable' });
-      continue;
-    }
-    const record = ensureRentRecord(unit, period);
-    if (!record.invoiceSentAt) {
-      const sent = await sendRentInvoice(record.id, unit.user_id, {});
-      results.push({ unit: unit.unitName, record: sent.record });
-    }
-  }
-  return { period, processed: results.length, skipped: skipped.length, results, skippedDetails: skipped };
+  // Materialize period rows + overdue only — do not auto-email invoices.
+  // Manual send remains via POST /api/rentals/records/[id]/invoice.
+  const materialized = await materializeRentPeriod(userId, period);
+  return {
+    period,
+    materialized,
+    processed: 0,
+    skipped: 0,
+    results: [] as { unit: string; record?: RentRecord }[],
+    skippedDetails: [] as { unit: string; reason: string }[],
+    emailDispatch: 'disabled' as const,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Print document helper
 // ---------------------------------------------------------------------------
 
-export function getRentDocument(id: number | string, userId: number) {
-  const record = getRentRecord(id, userId);
+export async function getRentDocument(id: number | string, userId: number) {
+  const record = await getRentRecord(id, userId);
   if (!record) return null;
-  const unit = getRentalUnit(record.unitId, userId);
+  const unit = await getRentalUnit(record.unitId, userId);
   if (!unit) return null;
   return { unit, record, dueDate: dueDateForPeriod(record.billingPeriod, unit.dueDateDay) };
 }
@@ -1067,15 +1230,15 @@ export function getRentDocument(id: number | string, userId: number) {
 // Advance / period-based payment allocation
 // ---------------------------------------------------------------------------
 
-function getNextAllocatablePeriod(userId: number, unitId: number): string {
-  const outstanding = db.prepare(
+async function getNextAllocatablePeriod(userId: number, unitId: number): Promise<string> {
+  const outstanding = await db.prepare(
     `SELECT billing_period FROM rental_charge_items
      WHERE user_id = ? AND unit_id = ? AND amount_due > amount_allocated
      ORDER BY billing_period ASC LIMIT 1`
   ).get(userId, unitId) as { billing_period: string } | undefined;
   if (outstanding) return outstanding.billing_period;
 
-  const maxRow = db.prepare(
+  const maxRow = await db.prepare(
     `SELECT billing_period FROM rental_records
      WHERE user_id = ? AND unit_id = ?
      ORDER BY billing_period DESC LIMIT 1`
@@ -1128,7 +1291,7 @@ function allocateToPeriodItems(
 }
 
 /** Build charge-item allocations from period rows and/or auto FIFO (creates future months for advance rent). */
-export function prepareAdvancePaymentAllocations(
+export async function prepareAdvancePaymentAllocations(
   userId: number,
   tenantId: number,
   options: {
@@ -1137,11 +1300,11 @@ export function prepareAdvancePaymentAllocations(
     periodAllocations?: PeriodPaymentAllocation[];
     autoAllocate?: boolean;
   },
-): { chargeItemId: number; amount: number }[] {
-  const tenant = getRentalTenant(tenantId, userId);
+): Promise<{ chargeItemId: number; amount: number }[]> {
+  const tenant = await getRentalTenant(tenantId, userId);
   if (!tenant) throw new Error('Tenant not found');
 
-  let units = getTenantUnits(tenantId, userId);
+  let units = await getTenantUnits(tenantId, userId);
   if (options.unitIds?.length) {
     const idSet = new Set(options.unitIds);
     units = units.filter((u) => idSet.has(u.id));
@@ -1161,11 +1324,11 @@ export function prepareAdvancePaymentAllocations(
       if (!unitIds.includes(row.unitId)) {
         throw new Error(`Unit ${row.unitId} is not linked to this tenant`);
       }
-      const unit = getRentalUnit(row.unitId, userId);
+      const unit = await getRentalUnit(row.unitId, userId);
       if (!unit) throw new Error(`Unit ${row.unitId} not found`);
       const billableTypes = billableTypesForUnit(row.unitId);
-      const record = ensureRentRecord(unit, row.billingPeriod);
-      const items = getChargeItemsForRecord(record.id, userId);
+      const record = await ensureRentRecord(unit, row.billingPeriod);
+      const items = await getChargeItemsForRecord(record.id, userId);
       const hasExplicit = row.rent !== undefined || row.water !== undefined || row.electricity !== undefined;
       if (hasExplicit) {
         const { allocations } = allocateToPeriodItems(
@@ -1186,7 +1349,7 @@ export function prepareAdvancePaymentAllocations(
   }
 
   let remaining = options.amount;
-  const existing = getOutstandingChargeItemsForUnits(userId, unitIds).filter(
+  const existing = (await getOutstandingChargeItemsForUnits(userId, unitIds)).filter(
     (c) => billableTypesForUnit(c.unitId).includes(c.chargeType),
   );
   for (const item of existing) {
@@ -1201,7 +1364,7 @@ export function prepareAdvancePaymentAllocations(
 
   const nextPeriodByUnit = new Map<number, string>();
   for (const uid of unitIds) {
-    nextPeriodByUnit.set(uid, getNextAllocatablePeriod(userId, uid));
+    nextPeriodByUnit.set(uid, await getNextAllocatablePeriod(userId, uid));
   }
 
   let safety = 0;
@@ -1210,11 +1373,11 @@ export function prepareAdvancePaymentAllocations(
     let roundProgress = false;
     for (const uid of unitIds) {
       if (remaining <= 0.009) break;
-      const unit = getRentalUnit(uid, userId);
+      const unit = await getRentalUnit(uid, userId);
       if (!unit) continue;
       const period = nextPeriodByUnit.get(uid)!;
-      const record = ensureRentRecord(unit, period);
-      const items = getChargeItemsForRecord(record.id, userId);
+      const record = await ensureRentRecord(unit, period);
+      const items = await getChargeItemsForRecord(record.id, userId);
       const billableTypes = billableTypesForUnit(uid);
       const { allocations, remaining: left } = allocateToPeriodItems(items, billableTypes, remaining);
       if (allocations.length) {

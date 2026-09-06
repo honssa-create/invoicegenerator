@@ -8,7 +8,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
     const body = await request.json();
     const result = await sendRentInvoice(params.id, ownerId, {
@@ -23,10 +23,34 @@ export async function POST(request: Request, { params }: { params: { id: string 
       note: body.note || null,
       paymentTemplate: body.paymentTemplate === 'elite' ? 'elite' : body.paymentTemplate === 'label' ? 'label' : undefined,
       paymentRemark: body.paymentRemark || null,
+      to: typeof body.to === 'string' ? body.to : undefined,
+      subject: typeof body.subject === 'string' ? body.subject : undefined,
+      body: typeof body.body === 'string' ? body.body : undefined,
     });
-    return NextResponse.json(result);
+
+    if (!result.email.sent && result.email.provider === 'skipped') {
+      return NextResponse.json(
+        { error: result.email.error || 'Resend not configured', sent: false, provider: result.email.provider, ...result },
+        { status: 422 },
+      );
+    }
+    if (!result.email.sent && result.email.provider === 'resend') {
+      return NextResponse.json(
+        { error: result.email.error || 'Failed to send email', sent: false, provider: result.email.provider, ...result },
+        { status: 502 },
+      );
+    }
+    if (!result.email.sent) {
+      return NextResponse.json(
+        { error: result.email.error || 'Email was not sent', sent: false, provider: result.email.provider, ...result },
+        { status: 422 },
+      );
+    }
+
+    return NextResponse.json({ ...result, sent: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to send invoice';
-    return NextResponse.json({ error: message }, { status: 400 });
+    const status = (e as { status?: number })?.status === 400 ? 400 : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

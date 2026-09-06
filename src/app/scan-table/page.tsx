@@ -1,8 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import AppLayout from '@/components/AppLayout';
+import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
 export default function ScanTablePage() {
   const [grid, setGrid] = useState<string[][]>([]);
@@ -64,30 +64,37 @@ export default function ScanTablePage() {
   const addColumn = () => setGrid((prev) => prev.map((row) => [...row, '']));
   const deleteRow = (r: number) => setGrid((prev) => prev.filter((_, ri) => ri !== r));
 
-  const buildWorkbook = () => {
+  const buildWorkbook = async () => {
+    const XLSX = await import('xlsx');
     const ws = XLSX.utils.aoa_to_sheet(grid);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    return wb;
+    return { XLSX, wb };
   };
 
-  const exportXlsx = () => XLSX.writeFile(buildWorkbook(), 'scan-table.xlsx', { bookType: 'xlsx' });
-  const exportCsv = () => XLSX.writeFile(buildWorkbook(), 'scan-table.csv', { bookType: 'csv' });
+  const exportXlsx = async () => {
+    const { XLSX, wb } = await buildWorkbook();
+    XLSX.writeFile(wb, 'scan-table.xlsx', { bookType: 'xlsx' });
+  };
+  const exportCsv = async () => {
+    const { XLSX, wb } = await buildWorkbook();
+    XLSX.writeFile(wb, 'scan-table.csv', { bookType: 'csv' });
+  };
 
   return (
     <AppLayout>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Scan to Table 掃描成表格</h1>
-          <p className="text-gray-500 mt-1 text-sm sm:text-base">Upload an image or PDF of a printed table, then edit &amp; export it</p>
+          <h1 className="page-title">{TITLE.scanTable}</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Upload an image or PDF of a printed table, then edit & export it', '上傳印刷表格的圖片或 PDF，然後編輯並匯出')}</p>
         </div>
         {grid.length > 0 && (
           <div className="page-actions">
             <button onClick={exportCsv} className="btn bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">
-              ⬇ Export CSV
+              ⬇ {BTN.exportCsv}
             </button>
             <button onClick={exportXlsx} className="btn bg-brand-600 text-white hover:bg-brand-700">
-              ⬇ Export Excel
+              ⬇ {BTN.exportExcel}
             </button>
           </div>
         )}

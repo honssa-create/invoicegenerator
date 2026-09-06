@@ -13,14 +13,14 @@ export async function GET(request: Request) {
     });
   }
 
-  const ownerId = getDataOwnerId(session.userId);
-  const rows = db
+  const ownerId = await getDataOwnerId(session);
+  const rows = await db
     .prepare('SELECT id FROM invoices WHERE user_id = ? ORDER BY created_at DESC')
     .all(ownerId) as { id: number }[];
 
-  const invoices = rows
-    .map((r) => getInvoiceWithDetails(r.id, ownerId))
-    .filter((i): i is NonNullable<typeof i> => Boolean(i));
+  const invoices = (await Promise.all(
+    rows.map((r) => getInvoiceWithDetails(r.id, ownerId))
+  )).filter((i): i is NonNullable<typeof i> => Boolean(i));
 
   const data = invoices.map((inv) => ({
     'Invoice #': inv.invoice_number,

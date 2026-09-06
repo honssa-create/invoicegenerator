@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -25,7 +26,7 @@ export default function RegisterPage() {
     try {
       await register(form);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setError(err instanceof Error ? err.message : MSG.registrationFailed);
     } finally {
       setLoading(false);
     }
@@ -40,22 +41,22 @@ export default function RegisterPage() {
             <span className="font-bold text-xl">InvoiceFlow</span>
           </Link>
           <h1 className="mt-6 text-2xl font-bold text-gray-900">
-            {registrationOpen === false ? 'Registration closed' : 'Create your account'}
+            {registrationOpen === false ? bi('Registration closed', '註冊已關閉') : TITLE.createAccount}
           </h1>
           <p className="mt-2 text-gray-600">
             {registrationOpen === false
-              ? 'Ask an administrator to create your account.'
+              ? bi('Ask an administrator to create your account.', '請聯絡管理員為您建立帳戶。')
               : registrationOpen
-                ? 'First setup — this account becomes the system administrator.'
-                : 'Loading…'}
+                ? bi('First setup — this account becomes the system administrator.', '首次設定 — 此帳戶將成為系統管理員。')
+                : BTN.loading}
           </p>
         </div>
 
         {registrationOpen === false ? (
           <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm text-center">
-            <p className="text-gray-600 text-sm mb-4">New users are created by an admin under Administration → Users.</p>
+            <p className="text-gray-600 text-sm mb-4">{bi('New users are created by an admin under Administration → Users.', '新用戶由管理員在「系統管理 → 用戶」中建立。')}</p>
             <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-              Back to sign in
+              {bi('Back to sign in', '返回登入')}
             </Link>
           </div>
         ) : registrationOpen ? (
@@ -68,7 +69,7 @@ export default function RegisterPage() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Full name', '全名')}</label>
               <input
                 type="text"
                 value={form.name}
@@ -79,7 +80,7 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Company name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Company name', '公司名稱')}</label>
               <input
                 type="text"
                 value={form.company_name}
@@ -89,7 +90,7 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Email', '電郵')}</label>
               <input
                 type="email"
                 value={form.email}
@@ -100,7 +101,7 @@ export default function RegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{bi('Password', '密碼')}</label>
               <input
                 type="password"
                 value={form.password}
@@ -118,19 +119,19 @@ export default function RegisterPage() {
             disabled={loading}
             className="mt-6 w-full py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? 'Creating account...' : 'Create account'}
+            {loading ? bi('Creating account…', '建立帳戶中…') : bi('Create account', '建立帳戶')}
           </button>
 
           <p className="mt-4 text-center text-sm text-gray-600">
-            Already have an account?{' '}
+            {bi('Already have an account?', '已有帳戶？')}{' '}
             <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium">
-              Sign in
+              {BTN.signIn}
             </Link>
           </p>
         </form>
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 p-8 shadow-sm text-center text-gray-500">
-            Loading…
+            {BTN.loading}
           </div>
         )}
       </div>

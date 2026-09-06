@@ -8,13 +8,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (session instanceof NextResponse) return session;
   const denied = denyReadOnlyWrite(session, 'rentals', request.method);
   if (denied) return denied;
-  const ownerId = rentalOwnerId(session.userId);
+  const ownerId = await rentalOwnerId(session);
   try {
-    if (!getRentRecord(params.id, ownerId)) {
+    if (!await getRentRecord(params.id, ownerId)) {
       return NextResponse.json({ error: 'Record not found' }, { status: 404 });
     }
     const body = await request.json();
-    const record = updateRentRecordUtilities(params.id, ownerId, {
+    const record = await updateRentRecordUtilities(params.id, ownerId, {
       baseRent: body.baseRent !== undefined ? Number(body.baseRent) : undefined,
       baseRentPeriodFrom: body.baseRentPeriodFrom,
       baseRentPeriodTo: body.baseRentPeriodTo,

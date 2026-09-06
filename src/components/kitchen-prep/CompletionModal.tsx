@@ -6,12 +6,13 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
   completionSplitsTotal,
-  computePrepCalculation,
+  computePrepCalculationForOrder,
   defaultCompletionSplits,
   originalOrderQuantity,
   type PrepCompletionSplit,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface CompletionModalProps {
   order: PrepOrder;
@@ -21,12 +22,7 @@ interface CompletionModalProps {
 
 export default function CompletionModal({ order, onClose, onCompleted }: CompletionModalProps) {
   const calc = useMemo(
-    () =>
-      computePrepCalculation(order.capacity, order.order_type, {
-        osmanthus: order.qty_osmanthus,
-        red_date: order.qty_red_date,
-        rock_sugar: order.qty_rock_sugar,
-      }),
+    () => computePrepCalculationForOrder(order),
     [order]
   );
   const expectedQty = calc.totals.bottles;
@@ -76,7 +72,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
   const submit = async () => {
     setError('');
     if (splits.length === 0) {
-      setError('No flavor lines to complete — add order quantities first.');
+      setError(bi('No flavor lines to complete — add order quantities first.', '尚無口味行可完成 — 請先新增訂單數量。'));
       return;
     }
     setSubmitting(true);
@@ -92,7 +88,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
     const data = await res.json();
     setSubmitting(false);
     if (!res.ok) {
-      setError(data.error || 'Submit failed');
+      setError(data.error || MSG.submitFailed);
       return;
     }
     onCompleted(data.order);
@@ -100,17 +96,20 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-panel sm:max-w-2xl max-h-[96vh] p-0 sm:p-0" onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 sm:px-6 py-5 border-b border-gray-200 bg-brand-50 rounded-t-2xl">
+      <div
+        className="modal-panel sm:max-w-2xl max-h-[96vh] p-0 sm:p-0 flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 sm:px-6 py-5 border-b border-gray-200 bg-brand-50 rounded-t-2xl shrink-0">
           <p className="text-sm font-semibold text-brand-800 uppercase tracking-wide">完成與匯報</p>
-          <h2 className="text-2xl font-bold text-gray-900 mt-1">Mark as Completed 完成燉製</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mt-1">完成炖製</h2>
           <p className="text-base text-gray-600 mt-2 font-mono">{order.order_code}</p>
           <p className="text-sm text-gray-500 mt-1">
             {order.stewing_date} · {PREP_ORDER_TYPE_LABELS[order.order_type]} · {PREP_CAPACITY_LABELS[order.capacity]}
           </p>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 overflow-y-auto flex-1 min-h-0">
           {error && (
             <div className="p-4 bg-red-50 text-red-700 text-base rounded-xl border border-red-200">{error}</div>
           )}
@@ -119,12 +118,12 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-4">
               <p className="text-sm font-medium text-gray-500 mb-1">Expected 預期產量</p>
               <p className="text-4xl font-bold text-gray-900 tabular-nums">{expectedQty}</p>
-              <p className="text-xs text-gray-500 mt-1">樽 (incl. buffer)</p>
+              <p className="text-xs text-gray-500 mt-1">樽 (from 實際生產)</p>
             </div>
             <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-4">
               <p className="text-sm font-medium text-gray-500 mb-1">Original 原訂單</p>
               <p className="text-4xl font-bold text-gray-700 tabular-nums">{orderQty}</p>
-              <p className="text-xs text-gray-500 mt-1">樽 (excl. buffer)</p>
+              <p className="text-xs text-gray-500 mt-1">樽 (客人訂)</p>
             </div>
             <div
               className={`rounded-xl border-2 p-4 ${
@@ -166,9 +165,9 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
                   >
                     <div className="flex-1 min-w-[180px]">
                       <p className="text-base font-bold text-gray-900">{row.label}</p>
-                      {calcRow && calcRow.weddingBuffer > 0 && (
+                      {calcRow && calcRow.extraQty > 0 && (
                         <p className="text-xs text-gray-500 mt-0.5">
-                          Expected {calcRow.actualQty} ({calcRow.orderQty} + {calcRow.weddingBuffer} buffer)
+                          Expected {calcRow.actualQty} ({calcRow.orderQty} + {calcRow.extraQty})
                         </p>
                       )}
                     </div>
@@ -233,14 +232,14 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
           </div>
         </div>
 
-        <div className="sticky bottom-0 px-6 py-5 border-t border-gray-200 bg-white flex flex-col sm:flex-row gap-3">
+        <div className="sticky bottom-0 px-6 py-5 border-t border-gray-200 bg-white flex flex-col sm:flex-row gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
             className="order-2 sm:order-1 flex-1 min-h-[56px] text-lg font-semibold rounded-xl border-2 border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50"
           >
-            Cancel 取消
+            {BTN.cancel}
           </button>
           <button
             type="button"
@@ -248,7 +247,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             disabled={submitting || splits.length === 0}
             className="order-1 sm:order-2 flex-[2] min-h-[56px] text-lg font-bold rounded-xl bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:opacity-50 shadow-lg"
           >
-            {submitting ? 'Submitting…' : 'Submit & Complete 確認完成'}
+            {submitting ? '提交中…' : '確認完成炖製'}
           </button>
         </div>
       </div>

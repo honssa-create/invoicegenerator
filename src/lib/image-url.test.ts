@@ -1,0 +1,73 @@
+import { describe, expect, it } from 'vitest';
+import {
+  expenseReceiptUrl,
+  formReceiptPreviewUrl,
+  isStoredImageUrl,
+  scanPreviewReceiptUrl,
+  utilityMeterPhotoUrl,
+} from './image-url';
+
+describe('isStoredImageUrl', () => {
+  it('detects http(s) URLs', () => {
+    expect(isStoredImageUrl('https://cdn.example.com/a.jpg')).toBe(true);
+    expect(isStoredImageUrl('http://x.test/b.png')).toBe(true);
+    expect(isStoredImageUrl('abc.jpg')).toBe(false);
+    expect(isStoredImageUrl(null)).toBe(false);
+  });
+});
+
+describe('formReceiptPreviewUrl', () => {
+  it('prefers the local blob URL over a stored R2 URL', () => {
+    expect(
+      formReceiptPreviewUrl('https://cdn.example.com/receipts/a.jpg', 'blob:http://localhost/abc'),
+    ).toBe('blob:http://localhost/abc');
+  });
+
+  it('uses scan-preview for bare filenames when no blob is available', () => {
+    expect(formReceiptPreviewUrl('ad8d63f0-4f76-47c5-a3d1-6f25bef3b499.jpg')).toBe(
+      '/api/expenses/scan-preview/ad8d63f0-4f76-47c5-a3d1-6f25bef3b499.jpg',
+    );
+  });
+});
+
+describe('scanPreviewReceiptUrl', () => {
+  it('rejects paths with directories or http URLs', () => {
+    expect(scanPreviewReceiptUrl('https://cdn.test/a.jpg')).toBeNull();
+    expect(scanPreviewReceiptUrl('../etc/passwd')).toBeNull();
+  });
+});
+
+describe('utilityMeterPhotoUrl', () => {
+  it('includes stored path as cache buster', () => {
+    expect(utilityMeterPhotoUrl(12, 'abc.jpg')).toBe(
+      '/api/rentals/meters/files/12?v=abc.jpg',
+    );
+    expect(utilityMeterPhotoUrl(12, 'https://cdn.test/receipts/x.jpg')).toBe(
+      '/api/rentals/meters/files/12?v=https%3A%2F%2Fcdn.test%2Freceipts%2Fx.jpg',
+    );
+  });
+
+  it('returns null without item id or stored path', () => {
+    expect(utilityMeterPhotoUrl(0, 'abc.jpg')).toBeNull();
+    expect(utilityMeterPhotoUrl(5, null)).toBeNull();
+  });
+});
+
+describe('expenseReceiptUrl', () => {
+  it('always uses the auth API for saved receipts (R2, local, or remote path)', () => {
+    expect(
+      expenseReceiptUrl({ id: 1, path: 'https://pub-abc.r2.dev/receipts/a.jpg' }, 5),
+    ).toBe('/api/receipts/1');
+    expect(
+      expenseReceiptUrl(
+        { id: 2, path: 'a8d5d09b.png', source_url: 'https://drive.google.com/file/d/abc/view' },
+        5,
+      ),
+    ).toBe('/api/receipts/2');
+    expect(expenseReceiptUrl({ id: 3, path: 'abc.jpg' }, 5)).toBe('/api/receipts/3');
+  });
+
+  it('uses legacy expense receipt route when receipt id is 0', () => {
+    expect(expenseReceiptUrl({ id: 0, path: 'abc.jpg' }, 9)).toBe('/api/expenses/9/receipt');
+  });
+});

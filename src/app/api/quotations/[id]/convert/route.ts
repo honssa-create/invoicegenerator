@@ -3,9 +3,12 @@ import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getQuotationWithDetails } from '@/lib/quotation-server';
-import { generateInvoiceNumber } from '@/lib/invoices';
+import { createInvoiceFromQuotation, findInvoiceForQuotation } from '@/lib/quotation-to-invoice-server';
 import { getDataOwnerId } from '@/lib/org-server';
 import { logActivity } from '@/lib/activity';
+import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
+import { getOrder } from '@/lib/order-server';
+import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -14,8 +17,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const denied = denyReadOnlyWrite(session, 'quotations', request.method);
   if (denied) return denied;
 
-  const ownerId = getDataOwnerId(session.userId);
-  const q = getQuotationWithDetails(params.id, ownerId);
+  const ownerId = await getDataOwnerId(session);
+  const q = await getQuotationWithDetails(params.id, ownerId);
   if (!q) return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
 
   let target: string;
@@ -29,58 +32,80 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (!q.customer_id) {
       return NextResponse.json({ error: 'Set a customer on the quotation before converting to an invoice' }, { status: 400 });
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-    const invoiceNumber = generateInvoiceNumber(ownerId);
 
-    const create = db.transaction(() => {
-      const result = db
-        .prepare(
-          `INSERT INTO invoices (user_id, customer_id, invoice_number, status, issue_date, due_date, tax_rate, notes, terms)
-           VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)`
-        )
-        .run(ownerId, q.customer_id, invoiceNumber, today, due, q.tax_rate, q.notes, q.terms);
-      const invId = result.lastInsertRowid as number;
-      const insertItem = db.prepare(
-        'INSERT INTO invoice_items (invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, ?, ?)'
+    const existing = await findInvoiceForQuotation(params.id, ownerId);
+    if (existing) {
+      return NextResponse.json(
+        {
+          error: 'Quotation is already linked to an invoice',
+          id: existing.id,
+          invoice_number: existing.invoice_number,
+        },
+        { status: 409 },
       );
-      for (const it of q.items) insertItem.run(invId, it.description, it.quantity, it.unit_price, it.amount);
-      return { invId, invoiceNumber };
-    });
+    }
 
-    const { invId, invoiceNumber: invNo } = create();
-    db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
-    logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to invoice ${invNo}`);
-    logActivity('invoice', invId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
+    const { invoiceId: invId, invoiceNumber: invNo } = await createInvoiceFromQuotation(q, ownerId);
+    await db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
+    await logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to invoice ${invNo}`);
+    await logActivity('invoice', invId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
     return NextResponse.json({ target: 'invoice', id: invId });
   }
 
   if (target === 'order') {
-    const itemsSummary = q.items.map((i) => `• ${i.description} × ${i.quantity} @ ${i.unit_price}`).join('\n');
-    const create = db.transaction(() => {
-      const result = db
+    const existingOrder = (await db
+      .prepare(
+        `SELECT id, reference_number FROM orders WHERE quotation_id = ? AND user_id = ? ORDER BY id ASC LIMIT 1`
+      )
+      .get(params.id, ownerId)) as { id: number; reference_number: string | null } | undefined;
+    if (existingOrder) {
+      return NextResponse.json(
+        {
+          error: 'Quotation is already linked to an order',
+          id: existingOrder.id,
+          reference_number: existingOrder.reference_number,
+        },
+        { status: 409 }
+      );
+    }
+
+    const itemsSummary = q.items.map((i) => `• ${i.product_service || ''} × ${i.quantity} @ $${i.unit_price}`).join('\n');
+    const first = q.items[0];
+    const firstName = (first?.product_service || '').trim();
+    const firstQty = first != null ? String(first.quantity ?? '') : '';
+    const itemPart =
+      firstName && firstQty !== '' ? `${firstName} x${firstQty}` : firstName || (firstQty !== '' ? `x${firstQty}` : '');
+    const orderName = [(q.customer_name || '').trim(), itemPart].filter(Boolean).join(' - ');
+    const { orderId, referenceNumber } = await db.transaction(async () => {
+      const referenceNumber = await allocateGlobalRecordNumber('order');
+      const result = await db
         .prepare(
-          `INSERT INTO orders (user_id, po_number, name, description, status, customer_email, phone, shipping_address, notes, fields_json, quotation_id)
-           VALUES (?, ?, ?, ?, '草稿', ?, ?, ?, ?, '{}', ?)`
+          `INSERT INTO orders (
+             user_id, reference_number, po_number, name, description, status,
+             customer_email, phone, shipping_address, notes, fields_json, quotation_id
+           ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, '{}', ?)`
         )
         .run(
-          session.userId,
-          q.quote_number,
-          q.customer_name || null,
-          `From ${q.quote_number}`,
+          ownerId,
+          referenceNumber,
+          (q.order_no || '').trim() || null,
+          orderName || q.customer_name || null,
+          null,
           q.customer_email || null,
           null,
-          [q.customer_address, q.customer_city, q.customer_state, q.customer_zip].filter(Boolean).join(', ') || null,
+          q.shipping_address?.trim() || q.customer_address?.trim() || null,
           itemsSummary || null,
           q.id
         );
-      return result.lastInsertRowid as number;
+      return { orderId: result.lastInsertRowid as number, referenceNumber };
     });
-    const orderId = create();
-    // Give the order a proper receipt-style number is not needed; orders use their own ids.
-    db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
-    logActivity('quotation', params.id, session.userId, 'activity', session.name, 'converted to an order');
-    logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
+    const order = await getOrder(orderId, ownerId);
+    if (order && q.customer_name?.trim()) {
+      await trySyncCustomerFromOrderRecord(ownerId, order, q.customer_name.trim());
+    }
+    await db.prepare("UPDATE quotations SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(params.id);
+    await logActivity('quotation', params.id, session.userId, 'activity', session.name, `converted to order ${referenceNumber}`);
+    await logActivity('order', orderId, session.userId, 'activity', session.name, `created from quotation ${q.quote_number}`);
     return NextResponse.json({ target: 'order', id: orderId });
   }
 

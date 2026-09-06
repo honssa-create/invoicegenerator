@@ -9,6 +9,8 @@ import {
 } from '@/lib/debit-note-style';
 import { downloadDebitNoteStyleTemplate } from '@/lib/debit-note-style-document';
 import { DEBIT_NOTE_COMPANY_VARIANTS, type TemplateCompanyVariantId } from '@/lib/document-templates';
+import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
+import { BTN, MSG, bi } from '@/lib/ui-labels';
 
 interface Props {
   companyKey: TemplateCompanyVariantId;
@@ -123,7 +125,7 @@ export default function DebitNoteTemplateEditor({
                     disabled={saving}
                     className="px-4 py-2 bg-brand-600 text-white text-sm rounded-lg disabled:opacity-50"
                   >
-                    {saving ? 'Saving…' : 'Save template 儲存範本'}
+                    {saving ? BTN.saving : bi('Save template', '儲存範本')}
                   </button>
                 )}
                 <button
@@ -166,6 +168,7 @@ export function useDebitNoteStyleTemplate(companyKey: TemplateCompanyVariantId, 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -175,11 +178,15 @@ export function useDebitNoteStyleTemplate(companyKey: TemplateCompanyVariantId, 
         return r.json();
       })
       .then((d) => {
-        if (d?.style) setStyle(normalizeDebitNoteStyle(d.style));
-        else setStyle({ ...DEFAULT_DEBIT_NOTE_STYLE });
+        const next = d?.style ? normalizeDebitNoteStyle(d.style) : { ...DEFAULT_DEBIT_NOTE_STYLE };
+        setStyle(next);
+        setSavedSnapshot(JSON.stringify(next));
       })
       .finally(() => setLoading(false));
   }, [companyKey]);
+
+  const isDirty = !readOnly && savedSnapshot !== null && JSON.stringify(style) !== savedSnapshot;
+  useUnsavedChangesWarning(isDirty);
 
   const save = useCallback(async () => {
     if (readOnly) return;
@@ -193,11 +200,15 @@ export function useDebitNoteStyleTemplate(companyKey: TemplateCompanyVariantId, 
     const data = await res.json().catch(() => ({}));
     setSaving(false);
     if (!res.ok) {
-      setSaveMessage(data.error || 'Save failed');
+      setSaveMessage(data.error || MSG.saveFailed);
       return;
     }
-    if (data.style) setStyle(normalizeDebitNoteStyle(data.style));
-    setSaveMessage('Template saved ✓');
+    if (data.style) {
+      const next = normalizeDebitNoteStyle(data.style);
+      setStyle(next);
+      setSavedSnapshot(JSON.stringify(next));
+    }
+    setSaveMessage(MSG.templateSaved);
     setTimeout(() => setSaveMessage(''), 3000);
   }, [readOnly, style, companyKey]);
 

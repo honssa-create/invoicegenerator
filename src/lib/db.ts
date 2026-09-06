@@ -1,1217 +1,975 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { AsyncLocalStorage } from 'async_hooks';
+import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { warnIfEphemeralReceiptStorage } from './receipt-storage';
+import { warnIfR2Misconfigured } from './r2';
 import fs from 'fs';
+import path from 'path';
+import { assignLegacyDocumentNumbers } from './record-numbering-core';
 
-const defaultDbPath = path.join(process.cwd(), 'data', 'invoices.db');
+type Queryable = Pool | PoolClient;
 
-let dbInstance: Database.Database | null = null;
+const txStorage = new AsyncLocalStorage<PoolClient>();
+/** True only for nested ensureSchema calls that run inside the boot promise. */
+const schemaBootAls = new AsyncLocalStorage<boolean>();
 
-/** During `next build`, avoid Railway runtime volume paths like /data. */
-function resolveDbPath(): string {
+let pool: Pool | null = null;
+let schemaReady: Promise<void> | null = null;
+
+function databaseUrl(): string {
   if (process.env.NEXT_PHASE === 'phase-production-build') {
-    return path.join(process.cwd(), 'data', '.next-build.sqlite');
+    // Build must not require a live database.
+    return process.env.DATABASE_URL || 'postgresql://127.0.0.1:5432/invoiceflow_build';
   }
-  return process.env.DB_PATH || defaultDbPath;
-}
-
-function initializeDatabase(): Database.Database {
-  if (dbInstance) return dbInstance;
-
-  const dbPath = resolveDbPath();
-  const dataDir = path.dirname(dbPath);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    name TEXT NOT NULL,
-    company_name TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS customers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    email TEXT,
-    phone TEXT,
-    address TEXT,
-    city TEXT,
-    state TEXT,
-    zip TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS invoices (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    customer_id INTEGER NOT NULL,
-    invoice_number TEXT NOT NULL,
-    status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'paid', 'overdue')),
-    issue_date TEXT NOT NULL,
-    due_date TEXT NOT NULL,
-    tax_rate REAL DEFAULT 0,
-    notes TEXT,
-    terms TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT,
-    UNIQUE(user_id, invoice_number)
-  );
-
-  CREATE TABLE IF NOT EXISTS invoice_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    invoice_id INTEGER NOT NULL,
-    description TEXT NOT NULL,
-    quantity REAL NOT NULL DEFAULT 1,
-    unit_price REAL NOT NULL DEFAULT 0,
-    amount REAL NOT NULL DEFAULT 0,
-    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS expenses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    category TEXT NOT NULL DEFAULT 'other',
-    merchant TEXT,
-    amount_hkd REAL,
-    amount_rmb REAL,
-    paid_date TEXT,
-    order_no TEXT,
-    platform TEXT,
-    notes TEXT,
-    payment_status TEXT DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'pending', 'paid')),
-    receipt_path TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_customers_user ON customers(user_id);
-  CREATE INDEX IF NOT EXISTS idx_invoices_user ON invoices(user_id);
-  CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
-  CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id);
-`);
-
-// Migration: batch_id + receipt numbers (EXP-YYYYMM-XXX / EXP-YYYYMM-XXX-CC001).
-const expenseColumns = db.prepare('PRAGMA table_info(expenses)').all() as { name: string }[];
-if (!expenseColumns.some((c) => c.name === 'receipt_no')) {
-  db.exec('ALTER TABLE expenses ADD COLUMN receipt_no TEXT');
-}
-if (!expenseColumns.some((c) => c.name === 'batch_id')) {
-  db.exec('ALTER TABLE expenses ADD COLUMN batch_id TEXT');
-}
-if (!expenseColumns.some((c) => c.name === 'payment_method')) {
-  db.exec('ALTER TABLE expenses ADD COLUMN payment_method TEXT');
-}
-
-function migratePaymentCode(method: string | null | undefined): 'CC' | 'CS' | 'BT' | 'OT' {
-  const m = (method || '').toLowerCase();
-  if (/credit\s*card|信用卡|credit|0860/.test(m)) return 'CC';
-  if (/cash|現金|现金|hing現金/.test(m)) return 'CS';
-  if (/bank|transfer|轉帳|转账|fps|payme|wire|cheque|check/.test(m)) return 'BT';
-  return 'OT';
-}
-
-const BATCH_RE = /^EXP-\d{6}-\d{3}$/;
-const RECEIPT_RE = /^EXP-\d{6}-\d{3}-(CC|CS|BT|OT)\d{3}$/;
-
-const numberYm = (row: { paid_date: string | null; created_at: string | null }) => {
-  const src = row.paid_date && /^\d{4}-\d{2}/.test(row.paid_date) ? row.paid_date : row.created_at || '';
-  const ym = src.slice(0, 7);
-  return ym ? ym.replace('-', '') : new Date().toISOString().slice(0, 7).replace('-', '');
-};
-
-type NumberRow = {
-  id: number;
-  user_id: number;
-  receipt_no: string | null;
-  batch_id: string | null;
-  payment_method: string | null;
-  paid_date: string | null;
-  created_at: string | null;
-};
-
-const numberRows = db
-  .prepare(
-    'SELECT id, user_id, receipt_no, batch_id, payment_method, paid_date, created_at FROM expenses'
-  )
-  .all() as NumberRow[];
-
-const updateBoth = db.prepare('UPDATE expenses SET batch_id = ?, receipt_no = ? WHERE id = ?');
-const updateBatch = db.prepare('UPDATE expenses SET batch_id = ? WHERE id = ?');
-
-// Pass 1: new receipt format → derive batch_id from receipt prefix.
-for (const row of numberRows) {
-  if (row.batch_id || !RECEIPT_RE.test(row.receipt_no || '')) continue;
-  const batchId = row.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
-  updateBatch.run(batchId, row.id);
-  row.batch_id = batchId;
-}
-
-// Pass 2: legacy EXP-YYYYMM-XXX receipt → batch_id = old receipt, extend with payment code.
-for (const row of numberRows) {
-  if (RECEIPT_RE.test(row.receipt_no || '')) continue;
-  if (!BATCH_RE.test(row.receipt_no || '')) continue;
-  const batchId = row.receipt_no!;
-  const code = migratePaymentCode(row.payment_method);
-  const newReceipt = `${batchId}-${code}001`;
-  updateBoth.run(batchId, newReceipt, row.id);
-  row.batch_id = batchId;
-  row.receipt_no = newReceipt;
-}
-
-// Pass 3: missing / invalid — assign fresh batch + receipt numbers.
-const needsNumber = numberRows.filter(
-  (r) => !r.batch_id || !r.receipt_no || !RECEIPT_RE.test(r.receipt_no)
-);
-
-if (needsNumber.length) {
-  const batchCounters = new Map<string, number>();
-  const receiptCounters = new Map<string, number>();
-
-  for (const r of numberRows) {
-    const bid =
-      r.batch_id || (BATCH_RE.test(r.receipt_no || '') ? r.receipt_no : null) ||
-      (RECEIPT_RE.test(r.receipt_no || '') ? r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '') : null);
-    if (bid && BATCH_RE.test(bid)) {
-      const key = `${r.user_id}-${bid.slice(4, 10)}`;
-      batchCounters.set(key, Math.max(batchCounters.get(key) || 0, parseInt(bid.slice(11), 10)));
-    }
-    const rm = RECEIPT_RE.exec(r.receipt_no || '');
-    if (rm) {
-      const batchId = r.receipt_no!.replace(/-(CC|CS|BT|OT)\d{3}$/, '');
-      const receiptKey = `${r.user_id}-${batchId}`;
-      receiptCounters.set(
-        receiptKey,
-        Math.max(receiptCounters.get(receiptKey) || 0, parseInt(r.receipt_no!.slice(-3), 10))
-      );
-    }
-  }
-
-  const sortDate = (r: { paid_date: string | null; created_at: string | null }) =>
-    r.paid_date || r.created_at || '';
-  needsNumber.sort(
-    (a, b) =>
-      a.user_id - b.user_id ||
-      numberYm(a).localeCompare(numberYm(b)) ||
-      sortDate(a).localeCompare(sortDate(b)) ||
-      a.id - b.id
-  );
-
-  const backfill = db.transaction(() => {
-    for (const row of needsNumber) {
-      const ym = numberYm(row);
-      const batchKey = `${row.user_id}-${ym}`;
-      const batchNext = (batchCounters.get(batchKey) || 0) + 1;
-      batchCounters.set(batchKey, batchNext);
-      const batchId = `EXP-${ym}-${String(batchNext).padStart(3, '0')}`;
-
-      const code = migratePaymentCode(row.payment_method);
-      const receiptKey = `${row.user_id}-${batchId}`;
-      const receiptNext = (receiptCounters.get(receiptKey) || 0) + 1;
-      receiptCounters.set(receiptKey, receiptNext);
-      const receiptNo = `${batchId}-${code}${String(receiptNext).padStart(3, '0')}`;
-
-      updateBoth.run(batchId, receiptNo, row.id);
-    }
-  });
-  backfill();
-}
-
-// Order Management module tables (ClickUp-style order detail).
-db.exec(`
-  CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    po_number TEXT,
-    name TEXT,
-    description TEXT,
-    status TEXT DEFAULT '草稿',
-    delivery_date TEXT,
-    customer_email TEXT,
-    phone TEXT,
-    shipping_address TEXT,
-    notes TEXT,
-    fields_json TEXT DEFAULT '{}',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS order_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    path TEXT NOT NULL,
-    original_name TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS order_activities (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'comment',
-    author TEXT,
-    body TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
-  CREATE INDEX IF NOT EXISTS idx_order_files_order ON order_files(order_id);
-  CREATE INDEX IF NOT EXISTS idx_order_activities_order ON order_activities(order_id);
-`);
-
-// Carton count + quotation link on orders (for delivery notes / source quote tracking).
-{
-  const orderCols = db.prepare('PRAGMA table_info(orders)').all() as { name: string }[];
-  if (!orderCols.some((c) => c.name === 'carton_count')) {
-    db.exec('ALTER TABLE orders ADD COLUMN carton_count TEXT');
-  }
-  if (!orderCols.some((c) => c.name === 'quotation_id')) {
-    db.exec('ALTER TABLE orders ADD COLUMN quotation_id INTEGER');
-  }
-}
-
-// Unified activity log shared by Orders, Invoices and Quotations (ClickUp-style feed).
-db.exec(`
-  CREATE TABLE IF NOT EXISTS activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'comment',
-    author TEXT,
-    body TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type, entity_id);
-`);
-
-// One-time backfill: fold legacy order_activities into the unified table.
-try {
-  const legacyCount = (db.prepare("SELECT COUNT(*) c FROM order_activities").get() as { c: number }).c;
-  const migratedOrders = (db
-    .prepare("SELECT COUNT(*) c FROM activity_logs WHERE entity_type = 'order'")
-    .get() as { c: number }).c;
-  if (legacyCount > 0 && migratedOrders === 0) {
-    db.exec(`
-      INSERT INTO activity_logs (entity_type, entity_id, user_id, kind, author, body, created_at)
-      SELECT 'order', order_id, user_id, kind, author, body, created_at FROM order_activities
-    `);
-  }
-} catch {
-  // order_activities may not exist on a very old DB — ignore.
-}
-
-// Invoice ↔ Order relation + reminder tracking.
-{
-  const invoiceCols = db.prepare('PRAGMA table_info(invoices)').all() as { name: string }[];
-  if (!invoiceCols.some((c) => c.name === 'order_id')) {
-    db.exec('ALTER TABLE invoices ADD COLUMN order_id INTEGER');
-  }
-  if (!invoiceCols.some((c) => c.name === 'last_reminder_at')) {
-    db.exec('ALTER TABLE invoices ADD COLUMN last_reminder_at TEXT');
-  }
-}
-
-// Quotation module.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS quotations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    customer_id INTEGER,
-    quote_number TEXT NOT NULL,
-    status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'approved', 'rejected')),
-    issue_date TEXT NOT NULL,
-    valid_until TEXT,
-    tax_rate REAL DEFAULT 0,
-    notes TEXT,
-    terms TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS quotation_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    quotation_id INTEGER NOT NULL,
-    description TEXT NOT NULL,
-    quantity REAL NOT NULL DEFAULT 1,
-    unit_price REAL NOT NULL DEFAULT 0,
-    amount REAL NOT NULL DEFAULT 0,
-    FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_quotations_user ON quotations(user_id);
-  CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
-`);
-
-// Other Income (non-product revenue) for the Cash Flow dashboard.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS other_income (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    category TEXT,
-    txn_date TEXT,
-    amount REAL NOT NULL DEFAULT 0,
-    account TEXT,
-    remarks TEXT,
-    receipt_path TEXT,
-    verified INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_other_income_user ON other_income(user_id);
-`);
-
-// Integrated Kitchen Scheduling & Two-Tier Inventory System.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS kitchen_finished (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    sku TEXT NOT NULL,
-    quantity INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(user_id, sku),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS kitchen_raw (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    unit TEXT,
-    total_stock REAL NOT NULL DEFAULT 0,
-    allocated_stock REAL NOT NULL DEFAULT 0,
-    UNIQUE(user_id, name),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS kitchen_daily_orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    source TEXT DEFAULT 'manual',
-    customer TEXT,
-    sku TEXT NOT NULL,
-    quantity INTEGER NOT NULL DEFAULT 1,
-    status TEXT NOT NULL DEFAULT '無現貨 (Out of Stock)',
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS kitchen_batches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    flavor TEXT NOT NULL,
-    capacity TEXT NOT NULL,
-    brewing_date TEXT,
-    bottle_count INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'scheduled',
-    created_at TEXT DEFAULT (datetime('now')),
-    completed_at TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_kitchen_daily_user ON kitchen_daily_orders(user_id);
-  CREATE INDEX IF NOT EXISTS idx_kitchen_batches_user ON kitchen_batches(user_id);
-`);
-
-// Kitchen Prep (廚房備料系統) — stewing ingredient calculator.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    order_code TEXT NOT NULL,
-    linked_order_id INTEGER,
-    stewing_date TEXT NOT NULL,
-    order_type TEXT NOT NULL DEFAULT 'daily' CHECK(order_type IN ('daily', 'wedding')),
-    capacity TEXT NOT NULL DEFAULT '45g',
-    status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'in_prep', 'completed')),
-    qty_osmanthus INTEGER NOT NULL DEFAULT 0,
-    qty_red_date INTEGER NOT NULL DEFAULT 0,
-    qty_rock_sugar INTEGER NOT NULL DEFAULT 0,
-    notes TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (linked_order_id) REFERENCES orders(id) ON DELETE SET NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_kitchen_prep_user ON kitchen_prep_orders(user_id);
-  CREATE INDEX IF NOT EXISTS idx_kitchen_prep_date ON kitchen_prep_orders(user_id, stewing_date);
-`);
-
-const kitchenPrepCompletionCols = [
-  'expected_yield INTEGER',
-  'actual_yield INTEGER',
-  'completion_remarks TEXT',
-  'completed_at TEXT',
-  'completed_by TEXT',
-  'completion_splits_json TEXT',
-] as const;
-for (const col of kitchenPrepCompletionCols) {
-  try {
-    db.exec(`ALTER TABLE kitchen_prep_orders ADD COLUMN ${col}`);
-  } catch {
-    /* column exists */
-  }
-}
-
-// Inbound Shipment Tracker (到件紀錄) — arriving supplier shipments.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS inbound_shipments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    waybill_number TEXT,
-    sender TEXT,
-    arrival_date TEXT,
-    photo_path TEXT,
-    notes TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_inbound_shipments_user ON inbound_shipments(user_id);
-`);
-
-// Enforce uniqueness of receipt numbers per user (guarded so a boot never crashes).
-try {
-  db.exec(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_user_receipt_no ON expenses(user_id, receipt_no)'
-  );
-} catch (err) {
-  console.error('Could not create unique receipt_no index:', err);
-}
-
-// Tables for multiple receipt images per expense and user-managed dropdown options.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS expense_receipts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    expense_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    path TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_expense_receipts_expense ON expense_receipts(expense_id);
-
-  CREATE TABLE IF NOT EXISTS expense_options (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    value TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(user_id, type, value),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_expense_options_user ON expense_options(user_id, type);
-`);
-
-// Rental Income Management — unit leases + monthly rent records.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS rental_units (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    unit_name TEXT NOT NULL,
-    tenant_name TEXT NOT NULL,
-    tenant_phone TEXT,
-    tenant_email TEXT,
-    current_year_rent REAL NOT NULL DEFAULT 0,
-    previous_years_rent_json TEXT DEFAULT '[]',
-    lease_start_date TEXT,
-    lease_end_date TEXT,
-    due_date_day INTEGER NOT NULL DEFAULT 1,
-    auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
-    automation_enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    unit_id INTEGER NOT NULL,
-    billing_period TEXT NOT NULL,
-    base_rent REAL NOT NULL DEFAULT 0,
-    water_fee REAL NOT NULL DEFAULT 0,
-    electricity_fee REAL NOT NULL DEFAULT 0,
-    actual_amount REAL NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'overdue')),
-    paid_date TEXT,
-    invoice_ref TEXT,
-    receipt_ref TEXT,
-    receipt_image_path TEXT,
-    invoice_sent_at TEXT,
-    receipt_sent_at TEXT,
-    paid_at TEXT,
-    custom_invoice_note TEXT,
-    custom_receipt_note TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(user_id, unit_id, billing_period),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_payment_receipts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    rent_record_id INTEGER NOT NULL,
-    image_path TEXT NOT NULL,
-    extracted_method TEXT,
-    extracted_transfer_date TEXT,
-    extracted_receiving_account TEXT,
-    extracted_amount REAL,
-    extraction_source TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (rent_record_id) REFERENCES rental_records(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    unit_id INTEGER NOT NULL,
-    rent_record_id INTEGER,
-    action TEXT NOT NULL,
-    note TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_rental_units_user ON rental_units(user_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_records_user_period ON rental_records(user_id, billing_period);
-  CREATE INDEX IF NOT EXISTS idx_rental_records_unit ON rental_records(unit_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_receipts_record ON rental_payment_receipts(rent_record_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_activities_unit ON rental_activity_logs(unit_id);
-`);
-
-// Migrate existing rental_units / rental_records columns safely.
-{
-  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
-  if (!ruCols.includes('tenant_phone')) {
-    db.exec('ALTER TABLE rental_units ADD COLUMN tenant_phone TEXT');
-  }
-  const rrCols = (db.prepare('PRAGMA table_info(rental_records)').all() as { name: string }[]).map((c) => c.name);
-  for (const col of [
-    'base_rent REAL NOT NULL DEFAULT 0',
-    'water_fee REAL NOT NULL DEFAULT 0',
-    'electricity_fee REAL NOT NULL DEFAULT 0',
-    'paid_date TEXT',
-    'receipt_image_path TEXT',
-    'amount_paid REAL NOT NULL DEFAULT 0',
-    'water_period_from TEXT',
-    'water_period_to TEXT',
-    'electricity_period_from TEXT',
-    'electricity_period_to TEXT',
-    'base_rent_period_from TEXT',
-    'base_rent_period_to TEXT',
-  ]) {
-    const name = col.split(' ')[0];
-    if (!rrCols.includes(name)) {
-      try { db.exec(`ALTER TABLE rental_records ADD COLUMN ${col}`); } catch { /* exists */ }
-    }
-  }
-  if (!rrCols.includes('electricity_meter_json')) {
-    try { db.exec('ALTER TABLE rental_records ADD COLUMN electricity_meter_json TEXT'); } catch { /* exists */ }
-  }
-  if (!rrCols.includes('water_meter_json')) {
-    try { db.exec('ALTER TABLE rental_records ADD COLUMN water_meter_json TEXT'); } catch { /* exists */ }
-  }
-}
-
-// Rental ledger — tenants, charge line items, payments + manual allocations (parallel with rental_records).
-db.exec(`
-  CREATE TABLE IF NOT EXISTS rental_tenants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    phone TEXT,
-    email TEXT,
-    notes TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_charge_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    unit_id INTEGER NOT NULL,
-    billing_period TEXT NOT NULL,
-    charge_type TEXT NOT NULL CHECK(charge_type IN ('rent', 'water', 'electricity')),
-    amount_due REAL NOT NULL DEFAULT 0,
-    amount_allocated REAL NOT NULL DEFAULT 0,
-    legacy_record_id INTEGER,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(user_id, unit_id, billing_period, charge_type),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE,
-    FOREIGN KEY (legacy_record_id) REFERENCES rental_records(id) ON DELETE SET NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_payments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    tenant_id INTEGER NOT NULL,
-    payment_date TEXT NOT NULL,
-    amount REAL NOT NULL,
-    receipt_image_path TEXT,
-    method TEXT,
-    reference TEXT,
-    notes TEXT,
-    legacy_receipt_id INTEGER,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id) REFERENCES rental_tenants(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_payment_allocations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    payment_id INTEGER NOT NULL,
-    charge_item_id INTEGER NOT NULL,
-    amount REAL NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (payment_id) REFERENCES rental_payments(id) ON DELETE CASCADE,
-    FOREIGN KEY (charge_item_id) REFERENCES rental_charge_items(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_rental_tenants_user ON rental_tenants(user_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_charge_items_unit_period ON rental_charge_items(unit_id, billing_period);
-  CREATE INDEX IF NOT EXISTS idx_rental_charge_items_tenant_lookup ON rental_charge_items(user_id, unit_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_payments_tenant ON rental_payments(tenant_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_allocations_payment ON rental_payment_allocations(payment_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_allocations_charge ON rental_payment_allocations(charge_item_id);
-
-  CREATE TABLE IF NOT EXISTS rental_debit_note_seq (
-    user_id INTEGER NOT NULL,
-    note_month TEXT NOT NULL,
-    last_seq INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, note_month),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_debit_note_styles (
-    user_id INTEGER PRIMARY KEY,
-    styles_json TEXT NOT NULL,
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_leases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    unit_id INTEGER NOT NULL,
-    tenant_id INTEGER,
-    tenant_name TEXT NOT NULL,
-    tenant_phone TEXT,
-    tenant_email TEXT,
-    lease_start_date TEXT NOT NULL,
-    lease_end_date TEXT NOT NULL,
-    actual_end_date TEXT,
-    base_rent REAL NOT NULL DEFAULT 0,
-    due_date_day INTEGER NOT NULL DEFAULT 1,
-    deposit_amount REAL NOT NULL DEFAULT 0,
-    deposit_refund REAL,
-    deposit_deductions REAL NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'active',
-    end_reason TEXT,
-    end_notes TEXT,
-    auto_send_receipt_email INTEGER NOT NULL DEFAULT 0,
-    automation_enabled INTEGER NOT NULL DEFAULT 1,
-    is_current INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (unit_id) REFERENCES rental_units(id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id) REFERENCES rental_tenants(id) ON DELETE SET NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS rental_lease_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    lease_id INTEGER NOT NULL,
-    doc_type TEXT NOT NULL DEFAULT 'agreement',
-    file_path TEXT NOT NULL,
-    label TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (lease_id) REFERENCES rental_leases(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_rental_leases_unit ON rental_leases(unit_id);
-  CREATE INDEX IF NOT EXISTS idx_rental_leases_current ON rental_leases(unit_id, is_current);
-  CREATE INDEX IF NOT EXISTS idx_rental_lease_docs_lease ON rental_lease_documents(lease_id);
-
-  CREATE TABLE IF NOT EXISTS rental_document_templates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    template_key TEXT NOT NULL,
-    name TEXT NOT NULL,
-    payment_instructions TEXT NOT NULL DEFAULT '',
-    footer_remark TEXT NOT NULL DEFAULT '',
-    rent_invoice_note TEXT NOT NULL DEFAULT '',
-    company_json TEXT,
-    updated_at TEXT DEFAULT (datetime('now')),
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(user_id, template_key),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
-{
-  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
-  if (!ruCols.includes('tenant_id')) {
-    try { db.exec('ALTER TABLE rental_units ADD COLUMN tenant_id INTEGER REFERENCES rental_tenants(id)'); } catch { /* exists */ }
-  }
-}
-
-// Billing-item status (unpaid / partially_paid / paid) on rental_charge_items.
-{
-  const ciCols = (db.prepare('PRAGMA table_info(rental_charge_items)').all() as { name: string }[]).map((c) => c.name);
-  if (!ciCols.includes('status')) {
-    try {
-      db.exec(`ALTER TABLE rental_charge_items ADD COLUMN status TEXT NOT NULL DEFAULT 'unpaid'`);
-      db.exec(`
-        UPDATE rental_charge_items SET status = CASE
-          WHEN amount_due <= 0 THEN 'empty'
-          WHEN amount_allocated >= amount_due - 0.009 THEN 'paid'
-          WHEN amount_allocated > 0 THEN 'partially_paid'
-          ELSE 'unpaid'
-        END
-      `);
-    } catch { /* exists */ }
-  }
-  if (!ciCols.includes('tenant_id')) {
-    try {
-      db.exec(`ALTER TABLE rental_charge_items ADD COLUMN tenant_id INTEGER REFERENCES rental_tenants(id)`);
-      db.exec(`
-        UPDATE rental_charge_items SET tenant_id = (
-          SELECT tenant_id FROM rental_units WHERE rental_units.id = rental_charge_items.unit_id
-        )
-      `);
-      db.exec(`CREATE INDEX IF NOT EXISTS idx_rental_charge_items_tenant ON rental_charge_items(tenant_id)`);
-    } catch { /* exists */ }
-  }
-}
-
-// Per-tenant utility billing: tenant pays utilities directly vs company proxy-bills on debit note.
-{
-  const rtCols = (db.prepare('PRAGMA table_info(rental_tenants)').all() as { name: string }[]).map((c) => c.name);
-  if (!rtCols.includes('utility_billing_mode')) {
-    try {
-      db.exec(`ALTER TABLE rental_tenants ADD COLUMN utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'`);
-    } catch { /* exists */ }
-  }
-}
-
-// Per-unit utility billing (primary setting for debit notes / notices).
-{
-  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
-  if (!ruCols.includes('utility_billing_mode')) {
-    try {
-      db.exec(`ALTER TABLE rental_units ADD COLUMN utility_billing_mode TEXT NOT NULL DEFAULT 'company_proxy'`);
-      db.exec(`
-        UPDATE rental_units SET utility_billing_mode = COALESCE(
-          (SELECT utility_billing_mode FROM rental_tenants WHERE rental_tenants.id = rental_units.tenant_id),
-          'company_proxy'
-        )
-        WHERE tenant_id IS NOT NULL
-      `);
-    } catch { /* exists */ }
-  }
-  if (!ruCols.includes('address')) {
-    try { db.exec('ALTER TABLE rental_units ADD COLUMN address TEXT'); } catch { /* exists */ }
-  }
-  if (!ruCols.includes('billing_company')) {
-    try { db.exec('ALTER TABLE rental_units ADD COLUMN billing_company TEXT'); } catch { /* exists */ }
-  }
-  try {
-    db.exec(`UPDATE rental_units SET utility_billing_mode = 'company_shared_meter' WHERE utility_billing_mode = 'company_proxy'`);
-    db.exec(`UPDATE rental_tenants SET utility_billing_mode = 'company_shared_meter' WHERE utility_billing_mode = 'company_proxy'`);
-    db.exec(`
-      UPDATE rental_units SET utility_billing_mode = 'company_sub_meter'
-      WHERE LOWER(TRIM(unit_name)) IN ('stock room 1', 'stock room 2')
-    `);
-  } catch { /* migration */ }
-}
-
-// Backfill rental_tenants from legacy tenant_name and sync charge items from rental_records.
-{
-  const unitsNeedingTenant = db.prepare(
-    `SELECT id, user_id, tenant_name, tenant_phone, tenant_email
-     FROM rental_units WHERE tenant_id IS NULL AND tenant_name IS NOT NULL AND tenant_name <> ''`
-  ).all() as { id: number; user_id: number; tenant_name: string; tenant_phone: string | null; tenant_email: string | null }[];
-
-  const findTenant = db.prepare(
-    `SELECT id FROM rental_tenants WHERE user_id = ? AND name = ? COLLATE NOCASE LIMIT 1`
-  );
-  const insertTenant = db.prepare(
-    `INSERT INTO rental_tenants (user_id, name, phone, email) VALUES (?, ?, ?, ?)`
-  );
-  const linkUnit = db.prepare(`UPDATE rental_units SET tenant_id = ? WHERE id = ?`);
-
-  const backfillTenants = db.transaction(() => {
-    for (const u of unitsNeedingTenant) {
-      let tenantId = (findTenant.get(u.user_id, u.tenant_name) as { id: number } | undefined)?.id;
-      if (!tenantId) {
-        const res = insertTenant.run(u.user_id, u.tenant_name.trim(), u.tenant_phone || null, u.tenant_email || null);
-        tenantId = Number(res.lastInsertRowid);
-      }
-      linkUnit.run(tenantId, u.id);
-    }
-  });
-  if (unitsNeedingTenant.length) backfillTenants();
-
-  const records = db.prepare('SELECT * FROM rental_records').all() as {
-    id: number; user_id: number; unit_id: number; billing_period: string;
-    base_rent: number; water_fee: number; electricity_fee: number; amount_paid: number;
-  }[];
-
-  const upsertCharge = db.prepare(
-    `INSERT INTO rental_charge_items (user_id, unit_id, billing_period, charge_type, amount_due, amount_allocated, legacy_record_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, unit_id, billing_period, charge_type) DO UPDATE SET
-       amount_due = excluded.amount_due,
-       legacy_record_id = excluded.legacy_record_id,
-       updated_at = datetime('now')`
-  );
-  const setAllocated = db.prepare(
-    `UPDATE rental_charge_items SET amount_allocated = ?, updated_at = datetime('now') WHERE id = ?`
-  );
-
-  const syncRecords = db.transaction(() => {
-    for (const rec of records) {
-      const charges: [string, number][] = [
-        ['rent', rec.base_rent || 0],
-        ['water', rec.water_fee || 0],
-        ['electricity', rec.electricity_fee || 0],
-      ];
-      const itemIds: { type: string; id: number; due: number }[] = [];
-      for (const [type, due] of charges) {
-        upsertCharge.run(rec.user_id, rec.unit_id, rec.billing_period, type, due, 0, rec.id);
-        const row = db.prepare(
-          `SELECT id, amount_due FROM rental_charge_items
-           WHERE user_id = ? AND unit_id = ? AND billing_period = ? AND charge_type = ?`
-        ).get(rec.user_id, rec.unit_id, rec.billing_period, type) as { id: number; amount_due: number };
-        itemIds.push({ type, id: row.id, due: row.amount_due });
-      }
-      const manualAlloc = (db.prepare(
-        `SELECT COALESCE(SUM(a.amount), 0) AS total
-         FROM rental_payment_allocations a
-         JOIN rental_charge_items c ON c.id = a.charge_item_id
-         WHERE c.legacy_record_id = ?`
-      ).get(rec.id) as { total: number }).total;
-      if (manualAlloc > 0) {
-        const byItem = db.prepare(
-          `SELECT c.id, COALESCE(SUM(a.amount), 0) AS allocated
-           FROM rental_charge_items c
-           LEFT JOIN rental_payment_allocations a ON a.charge_item_id = c.id
-           WHERE c.legacy_record_id = ?
-           GROUP BY c.id`
-        ).all(rec.id) as { id: number; allocated: number }[];
-        for (const row of byItem) setAllocated.run(row.allocated, row.id);
-      } else {
-        let remaining = rec.amount_paid || 0;
-        for (const item of itemIds) {
-          const alloc = Math.min(remaining, item.due);
-          setAllocated.run(alloc, item.id);
-          remaining -= alloc;
-        }
-      }
-    }
-  });
-  if (records.length) syncRecords();
-}
-
-// Backfill rental_leases from existing units (one current lease per unit).
-{
-  const ruCols = (db.prepare('PRAGMA table_info(rental_units)').all() as { name: string }[]).map((c) => c.name);
-  if (!ruCols.includes('current_lease_id')) {
-    try { db.exec('ALTER TABLE rental_units ADD COLUMN current_lease_id INTEGER REFERENCES rental_leases(id)'); } catch { /* exists */ }
-  }
-
-  const unitsNeedingLease = db.prepare(
-    `SELECT u.* FROM rental_units u
-     WHERE NOT EXISTS (SELECT 1 FROM rental_leases l WHERE l.unit_id = u.id AND l.is_current = 1)`
-  ).all() as {
-    id: number; user_id: number; tenant_name: string; tenant_phone: string | null; tenant_email: string | null;
-    current_year_rent: number; lease_start_date: string | null; lease_end_date: string | null;
-    due_date_day: number; auto_send_receipt_email: number; automation_enabled: number; tenant_id: number | null;
-  }[];
-
-  const insertLease = db.prepare(
-    `INSERT INTO rental_leases
-      (user_id, unit_id, tenant_id, tenant_name, tenant_phone, tenant_email,
-       lease_start_date, lease_end_date, base_rent, due_date_day,
-       auto_send_receipt_email, automation_enabled, is_current, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active')`
-  );
-  const linkUnit = db.prepare(
-    `UPDATE rental_units SET current_lease_id = ?, updated_at = datetime('now') WHERE id = ?`
-  );
-
-  const backfillLeases = db.transaction(() => {
-    for (const u of unitsNeedingLease) {
-      const name = (u.tenant_name || '').trim();
-      if (!name) continue;
-      const start = u.lease_start_date || new Date().toISOString().slice(0, 10);
-      const end = u.lease_end_date || start;
-      const res = insertLease.run(
-        u.user_id, u.id, u.tenant_id ?? null, name,
-        u.tenant_phone || null, u.tenant_email || null,
-        start, end, u.current_year_rent || 0, u.due_date_day || 1,
-        u.auto_send_receipt_email ? 1 : 0, u.automation_enabled !== 0 ? 1 : 0,
-      );
-      linkUnit.run(Number(res.lastInsertRowid), u.id);
-    }
-  });
-  if (unitsNeedingLease.length) backfillLeases();
-}
-
-// Backfill: move any single receipt_path into the expense_receipts table once.
-const legacyReceipts = db
-  .prepare(
-    `SELECT e.id, e.user_id, e.receipt_path
-     FROM expenses e
-     WHERE e.receipt_path IS NOT NULL AND e.receipt_path <> ''
-       AND NOT EXISTS (SELECT 1 FROM expense_receipts r WHERE r.expense_id = e.id)`
-  )
-  .all() as { id: number; user_id: number; receipt_path: string }[];
-
-if (legacyReceipts.length) {
-  const insert = db.prepare(
-    'INSERT INTO expense_receipts (expense_id, user_id, path) VALUES (?, ?, ?)'
-  );
-  const migrate = db.transaction(() => {
-    for (const r of legacyReceipts) insert.run(r.id, r.user_id, r.receipt_path);
-  });
-  migrate();
-}
-
-// Recycle bin — deleted records kept for 60 days before permanent purge.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS deleted_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    label TEXT NOT NULL,
-    summary TEXT,
-    payload TEXT NOT NULL,
-    deleted_at TEXT DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_deleted_records_user ON deleted_records(user_id);
-  CREATE INDEX IF NOT EXISTS idx_deleted_records_expires ON deleted_records(expires_at);
-`);
-
-try {
-  db.prepare("DELETE FROM deleted_records WHERE expires_at < datetime('now')").run();
-} catch {
-  /* table may not exist on first boot before exec above — ignore */
-}
-
-// User roles + per-role section permissions.
-{
-  const userCols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
-  if (!userCols.some((c) => c.name === 'role')) {
-    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
-    db.exec("UPDATE users SET role = 'admin' WHERE role IS NULL OR role = ''");
-  }
-  if (!userCols.some((c) => c.name === 'owner_user_id')) {
-    db.exec('ALTER TABLE users ADD COLUMN owner_user_id INTEGER REFERENCES users(id)');
-    db.exec('UPDATE users SET owner_user_id = id WHERE owner_user_id IS NULL');
-  }
-}
-
-// Track who uploaded each expense (for operator-scoped visibility).
-{
-  const expenseCols = db.prepare('PRAGMA table_info(expenses)').all() as { name: string }[];
-  if (!expenseCols.some((c) => c.name === 'created_by_user_id')) {
-    db.exec('ALTER TABLE expenses ADD COLUMN created_by_user_id INTEGER REFERENCES users(id)');
-    db.exec('UPDATE expenses SET created_by_user_id = user_id WHERE created_by_user_id IS NULL');
-  }
-  if (!expenseCols.some((c) => c.name === 'special_notes')) {
-    db.exec('ALTER TABLE expenses ADD COLUMN special_notes TEXT');
-  }
-  if (!expenseCols.some((c) => c.name === 'supplier_input')) {
-    db.exec('ALTER TABLE expenses ADD COLUMN supplier_input TEXT');
-  }
-  if (!expenseCols.some((c) => c.name === 'payment_channel')) {
-    db.exec('ALTER TABLE expenses ADD COLUMN payment_channel TEXT');
-  }
-  if (!expenseCols.some((c) => c.name === 'funding_source')) {
-    db.exec('ALTER TABLE expenses ADD COLUMN funding_source TEXT');
-  }
-  if (!expenseCols.some((c) => c.name === 'card_last4')) {
-    db.exec('ALTER TABLE expenses ADD COLUMN card_last4 TEXT');
-  }
-}
-
-// Global parent Batch ID sequence (EXP-0000001, never resets).
-db.exec(`
-  CREATE TABLE IF NOT EXISTS expense_report_sequence (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    next_serial INTEGER NOT NULL DEFAULT 1
-  );
-  INSERT OR IGNORE INTO expense_report_sequence (id, next_serial) VALUES (1, 1);
-`);
-{
-  const maxReportRow = db
-    .prepare(
-      `SELECT batch_id FROM expenses
-       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
-       ORDER BY batch_id DESC LIMIT 1`,
-    )
-    .get() as { batch_id: string } | undefined;
-  if (maxReportRow?.batch_id) {
-    const n = parseInt(maxReportRow.batch_id.slice(4), 10);
-    if (Number.isFinite(n) && n >= 1) {
-      db.prepare(
-        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
-      ).run(n + 1);
-    }
-  }
-  const legacyMaxRow = db
-    .prepare(
-      `SELECT batch_id FROM expenses
-       WHERE batch_id GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]'
-         AND batch_id NOT GLOB 'EXP-[0-9][0-9][0-9][0-9][0-9][0-9]-*'
-       ORDER BY batch_id DESC LIMIT 1`,
-    )
-    .get() as { batch_id: string } | undefined;
-  if (legacyMaxRow?.batch_id) {
-    const n = parseInt(legacyMaxRow.batch_id.slice(4), 10);
-    if (Number.isFinite(n) && n >= 1) {
-      db.prepare(
-        'UPDATE expense_report_sequence SET next_serial = MAX(next_serial, ?) WHERE id = 1',
-      ).run(n + 1);
-    }
-  }
-}
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS role_permissions (
-    role TEXT NOT NULL,
-    section TEXT NOT NULL,
-    allowed INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (role, section)
-  );
-`);
-
-// Seed default operator/accountant permissions once.
-{
-  const permCount = (db.prepare('SELECT COUNT(*) as c FROM role_permissions').get() as { c: number }).c;
-  if (permCount === 0) {
-    const defaults: Record<string, Record<string, boolean>> = {
-      operator: {
-        dashboard: true, quotations: true, invoices: true, orders: true, inbound: true,
-        kitchen: true, kitchen_prep: true, rentals: false, expenses: true, accounting: false,
-        cashflow: false, scan_table: true, customers: true, trash: false, admin: false,
-      },
-      accountant: {
-        dashboard: true, quotations: true, invoices: true, orders: false, inbound: false,
-        kitchen: false, kitchen_prep: false, rentals: true, expenses: true, accounting: true,
-        cashflow: true, scan_table: true, customers: true, trash: true, admin: false,
-      },
-    };
-    const insert = db.prepare(
-      'INSERT INTO role_permissions (role, section, allowed) VALUES (?, ?, ?)'
+  const url = process.env.DATABASE_URL?.trim();
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL is required. Start Postgres (see docker-compose.yml) and set DATABASE_URL in .env.local.'
     );
-    const seed = db.transaction(() => {
-      for (const [role, sections] of Object.entries(defaults)) {
-        for (const [section, allowed] of Object.entries(sections)) {
-          insert.run(role, section, allowed ? 1 : 0);
-        }
-      }
+  }
+  return url;
+}
+
+function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: databaseUrl(),
+      max: Number(process.env.PG_POOL_MAX || 10),
+      ssl: process.env.PGSSLMODE === 'disable' ? undefined : undefined,
     });
-    seed();
+    pool.on('error', (err) => {
+      console.error('[InvoiceFlow] Postgres pool error:', err);
+    });
+  }
+  return pool;
+}
+
+function client(): Queryable {
+  return txStorage.getStore() ?? getPool();
+}
+
+/** Convert SQLite `?` placeholders to Postgres `$1…$n`. */
+export function convertPlaceholders(sql: string): string {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+
+/** Light dialect fixes for SQL written for SQLite. */
+export function adaptSql(sql: string): string {
+  let out = sql;
+  out = out.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
+  // Append ON CONFLICT DO NOTHING only when not already present and it's INSERT OR IGNORE style —
+  // handled at call sites / via insertIgnore helper. For raw adapted strings that still say OR IGNORE:
+  out = out.replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, "to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')");
+  out = out.replace(/\bexcluded\./gi, 'EXCLUDED.');
+  out = out.replace(/\s+COLLATE\s+NOCASE\b/gi, '');
+  // SQLite IFNULL → Postgres COALESCE
+  out = out.replace(/\bIFNULL\s*\(/gi, 'COALESCE(');
+  // SQLite allows MAX(a,b); Postgres needs GREATEST for scalar max.
+  out = out.replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
+  return out;
+}
+
+function needsConflictDoNothing(originalSql: string): boolean {
+  return /INSERT\s+OR\s+IGNORE\s+INTO/i.test(originalSql);
+}
+
+export interface RunResult {
+  lastInsertRowid: number | bigint;
+  changes: number;
+}
+
+const NO_RETURNING_TABLES = new Set([
+  'expense_option_settings',
+  'expense_report_sequence',
+  'global_record_sequences',
+  'rental_debit_note_seq',
+  'rental_debit_note_styles',
+  'integration_tokens',
+  'hub_order_sequences',
+  'integration_sync_state',
+  'integration_settings',
+  'app_migrations',
+  'role_permissions',
+  'kitchen_settings',
+]);
+
+function insertTableName(sql: string): string | null {
+  const m = sql.match(/INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+export class PgStatement {
+  constructor(private readonly originalSql: string) {}
+
+  private prepared(): { text: string; returningId: boolean } {
+    let sql = adaptSql(this.originalSql);
+    const insertIgnore = needsConflictDoNothing(this.originalSql);
+    if (insertIgnore && !/ON\s+CONFLICT/i.test(sql)) {
+      sql = sql.replace(/;?\s*$/, '') + ' ON CONFLICT DO NOTHING';
+    }
+    const isInsert = /^\s*INSERT\b/i.test(sql);
+    const hasReturning = /\bRETURNING\b/i.test(sql);
+    const table = insertTableName(sql);
+    let returningId = false;
+    if (
+      isInsert &&
+      !hasReturning &&
+      !insertIgnore &&
+      table &&
+      !NO_RETURNING_TABLES.has(table)
+    ) {
+      sql = sql.replace(/;?\s*$/, '') + ' RETURNING id';
+      returningId = true;
+    }
+    return { text: convertPlaceholders(sql), returningId };
+  }
+
+  async get<T extends QueryResultRow = QueryResultRow>(
+    ...params: unknown[]
+  ): Promise<T | undefined> {
+    await ensureSchema();
+    const { text } = this.prepared();
+    const res = await client().query<T>(text, params);
+    return res.rows[0];
+  }
+
+  async all<T extends QueryResultRow = QueryResultRow>(...params: unknown[]): Promise<T[]> {
+    await ensureSchema();
+    const { text } = this.prepared();
+    const res = await client().query<T>(text, params);
+    return res.rows;
+  }
+
+  async run(...params: unknown[]): Promise<RunResult> {
+    await ensureSchema();
+    const { text, returningId } = this.prepared();
+    const res = await client().query(text, params);
+    const id = returningId && res.rows[0] && 'id' in res.rows[0] ? Number(res.rows[0].id) : 0;
+    return {
+      lastInsertRowid: id,
+      changes: res.rowCount ?? 0,
+    };
   }
 }
 
-// Grant operators view access to invoices, quotations, and expenses.
-{
-  const upsert = db.prepare(
-    `INSERT INTO role_permissions (role, section, allowed) VALUES ('operator', ?, 1)
-     ON CONFLICT(role, section) DO UPDATE SET allowed = 1`
-  );
-  for (const section of ['invoices', 'quotations', 'expenses']) {
-    upsert.run(section);
-  }
+async function loadSchemaSql(): Promise<string> {
+  const schemaPath = path.join(process.cwd(), 'src', 'lib', 'pg-schema.sql');
+  return fs.readFileSync(schemaPath, 'utf8');
 }
 
-// Per-company debit note style templates (label / elite).
-{
-  const styleCols = (db.prepare('PRAGMA table_info(rental_debit_note_styles)').all() as { name: string }[]).map((c) => c.name);
-  if (!styleCols.includes('company_key')) {
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS rental_debit_note_styles_v2 (
-          user_id INTEGER NOT NULL,
-          company_key TEXT NOT NULL,
-          styles_json TEXT NOT NULL,
-          updated_at TEXT DEFAULT (datetime('now')),
-          PRIMARY KEY (user_id, company_key),
-          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-      `);
-      const legacy = db.prepare('SELECT user_id, styles_json FROM rental_debit_note_styles').all() as {
-        user_id: number; styles_json: string;
-      }[];
-      const insert = db.prepare(
-        `INSERT OR IGNORE INTO rental_debit_note_styles_v2 (user_id, company_key, styles_json) VALUES (?, ?, ?)`
-      );
-      for (const row of legacy) {
-        insert.run(row.user_id, 'label', row.styles_json);
-        insert.run(row.user_id, 'elite', row.styles_json);
+/**
+ * Split a SQL script into statements so each can autocommit separately.
+ * Running the whole pg-schema.sql as one Query holds AccessExclusiveLock across
+ * many tables until the end — concurrent SELECTs that join those tables deadlock
+ * (e.g. invoices ↔ reconciliation_records).
+ */
+export function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let i = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let dollarTag: string | null = null;
+
+  while (i < sql.length) {
+    const c = sql[i];
+    const next = sql[i + 1];
+
+    if (inLineComment) {
+      buf += c;
+      if (c === '\n') inLineComment = false;
+      i += 1;
+      continue;
+    }
+    if (inBlockComment) {
+      buf += c;
+      if (c === '*' && next === '/') {
+        buf += '/';
+        i += 2;
+        inBlockComment = false;
+        continue;
       }
-      db.exec('DROP TABLE rental_debit_note_styles');
-      db.exec('ALTER TABLE rental_debit_note_styles_v2 RENAME TO rental_debit_note_styles');
-    } catch (err) {
-      console.error('rental_debit_note_styles migration:', err);
+      i += 1;
+      continue;
     }
+    if (dollarTag !== null) {
+      if (c === '$' && sql.startsWith(dollarTag, i)) {
+        buf += dollarTag;
+        i += dollarTag.length;
+        dollarTag = null;
+        continue;
+      }
+      buf += c;
+      i += 1;
+      continue;
+    }
+    if (inSingle) {
+      buf += c;
+      if (c === "'" && next === "'") {
+        buf += next;
+        i += 2;
+        continue;
+      }
+      if (c === "'") inSingle = false;
+      i += 1;
+      continue;
+    }
+    if (inDouble) {
+      buf += c;
+      if (c === '"') inDouble = false;
+      i += 1;
+      continue;
+    }
+
+    if (c === '-' && next === '-') {
+      buf += c + next;
+      i += 2;
+      inLineComment = true;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      buf += c + next;
+      i += 2;
+      inBlockComment = true;
+      continue;
+    }
+    if (c === "'") {
+      buf += c;
+      inSingle = true;
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      buf += c;
+      inDouble = true;
+      i += 1;
+      continue;
+    }
+    if (c === '$') {
+      const rest = sql.slice(i);
+      const m = rest.match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/);
+      if (m) {
+        dollarTag = m[0];
+        buf += dollarTag;
+        i += dollarTag.length;
+        continue;
+      }
+    }
+    if (c === ';') {
+      const stmt = buf.trim();
+      if (stmt) out.push(stmt);
+      buf = '';
+      i += 1;
+      continue;
+    }
+    buf += c;
+    i += 1;
+  }
+  const tail = buf.trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+async function tableNumbersAlreadyNormalized(
+  conn: PoolClient,
+  sql: string,
+): Promise<boolean> {
+  const row = (await conn.query<{ total: number; valid: number; distinct: number }>(sql)).rows[0];
+  const total = Number(row?.total || 0);
+  const valid = Number(row?.valid || 0);
+  const distinct = Number(row?.distinct || 0);
+  return total === valid && total === distinct;
+}
+
+async function applyUnifiedNumberingConstraints(conn: PoolClient): Promise<void> {
+  await conn.query(`ALTER TABLE orders ALTER COLUMN reference_number SET NOT NULL`);
+  await conn.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_reference_number_format`);
+  await conn.query(`
+    ALTER TABLE orders
+    ADD CONSTRAINT orders_reference_number_format CHECK (reference_number ~ '^ORD-[0-9]{7}$')
+  `);
+  await conn.query(`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_number_format`);
+  await conn.query(`
+    ALTER TABLE invoices
+    ADD CONSTRAINT invoices_number_format CHECK (invoice_number ~ '^[0-9]{8}$')
+  `);
+  await conn.query(`ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_number_format`);
+  await conn.query(`
+    ALTER TABLE quotations
+    ADD CONSTRAINT quotations_number_format CHECK (quote_number ~ '^[0-9]{8}$')
+  `);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reference_number ON orders(reference_number)`);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number_global ON invoices(invoice_number)`);
+  await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_number_global ON quotations(quote_number)`);
+}
+
+async function migrateUnifiedRecordNumberingOnce(): Promise<void> {
+  const conn = await getPool().connect();
+  try {
+    await conn.query('BEGIN');
+    await conn.query(`SELECT pg_advisory_xact_lock(72910421)`);
+    const done = await conn.query<{ key: string }>(
+      `SELECT key FROM app_migrations WHERE key = 'unified_global_record_numbering_v1'`,
+    );
+    if (done.rows.length) {
+      await conn.query('COMMIT');
+      return;
+    }
+
+    const ordersNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE reference_number ~ '^ORD-[0-9]{7}$')::int AS valid,
+              COUNT(DISTINCT reference_number)::int AS distinct
+       FROM orders`,
+    );
+    const invoicesNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE invoice_number ~ '^[0-9]{8}$')::int AS valid,
+              COUNT(DISTINCT invoice_number)::int AS distinct
+       FROM invoices`,
+    );
+    const quotesNormalized = await tableNumbersAlreadyNormalized(
+      conn,
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE quote_number ~ '^[0-9]{8}$')::int AS valid,
+              COUNT(DISTINCT quote_number)::int AS distinct
+       FROM quotations`,
+    );
+
+    let maxInvoice = 0;
+    let maxQuote = 0;
+    let orderSerial = 1;
+
+    if (invoicesNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(invoice_number AS INTEGER)) AS m FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'`,
+      );
+      maxInvoice = Number(maxRow.rows[0]?.m || 0);
+    }
+    if (quotesNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(quote_number AS INTEGER)) AS m FROM quotations WHERE quote_number ~ '^[0-9]{8}$'`,
+      );
+      maxQuote = Number(maxRow.rows[0]?.m || 0);
+    }
+    if (ordersNormalized) {
+      const maxRow = await conn.query<{ m: string | null }>(
+        `SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) AS m
+         FROM orders WHERE reference_number ~ '^ORD-[0-9]{7}$'`,
+      );
+      orderSerial = Number(maxRow.rows[0]?.m || 0) + 1;
+    }
+
+    // Numbers already unique and in the office format: do not re-stamp ORD-0000001…
+    // (that UPDATE collides with live rows when the migration key is missing).
+    if (!invoicesNormalized || !quotesNormalized || !ordersNormalized) {
+    await conn.query(`
+      UPDATE invoices
+      SET external_invoice_number = invoice_number
+      WHERE external_invoice_number IS NULL
+        AND (source_platform <> 'manual' OR invoice_number !~ '^[0-9]+$')
+    `);
+
+    if (!invoicesNormalized) {
+    const invoiceRows = await conn.query<{
+      id: number;
+      invoice_number: string;
+      created_at: string;
+    }>(`SELECT id, invoice_number, created_at FROM invoices ORDER BY created_at, id`);
+    const invoiceNumbers = assignLegacyDocumentNumbers(
+      invoiceRows.rows.map((row) => ({ id: row.id, value: row.invoice_number, created_at: row.created_at })),
+    );
+    await conn.query(`UPDATE invoices SET invoice_number = '__legacy_invoice_' || id`);
+    for (const [id, serial] of Array.from(invoiceNumbers.entries())) {
+      maxInvoice = Math.max(maxInvoice, serial);
+      await conn.query(`UPDATE invoices SET invoice_number = $1 WHERE id = $2`, [
+        String(serial).padStart(8, '0'),
+        id,
+      ]);
+    }
+    }
+
+    if (!quotesNormalized) {
+    const quoteRows = await conn.query<{
+      id: number;
+      quote_number: string;
+      created_at: string;
+    }>(`SELECT id, quote_number, created_at FROM quotations ORDER BY created_at, id`);
+    const quoteNumbers = assignLegacyDocumentNumbers(
+      quoteRows.rows.map((row) => ({ id: row.id, value: row.quote_number, created_at: row.created_at })),
+    );
+    await conn.query(`UPDATE quotations SET quote_number = '__legacy_quote_' || id`);
+    for (const [id, serial] of Array.from(quoteNumbers.entries())) {
+      maxQuote = Math.max(maxQuote, serial);
+      await conn.query(`UPDATE quotations SET quote_number = $1 WHERE id = $2`, [
+        String(serial).padStart(8, '0'),
+        id,
+      ]);
+    }
+    }
+
+    if (!ordersNormalized) {
+    const orderRows = await conn.query<{ id: number }>(
+      `SELECT id FROM orders ORDER BY created_at, id`,
+    );
+    orderSerial = 1;
+    for (const row of orderRows.rows) {
+      await conn.query(`UPDATE orders SET reference_number = $1 WHERE id = $2`, [
+        `ORD-${String(orderSerial).padStart(7, '0')}`,
+        row.id,
+      ]);
+      orderSerial += 1;
+    }
+    }
+    }
+
+    const linkedQuotes = await conn.query<{
+      id: number;
+      fields_json: string | null;
+      quote_number: string;
+    }>(
+      `SELECT o.id, o.fields_json, q.quote_number
+       FROM orders o
+       JOIN quotations q ON q.id = o.quotation_id`,
+    );
+    for (const row of linkedQuotes.rows) {
+      let fields: Record<string, unknown> = {};
+      try {
+        fields = row.fields_json ? JSON.parse(row.fields_json) : {};
+      } catch {
+        fields = {};
+      }
+      fields.quotation_no = row.quote_number;
+      await conn.query(`UPDATE orders SET fields_json = $1 WHERE id = $2`, [
+        JSON.stringify(fields),
+        row.id,
+      ]);
+    }
+
+    await conn.query(`
+      INSERT INTO global_record_sequences (record_type, next_serial)
+      VALUES ('order', $1), ('quotation', $2), ('invoice', $3)
+      ON CONFLICT (record_type) DO UPDATE
+      SET next_serial = GREATEST(global_record_sequences.next_serial, EXCLUDED.next_serial)
+    `, [orderSerial, maxQuote + 1, maxInvoice + 1]);
+
+    await applyUnifiedNumberingConstraints(conn);
+    await conn.query(
+      `INSERT INTO app_migrations (key) VALUES ('unified_global_record_numbering_v1') ON CONFLICT DO NOTHING`,
+    );
+    await conn.query('COMMIT');
+  } catch (error) {
+    await conn.query('ROLLBACK');
+    throw error;
+  } finally {
+    conn.release();
   }
 }
 
-  dbInstance = db;
-  return dbInstance;
+async function migrateOrderStatusesV2Once(): Promise<void> {
+  const conn = await getPool().connect();
+  try {
+    await conn.query('BEGIN');
+    await conn.query(`SELECT pg_advisory_xact_lock(72910422)`);
+    const done = await conn.query<{ key: string }>(
+      `SELECT key FROM app_migrations WHERE key = 'order_status_workflow_v2'`,
+    );
+    if (done.rows.length) {
+      await conn.query('COMMIT');
+      return;
+    }
+
+    // Product decision: reset every existing order into the new workflow at OPEN.
+    await conn.query(`UPDATE orders SET status = 'OPEN'`);
+    await conn.query(`ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'OPEN'`);
+    await conn.query(
+      `INSERT INTO app_migrations (key) VALUES ('order_status_workflow_v2') ON CONFLICT DO NOTHING`,
+    );
+    await conn.query('COMMIT');
+  } catch (error) {
+    await conn.query('ROLLBACK');
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
-const db: Database.Database = new Proxy({} as Database.Database, {
-  get(_target, prop) {
-    const instance = initializeDatabase();
-    const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
-    if (typeof value === 'function') {
-      return (value as (...args: unknown[]) => unknown).bind(instance);
+async function syncGlobalRecordSequences(): Promise<void> {
+  // Align counters to the highest issued number in each table. Using GREATEST()
+  // only (never lowering) let Vitest fixtures (ORD-99999xx) inflate next_serial
+  // permanently after the fixture rows were deleted.
+  await getPool().query(`
+    INSERT INTO global_record_sequences (record_type, next_serial)
+    VALUES
+      ('order', COALESCE((SELECT MAX(CAST(SUBSTR(reference_number, 5) AS INTEGER)) + 1 FROM orders WHERE reference_number ~ '^ORD-[0-9]{7}$'), 1)),
+      ('quotation', COALESCE((SELECT MAX(CAST(quote_number AS INTEGER)) + 1 FROM quotations WHERE quote_number ~ '^[0-9]{8}$'), 1)),
+      ('invoice', COALESCE((SELECT MAX(CAST(invoice_number AS INTEGER)) + 1 FROM invoices WHERE invoice_number ~ '^[0-9]{8}$'), 1))
+    ON CONFLICT (record_type) DO UPDATE
+    SET next_serial = EXCLUDED.next_serial
+  `);
+}
+
+async function runBootDataFixes(): Promise<void> {
+  await migrateUnifiedRecordNumberingOnce();
+  await migrateOrderStatusesV2Once();
+  // Keep counters aligned with live max on boot (also heals inflated test counters).
+  await syncGlobalRecordSequences();
+
+  // Sequence MAX scans once per DB (not every process cold start).
+  const migSeq = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'boot_sequence_sync_once_v1'`
+  );
+  if (!migSeq.rows.length) {
+    await syncGlobalRecordSequences();
+    await client().query(`
+      INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    const maxRow = await client().query<{ m: string | null }>(`
+      SELECT MAX(CAST(SUBSTR(batch_id, 5) AS INTEGER)) AS m
+      FROM expenses
+      WHERE batch_id IS NOT NULL AND batch_id LIKE 'EXP-%' AND LENGTH(batch_id) >= 5
+    `);
+    const maxSerial = Number(maxRow.rows[0]?.m || 0);
+    if (maxSerial > 0) {
+      await client().query(
+        `UPDATE expense_report_sequence SET next_serial = GREATEST(next_serial, $1) WHERE id = 1`,
+        [maxSerial + 1]
+      );
     }
-    return value;
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('boot_sequence_sync_once_v1') ON CONFLICT DO NOTHING`
+    );
+  } else {
+    await client().query(`
+      INSERT INTO expense_report_sequence (id, next_serial) VALUES (1, 1)
+      ON CONFLICT (id) DO NOTHING
+    `);
+  }
+
+  // Normalize utility billing mode labels (idempotent).
+  await client().query(`
+    UPDATE rental_units SET utility_billing_mode = 'company_shared_meter'
+    WHERE utility_billing_mode = 'company_proxy'
+  `);
+  await client().query(`
+    UPDATE rental_tenants SET utility_billing_mode = 'company_shared_meter'
+    WHERE utility_billing_mode = 'company_proxy'
+  `);
+
+  // Purge expired trash.
+  await client().query(`DELETE FROM deleted_records WHERE expires_at < to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')`);
+
+  // Fix legacy permission section key (hyphen → underscore).
+  await client().query(`
+    UPDATE role_permissions SET section = 'kitchen_prep'
+    WHERE section = 'kitchen-prep'
+  `);
+  // Drop obsolete role seeds (staff/viewer) and unused admin rows from the old boot path.
+  await client().query(`DELETE FROM role_permissions WHERE role IN ('staff', 'viewer', 'admin')`);
+
+  // Column must exist before any role_permissions insert/select uses access_level.
+  await client().query(
+    `ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'none'`,
+  );
+
+  // One-time backfill from legacy allowed flag.
+  const migAccessLevel = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'role_permissions_access_level_v1'`,
+  );
+  if (!migAccessLevel.rows.length) {
+    await client().query(`UPDATE role_permissions SET access_level = 'none' WHERE allowed = 0`);
+    await client().query(
+      `UPDATE role_permissions SET access_level = 'read'
+       WHERE allowed = 1 AND role = 'operator' AND section IN ('invoices', 'quotations')`,
+    );
+    await client().query(
+      `UPDATE role_permissions SET access_level = 'write'
+       WHERE allowed = 1 AND access_level = 'none'`,
+    );
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('role_permissions_access_level_v1')`,
+    );
+  }
+
+  // Role permissions: seed missing rows only; runtime access always reads role_permissions table.
+  const { ensureRolePermissionRows } = await import('./permissions-server');
+  await ensureRolePermissionRows();
+
+  // Store wall-clock timestamps in Asia/Hong_Kong (existing DBs still had UTC column defaults).
+  const migHkt = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'timestamp_defaults_asia_hong_kong_v1'`
+  );
+  if (!migHkt.rows.length) {
+    const hktDefault = `(to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))`;
+    const alters: [string, string][] = [
+      ['kitchen_movements', 'created_at'],
+      ['kitchen_prep_orders', 'created_at'],
+      ['kitchen_prep_orders', 'updated_at'],
+      ['kitchen_settings', 'updated_at'],
+      ['kitchen_order_fulfillments', 'updated_at'],
+      ['activity_logs', 'created_at'],
+    ];
+    for (const [table, col] of alters) {
+      await client().query(
+        `ALTER TABLE ${table} ALTER COLUMN ${col} SET DEFAULT ${hktDefault}`
+      );
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('timestamp_defaults_asia_hong_kong_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Allow kitchen_prep_orders.status = inactive (one-time constraint refresh).
+  const mig = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_status_inactive'`
+  );
+  if (!mig.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_status_check
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_status_check
+        CHECK (status IN ('inactive', 'scheduled', 'in_prep', 'completed'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_inactive') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Kitchen prep status v2: not_started / scheduled / prepped / stewing / completed.
+  const migPrepStatusV2 = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_status_v2'`
+  );
+  if (!migPrepStatusV2.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_status_check
+    `);
+    await client().query(`
+      UPDATE kitchen_prep_orders SET status = 'not_started' WHERE status = 'inactive'
+    `);
+    await client().query(`
+      UPDATE kitchen_prep_orders SET status = 'stewing' WHERE status = 'in_prep'
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_status_check
+        CHECK (status IN ('not_started', 'scheduled', 'prepped', 'stewing', 'completed'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_status_v2') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Allow kitchen_prep_orders.order_type = restock (補充存貨).
+  const migType = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'kitchen_prep_order_type_restock'`
+  );
+  if (!migType.rows.length) {
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_order_type_check
+    `);
+    await client().query(`
+      ALTER TABLE kitchen_prep_orders
+        ADD CONSTRAINT kitchen_prep_orders_order_type_check
+        CHECK (order_type IN ('daily', 'wedding', 'restock'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('kitchen_prep_order_type_restock') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Reconciliation approval workflow: Pending Approval + confidence / suggestion columns.
+  const migRecon = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_approval_workflow_v1'`
+  );
+  if (!migRecon.rows.length) {
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_status_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_status_check
+        CHECK (status IN ('Unmatched', 'Pending Approval', 'Matched', 'Discrepancy'))
+    `);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS confidence TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_order_id INTEGER`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS suggested_invoice_id INTEGER`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS candidate_order_ids_json TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_by TEXT`);
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS approved_at TEXT`);
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_confidence_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_confidence_check
+        CHECK (confidence IS NULL OR confidence IN ('high', 'medium'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_approval_workflow_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Manual payment entry: source=manual + receipt_path.
+  const migReconManual = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_manual_entry_v1'`
+  );
+  if (!migReconManual.rows.length) {
+    await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS receipt_path TEXT`);
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_source_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_source_check
+        CHECK (source IN ('yedpay', 'bank_upload', 'manual'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_manual_entry_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE reconciliation_records ADD COLUMN IF NOT EXISTS created_by TEXT`);
+
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_osmanthus INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_red_date INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS actual_qty_rock_sugar INTEGER`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS stewing_started_at TEXT`);
+
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_osmanthus TEXT DEFAULT 'large'`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_red_date TEXT DEFAULT 'large'`);
+  await client().query(`ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS bird_nest_rock_sugar TEXT DEFAULT 'large'`);
+
+  // Extra manual payment methods: 現金 / 支票 / 銀行轉帳.
+  const migReconMethods = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'reconciliation_payment_methods_v2'`
+  );
+  if (!migReconMethods.rows.length) {
+    await client().query(`
+      ALTER TABLE reconciliation_records DROP CONSTRAINT IF EXISTS reconciliation_records_payment_method_check
+    `);
+    await client().query(`
+      ALTER TABLE reconciliation_records
+        ADD CONSTRAINT reconciliation_records_payment_method_check
+        CHECK (payment_method IN ('Yedpay', 'FPS', 'Payme', '現金', '支票', '銀行轉帳'))
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('reconciliation_payment_methods_v2') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Drop unused legacy kitchen/order activity tables (replaced by gift-box movements + activity_logs).
+  const migDropLegacy = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'drop_legacy_kitchen_and_order_activities_v1'`
+  );
+  if (!migDropLegacy.rows.length) {
+    await client().query(`DROP TABLE IF EXISTS order_activities CASCADE`);
+    await client().query(`DROP TABLE IF EXISTS kitchen_daily_orders CASCADE`);
+    await client().query(`DROP TABLE IF EXISTS kitchen_batches CASCADE`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('drop_legacy_kitchen_and_order_activities_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  // Needed for rental charge upsert ON CONFLICT; ignore if duplicate rows already exist.
+  const migChargeUnique = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'rental_charge_items_upsert_unique_v1'`
+  );
+  if (!migChargeUnique.rows.length) {
+    try {
+      await client().query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rental_charge_items_upsert
+        ON rental_charge_items(user_id, unit_id, billing_period, charge_type)
+      `);
+    } catch (err) {
+      console.error('[InvoiceFlow] Could not create rental_charge_items unique index:', err);
+    }
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('rental_charge_items_upsert_unique_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  const migCustomersSchema = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'customers_simplified_schema_v1'`
+  );
+
+  // Idempotent every boot — columns must exist before API queries / filtered index.
+  await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name TEXT`);
+  await client().query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ordered TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS company_name TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS contact_name TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_contact_name TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_company_name TEXT`);
+  await client().query(`ALTER TABLE rental_tenants ADD COLUMN IF NOT EXISTS address TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_address TEXT`);
+  await client().query(`ALTER TABLE rental_units ADD COLUMN IF NOT EXISTS tenant_notes TEXT`);
+  await client().query(
+    `CREATE INDEX IF NOT EXISTS idx_customers_user_ordered ON customers(user_id, ordered)`
+  );
+
+  if (!migCustomersSchema.rows.length) {
+    const cityCol = await client().query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'city'`
+    );
+    if (cityCol.rows.length) {
+      await client().query(`
+        UPDATE customers SET address = trim(both from concat_ws(', ',
+          nullif(trim(address), ''), nullif(trim(city), ''),
+          nullif(trim(state), ''), nullif(trim(zip), '')))
+        WHERE city IS NOT NULL OR state IS NOT NULL OR zip IS NOT NULL
+      `);
+    }
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS city`);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS state`);
+    await client().query(`ALTER TABLE customers DROP COLUMN IF EXISTS zip`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('customers_simplified_schema_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  const migDropLineItemServiceDate = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'drop_line_item_service_date_v1'`
+  );
+  if (!migDropLineItemServiceDate.rows.length) {
+    await client().query(`ALTER TABLE invoice_items DROP COLUMN IF EXISTS service_date`);
+    await client().query(`ALTER TABLE quotation_items DROP COLUMN IF EXISTS service_date`);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('drop_line_item_service_date_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS quotation_id INTEGER`);
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deposit_amount DOUBLE PRECISION`);
+  await client().query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER`);
+  await client().query(`ALTER TABLE quotations ADD COLUMN IF NOT EXISTS thumbnail_file_id INTEGER`);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_invoices_quotation ON invoices(quotation_id)
+    WHERE quotation_id IS NOT NULL
+  `);
+
+  const { migrateCustomerDedupOnce } = await import('./customer-server');
+  await migrateCustomerDedupOnce();
+
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT`);
+  await client().query(`ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT`);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user_kitchen_type ON orders(user_id, order_type)
+    WHERE order_type IS NOT NULL
+  `);
+
+  const migOrderType = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_order_type_column_v1'`
+  );
+  if (!migOrderType.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET order_type = NULLIF(TRIM(fields_json::jsonb->>'order_type'), '')
+      WHERE order_type IS NULL
+        AND fields_json IS NOT NULL
+        AND btrim(fields_json) <> ''
+        AND fields_json::jsonb ? 'order_type'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_order_type_column_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS attended_at TEXT`);
+  const migAttended = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_attended_at_backfill_v1'`
+  );
+  if (!migAttended.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET attended_at = COALESCE(NULLIF(TRIM(created_at), ''), to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))
+      WHERE attended_at IS NULL
+        AND source_platform IS NOT NULL
+        AND source_platform <> 'manual'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_attended_at_backfill_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  const { migrateNestieeGiftBoxQtysOnce } = await import('./nestiee-gift-box-server');
+  await migrateNestieeGiftBoxQtysOnce();
+}
+
+export async function ensureSchema(): Promise<void> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return;
+  // Nested call from boot helpers (e.g. seedRolePermissionsIfEmpty → db.prepare) must not
+  // await the in-flight schemaReady promise — that deadlocks login and every first DB use.
+  if (schemaBootAls.getStore()) {
+    return;
+  }
+  if (!schemaReady) {
+    schemaReady = schemaBootAls
+      .run(true, async () => {
+        const sql = await loadSchemaSql();
+        // Autocommit each statement so AccessExclusiveLock is released between ALTERs.
+        // A single multi-statement Query holds locks across invoices + reconciliation_records
+        // and deadlocks concurrent JOINs (Postgres 40P01).
+        for (const stmt of splitSqlStatements(sql)) {
+          await getPool().query(stmt);
+        }
+        await runBootDataFixes();
+        warnIfEphemeralReceiptStorage();
+        warnIfR2Misconfigured();
+      })
+      .catch((err) => {
+        schemaReady = null;
+        throw err;
+      });
+  }
+  await schemaReady;
+}
+
+const db = {
+  prepare(sql: string) {
+    return new PgStatement(sql);
   },
-});
+
+  async exec(sql: string): Promise<void> {
+    await ensureSchema();
+    const adapted = adaptSql(sql);
+    await client().query(adapted);
+  },
+
+  /**
+   * Async transaction. Call as: `await db.transaction(async () => { ... })`
+   * (unlike better-sqlite3 which returned a runner function).
+   */
+  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    await ensureSchema();
+    const existing = txStorage.getStore();
+    if (existing) {
+      return fn();
+    }
+    const conn = await getPool().connect();
+    try {
+      await conn.query('BEGIN');
+      const result = await txStorage.run(conn, fn);
+      await conn.query('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await conn.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    } finally {
+      conn.release();
+    }
+  },
+};
 
 export default db;
+export { getPool };

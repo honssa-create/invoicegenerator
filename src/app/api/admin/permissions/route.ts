@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireApiAdmin } from '@/lib/api-guard';
-import { PERMISSION_SECTIONS, USER_ROLES, ROLE_LABELS, type PermissionSection, type UserRole } from '@/lib/permissions';
+import { PERMISSION_SECTIONS, USER_ROLES, ROLE_LABELS, type PermissionSection, type SectionAccessLevel, type UserRole } from '@/lib/permissions';
 import { getPermissionMatrix, saveRolePermissions } from '@/lib/permissions-server';
 import { refreshSessionCookie } from '@/lib/auth';
 
@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (session instanceof NextResponse) return session;
 
   return NextResponse.json({
-    matrix: getPermissionMatrix(),
+    matrix: await getPermissionMatrix(),
     sections: PERMISSION_SECTIONS,
     roles: USER_ROLES.filter((r) => r !== 'admin'),
     role_labels: ROLE_LABELS,
@@ -24,7 +24,7 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const { role, permissions } = body as {
       role: UserRole;
-      permissions: Partial<Record<PermissionSection, boolean>>;
+      permissions: Partial<Record<PermissionSection, SectionAccessLevel>>;
     };
 
     if (!role || role === 'admin') {
@@ -34,10 +34,10 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
-    saveRolePermissions(role, permissions);
+    await saveRolePermissions(role, permissions);
     await refreshSessionCookie(session.userId);
 
-    return NextResponse.json({ matrix: getPermissionMatrix() });
+    return NextResponse.json({ matrix: await getPermissionMatrix() });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to save permissions';
     return NextResponse.json({ error: message }, { status: 400 });

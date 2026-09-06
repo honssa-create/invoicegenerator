@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
-import { resolveHubOwnerUserId } from '@/lib/hub-server';
+import { listHubCronOwnerUserIds } from '@/lib/hub-server';
 import { syncAllWooStores, syncQuickBooksInvoices, syncClickUpTasks, isQuickBooksConnected } from '@/lib/hub-sync';
 import { clickupConfigured } from '@/lib/integration-settings-server';
 import { getWooStoreConfigs } from '@/lib/woocommerce';
@@ -57,15 +57,23 @@ async function handle(request: Request) {
     await markSentInvoicesOverdue(null);
   }
 
-  let ownerId: number;
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
-    ownerId = await resolveHubOwnerUserId();
-  } else {
-    const session = await getSessionFromRequest(request);
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    ownerId = await getDataOwnerId(session);
+    const ownerIds = await listHubCronOwnerUserIds();
+    const results = [];
+    for (const ownerId of ownerIds) {
+      results.push(await runHubSyncForOwner(ownerId));
+    }
+    return NextResponse.json({
+      user_id: results[0]?.user_id ?? null,
+      owners: ownerIds,
+      results,
+      errors: results.flatMap((r) => r.errors),
+    });
   }
 
+  const session = await getSessionFromRequest(request);
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const ownerId = await getDataOwnerId(session);
   const result = await runHubSyncForOwner(ownerId);
   return NextResponse.json(result);
 }

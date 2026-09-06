@@ -148,6 +148,39 @@ describe('summarizeNestieeOrderStatusCounts', () => {
     expect(counts.processing).toBe(0);
     expect(counts.completed).toBe(0);
   });
+
+  it('filters processing/completed by delivery date when dateFilterType is delivery_date', () => {
+    const orders = [
+      {
+        status: 'processing',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-05' },
+      },
+      {
+        status: 'processing',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE, due_date: '2026-09-09' },
+      },
+      {
+        status: 'completed',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE, client_delivery_date: '2026-09-08' },
+      },
+      {
+        status: 'completed',
+        created_at: '2026-01-01',
+        fields: { order_type: NESTIEE_ORDER_TYPE, client_delivery_date: '2026-09-10' },
+      },
+    ];
+    const counts = summarizeNestieeOrderStatusCounts(orders, {
+      dateStart: '2026-09-05',
+      dateEnd: '2026-09-08',
+      dateFilterType: 'delivery_date',
+      today: '2026-09-06',
+    });
+    expect(counts.processing).toBe(1);
+    expect(counts.completed).toBe(1);
+  });
 });
 
 describe('orderMatchesNestieeShippedToday', () => {

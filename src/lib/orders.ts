@@ -282,13 +282,24 @@ export function orderListPaymentStatus(o: Pick<Order, 'fields' | 'total_amount'>
 /**
  * Calendar / list date for an order: property-bar `due_date`, falling back to
  * shipment `client_delivery_date` (客人收貨日期) — the two stay linked in the UI.
+ * Nestiee orders also fall back to Woo/EPO delivery options in `nestiee_lines`.
  * Returns YYYY-MM-DD when parseable.
  */
-export function orderDueDate(o: { fields?: Record<string, unknown> }): string | null {
+export function orderDueDate(o: {
+  fields?: Record<string, unknown>;
+  created_at?: string | null;
+}): string | null {
   const due = typeof o.fields?.due_date === 'string' ? o.fields.due_date : '';
   const ship =
     typeof o.fields?.client_delivery_date === 'string' ? o.fields.client_delivery_date : '';
-  return normalizeOrderDueDate(due) || normalizeOrderDueDate(ship);
+  const fromFields = normalizeOrderDueDate(due) || normalizeOrderDueDate(ship);
+  if (fromFields) return fromFields;
+
+  const orderType = orderTypeFromFields(o.fields);
+  if (!isNestieeOrderType(orderType)) return null;
+  const lines = getNestieeLines(o.fields || {});
+  const fromLines = parseNestieeReceiptDateFromDeliveryOptions(lines, o.created_at, null);
+  return fromLines || null;
 }
 
 /** Read linked due / 客人收貨日期 (YYYY-MM-DD or empty). */

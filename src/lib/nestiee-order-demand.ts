@@ -117,7 +117,7 @@ export function orderMatchesNestieeShipToday(
   });
 }
 
-/** Delivery window for the status-summary 「四日內要出貨」 card (today inclusive). */
+/** Delivery window for the status-summary 「今日需要出貨訂單」 card (today inclusive). */
 export function nestieeShipWithinDaysDateRange(
   today: string = localDateYmd(),
   withinDays: number = NESTIEE_STATUS_SHIP_WITHIN_DAYS,

@@ -203,7 +203,7 @@ export default function NestieeProcessingDashboard({
             loading={loading}
           />
           <DemandCard
-            label={bi('Due to ship within 4 days', '四日內要出貨')}
+            label={bi('Orders to ship today', '今日需要出貨訂單')}
             qty={statusCounts.shipWithinDays}
             loading={loading}
           />

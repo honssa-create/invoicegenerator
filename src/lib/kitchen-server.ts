@@ -1036,6 +1036,27 @@ export type AllocateRemainingResult =
   | { ok: true; allocated: boolean; summary?: string }
   | { ok: false; shortages: KitchenShortage[] };
 
+export type KitchenShipTransitionAllocResult = AllocateRemainingResult & {
+  triggered: boolean;
+};
+
+/** Run gift-box / bottle auto-allocation when status crosses into shipped. */
+export async function tryAllocateKitchenOnShipTransition(
+  ownerId: number,
+  actorId: number,
+  orderId: number,
+  before: { status: string; fields: Record<string, unknown> },
+  after: { status: string; fields: Record<string, unknown> },
+): Promise<KitchenShipTransitionAllocResult> {
+  const wasShipped = isOrderShipped({ status: before.status, fields: before.fields });
+  const willBeShipped = isOrderShipped({ status: after.status, fields: after.fields });
+  if (wasShipped || !willBeShipped) {
+    return { ok: true, allocated: false, triggered: false };
+  }
+  const result = await tryAllocateRemainingForOrder(ownerId, actorId, orderId);
+  return { ...result, triggered: true };
+}
+
 /**
  * Deduct remaining Nestiee gift boxes / 回禮 bottles for an order.
  * No writes when stock is short. No-op for other order types or fully allocated orders.

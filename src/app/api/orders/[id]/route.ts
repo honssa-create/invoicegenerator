@@ -6,9 +6,9 @@ import { getOrder, logActivity } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
-import { isOrderShipped, isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
+import { isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
-import { tryAllocateRemainingForOrder } from '@/lib/kitchen-server';
+import { tryAllocateKitchenOnShipTransition } from '@/lib/kitchen-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 import { cleanupReplacedOrderPaymentReceipts } from '@/lib/stored-file-cleanup';
@@ -122,18 +122,23 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     let kitchenAllocatedSummary: string | undefined;
     if ('status' in core && typeof core.status === 'string' && core.status && core.status !== existing.status) {
-      let fieldsForShip: Record<string, unknown> = {};
+      let fieldsBeforeShip: Record<string, unknown> = {};
       try {
-        fieldsForShip = existing.fields_json ? JSON.parse(existing.fields_json) : {};
+        fieldsBeforeShip = existing.fields_json ? JSON.parse(existing.fields_json) : {};
       } catch {
-        fieldsForShip = {};
+        fieldsBeforeShip = {};
       }
+      let fieldsForShip = fieldsBeforeShip;
       if (mergedFields) fieldsForShip = mergedFields;
-      const wasShipped = isOrderShipped({ status: existing.status, fields: fieldsForShip });
-      const willBeShipped = isOrderShipped({ status: core.status, fields: fieldsForShip });
-      if (!wasShipped && willBeShipped && !skipKitchenAllocation) {
-        const alloc = await tryAllocateRemainingForOrder(ownerId, session.userId, Number(params.id));
-        if (!alloc.ok) {
+      if (!skipKitchenAllocation) {
+        const alloc = await tryAllocateKitchenOnShipTransition(
+          ownerId,
+          session.userId,
+          Number(params.id),
+          { status: existing.status, fields: fieldsBeforeShip },
+          { status: core.status, fields: fieldsForShip },
+        );
+        if (alloc.triggered && !alloc.ok) {
           return NextResponse.json(
             {
               kitchen_shortage: true,
@@ -143,7 +148,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
             { status: 409 },
           );
         }
-        if (alloc.allocated) kitchenAllocatedSummary = alloc.summary;
+        if (alloc.ok && alloc.allocated && alloc.summary) kitchenAllocatedSummary = alloc.summary;
       }
     }
 

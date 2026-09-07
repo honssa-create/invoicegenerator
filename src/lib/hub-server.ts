@@ -39,6 +39,8 @@ import {
 import { getOrder } from './order-server';
 import { trySyncCustomerFromOrderRecord } from './customer-server';
 import { getWooStoreConfigs } from './woocommerce';
+import { tryAllocateKitchenOnShipTransition } from './kitchen-server';
+import { logActivity } from './activity';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -115,6 +117,40 @@ async function syncCustomerAfterHubOrder(userId: number, orderId: number): Promi
   if (order) await trySyncCustomerFromOrderRecord(userId, order);
 }
 
+async function applyHubShipKitchenAllocation(
+  userId: number,
+  orderId: number,
+  before: { status: string; fields: Record<string, unknown> },
+  after: { status: string; fields: Record<string, unknown> },
+): Promise<void> {
+  const alloc = await tryAllocateKitchenOnShipTransition(userId, userId, orderId, before, after);
+  if (!alloc.triggered) return;
+  if (alloc.ok && alloc.allocated) {
+    await logActivity(
+      'order',
+      orderId,
+      userId,
+      'activity',
+      'System',
+      'auto-allocated kitchen stock on ship (Woo sync)',
+    );
+    return;
+  }
+  if (!alloc.ok) {
+    const detail = alloc.shortages
+      .map((s) => `${s.label}: need ${s.need}, have ${s.have}`)
+      .join('; ');
+    await logActivity(
+      'order',
+      orderId,
+      userId,
+      'activity',
+      'System',
+      `Woo sync: kitchen stock short — could not auto-allocate (${detail})`,
+    );
+  }
+}
+
 /** Upsert external order — never deletes local rows. */
 export async function upsertHubOrder(
   userId: number,
@@ -126,7 +162,7 @@ export async function upsertHubOrder(
   };
   const existing = await db
     .prepare(
-      `SELECT id, system_order_no, fields_json, notes, shipping_address FROM orders
+      `SELECT id, system_order_no, fields_json, notes, shipping_address, status FROM orders
        WHERE user_id = ? AND source_platform = ? AND original_order_id = ?`
     )
     .get(userId, input.source_platform, input.original_order_id) as
@@ -136,8 +172,19 @@ export async function upsertHubOrder(
         fields_json: string | null;
         notes: string | null;
         shipping_address: string | null;
+        status: string | null;
       }
     | undefined;
+
+  const previousStatus = existing?.status ?? '';
+  let previousFields: Record<string, unknown> = {};
+  if (existing?.fields_json) {
+    try {
+      previousFields = JSON.parse(existing.fields_json) || {};
+    } catch {
+      previousFields = {};
+    }
+  }
 
   let fields: Record<string, unknown> = {};
   if (existing?.fields_json) {
@@ -393,6 +440,13 @@ export async function upsertHubOrder(
       userId
     );
     await syncCustomerAfterHubOrder(userId, existing.id);
+    await applyHubShipKitchenAllocation(userId, existing.id, {
+      status: previousStatus,
+      fields: previousFields,
+    }, {
+      status: input.status,
+      fields,
+    });
     return {
       id: existing.id,
       inserted: false,
@@ -434,6 +488,13 @@ export async function upsertHubOrder(
 
   const orderId = Number(result.lastInsertRowid);
   await syncCustomerAfterHubOrder(userId, orderId);
+  await applyHubShipKitchenAllocation(userId, orderId, {
+    status: '',
+    fields: {},
+  }, {
+    status: input.status,
+    fields,
+  });
 
   return {
     id: orderId,

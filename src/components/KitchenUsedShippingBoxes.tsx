@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import DateSelectSheet from '@/components/DateSelectSheet';
+import DateFilterField from '@/components/DateFilterField';
 import {
   NESTIEE_DATE_FILTER_TYPES,
   NESTIEE_SHIPPING_BOX_SLOTS,
@@ -9,7 +9,6 @@ import {
   type NestieeDateFilterType,
   type NestieeUsedShippingBoxesSummary,
 } from '@/lib/nestiee-order-demand';
-import { localDateYmd } from '@/lib/orders';
 import { tapProps } from '@/lib/tap-action';
 import { FILTER, bi } from '@/lib/ui-labels';
 
@@ -25,59 +24,19 @@ type ShippingInventoryRow = {
   needed: number;
 };
 
-function monthStartYmd(): string {
-  const today = localDateYmd();
-  return `${today.slice(0, 8)}01`;
-}
-
-function UsedDateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const fieldCls =
-    'w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-lg text-sm text-left focus:ring-2 focus:ring-brand-500 outline-none';
-  return (
-    <div className="flex flex-col min-w-0">
-      <span className="text-[11px] font-medium text-gray-500 mb-1">{label}</span>
-      <button
-        type="button"
-        className={`${fieldCls} ${value ? 'text-gray-900' : 'text-gray-400'}`}
-        {...tapProps(() => setOpen(true))}
-      >
-        {value || bi('Any date', '不限日期')}
-      </button>
-      {open && (
-        <DateSelectSheet
-          title={label}
-          value={value}
-          onApply={(ymd) => {
-            onChange(ymd);
-            setOpen(false);
-          }}
-          onClose={() => setOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
 function shortfallClass(shortfall: number): string {
   return shortfall > 0 ? 'text-red-600 font-semibold' : 'text-green-600';
 }
 
 export default function KitchenUsedShippingBoxes() {
-  const [dateStart, setDateStart] = useState(monthStartYmd);
-  const [dateEnd, setDateEnd] = useState(localDateYmd);
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
   const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('order_date');
   const [summary, setSummary] = useState<NestieeUsedShippingBoxesSummary | null>(null);
   const [shippingInventory, setShippingInventory] = useState<ShippingInventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const hasDateFilter = Boolean(dateStart || dateEnd);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -143,17 +102,22 @@ export default function KitchenUsedShippingBoxes() {
         <p className="text-xs text-gray-500 shrink-0">
           {loading
             ? bi('Loading…', '載入中…')
-            : bi(
-                `${summary?.orderCount ?? 0} shipped order(s) in range`,
-                `日期範圍內 ${summary?.orderCount ?? 0} 張已出貨訂單`,
-              )}
+            : hasDateFilter
+              ? bi(
+                  `${summary?.orderCount ?? 0} shipped order(s) in range`,
+                  `日期範圍內 ${summary?.orderCount ?? 0} 張已出貨訂單`,
+                )
+              : bi(
+                  `${summary?.orderCount ?? 0} shipped order(s)`,
+                  `${summary?.orderCount ?? 0} 張已出貨訂單`,
+                )}
         </p>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-4">
         <div className="grid grid-cols-2 gap-3 sm:contents">
-          <UsedDateField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
-          <UsedDateField label={FILTER.endDate} value={dateEnd} onChange={setDateEnd} />
+          <DateFilterField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
+          <DateFilterField label={FILTER.endDate} value={dateEnd} onChange={setDateEnd} />
         </div>
         <div
           className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm self-start"

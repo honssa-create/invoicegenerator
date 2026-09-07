@@ -192,7 +192,7 @@ export default function KitchenPage() {
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
-  const [stockExpanded, setStockExpanded] = useState(false);
+  const [stockExpanded, setStockExpanded] = useState(true);
   const [ordersExpanded, setOrdersExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -382,6 +382,11 @@ export default function KitchenPage() {
   useEffect(() => {
     void loadInitial();
   }, []);
+  useEffect(() => {
+    if (state && stockExpanded) {
+      void ensureInventory();
+    }
+  }, [state, stockExpanded]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4500);
@@ -1047,7 +1052,7 @@ export default function KitchenPage() {
         <KitchenProductionSchedule />
       </div>
 
-      {/* Inventory — collapsed by default; fetches stock on first expand */}
+      {/* Inventory — expanded by default */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
         <button
           type="button"

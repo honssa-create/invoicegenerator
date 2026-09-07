@@ -90,8 +90,8 @@ export async function ingestWooOrders(
         return day >= dateRange.dateFrom && day <= dateRange.dateTo;
       })
     : orders;
-  // Honour/cupmoka skip Woo checkout drafts. Nestiee only keeps pending /
-  // processing / shipped / completed (unmapped statuses are dropped).
+  // Honour/cupmoka skip Woo checkout drafts. Nestiee drops unmapped statuses
+  // (cancelled/refunded/draft); on-hold and wc-shipped are mapped in mapNestieeWooStatus.
   const rows = dateRows.filter((order) => {
     if (isWooDraftOrder(order.status)) return false;
     if (platform === 'nestiee') return mapNestieeWooStatus(order.status) != null;

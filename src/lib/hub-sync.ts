@@ -28,9 +28,53 @@ import {
   type WooOrder,
 } from './woocommerce';
 import type { HubImportDateRange } from './hub-import';
-import { orderCreatedInRange } from './hub-import';
-import { wooOrderCreatedBounds } from './hub-import';
+import {
+  orderCreatedInRange,
+  rollingHubImportDateRange,
+  subtractDaysFromIsoTimestamp,
+  wooOrderCreatedBounds,
+} from './hub-import';
 import { normalizeCustomerName } from './customer-name';
+
+/** Re-fetch Woo orders modified within this many days before last sync (overlap). */
+export const HUB_WOO_SYNC_MODIFIED_OVERLAP_DAYS = 7;
+
+/**
+ * Nestiee incremental cron also re-fetches orders by date_created so orders that were
+ * skipped (e.g. unmapped Woo status) but never modified in Woo can still be imported.
+ */
+export const NESTIEE_WOO_CREATED_CATCHUP_DAYS = 90;
+
+function dedupeWooOrdersById(orders: WooOrder[]): WooOrder[] {
+  const byId = new Map<number, WooOrder>();
+  for (const order of orders) byId.set(order.id, order);
+  return Array.from(byId.values());
+}
+
+async function fetchWooOrdersForIncrementalSync(
+  store: WooStoreConfig,
+  lastSync: string | null,
+): Promise<WooOrder[]> {
+  if (!lastSync) {
+    return await fetchWooOrders(store, {});
+  }
+
+  const modifiedAfter = subtractDaysFromIsoTimestamp(lastSync, HUB_WOO_SYNC_MODIFIED_OVERLAP_DAYS);
+  const modifiedOrders = await fetchWooOrders(store, { modifiedAfter });
+
+  if (store.platform !== 'nestiee' || NESTIEE_WOO_CREATED_CATCHUP_DAYS <= 0) {
+    return modifiedOrders;
+  }
+
+  const catchupRange = rollingHubImportDateRange(NESTIEE_WOO_CREATED_CATCHUP_DAYS);
+  const bounds = wooOrderCreatedBounds(catchupRange);
+  const createdOrders = await fetchWooOrders(store, {
+    createdAfter: bounds.after,
+    createdBefore: bounds.before,
+    dateRange: catchupRange,
+  });
+  return dedupeWooOrdersById([...modifiedOrders, ...createdOrders]);
+}
 
 export async function syncWooStore(
   userId: number,
@@ -58,7 +102,7 @@ export async function syncWooStore(
         dateRange,
       });
     } else {
-      orders = await fetchWooOrders(store, { modifiedAfter: lastSync || undefined });
+      orders = await fetchWooOrdersForIncrementalSync(store, lastSync);
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : 'fetch failed');

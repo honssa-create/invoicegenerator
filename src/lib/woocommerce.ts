@@ -182,7 +182,9 @@ export function mapWooStatus(status: string): string {
 
 /**
  * Nestiee Woo statuses → InvoiceFlow ecommerce status set.
- * Only exact Woo statuses are imported; anything else is dropped at ingest.
+ * Unmapped statuses (draft, cancelled, refunded, etc.) are dropped at ingest.
+ * `on-hold` and `wc-shipped` are common on nestiee.com.hk — map them so Hub sync
+ * does not silently skip orders that never match the core Woo status slugs.
  */
 export function mapNestieeWooStatus(status: string): string | null {
   const normalized = String(status || '').trim().toLowerCase();
@@ -190,10 +192,14 @@ export function mapNestieeWooStatus(status: string): string | null {
     case 'pending':
       return 'pending payment';
     case 'processing':
+    case 'on-hold':
       return 'processing';
     case 'shipped':
+    case 'wc-shipped':
       return 'shipped';
     case 'completed':
+    case 'delivered':
+    case 'wc-delivered':
       return 'completed';
     default:
       return null;

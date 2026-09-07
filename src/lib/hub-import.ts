@@ -11,6 +11,22 @@ export function isIsoDate(value: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
+/** Woo order ids / numbers from a Hub import field (`10667, 10997`). */
+export function parseHubImportOrderNumbers(raw: unknown): string[] {
+  const text = Array.isArray(raw)
+    ? raw.map((v) => String(v ?? '').trim()).join(',')
+    : String(raw ?? '');
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of text.split(/[\s,;]+/)) {
+    const n = part.trim();
+    if (!n || !/^\d{1,12}$/.test(n) || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
 export function parseHubImportDateRange(input: {
   date_from?: string | null;
   date_to?: string | null;

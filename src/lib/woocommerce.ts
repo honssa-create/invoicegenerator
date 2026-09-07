@@ -79,11 +79,12 @@ const STORE_META: Array<{
 async function wooApiGet(
   store: WooStoreConfig,
   storeUrl: string,
-  query: URLSearchParams
+  query: URLSearchParams,
+  path = 'orders'
 ): Promise<{ ok: boolean; status: number; body: string }> {
   // Query-string auth: SiteGround WAF returns HTML 403 for Basic Auth on /wp-json.
   appendWooQueryAuth(query, store.consumerKey, store.consumerSecret);
-  const url = `${storeUrl}/wp-json/wc/v3/orders?${query.toString()}`;
+  const url = `${storeUrl}/wp-json/wc/v3/${path}?${query.toString()}`;
   const res = await fetch(url, {
     headers: wooRequestHeaders(),
     cache: 'no-store',
@@ -390,4 +391,61 @@ export async function fetchWooOrders(
     createdBefore: options?.createdBefore,
     perPage: options?.perPage,
   });
+}
+
+function parseWooOrderMaybe(body: string, platform: string): WooOrder | null {
+  const parsed = parseWooApiJson<WooOrder | WooOrder[]>(body, platform);
+  if (Array.isArray(parsed)) return parsed[0] || null;
+  if (parsed && typeof parsed === 'object' && typeof (parsed as WooOrder).id === 'number') {
+    return parsed as WooOrder;
+  }
+  return null;
+}
+
+/** Fetch one Woo order by REST id, then by exact `number` search. */
+export async function fetchWooOrderByIdOrNumber(
+  store: WooStoreConfig,
+  idOrNumber: string
+): Promise<WooOrder | null> {
+  const token = String(idOrNumber || '').trim();
+  if (!token) return null;
+  const normalized = normalizeWooStoreUrl(store.storeUrl);
+  if (!normalized.ok) {
+    throw new Error(`${store.platform}: ${normalized.error}`);
+  }
+
+  if (/^\d+$/.test(token)) {
+    const byId = await wooApiGet(store, normalized.url, new URLSearchParams(), `orders/${token}`);
+    if (byId.ok) {
+      const order = parseWooOrderMaybe(byId.body, store.platform);
+      if (order) return order;
+    } else if (byId.status !== 404) {
+      throw new Error(wooApiErrorMessage(byId.status, byId.body, store.platform));
+    }
+  }
+
+  const params = new URLSearchParams();
+  params.set('search', token);
+  params.set('per_page', '20');
+  const res = await wooApiGet(store, normalized.url, params);
+  if (!res.ok) {
+    throw new Error(wooApiErrorMessage(res.status, res.body, store.platform));
+  }
+  const batch = parseWooOrderBatch(res.body, store.platform);
+  return batch.find((o) => String(o.number) === token || String(o.id) === token) || null;
+}
+
+export async function fetchWooOrdersByNumbers(
+  store: WooStoreConfig,
+  numbers: string[]
+): Promise<WooOrder[]> {
+  const out: WooOrder[] = [];
+  const seen = new Set<number>();
+  for (const raw of numbers) {
+    const order = await fetchWooOrderByIdOrNumber(store, raw);
+    if (!order || seen.has(order.id)) continue;
+    seen.add(order.id);
+    out.push(order);
+  }
+  return out;
 }

@@ -16,7 +16,7 @@ export const PERMISSION_SECTIONS = [
   { key: 'orders', label: 'Orders 訂單', navHref: '/orders' },
   { key: 'order_hub', label: 'Order Hub 訂單中心', navHref: '/hub' },
   { key: 'inbound', label: 'Inbound 到件', navHref: '/inbound' },
-  { key: 'kitchen', label: 'Kitchen 廚房', navHref: '/kitchen' },
+  { key: 'kitchen', label: 'Stock Planning 備貨預算', navHref: '/kitchen' },
   { key: 'kitchen_prep', label: 'Kitchen Prep 備料', navHref: '/kitchen-prep' },
   { key: 'stocks', label: 'Stocks 庫存', navHref: '/stocks' },
   { key: 'rentals', label: 'Rentals 租金', navHref: '/rentals' },

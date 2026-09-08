@@ -25,6 +25,9 @@ export const NESTIEE_DEMAND_SCOPES: readonly NestieeDemandScope[] = [
 /** Inclusive delivery-date window: today through today + N calendar days. */
 export const NESTIEE_SHIP_TODAY_DAYS = 4;
 
+/** Status-summary card: processing orders due to ship within this many calendar days (inclusive). */
+export const NESTIEE_STATUS_SHIP_WITHIN_DAYS = 4;
+
 export function parseNestieeDemandScope(raw: string | null | undefined): NestieeDemandScope {
   const v = String(raw || '').trim();
   if (v === 'shipped' || v === 'all' || v === 'ship_today') return v;
@@ -107,6 +110,37 @@ export function orderMatchesNestieeShipToday(
 ): boolean {
   if (!orderMatchesNestieeDemandScope(order.status, 'ship_today')) return false;
   const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);
+  return orderMatchesNestieeDateRange(order, {
+    dateStart,
+    dateEnd,
+    dateFilterType: 'delivery_date',
+  });
+}
+
+/** Delivery window for the status-summary 「四日內要出貨」 card (today inclusive). */
+export function nestieeShipWithinDaysDateRange(
+  today: string = localDateYmd(),
+  withinDays: number = NESTIEE_STATUS_SHIP_WITHIN_DAYS,
+): { dateStart: string; dateEnd: string } {
+  const days = Math.max(1, Math.floor(withinDays));
+  return {
+    dateStart: today,
+    dateEnd: addCalendarDays(today, days - 1),
+  };
+}
+
+/** Processing Nestiee orders with 送貨日期 from today through today+(withinDays-1). */
+export function orderMatchesNestieeShipWithinDays(
+  order: {
+    status?: string | null;
+    fields?: Record<string, unknown>;
+    created_at?: string | null;
+  },
+  today: string = localDateYmd(),
+  withinDays: number = NESTIEE_STATUS_SHIP_WITHIN_DAYS,
+): boolean {
+  if (!orderMatchesNestieeDemandScope(order.status, 'processing')) return false;
+  const { dateStart, dateEnd } = nestieeShipWithinDaysDateRange(today, withinDays);
   return orderMatchesNestieeDateRange(order, {
     dateStart,
     dateEnd,
@@ -197,7 +231,7 @@ export function mapShippingBoxesForGiftCount(totalGiftBoxes: number): Record<Nes
 
   switch (count) {
     case 1:
-      return { small: 1, single: 0, double: 0, triple: 0 };
+      return { small: 0, single: 1, double: 0, triple: 0 };
     case 2:
       return { small: 0, single: 1, double: 0, triple: 0 };
     case 3:
@@ -205,7 +239,7 @@ export function mapShippingBoxesForGiftCount(totalGiftBoxes: number): Record<Nes
     case 4:
       return { small: 0, single: 0, double: 0, triple: 1 };
     case 5:
-      return { small: 1, single: 0, double: 1, triple: 0 };
+      return { small: 0, single: 1, double: 1, triple: 0 };
     case 6:
       return { small: 0, single: 1, double: 1, triple: 0 };
     case 7:
@@ -325,6 +359,52 @@ export function summarizeNestieeProcessingDemand(
     orderCount,
     scope,
   };
+}
+
+export interface NestieeOrderStatusCounts {
+  processing: number;
+  completed: number;
+  /** Processing orders with 送貨日期 within {@link NESTIEE_STATUS_SHIP_WITHIN_DAYS} calendar days. */
+  shipWithinDays: number;
+}
+
+/** Nestiee order counts by status for the orders dashboard summary block. */
+export function summarizeNestieeOrderStatusCounts(
+  orders: Array<{
+    status?: string;
+    fields?: Record<string, unknown>;
+    created_at?: string | null;
+    updated_at?: string | null;
+  }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+    today?: string;
+  } = {},
+): NestieeOrderStatusCounts {
+  const counts: NestieeOrderStatusCounts = { processing: 0, completed: 0, shipWithinDays: 0 };
+  const today = opts.today || localDateYmd();
+
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+
+    if (orderMatchesNestieeShipWithinDays(order, today)) {
+      counts.shipWithinDays += 1;
+    }
+
+    if (!orderMatchesNestieeDateRange(order, opts)) continue;
+
+    const status = String(order.status || '').trim();
+    if (status === NESTIEE_PROCESSING_STATUS) {
+      counts.processing += 1;
+    } else if (NESTIEE_SHIPPED_STATUSES.includes(status as (typeof NESTIEE_SHIPPED_STATUSES)[number])) {
+      counts.completed += 1;
+    }
+  }
+
+  return counts;
 }
 
 export interface NestieeUsedShippingBoxesSummary {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { appendWooQueryAuth, parseWooApiJson, wooApiErrorMessage } from './woo-api';
+import {
+  appendWooQueryAuth,
+  DEFAULT_WOO_USER_AGENT,
+  parseWooApiJson,
+  wooApiErrorMessage,
+  wooRequestHeaders,
+} from './woo-api';
 
 describe('parseWooApiJson', () => {
   it('parses valid JSON', () => {
@@ -16,6 +22,16 @@ describe('parseWooApiJson', () => {
 describe('wooApiErrorMessage', () => {
   it('extracts Woo JSON error messages', () => {
     expect(wooApiErrorMessage(401, '{"message":"Invalid signature."}', 'nestiee')).toMatch(/Invalid signature/);
+  });
+});
+
+describe('wooRequestHeaders', () => {
+  it('sends a complete modern Chrome user-agent (SiteGround requires Chrome version)', () => {
+    const ua = wooRequestHeaders()['User-Agent'];
+    expect(ua).toBe(DEFAULT_WOO_USER_AGENT);
+    expect(ua).toMatch(/Chrome\/\d+\.\d+\.\d+\.\d+/);
+    expect(ua).toMatch(/Safari\/537\.36$/);
+    expect(ua.length).toBeGreaterThan('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'.length);
   });
 });
 

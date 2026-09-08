@@ -192,7 +192,7 @@ export default function KitchenPage() {
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
-  const [stockExpanded, setStockExpanded] = useState(false);
+  const [stockExpanded, setStockExpanded] = useState(true);
   const [ordersExpanded, setOrdersExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -382,6 +382,11 @@ export default function KitchenPage() {
   useEffect(() => {
     void loadInitial();
   }, []);
+  useEffect(() => {
+    if (state && stockExpanded) {
+      void ensureInventory();
+    }
+  }, [state, stockExpanded]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4500);
@@ -991,7 +996,7 @@ export default function KitchenPage() {
         <div>
           <h1 className="page-title">{TITLE.kitchen}</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            {bi('Gift boxes · finished bottles · raw · order fulfillment', '禮盒 · 成品樽 · 原料 · 訂單履約')}
+            {bi('Gift boxes · stock planning · order fulfillment', '禮盒 · 備貨預算 · 訂單履約')}
           </p>
         </div>
         {state.isAdmin && (
@@ -1047,7 +1052,7 @@ export default function KitchenPage() {
         <KitchenProductionSchedule />
       </div>
 
-      {/* Inventory — collapsed by default; fetches stock on first expand */}
+      {/* Inventory — expanded by default */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
         <button
           type="button"

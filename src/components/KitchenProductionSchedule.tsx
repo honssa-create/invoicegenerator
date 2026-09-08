@@ -1,14 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import DateSelectSheet from '@/components/DateSelectSheet';
+import DateFilterField from '@/components/DateFilterField';
 import type { ProductionScheduleSummary } from '@/lib/kitchen-production-schedule';
 import { KITCHEN_DAILY_SESSION_LIMIT } from '@/lib/kitchen-production-schedule';
 import {
   NESTIEE_DATE_FILTER_TYPES,
   type NestieeDateFilterType,
 } from '@/lib/nestiee-order-demand';
-import { localDateYmd } from '@/lib/orders';
 import { tapProps } from '@/lib/tap-action';
 import { FILTER, bi } from '@/lib/ui-labels';
 
@@ -17,55 +16,15 @@ const DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string
   delivery_date: { en: 'By delivery date', zh: '按送貨日期' },
 };
 
-function monthStartYmd(): string {
-  const today = localDateYmd();
-  return `${today.slice(0, 8)}01`;
-}
-
-function ScheduleDateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const fieldCls =
-    'w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-lg text-sm text-left focus:ring-2 focus:ring-brand-500 outline-none';
-  return (
-    <div className="flex flex-col min-w-0">
-      <span className="text-[11px] font-medium text-gray-500 mb-1">{label}</span>
-      <button
-        type="button"
-        className={`${fieldCls} ${value ? 'text-gray-900' : 'text-gray-400'}`}
-        {...tapProps(() => setOpen(true))}
-      >
-        {value || bi('Any date', '不限日期')}
-      </button>
-      {open && (
-        <DateSelectSheet
-          title={label}
-          value={value}
-          onApply={(ymd) => {
-            onChange(ymd);
-            setOpen(false);
-          }}
-          onClose={() => setOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
 export default function KitchenProductionSchedule() {
-  const [dateStart, setDateStart] = useState(monthStartYmd);
-  const [dateEnd, setDateEnd] = useState(localDateYmd);
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
   const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('delivery_date');
   const [schedule, setSchedule] = useState<ProductionScheduleSummary | null>(null);
   const [orderCount, setOrderCount] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const hasDateFilter = Boolean(dateStart || dateEnd);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -100,17 +59,22 @@ export default function KitchenProductionSchedule() {
         <p className="text-sm text-gray-500 mt-1">
           {loading
             ? bi('Loading…', '載入中…')
-            : bi(
-                `${orderCount} unshipped processing order(s) in range`,
-                `日期範圍內 ${orderCount} 張未出貨處理中訂單`,
-              )}
+            : hasDateFilter
+              ? bi(
+                  `${orderCount} unshipped processing order(s) in range`,
+                  `日期範圍內 ${orderCount} 張未出貨處理中訂單`,
+                )
+              : bi(
+                  `${orderCount} unshipped processing order(s)`,
+                  `${orderCount} 張未出貨處理中訂單`,
+                )}
         </p>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-4">
         <div className="grid grid-cols-2 gap-3 sm:contents">
-          <ScheduleDateField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
-          <ScheduleDateField label={FILTER.endDate} value={dateEnd} onChange={setDateEnd} />
+          <DateFilterField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
+          <DateFilterField label={FILTER.endDate} value={dateEnd} onChange={setDateEnd} />
         </div>
         <div
           className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm self-start"
@@ -153,8 +117,30 @@ export default function KitchenProductionSchedule() {
           <thead>
             <tr className="text-left text-gray-500 border-b">
               <th className="py-2 pr-2">{bi('Product', '產品')}</th>
-              <th className="py-2 pr-2 text-right">{bi('Stock', '庫存')}</th>
-              <th className="py-2 pr-2 text-right">{bi('Demand', '需求')}</th>
+              <th className="py-2 pr-2 text-right">
+                <span
+                  className="inline-flex items-center justify-end gap-1 cursor-help"
+                  title={bi(
+                    'Loose 75g tall bottle stock only',
+                    '單樽現貨庫存（75g 高身樽；禮盒內樽數不計入此欄）',
+                  )}
+                >
+                  {bi('Stock', '庫存')}
+                  <span className="text-gray-400 text-xs leading-none" aria-hidden="true">ⓘ</span>
+                </span>
+              </th>
+              <th className="py-2 pr-2 text-right">
+                <span
+                  className="inline-flex items-center justify-end gap-1 cursor-help"
+                  title={bi(
+                    'Order bottle need minus bottles already in gift-box inventory (same flavor only)',
+                    '訂單樽需求，已扣除禮盒庫存內同口味樽數',
+                  )}
+                >
+                  {bi('Demand', '需求')}
+                  <span className="text-gray-400 text-xs leading-none" aria-hidden="true">ⓘ</span>
+                </span>
+              </th>
               <th className="py-2 pr-2 text-right">{bi('Shortfall', '尚欠')}</th>
               <th className="py-2 text-right">{bi('Sessions', '所需轉數')}</th>
             </tr>

@@ -1,4 +1,4 @@
-/** Bird's nest 75g production queue — shared daily kitchen capacity (client-safe). */
+/** Bird's nest production queue — 75g / 45g / 25g bottle planning (client-safe). */
 
 import { expandGiftBoxBom, finishedSku, type BomLine } from './kitchen-bom';
 import { hydrateNestieeGiftBoxQtys, localDateYmd } from './orders';
@@ -6,6 +6,8 @@ import { hydrateNestieeGiftBoxQtys, localDateYmd } from './orders';
 export const KITCHEN_DAILY_SESSION_LIMIT = 2;
 
 export type ProductionScheduleFlavor = 'red_date' | 'osmanthus' | 'rock_sugar';
+export type ProductionScheduleCapacity = '75g' | '45g' | '25g';
+export type ProductionScheduleSlotId = `${ProductionScheduleCapacity}:${ProductionScheduleFlavor}`;
 
 export const PRODUCTION_SCHEDULE_FLAVORS: ProductionScheduleFlavor[] = [
   'red_date',
@@ -13,16 +15,37 @@ export const PRODUCTION_SCHEDULE_FLAVORS: ProductionScheduleFlavor[] = [
   'rock_sugar',
 ];
 
+export interface ProductionScheduleSlot {
+  id: ProductionScheduleSlotId;
+  capacity: ProductionScheduleCapacity;
+  flavor: ProductionScheduleFlavor;
+  label: string;
+  /** 75g tall only — bottles per stewing session (轉). */
+  sessionBottles?: number;
+}
+
+export const PRODUCTION_SCHEDULE_SLOTS: ProductionScheduleSlot[] = [
+  { id: '75g:red_date', capacity: '75g', flavor: 'red_date', label: '75g 紅棗', sessionBottles: 100 },
+  { id: '75g:osmanthus', capacity: '75g', flavor: 'osmanthus', label: '75g 桂花', sessionBottles: 110 },
+  { id: '75g:rock_sugar', capacity: '75g', flavor: 'rock_sugar', label: '75g 冰糖', sessionBottles: 110 },
+  { id: '45g:red_date', capacity: '45g', flavor: 'red_date', label: '45g 紅棗' },
+  { id: '45g:osmanthus', capacity: '45g', flavor: 'osmanthus', label: '45g 桂花' },
+  { id: '45g:rock_sugar', capacity: '45g', flavor: 'rock_sugar', label: '45g 冰糖' },
+  { id: '25g:osmanthus', capacity: '25g', flavor: 'osmanthus', label: '25g 桂花' },
+  { id: '25g:rock_sugar', capacity: '25g', flavor: 'rock_sugar', label: '25g 冰糖' },
+];
+
+/** @deprecated Use PRODUCTION_SCHEDULE_SLOTS labels for 75g rows. */
 export const PRODUCTION_SCHEDULE_LABELS: Record<ProductionScheduleFlavor, string> = {
   red_date: '75g 紅棗',
   osmanthus: '75g 桂花',
   rock_sugar: '75g 冰糖',
 };
 
-/** Star boxes count toward 75g tall schedule flavors (not 大肚樽 SKU). */
+/** Star boxes count toward 75g tall schedule slots (not 大肚樽 SKU). */
 export const PRODUCTION_SCHEDULE_STAR_BOX_TYPES = new Set(['star_gold', 'star_silver']);
 
-/** Bottles per session (轉) by flavor. */
+/** Bottles per session (轉) — 75g tall only. */
 export const SESSION_BOTTLES_PER_FLAVOR: Record<ProductionScheduleFlavor, number> = {
   red_date: 100,
   osmanthus: 110,
@@ -30,6 +53,7 @@ export const SESSION_BOTTLES_PER_FLAVOR: Record<ProductionScheduleFlavor, number
 };
 
 export interface ProductionScheduleRow {
+  slotId: ProductionScheduleSlotId;
   flavor: ProductionScheduleFlavor;
   product: string;
   stock: number;
@@ -46,39 +70,74 @@ export interface ProductionScheduleSummary {
   today: string;
 }
 
+export type ProductionScheduleSlotTotals = Record<ProductionScheduleSlotId, number>;
+
+/** @deprecated Legacy 75g-only totals keyed by flavor. */
 export type ProductionScheduleFlavorTotals = Record<ProductionScheduleFlavor, number>;
 
 export interface ProductionScheduleNetInputs {
-  grossDemand: ProductionScheduleFlavorTotals;
-  giftBoxBottles: ProductionScheduleFlavorTotals;
-  looseStock: ProductionScheduleFlavorTotals;
-  netDemand: ProductionScheduleFlavorTotals;
-  netStock: ProductionScheduleFlavorTotals;
+  grossDemand: ProductionScheduleSlotTotals;
+  giftBoxBottles: ProductionScheduleSlotTotals;
+  looseStock: ProductionScheduleSlotTotals;
+  netDemand: ProductionScheduleSlotTotals;
+  netStock: ProductionScheduleSlotTotals;
 }
 
+export function emptySlotTotals(): ProductionScheduleSlotTotals {
+  const out: Partial<ProductionScheduleSlotTotals> = {};
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) out[slot.id] = 0;
+  return out as ProductionScheduleSlotTotals;
+}
+
+/** @deprecated Use emptySlotTotals — 75g flavor slice only. */
 export function emptyFlavorTotals(): ProductionScheduleFlavorTotals {
   return { red_date: 0, osmanthus: 0, rock_sugar: 0 };
+}
+
+export function finishedSkuForScheduleSlot(slotId: ProductionScheduleSlotId): string {
+  const slot = PRODUCTION_SCHEDULE_SLOTS.find((s) => s.id === slotId);
+  if (!slot) throw new Error(`Unknown schedule slot: ${slotId}`);
+  return finishedSku(slot.capacity, slot.flavor);
 }
 
 export function finishedSkuForScheduleFlavor(flavor: ProductionScheduleFlavor): string {
   return finishedSku('75g', flavor);
 }
 
-/** Map a finished SKU from gift-box BOM to a 75g tall schedule flavor, if any. */
+function slotIdForCapacityFlavor(
+  capacity: ProductionScheduleCapacity,
+  flavor: ProductionScheduleFlavor,
+): ProductionScheduleSlotId | null {
+  const id = `${capacity}:${flavor}` as ProductionScheduleSlotId;
+  return PRODUCTION_SCHEDULE_SLOTS.some((s) => s.id === id) ? id : null;
+}
+
+/** Map a finished SKU from gift-box BOM to a schedule slot, if tracked. */
+export function scheduleSlotForGiftBoxFinishedSku(
+  boxType: string,
+  sku: string,
+): ProductionScheduleSlotId | null {
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+    if (sku === finishedSku(slot.capacity, slot.flavor)) return slot.id;
+  }
+  if (PRODUCTION_SCHEDULE_STAR_BOX_TYPES.has(boxType)) {
+    for (const flavor of PRODUCTION_SCHEDULE_FLAVORS) {
+      if (sku === finishedSku('75g_big_belly', flavor)) {
+        return slotIdForCapacityFlavor('75g', flavor);
+      }
+    }
+  }
+  return null;
+}
+
+/** @deprecated Use scheduleSlotForGiftBoxFinishedSku */
 export function scheduleFlavorForGiftBoxFinishedSku(
   boxType: string,
   sku: string,
 ): ProductionScheduleFlavor | null {
-  for (const flavor of PRODUCTION_SCHEDULE_FLAVORS) {
-    if (sku === finishedSkuForScheduleFlavor(flavor)) return flavor;
-    if (
-      PRODUCTION_SCHEDULE_STAR_BOX_TYPES.has(boxType) &&
-      sku === finishedSku('75g_big_belly', flavor)
-    ) {
-      return flavor;
-    }
-  }
-  return null;
+  const slotId = scheduleSlotForGiftBoxFinishedSku(boxType, sku);
+  if (!slotId || !slotId.startsWith('75g:')) return null;
+  return slotId.slice(4) as ProductionScheduleFlavor;
 }
 
 function fieldQty(fields: Record<string, unknown>, key: string): number {
@@ -96,29 +155,43 @@ function fulfilledGiftQty(
   return fulfillments.get(`${orderId}::gift:${boxType}`) || 0;
 }
 
-/** Expand gift-box qty into 75g tall bottle demand by schedule flavor. */
+/** Expand gift-box qty into bottle demand by schedule slot. */
+export function giftBoxBottlesByScheduleSlot(
+  boxType: string,
+  quantity: number,
+  boms: Record<string, BomLine[]>,
+): ProductionScheduleSlotTotals {
+  const totals = emptySlotTotals();
+  if (quantity <= 0) return totals;
+  for (const line of expandGiftBoxBom(boxType, quantity, boms)) {
+    if (line.kind !== 'finished') continue;
+    const slotId = scheduleSlotForGiftBoxFinishedSku(boxType, line.sku);
+    if (!slotId) continue;
+    totals[slotId] += line.qty;
+  }
+  return totals;
+}
+
+/** @deprecated Use giftBoxBottlesByScheduleSlot */
 export function giftBoxBottlesByScheduleFlavor(
   boxType: string,
   quantity: number,
   boms: Record<string, BomLine[]>,
 ): ProductionScheduleFlavorTotals {
-  const totals = emptyFlavorTotals();
-  if (quantity <= 0) return totals;
-  for (const line of expandGiftBoxBom(boxType, quantity, boms)) {
-    if (line.kind !== 'finished') continue;
-    const flavor = scheduleFlavorForGiftBoxFinishedSku(boxType, line.sku);
-    if (!flavor) continue;
-    totals[flavor] += line.qty;
+  const slots = giftBoxBottlesByScheduleSlot(boxType, quantity, boms);
+  const out = emptyFlavorTotals();
+  for (const flavor of PRODUCTION_SCHEDULE_FLAVORS) {
+    out[flavor] = slots[`75g:${flavor}` as ProductionScheduleSlotId] || 0;
   }
-  return totals;
+  return out;
 }
 
-function addFlavorTotals(
-  target: ProductionScheduleFlavorTotals,
-  partial: ProductionScheduleFlavorTotals,
+function addSlotTotals(
+  target: ProductionScheduleSlotTotals,
+  partial: ProductionScheduleSlotTotals,
 ): void {
-  for (const flavor of PRODUCTION_SCHEDULE_FLAVORS) {
-    target[flavor] += partial[flavor];
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+    target[slot.id] += partial[slot.id] || 0;
   }
 }
 
@@ -128,16 +201,14 @@ export interface ProductionScheduleGiftBoxType {
   active?: boolean;
 }
 
-/**
- * Gross 75g bottle demand from processing orders — uses remaining (unfulfilled) 所需禮盒 only.
- */
+/** Gross bottle demand from processing orders — remaining (unfulfilled) 所需禮盒 only. */
 export function grossDemandFromRemainingGiftBoxes(
   orders: Array<{ id: number; fields?: Record<string, unknown> }>,
   giftBoxTypes: ProductionScheduleGiftBoxType[],
   boms: Record<string, BomLine[]>,
   fulfillments: Map<string, number>,
-): ProductionScheduleFlavorTotals {
-  const totals = emptyFlavorTotals();
+): ProductionScheduleSlotTotals {
+  const totals = emptySlotTotals();
   const activeTypes = giftBoxTypes.filter((g) => g.active !== false);
 
   for (const order of orders) {
@@ -148,43 +219,52 @@ export function grossDemandFromRemainingGiftBoxes(
       const fulfilled = Math.min(required, fulfilledGiftQty(fulfillments, order.id, g.id));
       const remaining = Math.max(0, required - fulfilled);
       if (remaining <= 0) continue;
-      addFlavorTotals(totals, giftBoxBottlesByScheduleFlavor(g.id, remaining, boms));
+      addSlotTotals(totals, giftBoxBottlesByScheduleSlot(g.id, remaining, boms));
     }
   }
   return totals;
 }
 
-/** Bottles inside on-hand gift-box stock (kitchen_gift_boxes), by schedule flavor. */
-export function giftBoxSupplyByScheduleFlavor(
+/** Bottles inside on-hand gift-box stock, by schedule slot. */
+export function giftBoxSupplyByScheduleSlot(
   giftBoxes: Array<{ boxType: string; quantity: number }>,
   boms: Record<string, BomLine[]>,
-): ProductionScheduleFlavorTotals {
-  const totals = emptyFlavorTotals();
+): ProductionScheduleSlotTotals {
+  const totals = emptySlotTotals();
   for (const row of giftBoxes) {
     const qty = Math.max(0, Math.floor(row.quantity || 0));
     if (qty <= 0) continue;
-    addFlavorTotals(totals, giftBoxBottlesByScheduleFlavor(row.boxType, qty, boms));
+    addSlotTotals(totals, giftBoxBottlesByScheduleSlot(row.boxType, qty, boms));
   }
   return totals;
 }
 
-/**
- * Net schedule inputs: Demand = gross − gift-box supply; Stock = loose; Shortfall = gross − gift − loose.
- * Gift-box bottles only reduce the same flavor's demand.
- */
-export function netProductionScheduleInputs(
-  grossDemand: ProductionScheduleFlavorTotals,
-  giftBoxBottles: ProductionScheduleFlavorTotals,
-  looseStock: ProductionScheduleFlavorTotals,
-): ProductionScheduleNetInputs {
-  const netDemand = emptyFlavorTotals();
-  const netStock = emptyFlavorTotals();
+/** @deprecated Use giftBoxSupplyByScheduleSlot */
+export function giftBoxSupplyByScheduleFlavor(
+  giftBoxes: Array<{ boxType: string; quantity: number }>,
+  boms: Record<string, BomLine[]>,
+): ProductionScheduleFlavorTotals {
+  const slots = giftBoxSupplyByScheduleSlot(giftBoxes, boms);
+  const out = emptyFlavorTotals();
   for (const flavor of PRODUCTION_SCHEDULE_FLAVORS) {
-    const gross = Math.max(0, Math.floor(grossDemand[flavor] || 0));
-    const gift = Math.max(0, Math.floor(giftBoxBottles[flavor] || 0));
-    const loose = Math.max(0, Math.floor(looseStock[flavor] || 0));
-    netDemand[flavor] = Math.max(0, gross - gift);
-    netStock[flavor] = loose;
+    out[flavor] = slots[`75g:${flavor}` as ProductionScheduleSlotId] || 0;
+  }
+  return out;
+}
+
+export function netProductionScheduleInputs(
+  grossDemand: ProductionScheduleSlotTotals,
+  giftBoxBottles: ProductionScheduleSlotTotals,
+  looseStock: ProductionScheduleSlotTotals,
+): ProductionScheduleNetInputs {
+  const netDemand = emptySlotTotals();
+  const netStock = emptySlotTotals();
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+    const gross = Math.max(0, Math.floor(grossDemand[slot.id] || 0));
+    const gift = Math.max(0, Math.floor(giftBoxBottles[slot.id] || 0));
+    const loose = Math.max(0, Math.floor(looseStock[slot.id] || 0));
+    netDemand[slot.id] = Math.max(0, gross - gift);
+    netStock[slot.id] = loose;
   }
   return {
     grossDemand: { ...grossDemand },
@@ -204,7 +284,6 @@ export function sessionsForShortfall(
   return Math.ceil(shortfall / perSession);
 }
 
-/** Advance `days` production days from `startYmd`, skipping Sundays. */
 export function addProductionDaysSkippingSundays(startYmd: string, days: number): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startYmd.trim());
   if (!m) return startYmd;
@@ -221,26 +300,32 @@ export function addProductionDaysSkippingSundays(startYmd: string, days: number)
 }
 
 export function computeKitchenProductionSchedule(
-  demandByFlavor: Record<ProductionScheduleFlavor, number>,
-  stockByFlavor: Record<ProductionScheduleFlavor, number>,
+  demandBySlot: ProductionScheduleSlotTotals,
+  stockBySlot: ProductionScheduleSlotTotals,
   today: string = localDateYmd(),
-  grossByFlavor?: Record<ProductionScheduleFlavor, number>,
-  giftBoxBottlesByFlavor?: Record<ProductionScheduleFlavor, number>,
+  grossBySlot?: ProductionScheduleSlotTotals,
+  giftBoxBottlesBySlot?: ProductionScheduleSlotTotals,
 ): ProductionScheduleSummary {
-  const rows: ProductionScheduleRow[] = PRODUCTION_SCHEDULE_FLAVORS.map((flavor) => {
+  const rows: ProductionScheduleRow[] = PRODUCTION_SCHEDULE_SLOTS.map((slot) => {
     const gross = Math.max(
       0,
-      Math.floor(grossByFlavor?.[flavor] ?? (demandByFlavor[flavor] || 0)),
+      Math.floor(grossBySlot?.[slot.id] ?? (demandBySlot[slot.id] || 0)),
     );
-    const gift = Math.max(0, Math.floor(giftBoxBottlesByFlavor?.[flavor] ?? 0));
-    const loose = Math.max(0, Math.floor(stockByFlavor[flavor] || 0));
-    const demand = Math.max(0, Math.floor(demandByFlavor[flavor] || 0));
+    const gift = Math.max(0, Math.floor(giftBoxBottlesBySlot?.[slot.id] ?? 0));
+    const loose = Math.max(0, Math.floor(stockBySlot[slot.id] || 0));
+    const demand = Math.max(0, Math.floor(demandBySlot[slot.id] || 0));
     const stock = loose;
     const shortfall = Math.max(0, gross - gift - loose);
-    const sessions = sessionsForShortfall(flavor, shortfall);
+    const sessions =
+      slot.capacity === '75g' && slot.sessionBottles
+        ? shortfall > 0
+          ? Math.ceil(shortfall / slot.sessionBottles)
+          : null
+        : null;
     return {
-      flavor,
-      product: PRODUCTION_SCHEDULE_LABELS[flavor],
+      slotId: slot.id,
+      flavor: slot.flavor,
+      product: slot.label,
       stock,
       demand,
       shortfall,
@@ -263,7 +348,7 @@ export function computeKitchenProductionSchedule(
   };
 }
 
-/** @deprecated Use grossDemandFromRemainingGiftBoxes — kept for tests migrating from bottle totals. */
+/** @deprecated Use grossDemandFromRemainingGiftBoxes */
 export function demandFrom75gBottleTotals(
   totals: Array<{ sku: string; qty: number }>,
 ): ProductionScheduleFlavorTotals {
@@ -278,15 +363,15 @@ export function demandFrom75gBottleTotals(
   return out;
 }
 
-/** Read on-hand 75g tall stock from kitchen finished inventory rows. */
+/** Read on-hand loose bottle stock for all tracked schedule slots. */
 export function stockFromFinishedRows(
   rows: Array<{ sku: string; quantity: number }>,
-): ProductionScheduleFlavorTotals {
-  const out = emptyFlavorTotals();
+): ProductionScheduleSlotTotals {
+  const out = emptySlotTotals();
   for (const row of rows) {
-    for (const flavor of PRODUCTION_SCHEDULE_FLAVORS) {
-      if (row.sku === finishedSkuForScheduleFlavor(flavor)) {
-        out[flavor] = Math.max(0, Math.floor(row.quantity || 0));
+    for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+      if (row.sku === finishedSku(slot.capacity, slot.flavor)) {
+        out[slot.id] = Math.max(0, Math.floor(row.quantity || 0));
       }
     }
   }

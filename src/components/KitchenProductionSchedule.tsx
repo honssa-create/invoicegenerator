@@ -121,8 +121,8 @@ export default function KitchenProductionSchedule() {
                 <span
                   className="inline-flex items-center justify-end gap-1 cursor-help"
                   title={bi(
-                    'Loose 75g tall bottle stock only',
-                    '單樽現貨庫存（75g 高身樽；禮盒內樽數不計入此欄）',
+                    'Loose bottle stock by capacity & flavor (gift-box bottles excluded)',
+                    '單樽現貨庫存（按容量口味；禮盒內樽數不計入此欄）',
                   )}
                 >
                   {bi('Stock', '庫存')}
@@ -133,8 +133,8 @@ export default function KitchenProductionSchedule() {
                 <span
                   className="inline-flex items-center justify-end gap-1 cursor-help"
                   title={bi(
-                    'Order bottle need minus bottles already in gift-box inventory (same flavor only)',
-                    '訂單樽需求，已扣除禮盒庫存內同口味樽數',
+                    'Order bottle need minus bottles in gift-box inventory (same capacity & flavor)',
+                    '訂單樽需求，已扣除禮盒庫存內同容量口味樽數',
                   )}
                 >
                   {bi('Demand', '需求')}
@@ -147,7 +147,7 @@ export default function KitchenProductionSchedule() {
           </thead>
           <tbody>
             {(schedule?.rows ?? []).map((row) => (
-              <tr key={row.flavor} className="border-b border-gray-50">
+              <tr key={row.slotId} className="border-b border-gray-50">
                 <td className="py-2 pr-2 font-medium text-gray-900">{row.product}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.stock}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.demand}</td>

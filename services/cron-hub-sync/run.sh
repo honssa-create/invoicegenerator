@@ -15,7 +15,7 @@ BASE="${APP_URL%/}"
 URL="${BASE}/api/cron/hub-sync"
 
 echo "GET ${URL}"
-HTTP_CODE=$(curl -sS --max-time 300 -o /tmp/cron-body.json -w '%{http_code}' \
+HTTP_CODE=$(curl -sS --max-time 600 -o /tmp/cron-body.json -w '%{http_code}' \
   -H "Authorization: Bearer ${CRON_SECRET}" \
   "${URL}")
 echo "HTTP ${HTTP_CODE}"

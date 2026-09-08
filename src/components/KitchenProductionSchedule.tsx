@@ -121,15 +121,26 @@ export default function KitchenProductionSchedule() {
                 <span
                   className="inline-flex items-center justify-end gap-1 cursor-help"
                   title={bi(
-                    'Loose bottle stock only (bottles inside gift boxes are not counted)',
-                    '單樽現貨庫存（禮盒內的樽數沒有計算在內）',
+                    'Loose 75g tall bottle stock only',
+                    '單樽現貨庫存（75g 高身樽；禮盒內樽數不計入此欄）',
                   )}
                 >
                   {bi('Stock', '庫存')}
                   <span className="text-gray-400 text-xs leading-none" aria-hidden="true">ⓘ</span>
                 </span>
               </th>
-              <th className="py-2 pr-2 text-right">{bi('Demand', '需求')}</th>
+              <th className="py-2 pr-2 text-right">
+                <span
+                  className="inline-flex items-center justify-end gap-1 cursor-help"
+                  title={bi(
+                    'Order bottle need minus bottles already in gift-box inventory (same flavor only)',
+                    '訂單樽需求，已扣除禮盒庫存內同口味樽數',
+                  )}
+                >
+                  {bi('Demand', '需求')}
+                  <span className="text-gray-400 text-xs leading-none" aria-hidden="true">ⓘ</span>
+                </span>
+              </th>
               <th className="py-2 pr-2 text-right">{bi('Shortfall', '尚欠')}</th>
               <th className="py-2 text-right">{bi('Sessions', '所需轉數')}</th>
             </tr>

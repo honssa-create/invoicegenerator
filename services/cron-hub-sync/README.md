@@ -18,3 +18,13 @@ Railway cron service: triggers InvoiceFlow Order Hub sync every 15 minutes.
 | `APP_URL` | `https://${{invoice-generator.RAILWAY_PUBLIC_DOMAIN}}` |
 
 4. Deploy once; check logs for `HTTP 200` and a JSON body with `woocommerce`.
+
+## Performance notes
+
+Incremental cron sync:
+
+- **Modified orders** — re-fetched every run (7-day overlap).
+- **Nestiee 90-day created catch-up** — at most once per 24h (`HUB_WOO_CATCHUP_INTERVAL_HOURS`), and only non-completed Woo statuses.
+- **Settled orders** — `shipped` / `completed` (etc.) already in Hub are skipped when status unchanged.
+
+Optional on `invoice-generator`: `HUB_WOO_CATCHUP_INTERVAL_HOURS=24` (default).

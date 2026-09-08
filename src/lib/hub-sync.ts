@@ -35,13 +35,20 @@ import {
   wooOrderCreatedBounds,
 } from './hub-import';
 import { normalizeCustomerName } from './customer-name';
+import {
+  catchupIntervalElapsed,
+  catchupSyncStoreKey,
+  NESTIEE_CATCHUP_WOO_STATUSES,
+  shouldSkipSettledHubOrderSync,
+} from './hub-sync-perf';
 
 /** Re-fetch Woo orders modified within this many days before last sync (overlap). */
 export const HUB_WOO_SYNC_MODIFIED_OVERLAP_DAYS = 7;
 
 /**
- * Nestiee incremental cron also re-fetches orders by date_created so orders that were
+ * Nestiee incremental cron also re-fetches recent orders by date_created so orders that were
  * skipped (e.g. unmapped Woo status) but never modified in Woo can still be imported.
+ * Runs at most once per {@link nestieeCatchupIntervalHours} (default 24h), not every cron tick.
  */
 export const NESTIEE_WOO_CREATED_CATCHUP_DAYS = 90;
 
@@ -51,19 +58,49 @@ function dedupeWooOrdersById(orders: WooOrder[]): WooOrder[] {
   return Array.from(byId.values());
 }
 
+async function loadExistingHubOrderStatuses(
+  userId: number,
+  platform: WooStoreConfig['platform'],
+  wooIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (wooIds.length === 0) return map;
+  const chunkSize = 500;
+  for (let i = 0; i < wooIds.length; i += chunkSize) {
+    const chunk = wooIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = (await db
+      .prepare(
+        `SELECT original_order_id, status FROM orders
+         WHERE user_id = ? AND source_platform = ? AND original_order_id IN (${placeholders})`
+      )
+      .all(userId, platform, ...chunk)) as { original_order_id: string; status: string | null }[];
+    for (const row of rows) {
+      map.set(String(row.original_order_id), String(row.status || '').trim());
+    }
+  }
+  return map;
+}
+
 async function fetchWooOrdersForIncrementalSync(
+  userId: number,
   store: WooStoreConfig,
   lastSync: string | null,
-): Promise<WooOrder[]> {
+): Promise<{ orders: WooOrder[]; ranCreatedCatchup: boolean }> {
   if (!lastSync) {
-    return await fetchWooOrders(store, {});
+    return { orders: await fetchWooOrders(store, {}), ranCreatedCatchup: false };
   }
 
   const modifiedAfter = subtractDaysFromIsoTimestamp(lastSync, HUB_WOO_SYNC_MODIFIED_OVERLAP_DAYS);
   const modifiedOrders = await fetchWooOrders(store, { modifiedAfter });
 
   if (store.platform !== 'nestiee' || NESTIEE_WOO_CREATED_CATCHUP_DAYS <= 0) {
-    return modifiedOrders;
+    return { orders: modifiedOrders, ranCreatedCatchup: false };
+  }
+
+  const lastCatchup = await getSyncState(userId, 'woocommerce', catchupSyncStoreKey(store.platform));
+  if (!catchupIntervalElapsed(lastCatchup)) {
+    return { orders: modifiedOrders, ranCreatedCatchup: false };
   }
 
   const catchupRange = rollingHubImportDateRange(NESTIEE_WOO_CREATED_CATCHUP_DAYS);
@@ -72,8 +109,12 @@ async function fetchWooOrdersForIncrementalSync(
     createdAfter: bounds.after,
     createdBefore: bounds.before,
     dateRange: catchupRange,
+    statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
   });
-  return dedupeWooOrdersById([...modifiedOrders, ...createdOrders]);
+  return {
+    orders: dedupeWooOrdersById([...modifiedOrders, ...createdOrders]),
+    ranCreatedCatchup: true,
+  };
 }
 
 export async function syncWooStore(
@@ -92,7 +133,8 @@ export async function syncWooStore(
   };
 
   const lastSync = await getSyncState(userId, 'woocommerce', store.platform);
-  let orders;
+  let orders: WooOrder[];
+  let ranCreatedCatchup = false;
   try {
     if (dateRange) {
       const bounds = wooOrderCreatedBounds(dateRange);
@@ -102,21 +144,24 @@ export async function syncWooStore(
         dateRange,
       });
     } else {
-      orders = await fetchWooOrdersForIncrementalSync(store, lastSync);
+      const fetched = await fetchWooOrdersForIncrementalSync(userId, store, lastSync);
+      orders = fetched.orders;
+      ranCreatedCatchup = fetched.ranCreatedCatchup;
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : 'fetch failed');
     return result;
   }
 
-  return await ingestWooOrders(userId, store.platform, orders, dateRange);
+  return await ingestWooOrders(userId, store.platform, orders, dateRange, { ranCreatedCatchup });
 }
 
 export async function ingestWooOrders(
   userId: number,
   platform: WooStoreConfig['platform'],
   orders: WooOrder[],
-  dateRange?: HubImportDateRange
+  dateRange?: HubImportDateRange,
+  opts?: { ranCreatedCatchup?: boolean },
 ): Promise<HubSyncResult> {
   const result: HubSyncResult = {
     platform,
@@ -144,6 +189,11 @@ export async function ingestWooOrders(
   result.fetched = dateRows.length;
   result.skipped += dateRows.length - rows.length;
   const syncedAt = new Date().toISOString();
+  const existingStatuses = await loadExistingHubOrderStatuses(
+    userId,
+    platform,
+    rows.map((o) => String(o.id)),
+  );
 
   await db.transaction(async () => {
     for (const order of rows) {
@@ -155,6 +205,11 @@ export async function ingestWooOrders(
               ? mapCupmokaWooStatus(order.status)
               : mapWooStatus(order.status);
         if (!status) {
+          result.skipped += 1;
+          continue;
+        }
+        const existingStatus = existingStatuses.get(String(order.id));
+        if (shouldSkipSettledHubOrderSync(platform, existingStatus, status)) {
           result.skipped += 1;
           continue;
         }
@@ -184,6 +239,9 @@ export async function ingestWooOrders(
     }
     if (!dateRange) {
       await setSyncState(userId, 'woocommerce', platform, syncedAt);
+      if (opts?.ranCreatedCatchup) {
+        await setSyncState(userId, 'woocommerce', catchupSyncStoreKey(platform), syncedAt);
+      }
     }
   });
   return result;

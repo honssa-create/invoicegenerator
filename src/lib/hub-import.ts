@@ -46,3 +46,24 @@ export function orderCreatedInRange(createdAt: string, range: HubImportDateRange
   const day = createdAt.slice(0, 10);
   return day >= range.dateFrom && day <= range.dateTo;
 }
+
+/** Shift an ISO / SQL sync timestamp back for modified_after overlap. */
+export function subtractDaysFromIsoTimestamp(timestamp: string, days: number): string {
+  if (days <= 0) return timestamp;
+  const normalized = timestamp.includes('T') ? timestamp : `${timestamp.replace(' ', 'T')}Z`;
+  const parsed = Date.parse(normalized);
+  if (Number.isNaN(parsed)) return timestamp;
+  return new Date(parsed - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/** Rolling inclusive calendar-day window ending today (UTC dates). */
+export function rollingHubImportDateRange(days: number): HubImportDateRange {
+  const safeDays = Math.max(1, Math.floor(days));
+  const to = new Date();
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - (safeDays - 1));
+  return {
+    dateFrom: from.toISOString().slice(0, 10),
+    dateTo: to.toISOString().slice(0, 10),
+  };
+}

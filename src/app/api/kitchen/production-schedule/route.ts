@@ -5,14 +5,15 @@ import { resolveKitchenOwnerUserId, getInventorySlice } from '@/lib/kitchen-serv
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import {
   computeKitchenProductionSchedule,
-  demandFrom75gBottleTotals,
+  giftBoxSupplyByScheduleFlavor,
+  grossDemandFromRemainingGiftBoxes,
+  netProductionScheduleInputs,
   stockFromFinishedRows,
 } from '@/lib/kitchen-production-schedule';
 import { NESTIEE_ORDER_TYPE, localDateYmd } from '@/lib/orders';
 import {
   orderMatchesNestieeDateRange,
   parseNestieeDateFilterType,
-  summarizeNestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
 
 function parseFields(raw: string | null | undefined): Record<string, unknown> {
@@ -27,6 +28,17 @@ function parseFields(raw: string | null | undefined): Record<string, unknown> {
 
 function isYmd(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+async function loadFulfillments(userId: number): Promise<Map<string, number>> {
+  const rows = (await db
+    .prepare('SELECT order_id, need_key, fulfilled_qty FROM kitchen_order_fulfillments WHERE user_id = ?')
+    .all(userId)) as { order_id: number; need_key: string; fulfilled_qty: number }[];
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    map.set(`${r.order_id}::${r.need_key}`, Number(r.fulfilled_qty) || 0);
+  }
+  return map;
 }
 
 export async function GET(request: Request) {
@@ -47,7 +59,7 @@ export async function GET(request: Request) {
   try {
     const rows = (await db
       .prepare(
-        `SELECT status, fields_json, order_type, created_at
+        `SELECT id, status, fields_json, order_type, created_at
          FROM orders
          WHERE user_id = ?
            AND status = ?
@@ -58,6 +70,7 @@ export async function GET(request: Request) {
          ORDER BY id DESC`
       )
       .all(ownerId, 'processing', NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE)) as Array<{
+      id: number;
       status: string | null;
       fields_json: string | null;
       order_type: string | null;
@@ -71,6 +84,7 @@ export async function GET(request: Request) {
           fields.order_type = row.order_type;
         }
         return {
+          id: row.id,
           status: row.status || '',
           fields,
           created_at: row.created_at || '',
@@ -89,27 +103,38 @@ export async function GET(request: Request) {
       active: g.active,
     }));
 
-    const demandRollup = summarizeNestieeProcessingDemand(
+    const fulfillments = await loadFulfillments(ownerId);
+    const grossDemand = grossDemandFromRemainingGiftBoxes(
       orders,
       giftBoxTypes,
       formulas.giftBoxBoms,
-      'processing',
-      { today },
+      fulfillments,
     );
 
     const inventory = await getInventorySlice(ownerId);
-    const demandByFlavor = demandFrom75gBottleTotals(
-      demandRollup.bottles.map((b) => ({ sku: b.sku, qty: b.qty })),
+    const giftBoxBottles = giftBoxSupplyByScheduleFlavor(
+      inventory.giftBoxes.map((g) => ({ boxType: g.boxType, quantity: g.quantity })),
+      formulas.giftBoxBoms,
     );
-    const stockByFlavor = stockFromFinishedRows(
+    const looseStock = stockFromFinishedRows(
       inventory.finished.map((f) => ({ sku: f.sku, quantity: f.quantity })),
     );
 
-    const schedule = computeKitchenProductionSchedule(demandByFlavor, stockByFlavor, today);
+    const net = netProductionScheduleInputs(grossDemand, giftBoxBottles, looseStock);
+    const schedule = computeKitchenProductionSchedule(
+      net.netDemand,
+      net.netStock,
+      today,
+      net.grossDemand,
+      net.giftBoxBottles,
+    );
 
     return NextResponse.json({
       schedule,
-      orderCount: demandRollup.orderCount,
+      grossDemand: net.grossDemand,
+      giftBoxBottles: net.giftBoxBottles,
+      looseStock: net.looseStock,
+      orderCount: orders.length,
       dateStart,
       dateEnd,
       dateFilterType,

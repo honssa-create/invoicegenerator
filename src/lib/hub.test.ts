@@ -25,21 +25,23 @@ describe('mapWooStatus', () => {
 });
 
 describe('mapNestieeWooStatus', () => {
-  it('maps only exact Woo statuses', () => {
+  it('maps core and nestiee.com.hk Woo statuses', () => {
     expect(mapNestieeWooStatus('pending')).toBe('pending payment');
     expect(mapNestieeWooStatus('processing')).toBe('processing');
+    expect(mapNestieeWooStatus('on-hold')).toBe('processing');
     expect(mapNestieeWooStatus('shipped')).toBe('shipped');
+    expect(mapNestieeWooStatus('wc-shipped')).toBe('shipped');
     expect(mapNestieeWooStatus('completed')).toBe('completed');
+    expect(mapNestieeWooStatus('delivered')).toBe('completed');
+    expect(mapNestieeWooStatus('wc-delivered')).toBe('completed');
   });
 
   it('drops unmatched Woo statuses', () => {
     expect(mapNestieeWooStatus('checkout-draft')).toBeNull();
     expect(mapNestieeWooStatus('draft')).toBeNull();
-    expect(mapNestieeWooStatus('on-hold')).toBeNull();
     expect(mapNestieeWooStatus('failed')).toBeNull();
     expect(mapNestieeWooStatus('cancelled')).toBeNull();
     expect(mapNestieeWooStatus('refunded')).toBeNull();
-    expect(mapNestieeWooStatus('wc-shipped')).toBeNull();
     expect(mapNestieeWooStatus('custom-status')).toBeNull();
     expect(mapNestieeWooStatus('')).toBeNull();
   });

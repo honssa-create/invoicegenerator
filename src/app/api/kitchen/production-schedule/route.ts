@@ -5,7 +5,7 @@ import { resolveKitchenOwnerUserId, getInventorySlice } from '@/lib/kitchen-serv
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import {
   computeKitchenProductionSchedule,
-  giftBoxSupplyByScheduleFlavor,
+  giftBoxSupplyByScheduleSlot,
   grossDemandFromRemainingGiftBoxes,
   netProductionScheduleInputs,
   stockFromFinishedRows,
@@ -112,7 +112,7 @@ export async function GET(request: Request) {
     );
 
     const inventory = await getInventorySlice(ownerId);
-    const giftBoxBottles = giftBoxSupplyByScheduleFlavor(
+    const giftBoxBottles = giftBoxSupplyByScheduleSlot(
       inventory.giftBoxes.map((g) => ({ boxType: g.boxType, quantity: g.quantity })),
       formulas.giftBoxBoms,
     );

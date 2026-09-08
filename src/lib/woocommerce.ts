@@ -279,6 +279,7 @@ async function fetchWooOrdersPaginated(
     createdBefore?: string;
     perPage?: number;
     maxPages?: number;
+    statuses?: string[];
   }
 ): Promise<WooOrder[]> {
   const perPage = options?.perPage ?? 100;
@@ -294,6 +295,7 @@ async function fetchWooOrdersPaginated(
     params.set('order', 'asc');
     if (options?.createdAfter) params.set('after', options.createdAfter);
     if (options?.createdBefore) params.set('before', options.createdBefore);
+    if (options?.statuses?.length) params.set('status', options.statuses.join(','));
     if (options?.modifiedAfter) {
       const iso = options.modifiedAfter.includes('T')
         ? options.modifiedAfter
@@ -364,6 +366,7 @@ export async function fetchWooOrders(
     createdBefore?: string;
     dateRange?: HubImportDateRange;
     perPage?: number;
+    statuses?: string[];
   }
 ): Promise<WooOrder[]> {
   const normalized = normalizeWooStoreUrl(store.storeUrl);
@@ -377,6 +380,7 @@ export async function fetchWooOrders(
         createdAfter: options.createdAfter,
         createdBefore: options.createdBefore,
         perPage: options.perPage,
+        statuses: options.statuses,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
@@ -395,5 +399,6 @@ export async function fetchWooOrders(
     createdAfter: options?.createdAfter,
     createdBefore: options?.createdBefore,
     perPage: options?.perPage,
+    statuses: options?.statuses,
   });
 }

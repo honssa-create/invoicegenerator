@@ -271,6 +271,27 @@ export function wooOrderDescription(order: WooOrder): string {
   return items || `WooCommerce order #${order.number}`;
 }
 
+/** Fetch one Woo order by id (used by webhooks when payload is minimal). */
+export async function fetchWooOrderById(store: WooStoreConfig, orderId: number): Promise<WooOrder> {
+  const normalized = normalizeWooStoreUrl(store.storeUrl);
+  if (!normalized.ok) {
+    throw new Error(`${store.platform}: ${normalized.error}`);
+  }
+  const params = new URLSearchParams();
+  appendWooQueryAuth(params, store.consumerKey, store.consumerSecret);
+  const url = `${normalized.url}/wp-json/wc/v3/orders/${orderId}?${params.toString()}`;
+  const res = await fetch(url, {
+    headers: wooRequestHeaders(),
+    cache: 'no-store',
+    redirect: 'follow',
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    throw new Error(wooApiErrorMessage(res.status, body, store.platform));
+  }
+  return parseWooApiJson<WooOrder>(body, store.platform);
+}
+
 async function fetchWooOrdersPaginated(
   store: WooStoreConfig,
   storeUrl: string,

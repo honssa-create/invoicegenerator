@@ -29,4 +29,16 @@ Incremental cron sync:
 - **Settled orders** — `shipped` / `completed` (etc.) already in Hub are skipped when status unchanged.
 - **on-hold** — stored as `on-hold` in Hub (not mapped to `processing`).
 
+## WooCommerce webhooks (instant new-order sync)
+
+Configure in **WooCommerce → Settings → Advanced → Webhooks** (per store):
+
+| Field | Value |
+|-------|--------|
+| Delivery URL | `https://<your-app>/api/webhooks/woocommerce/nestiee` (or `honour`, `cupmoka`, …) |
+| Secret | Same string as Railway env `WOO_WEBHOOK_SECRET_NESTIEE` (or global `WOO_WEBHOOK_SECRET`) |
+| Topic | **Order created** and **Order updated** (create two webhooks, or one per topic) |
+
+Order Hub also has **Sync now (server)** for manual incremental pull without a date range.
+
 Optional on `invoice-generator`: `HUB_WOO_CATCHUP_INTERVAL_HOURS=24` (default).

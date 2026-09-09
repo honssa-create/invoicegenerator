@@ -23,6 +23,8 @@ const EMPTY_WOO_MASKED = {
   key_hint: '',
   secret_set: false,
   secret_hint: '',
+  webhook_secret_set: false,
+  webhook_secret_hint: '',
 };
 
 const EMPTY_MASKED: IntegrationSettingsMasked = {
@@ -64,16 +66,28 @@ const EMPTY_MASKED: IntegrationSettingsMasked = {
   },
 };
 
-type WooForm = Record<WooPlatformKey, { url: string; key: string; secret: string }>;
+type WooForm = Record<WooPlatformKey, { url: string; key: string; secret: string; webhook_secret: string }>;
 type ResendForm = Record<ResendBrandKey, { api_key: string; from_email: string; order_types: string[] }>;
 
 function emptyWooForm(): WooForm {
   return {
-    nestiee: { url: '', key: '', secret: '' },
-    honour: { url: '', key: '', secret: '' },
-    honour_en: { url: '', key: '', secret: '' },
-    cupmoka: { url: '', key: '', secret: '' },
+    nestiee: { url: '', key: '', secret: '', webhook_secret: '' },
+    honour: { url: '', key: '', secret: '', webhook_secret: '' },
+    honour_en: { url: '', key: '', secret: '', webhook_secret: '' },
+    cupmoka: { url: '', key: '', secret: '', webhook_secret: '' },
   };
+}
+
+function randomWebhookSecret(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+function wooWebhookUrl(platform: WooPlatformKey): string {
+  if (typeof window === 'undefined') return '';
+  return `${window.location.origin}/api/webhooks/woocommerce/${platform}`;
 }
 
 export default function IntegrationsSettingsPanel({
@@ -111,6 +125,7 @@ export default function IntegrationsSettingsPanel({
     nestiee: { api_key: '', from_email: '', order_types: [] },
     cupmoka: { api_key: '', from_email: '', order_types: [] },
   });
+  const [copiedWebhook, setCopiedWebhook] = useState<WooPlatformKey | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
 
   const currentSnapshot = useMemo(
@@ -122,10 +137,10 @@ export default function IntegrationsSettingsPanel({
   const applyMasked = (s: IntegrationSettingsMasked) => {
     setMasked(s);
     setWoo({
-      nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '' },
-      honour: { url: s.woocommerce.honour.url, key: '', secret: '' },
-      honour_en: { url: s.woocommerce.honour_en.url, key: '', secret: '' },
-      cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '' },
+      nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '', webhook_secret: '' },
+      honour: { url: s.woocommerce.honour.url, key: '', secret: '', webhook_secret: '' },
+      honour_en: { url: s.woocommerce.honour_en.url, key: '', secret: '', webhook_secret: '' },
+      cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '', webhook_secret: '' },
     });
     setQb({
       client_id: s.quickbooks.client_id,
@@ -156,10 +171,10 @@ export default function IntegrationsSettingsPanel({
     setSavedSnapshot(
       JSON.stringify({
         woo: {
-          nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '' },
-          honour: { url: s.woocommerce.honour.url, key: '', secret: '' },
-          honour_en: { url: s.woocommerce.honour_en.url, key: '', secret: '' },
-          cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '' },
+          nestiee: { url: s.woocommerce.nestiee.url, key: '', secret: '', webhook_secret: '' },
+          honour: { url: s.woocommerce.honour.url, key: '', secret: '', webhook_secret: '' },
+          honour_en: { url: s.woocommerce.honour_en.url, key: '', secret: '', webhook_secret: '' },
+          cupmoka: { url: s.woocommerce.cupmoka.url, key: '', secret: '', webhook_secret: '' },
         },
         qb: {
           client_id: s.quickbooks.client_id,
@@ -231,19 +246,48 @@ export default function IntegrationsSettingsPanel({
     });
   };
 
+  const copyWebhookUrl = async (platform: WooPlatformKey) => {
+    const url = wooWebhookUrl(platform);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedWebhook(platform);
+      window.setTimeout(() => setCopiedWebhook(null), 2000);
+      onToast('Webhook URL copied', 'success');
+    } catch {
+      onToast('Could not copy URL', 'error');
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
         woocommerce: {
-          nestiee: { url: woo.nestiee.url, ...(woo.nestiee.key ? { key: woo.nestiee.key } : {}), ...(woo.nestiee.secret ? { secret: woo.nestiee.secret } : {}) },
-          honour: { url: woo.honour.url, ...(woo.honour.key ? { key: woo.honour.key } : {}), ...(woo.honour.secret ? { secret: woo.honour.secret } : {}) },
+          nestiee: {
+            url: woo.nestiee.url,
+            ...(woo.nestiee.key ? { key: woo.nestiee.key } : {}),
+            ...(woo.nestiee.secret ? { secret: woo.nestiee.secret } : {}),
+            ...(woo.nestiee.webhook_secret ? { webhook_secret: woo.nestiee.webhook_secret } : {}),
+          },
+          honour: {
+            url: woo.honour.url,
+            ...(woo.honour.key ? { key: woo.honour.key } : {}),
+            ...(woo.honour.secret ? { secret: woo.honour.secret } : {}),
+            ...(woo.honour.webhook_secret ? { webhook_secret: woo.honour.webhook_secret } : {}),
+          },
           honour_en: {
             url: woo.honour_en.url,
             ...(woo.honour_en.key ? { key: woo.honour_en.key } : {}),
             ...(woo.honour_en.secret ? { secret: woo.honour_en.secret } : {}),
+            ...(woo.honour_en.webhook_secret ? { webhook_secret: woo.honour_en.webhook_secret } : {}),
           },
-          cupmoka: { url: woo.cupmoka.url, ...(woo.cupmoka.key ? { key: woo.cupmoka.key } : {}), ...(woo.cupmoka.secret ? { secret: woo.cupmoka.secret } : {}) },
+          cupmoka: {
+            url: woo.cupmoka.url,
+            ...(woo.cupmoka.key ? { key: woo.cupmoka.key } : {}),
+            ...(woo.cupmoka.secret ? { secret: woo.cupmoka.secret } : {}),
+            ...(woo.cupmoka.webhook_secret ? { webhook_secret: woo.cupmoka.webhook_secret } : {}),
+          },
         },
         quickbooks: {
           client_id: qb.client_id,
@@ -340,7 +384,9 @@ export default function IntegrationsSettingsPanel({
           <h2 className="text-lg font-semibold text-gray-900">
             WooCommerce ({WOO_PLATFORM_KEYS.length} stores)
           </h2>
-          <p className="text-sm text-gray-500 mt-1">WooCommerce → Settings → Advanced → REST API → Add key (Read permission)</p>
+          <p className="text-sm text-gray-500 mt-1">
+            WooCommerce → Settings → Advanced → REST API → Add key (Read permission). For instant order sync, also add webhooks below.
+          </p>
         </div>
         <div className="divide-y divide-gray-100">
           {WOO_PLATFORM_KEYS.map((platform) => (
@@ -380,6 +426,63 @@ export default function IntegrationsSettingsPanel({
                     placeholder={masked.woocommerce[platform].secret_set ? masked.woocommerce[platform].secret_hint : 'cs_…'}
                     className={`${inputCls} mt-1`}
                   />
+                </div>
+                <div className="md:col-span-2 border-t border-gray-100 pt-3 mt-1">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Instant sync webhook 即時同步</p>
+                  <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                    In WooCommerce → Settings → Advanced → Webhooks, create <strong>two</strong> webhooks (Order created + Order updated).
+                    Paste the delivery URL and secret below — they must match exactly.
+                  </p>
+                  <label className="text-xs font-medium text-gray-500">Webhook delivery URL</label>
+                  <div className="mt-1 flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={wooWebhookUrl(platform)}
+                      className={`${inputCls} font-mono text-xs bg-gray-50`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => copyWebhookUrl(platform)}
+                      className="shrink-0 px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      {copiedWebhook === platform ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <div className="mt-3">
+                    <label className="text-xs font-medium text-gray-500">Webhook Secret</label>
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        type="password"
+                        value={woo[platform].webhook_secret}
+                        onChange={(e) =>
+                          setWoo({ ...woo, [platform]: { ...woo[platform], webhook_secret: e.target.value } })
+                        }
+                        placeholder={
+                          masked.woocommerce[platform].webhook_secret_set
+                            ? masked.woocommerce[platform].webhook_secret_hint
+                            : 'Same secret in Woo webhook settings'
+                        }
+                        className={`${inputCls} flex-1`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setWoo({
+                            ...woo,
+                            [platform]: { ...woo[platform], webhook_secret: randomWebhookSecret() },
+                          })
+                        }
+                        className="shrink-0 px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
+                      >
+                        Generate
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Woo topics: <span className="font-mono">Order created</span> +{' '}
+                      <span className="font-mono">Order updated</span>. Save here, then paste the same secret into both Woo webhooks.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

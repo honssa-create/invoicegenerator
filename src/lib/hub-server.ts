@@ -41,6 +41,12 @@ import { trySyncCustomerFromOrderRecord } from './customer-server';
 import { getWooStoreConfigs } from './woocommerce';
 import { tryAllocateKitchenOnShipTransition } from './kitchen-server';
 import { logActivity } from './activity';
+import {
+  applyNestieeWooPendingChangesToFields,
+  clearNestieeWooPendingChanges,
+  detectNestieeWooPendingChangesFromSync,
+  formatNestieeWooPendingChangeSummary,
+} from './nestiee-woo-changes';
 
 export interface HubOrderUpsertInput {
   source_platform: Exclude<HubPlatform, 'manual'>;
@@ -408,6 +414,26 @@ export async function upsertHubOrder(
     importedNotes && !(existing?.notes || '').trim() ? importedNotes : null;
   const orderType = orderTypeFromFields(fields);
 
+  let nestieePendingDetected: ReturnType<typeof detectNestieeWooPendingChangesFromSync> = [];
+  if (input.source_platform === 'nestiee') {
+    if (input.status !== 'processing') {
+      clearNestieeWooPendingChanges(fields);
+    } else if (existing && String(previousStatus || '').trim() === 'processing') {
+      const effectiveShipping = (shippingAddress || existing.shipping_address || '').trim();
+      nestieePendingDetected = detectNestieeWooPendingChangesFromSync({
+        previousFields,
+        previousShippingAddress: existing.shipping_address || '',
+        previousNotes: existing.notes || '',
+        nextFields: fields,
+        nextShippingAddress: effectiveShipping,
+        incomingCustomerNote: importedNotes,
+      });
+      if (nestieePendingDetected.length > 0) {
+        applyNestieeWooPendingChangesToFields(fields, nestieePendingDetected);
+      }
+    }
+  }
+
   if (existing) {
     await db.prepare(
       `UPDATE orders SET
@@ -440,6 +466,16 @@ export async function upsertHubOrder(
       userId
     );
     await syncCustomerAfterHubOrder(userId, existing.id);
+    if (nestieePendingDetected.length > 0) {
+      await logActivity(
+        'order',
+        existing.id,
+        userId,
+        'activity',
+        'System',
+        `Woo sync: ${formatNestieeWooPendingChangeSummary(nestieePendingDetected)}`,
+      );
+    }
     await applyHubShipKitchenAllocation(userId, existing.id, {
       status: previousStatus,
       fields: previousFields,

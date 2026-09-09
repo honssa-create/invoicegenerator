@@ -8,18 +8,20 @@ import {
   orderDueDate,
   orderTypeFromFields,
 } from './orders';
+import { orderMatchesNestieeModifiedScope } from './nestiee-woo-changes';
 import { addCalendarDays } from './wedding-gift-confirmation';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
 
-export type NestieeDemandScope = 'processing' | 'shipped' | 'all' | 'ship_today';
+export type NestieeDemandScope = 'processing' | 'modified' | 'shipped' | 'all' | 'ship_today';
 
 export const NESTIEE_DEMAND_SCOPES: readonly NestieeDemandScope[] = [
   'processing',
+  'modified',
+  'ship_today',
   'shipped',
   'all',
-  'ship_today',
 ] as const;
 
 /** Inclusive delivery-date window: today through today + N calendar days. */
@@ -30,7 +32,7 @@ export const NESTIEE_STATUS_SHIP_WITHIN_DAYS = 4;
 
 export function parseNestieeDemandScope(raw: string | null | undefined): NestieeDemandScope {
   const v = String(raw || '').trim();
-  if (v === 'shipped' || v === 'all' || v === 'ship_today') return v;
+  if (v === 'modified' || v === 'shipped' || v === 'all' || v === 'ship_today') return v;
   return 'processing';
 }
 
@@ -40,16 +42,19 @@ export function isNestieeShipTodayScope(scope: NestieeDemandScope): boolean {
 
 /** Statuses included in the Nestiee production dashboard for a given scope. */
 export function nestieeStatusesForDemandScope(scope: NestieeDemandScope): readonly string[] {
-  if (scope === 'processing' || scope === 'ship_today') return [NESTIEE_PROCESSING_STATUS];
+  if (scope === 'processing' || scope === 'ship_today' || scope === 'modified') {
+    return [NESTIEE_PROCESSING_STATUS];
+  }
   if (scope === 'shipped') return NESTIEE_SHIPPED_STATUSES;
   return [NESTIEE_PROCESSING_STATUS, ...NESTIEE_SHIPPED_STATUSES];
 }
 
 export function orderMatchesNestieeDemandScope(
-  status: string | null | undefined,
+  order: { status?: string | null; fields?: Record<string, unknown> },
   scope: NestieeDemandScope,
 ): boolean {
-  const s = String(status || '').trim();
+  if (scope === 'modified') return orderMatchesNestieeModifiedScope(order);
+  const s = String(order.status || '').trim();
   return nestieeStatusesForDemandScope(scope).includes(s);
 }
 
@@ -108,7 +113,7 @@ export function orderMatchesNestieeShipToday(
   order: { status?: string | null; fields?: Record<string, unknown> },
   today: string = localDateYmd(),
 ): boolean {
-  if (!orderMatchesNestieeDemandScope(order.status, 'ship_today')) return false;
+  if (!orderMatchesNestieeDemandScope(order, 'ship_today')) return false;
   const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);
   return orderMatchesNestieeDateRange(order, {
     dateStart,
@@ -139,7 +144,7 @@ export function orderMatchesNestieeShipWithinDays(
   today: string = localDateYmd(),
   withinDays: number = NESTIEE_STATUS_SHIP_WITHIN_DAYS,
 ): boolean {
-  if (!orderMatchesNestieeDemandScope(order.status, 'processing')) return false;
+  if (!orderMatchesNestieeDemandScope(order, 'processing')) return false;
   const { dateStart, dateEnd } = nestieeShipWithinDaysDateRange(today, withinDays);
   return orderMatchesNestieeDateRange(order, {
     dateStart,
@@ -314,7 +319,7 @@ export function summarizeNestieeProcessingDemand(
     if (!orderType || !isNestieeOrderType(orderType)) continue;
     if (scope === 'ship_today') {
       if (!orderMatchesNestieeShipToday(order, opts?.today)) continue;
-    } else if (!orderMatchesNestieeDemandScope(order.status, scope)) {
+    } else if (!orderMatchesNestieeDemandScope(order, scope)) {
       continue;
     }
     orderCount += 1;
@@ -441,7 +446,7 @@ export function summarizeNestieeUsedShippingBoxes(
   for (const order of orders) {
     const orderType = orderTypeFromFields(order.fields);
     if (!orderType || !isNestieeOrderType(orderType)) continue;
-    if (!orderMatchesNestieeDemandScope(order.status, 'shipped')) continue;
+    if (!orderMatchesNestieeDemandScope(order, 'shipped')) continue;
     if (
       !orderMatchesNestieeDateRange(order, {
         dateStart,

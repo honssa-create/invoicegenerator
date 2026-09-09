@@ -12,6 +12,7 @@ import { tryAllocateKitchenOnShipTransition } from '@/lib/kitchen-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 import { cleanupReplacedOrderPaymentReceipts } from '@/lib/stored-file-cleanup';
+import { clearNestieeWooPendingChanges } from '@/lib/nestiee-woo-changes';
 
 const CLIENT_SYNC_CORE_KEYS = ['name', 'phone', 'customer_email', 'shipping_address'] as const;
 const CLIENT_SYNC_FIELD_KEYS = ['company_name', 'order_type'] as const;
@@ -114,6 +115,17 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       }
       mergedFields = { ...currentFields, ...fields };
       pruneStaleOrderFields(mergedFields);
+      const userAcknowledgedWooChanges =
+        ('status' in core &&
+          typeof core.status === 'string' &&
+          core.status &&
+          core.status !== 'processing') ||
+        'shipping_address' in core ||
+        'notes' in core ||
+        ['client_delivery_date', 'due_date'].some((k) => k in fields);
+      if (userAcknowledgedWooChanges) {
+        clearNestieeWooPendingChanges(mergedFields);
+      }
       setClauses.push('fields_json = ?');
       values.push(JSON.stringify(mergedFields));
       setClauses.push('order_type = ?');

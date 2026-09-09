@@ -12,6 +12,7 @@ import {
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
+import { orderMatchesNestieeModifiedScope } from '@/lib/nestiee-woo-changes';
 
 function parseFields(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
@@ -75,11 +76,11 @@ export async function GET(request: Request) {
         fields: parseFields(row.fields_json),
         created_at: row.created_at || '',
       }))
-      .filter((order) =>
-        scope === 'ship_today'
-          ? orderMatchesNestieeShipToday(order, today)
-          : orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType }),
-      );
+      .filter((order) => {
+        if (scope === 'modified') return orderMatchesNestieeModifiedScope(order);
+        if (scope === 'ship_today') return orderMatchesNestieeShipToday(order, today);
+        return orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType });
+      });
 
     const { catalog, formulas } = await loadKitchenCatalog(ownerId);
     const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({

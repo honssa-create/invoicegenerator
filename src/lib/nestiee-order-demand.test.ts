@@ -84,9 +84,22 @@ describe('nestieeStatusesForDemandScope', () => {
 
 describe('orderMatchesNestieeDemandScope', () => {
   it('excludes draft/pending payment for all scopes', () => {
-    expect(orderMatchesNestieeDemandScope('pending payment', 'all')).toBe(false);
-    expect(orderMatchesNestieeDemandScope('checkout-draft', 'all')).toBe(false);
-    expect(orderMatchesNestieeDemandScope('completed', 'shipped')).toBe(true);
+    expect(orderMatchesNestieeDemandScope({ status: 'pending payment' }, 'all')).toBe(false);
+    expect(orderMatchesNestieeDemandScope({ status: 'checkout-draft' }, 'all')).toBe(false);
+    expect(orderMatchesNestieeDemandScope({ status: 'completed' }, 'shipped')).toBe(true);
+  });
+
+  it('matches modified scope only for processing orders with pending woo changes', () => {
+    expect(
+      orderMatchesNestieeDemandScope(
+        {
+          status: 'processing',
+          fields: { woo_pending_changes: [{ key: 'address', before: 'a', after: 'b' }] },
+        },
+        'modified',
+      ),
+    ).toBe(true);
+    expect(orderMatchesNestieeDemandScope({ status: 'processing', fields: {} }, 'modified')).toBe(false);
   });
 });
 

@@ -28,7 +28,7 @@ describe('mapNestieeWooStatus', () => {
   it('maps core and nestiee.com.hk Woo statuses', () => {
     expect(mapNestieeWooStatus('pending')).toBe('pending payment');
     expect(mapNestieeWooStatus('processing')).toBe('processing');
-    expect(mapNestieeWooStatus('on-hold')).toBe('processing');
+    expect(mapNestieeWooStatus('on-hold')).toBe('on-hold');
     expect(mapNestieeWooStatus('shipped')).toBe('shipped');
     expect(mapNestieeWooStatus('wc-shipped')).toBe('shipped');
     expect(mapNestieeWooStatus('completed')).toBe('completed');

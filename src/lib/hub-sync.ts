@@ -46,7 +46,14 @@ import {
 export const HUB_WOO_SYNC_MODIFIED_OVERLAP_DAYS = 7;
 
 /**
- * Nestiee incremental cron also re-fetches recent orders by date_created so orders that were
+ * Nestiee cron always re-fetches orders created in this window (by date_created) and merges
+ * with the modified_after pull so brand-new processing orders are not missed when pagination
+ * caps the modified query (oldest-first used to drop the newest rows).
+ */
+export const NESTIEE_WOO_RECENT_CREATED_SYNC_DAYS = 7;
+
+/**
+ * Nestiee incremental cron also re-fetches older orders by date_created so orders that were
  * skipped (e.g. unmapped Woo status) but never modified in Woo can still be imported.
  * Runs at most once per {@link nestieeCatchupIntervalHours} (default 24h), not every cron tick.
  */
@@ -94,13 +101,27 @@ async function fetchWooOrdersForIncrementalSync(
   const modifiedAfter = subtractDaysFromIsoTimestamp(lastSync, HUB_WOO_SYNC_MODIFIED_OVERLAP_DAYS);
   const modifiedOrders = await fetchWooOrders(store, { modifiedAfter });
 
+  let merged = modifiedOrders;
+
+  if (store.platform === 'nestiee' && NESTIEE_WOO_RECENT_CREATED_SYNC_DAYS > 0) {
+    const recentRange = rollingHubImportDateRange(NESTIEE_WOO_RECENT_CREATED_SYNC_DAYS);
+    const bounds = wooOrderCreatedBounds(recentRange);
+    const recentCreated = await fetchWooOrders(store, {
+      createdAfter: bounds.after,
+      createdBefore: bounds.before,
+      dateRange: recentRange,
+      statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
+    });
+    merged = dedupeWooOrdersById([...merged, ...recentCreated]);
+  }
+
   if (store.platform !== 'nestiee' || NESTIEE_WOO_CREATED_CATCHUP_DAYS <= 0) {
-    return { orders: modifiedOrders, ranCreatedCatchup: false };
+    return { orders: merged, ranCreatedCatchup: false };
   }
 
   const lastCatchup = await getSyncState(userId, 'woocommerce', catchupSyncStoreKey(store.platform));
   if (!catchupIntervalElapsed(lastCatchup)) {
-    return { orders: modifiedOrders, ranCreatedCatchup: false };
+    return { orders: merged, ranCreatedCatchup: false };
   }
 
   const catchupRange = rollingHubImportDateRange(NESTIEE_WOO_CREATED_CATCHUP_DAYS);
@@ -112,7 +133,7 @@ async function fetchWooOrdersForIncrementalSync(
     statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
   });
   return {
-    orders: dedupeWooOrdersById([...modifiedOrders, ...createdOrders]),
+    orders: dedupeWooOrdersById([...merged, ...createdOrders]),
     ranCreatedCatchup: true,
   };
 }
@@ -180,7 +201,7 @@ export async function ingestWooOrders(
       })
     : orders;
   // Honour/cupmoka skip Woo checkout drafts. Nestiee drops unmapped statuses
-  // (cancelled/refunded/draft); on-hold and wc-shipped are mapped in mapNestieeWooStatus.
+  // (cancelled/refunded/draft); on-hold is stored as on-hold; wc-shipped maps in mapNestieeWooStatus.
   const rows = dateRows.filter((order) => {
     if (isWooDraftOrder(order.status)) return false;
     if (platform === 'nestiee') return mapNestieeWooStatus(order.status) != null;

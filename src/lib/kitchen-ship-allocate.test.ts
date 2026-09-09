@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatKitchenShortageActivityLog,
   formatKitchenShortageConfirm,
   kitchenShortagesFromNeeds,
   parseKitchenShortageResponse,
@@ -64,5 +65,19 @@ describe('formatKitchenShortageConfirm', () => {
     expect(text).toMatch(/Ship anyway/);
     expect(text).toMatch(/不扣庫存/);
     expect(text).toMatch(/Star Gold/);
+  });
+});
+
+describe('formatKitchenShortageActivityLog', () => {
+  it('records shipped-without-deduction for Activity feed', () => {
+    const text = formatKitchenShortageActivityLog(
+      [{ label: '紅色銀', need: 10, have: 2 }],
+      'woo_sync',
+    );
+    expect(text).toContain('[庫存不足·未扣數]');
+    expect(text).toContain('Woo sync');
+    expect(text).toContain('紅色銀');
+    expect(text).toContain('需要 10');
+    expect(text).toContain('現有 2');
   });
 });

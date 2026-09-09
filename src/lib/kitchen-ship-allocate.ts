@@ -68,3 +68,19 @@ export function formatKitchenShortageConfirm(shortages: KitchenShortage[]): stri
     ...lines,
   ].join('\n');
 }
+
+function shortageDetailLines(shortages: KitchenShortage[]): string {
+  return shortages
+    .map((s) => `${s.label}: 需要 ${s.need} / need ${s.need}，現有 ${s.have} / have ${s.have}`)
+    .join('; ');
+}
+
+/** Activity log when an order ships/completes but kitchen stock was not deducted. */
+export function formatKitchenShortageActivityLog(
+  shortages: KitchenShortage[],
+  source: 'woo_sync' | 'manual',
+): string {
+  const detail = shortageDetailLines(shortages);
+  const via = source === 'woo_sync' ? 'Woo sync' : '手動改 status';
+  return `[庫存不足·未扣數] ${via}: 訂單已寄出／completed，但未扣廚房庫存 — ${detail}`;
+}

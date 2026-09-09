@@ -109,7 +109,7 @@ export function useOrderDetail(orderId: string) {
           if (res.status === 409 && shortages) {
             const shipAnyway = window.confirm(formatKitchenShortageConfirm(shortages));
             if (shipAnyway) {
-              patch({ ...payload, skip_kitchen_allocation: true }, opts);
+              patch({ ...payload, skip_kitchen_allocation: true, kitchen_shortages: shortages }, opts);
             } else if (opts?.revertStatusTo != null) {
               setCoreLocal('status', opts.revertStatusTo);
             }

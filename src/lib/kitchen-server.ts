@@ -51,7 +51,11 @@ import {
   totalGiftBoxesInOrder,
   type NestieeShippingBoxId,
 } from './nestiee-order-demand';
-import { kitchenShortagesFromNeeds, type KitchenShortage } from './kitchen-ship-allocate';
+import {
+  formatKitchenShortageActivityLog,
+  kitchenShortagesFromNeeds,
+  type KitchenShortage,
+} from './kitchen-ship-allocate';
 import {
   aggregateRawNeedsFromPrepOrders,
   bomRawDisplayLabel,
@@ -1033,8 +1037,30 @@ export async function makeReturnGift(
 }
 
 export type AllocateRemainingResult =
-  | { ok: true; allocated: boolean; summary?: string }
+  | { ok: true; allocated: boolean; summary?: string; skipReason?: string }
   | { ok: false; shortages: KitchenShortage[] };
+
+function kitchenNeedsSummary(needs: KitchenNeedLine[]): string {
+  if (needs.length === 0) return 'none';
+  return needs.map((n) => n.label).join(', ');
+}
+
+/** Activity feed text for ship-triggered kitchen allocation (null = nothing to log). */
+export function kitchenAllocateActivityMessage(
+  alloc: KitchenShipTransitionAllocResult,
+  source: 'woo_sync' | 'manual',
+): string | null {
+  if (!alloc.triggered) return null;
+  const prefix = source === 'woo_sync' ? 'Woo sync: ' : '';
+  if (alloc.ok && alloc.allocated) {
+    return alloc.summary || `${prefix}auto-allocated kitchen stock on ship`.trim();
+  }
+  if (!alloc.ok) {
+    return formatKitchenShortageActivityLog(alloc.shortages, source === 'woo_sync' ? 'woo_sync' : 'manual');
+  }
+  const reason = alloc.skipReason || 'no remaining gift-box needs';
+  return `${prefix}kitchen auto-allocate skipped — ${reason}`.trim();
+}
 
 export type KitchenShipTransitionAllocResult = AllocateRemainingResult & {
   triggered: boolean;
@@ -1057,6 +1083,47 @@ export async function tryAllocateKitchenOnShipTransition(
   return { ...result, triggered: true };
 }
 
+/** Read-only: gift-box / bottle shortages for an order (no DB writes). */
+export async function previewKitchenShortagesForOrder(
+  ownerId: number,
+  orderId: number,
+  fieldsOverride?: Record<string, unknown>,
+): Promise<KitchenShortage[]> {
+  const { catalog } = await loadKitchenCatalog(ownerId);
+  await ensureSeed(ownerId, catalog);
+
+  const order = (await db
+    .prepare('SELECT id, po_number, order_type, fields_json FROM orders WHERE id = ? AND user_id = ?')
+    .get(orderId, ownerId)) as OrderRow | undefined;
+  if (!order) return [];
+
+  const fields = fieldsOverride ?? orderFieldsFromRow(order);
+  const ot = orderTypeFromFields(fields) || '';
+  const fulfillments = await loadFulfillments(ownerId);
+
+  let needs: KitchenNeedLine[] = [];
+  if (ot === NESTIEE_ORDER_TYPE) {
+    needs = nestieeNeeds(order, fields, fulfillments, catalog.giftBoxTypes);
+  } else if (ot === WEDDING_GIFT_ORDER_TYPE) {
+    needs = returnGiftNeeds(order, fields, fulfillments, catalog);
+  } else {
+    return [];
+  }
+
+  const remaining = needs.filter((n) => n.remaining > 0);
+  if (remaining.length === 0) return [];
+
+  const stockLines = remaining.map((n) => {
+    let label = n.label;
+    if (n.needKey.startsWith('gift:')) label = giftBoxLabel(n.needKey.slice(5), catalog);
+    else if (n.needKey.startsWith('bottle:')) label = skuLabel(n.needKey.slice(7), catalog);
+    return { needKey: n.needKey, remaining: n.remaining, label };
+  });
+
+  const stock = await loadStockMaps(ownerId, catalog);
+  return kitchenShortagesFromNeeds(stockLines, stock);
+}
+
 /**
  * Deduct remaining Nestiee gift boxes / 回禮 bottles for an order.
  * No writes when stock is short. No-op for other order types or fully allocated orders.
@@ -1072,7 +1139,7 @@ export async function tryAllocateRemainingForOrder(
   const order = (await db
     .prepare('SELECT id, po_number, order_type, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, ownerId)) as OrderRow | undefined;
-  if (!order) return { ok: true, allocated: false };
+  if (!order) return { ok: true, allocated: false, skipReason: 'order not found' };
 
   const fields = orderFieldsFromRow(order);
   const ot = orderTypeFromFields(fields) || '';
@@ -1087,11 +1154,17 @@ export async function tryAllocateRemainingForOrder(
     kind = 'return_gift';
     needs = returnGiftNeeds(order, fields, fulfillments, catalog);
   } else {
-    return { ok: true, allocated: false };
+    return { ok: true, allocated: false, skipReason: 'not a Nestiee / 回禮 order' };
   }
 
   const remaining = needs.filter((n) => n.remaining > 0);
-  if (remaining.length === 0) return { ok: true, allocated: false };
+  if (remaining.length === 0) {
+    const skipReason =
+      needs.length === 0
+        ? 'no gift-box qty on order at ship time'
+        : `already fully allocated (${kitchenNeedsSummary(needs)})`;
+    return { ok: true, allocated: false, skipReason };
+  }
 
   const stockLines = remaining.map((n) => {
     let label = n.label;

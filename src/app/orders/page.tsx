@@ -47,6 +47,7 @@ import {
   parseKitchenShortageResponse,
   type KitchenShortage,
 } from '@/lib/kitchen-ship-allocate';
+import { giftBoxLabelsFromFields } from '@/lib/nestiee-gift-box-search';
 import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 
 const EMPTY_NESTIEE_DEMAND: NestieeProcessingDemand = {
@@ -275,7 +276,14 @@ function OrdersPageContent() {
     let list = orders.filter((o) => {
       if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
       if (q) {
-        const hay = [o.reference_number, o.po_number, o.name, o.description, getOrderType(o)]
+        const hay = [
+          o.reference_number,
+          o.po_number,
+          o.name,
+          o.description,
+          getOrderType(o),
+          ...giftBoxLabelsFromFields(o.fields),
+        ]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -754,7 +762,7 @@ function OrdersPageContent() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder={bi('Search reference, PO#, name, description, type…', '搜尋參考編號、PO#、客戶、描述、類型…')}
+        searchPlaceholder={bi('Search reference, PO#, name, gift box…', '搜尋參考編號、PO#、客戶、禮盒…')}
         onClear={clearFilters}
       >
         <div className="flex flex-col">

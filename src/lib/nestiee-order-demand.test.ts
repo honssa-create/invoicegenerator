@@ -69,6 +69,7 @@ describe('parseNestieeDemandScope', () => {
     expect(parseNestieeDemandScope('shipped')).toBe('shipped');
     expect(parseNestieeDemandScope('all')).toBe('all');
     expect(parseNestieeDemandScope('ship_today')).toBe('ship_today');
+    expect(parseNestieeDemandScope('modified')).toBe('modified');
     expect(parseNestieeDemandScope('invalid')).toBe('processing');
   });
 });

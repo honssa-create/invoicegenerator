@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
 import KitchenUsedShippingBoxes from '@/components/KitchenUsedShippingBoxes';
@@ -41,6 +41,7 @@ import { type StockMaps } from '@/lib/kitchen-bom';
 import { buildKitchenPrepCreateHref, type PrepCapacity } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
+import { kitchenOrderHasGiftBox } from '@/lib/nestiee-gift-box-search';
 
 type Modal = 'gift' | 'return' | 'restock' | null;
 
@@ -184,8 +185,9 @@ function mergeOrdersSlice(
   };
 }
 
-export default function KitchenPage() {
+function KitchenPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [state, setState] = useState<KitchenState | null>(null);
   const [shellLoading, setShellLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -222,6 +224,7 @@ export default function KitchenPage() {
   // 補充原料
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
   const [historyActionFilter, setHistoryActionFilter] = useState<KitchenAction | ''>('');
+  const [orderGiftBoxFilter, setOrderGiftBoxFilter] = useState('');
 
   // Admin stock adjustment
   const [adjustStock, setAdjustStock] = useState<AdjustStockTarget | null>(null);
@@ -935,11 +938,25 @@ export default function KitchenPage() {
   }, [state, historyActionFilter]);
 
   const openOrders = state?.openOrders ?? [];
-  const ordersTotalPages = Math.max(1, Math.ceil(openOrders.length / KITCHEN_TABLE_PAGE_SIZE));
+  const filteredOpenOrders = useMemo(() => {
+    if (!orderGiftBoxFilter) return openOrders;
+    return openOrders.filter((o) => kitchenOrderHasGiftBox(o, orderGiftBoxFilter, true));
+  }, [openOrders, orderGiftBoxFilter]);
+
+  const ordersTotalPages = Math.max(1, Math.ceil(filteredOpenOrders.length / KITCHEN_TABLE_PAGE_SIZE));
   const paginatedOpenOrders = useMemo(() => {
     const start = (ordersPage - 1) * KITCHEN_TABLE_PAGE_SIZE;
-    return openOrders.slice(start, start + KITCHEN_TABLE_PAGE_SIZE);
-  }, [openOrders, ordersPage]);
+    return filteredOpenOrders.slice(start, start + KITCHEN_TABLE_PAGE_SIZE);
+  }, [filteredOpenOrders, ordersPage]);
+
+  const applyGiftBoxOrderFilter = (boxType: string) => {
+    setOrderGiftBoxFilter(boxType);
+    setOrdersPage(1);
+    setOrdersExpanded(true);
+    if (!ordersLoadedRef.current) {
+      void loadOrders();
+    }
+  };
 
   const historyTotalPages = Math.max(1, Math.ceil(filteredMovements.length / KITCHEN_TABLE_PAGE_SIZE));
   const paginatedMovements = useMemo(() => {
@@ -950,6 +967,20 @@ export default function KitchenPage() {
   useEffect(() => {
     setHistoryPage(1);
   }, [historyActionFilter]);
+
+  useEffect(() => {
+    const box = searchParams.get('giftBox')?.trim() || '';
+    if (!box) return;
+    setOrderGiftBoxFilter(box);
+    setOrdersExpanded(true);
+    if (!ordersLoadedRef.current) {
+      void loadOrders();
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    setOrdersPage(1);
+  }, [orderGiftBoxFilter]);
 
   useEffect(() => {
     if (ordersPage > ordersTotalPages) setOrdersPage(ordersTotalPages);
@@ -1115,9 +1146,20 @@ export default function KitchenPage() {
                         {bi('Stock', '庫存')} {have}
                       </span>
                       <span className="mx-1">·</span>
-                      <span className={shortfall(have, needed)}>
-                        {bi('Need', '需要')} {needed}
-                      </span>
+                      {needed > 0 ? (
+                        <button
+                          type="button"
+                          className={`underline-offset-2 hover:underline ${shortfall(have, needed)}`}
+                          title={bi('Show orders needing this gift box', '顯示需要此禮盒的訂單')}
+                          onClick={() => applyGiftBoxOrderFilter(g.boxType)}
+                        >
+                          {bi('Need', '需要')} {needed}
+                        </button>
+                      ) : (
+                        <span className={shortfall(have, needed)}>
+                          {bi('Need', '需要')} {needed}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <TapButton
@@ -1418,6 +1460,37 @@ export default function KitchenPage() {
                 </div>
               ) : (
                 <>
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-end gap-3">
+            <label className="text-sm text-gray-600 flex flex-col gap-1 min-w-[12rem]">
+              <span>{bi('Filter by gift box', '按禮盒篩選')}</span>
+              <select
+                className={inputCls}
+                value={orderGiftBoxFilter}
+                onChange={(e) => {
+                  setOrderGiftBoxFilter(e.target.value);
+                  setOrdersPage(1);
+                }}
+              >
+                <option value="">{bi('All orders', '全部訂單')}</option>
+                {state.giftBoxes
+                  .filter((g) => g.needed > 0)
+                  .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant'))
+                  .map((g) => (
+                    <option key={g.boxType} value={g.boxType}>
+                      {g.label} ({g.needed})
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {orderGiftBoxFilter && (
+              <p className="text-sm text-gray-500">
+                {bi(
+                  `${filteredOpenOrders.length} order(s) need this gift box`,
+                  `${filteredOpenOrders.length} 張訂單需要此禮盒`,
+                )}
+              </p>
+            )}
+          </div>
           <div className="overflow-x-auto mt-4">
             <table className="w-full text-sm">
               <thead>
@@ -1429,10 +1502,12 @@ export default function KitchenPage() {
                 </tr>
               </thead>
               <tbody>
-                {openOrders.length === 0 ? (
+                {filteredOpenOrders.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-6 text-center text-gray-400">
-                      {bi('No open Nestiee / 回禮 needs', '沒有待製作的 Nestiee / 回禮')}
+                      {orderGiftBoxFilter
+                        ? bi('No orders need this gift box', '沒有訂單需要此禮盒')
+                        : bi('No open Nestiee / 回禮 needs', '沒有待製作的 Nestiee / 回禮')}
                     </td>
                   </tr>
                 ) : (
@@ -1531,7 +1606,7 @@ export default function KitchenPage() {
           </div>
           <TablePagination
             page={ordersPage}
-            totalItems={openOrders.length}
+            totalItems={filteredOpenOrders.length}
             pageSize={KITCHEN_TABLE_PAGE_SIZE}
             onPageChange={setOrdersPage}
           />
@@ -2128,5 +2203,21 @@ export default function KitchenPage() {
         </div>
       )}
     </AppLayout>
+  );
+}
+
+export default function KitchenPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppLayout>
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+          </div>
+        </AppLayout>
+      }
+    >
+      <KitchenPageContent />
+    </Suspense>
   );
 }

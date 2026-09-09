@@ -183,8 +183,8 @@ export function mapWooStatus(status: string): string {
 /**
  * Nestiee Woo statuses → InvoiceFlow ecommerce status set.
  * Unmapped statuses (draft, cancelled, refunded, etc.) are dropped at ingest.
- * `on-hold` and `wc-shipped` are common on nestiee.com.hk — map them so Hub sync
- * does not silently skip orders that never match the core Woo status slugs.
+ * `on-hold` is kept as `on-hold` in Hub (not folded into processing).
+ * `wc-shipped` is common on nestiee.com.hk — map it so Hub sync does not silently skip orders.
  */
 export function mapNestieeWooStatus(status: string): string | null {
   const normalized = String(status || '').trim().toLowerCase();
@@ -192,8 +192,9 @@ export function mapNestieeWooStatus(status: string): string | null {
     case 'pending':
       return 'pending payment';
     case 'processing':
-    case 'on-hold':
       return 'processing';
+    case 'on-hold':
+      return 'on-hold';
     case 'shipped':
     case 'wc-shipped':
       return 'shipped';
@@ -287,12 +288,15 @@ async function fetchWooOrdersPaginated(
   const all: WooOrder[] = [];
   let page = 1;
 
+  const orderBy = options?.modifiedAfter ? 'modified' : 'date';
+  const order = options?.modifiedAfter ? 'desc' : 'asc';
+
   while (page <= maxPages) {
     const params = new URLSearchParams();
     params.set('per_page', String(perPage));
     params.set('page', String(page));
-    params.set('orderby', 'date');
-    params.set('order', 'asc');
+    params.set('orderby', orderBy);
+    params.set('order', order);
     if (options?.createdAfter) params.set('after', options.createdAfter);
     if (options?.createdBefore) params.set('before', options.createdBefore);
     if (options?.statuses?.length) params.set('status', options.statuses.join(','));

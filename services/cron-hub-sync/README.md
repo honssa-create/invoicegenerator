@@ -23,8 +23,10 @@ Railway cron service: triggers InvoiceFlow Order Hub sync every 15 minutes.
 
 Incremental cron sync:
 
-- **Modified orders** — re-fetched every run (7-day overlap).
+- **Modified orders** — re-fetched every run (7-day overlap), newest modified first.
+- **Nestiee recent created (7 days)** — merged every run so new `processing` orders are not missed.
 - **Nestiee 90-day created catch-up** — at most once per 24h (`HUB_WOO_CATCHUP_INTERVAL_HOURS`), and only non-completed Woo statuses.
 - **Settled orders** — `shipped` / `completed` (etc.) already in Hub are skipped when status unchanged.
+- **on-hold** — stored as `on-hold` in Hub (not mapped to `processing`).
 
 Optional on `invoice-generator`: `HUB_WOO_CATCHUP_INTERVAL_HOURS=24` (default).

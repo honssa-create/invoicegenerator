@@ -12,6 +12,7 @@ export type OrderDetailPatchPayload = {
   linked_invoice_id?: string | number | null;
   linked_quotation_id?: string | number | null;
   skip_kitchen_allocation?: boolean;
+  kitchen_shortages?: { label: string; need: number; have: number }[];
 };
 
 export type OrderDetailFormHelpers = {

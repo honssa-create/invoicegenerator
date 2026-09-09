@@ -18,7 +18,9 @@ describe('kitchenAllocateActivityMessage', () => {
         },
         'woo_sync',
       ),
-    ).toBe('Woo sync: kitchen stock short — could not auto-allocate (紅色銀: need 10, have 2)');
+    ).toBe(
+      '[庫存不足·未扣數] Woo sync: 訂單已寄出／completed，但未扣廚房庫存 — 紅色銀: 需要 10 / need 10，現有 2 / have 2',
+    );
   });
 
   it('logs skip when no gift-box qty at ship time', () => {

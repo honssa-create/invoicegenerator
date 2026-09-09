@@ -493,7 +493,7 @@ function OrdersPageContent() {
     orderId: number,
     nextStatus: string,
     prevStatus: string,
-    opts?: { quiet?: boolean; skipKitchenAllocation?: boolean },
+    opts?: { quiet?: boolean; skipKitchenAllocation?: boolean; kitchenShortages?: KitchenShortage[] },
   ): Promise<{ ok: boolean; shortages?: KitchenShortage[] }> => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
@@ -502,6 +502,7 @@ function OrdersPageContent() {
         body: JSON.stringify({
           core: { status: nextStatus },
           ...(opts?.skipKitchenAllocation ? { skip_kitchen_allocation: true } : {}),
+          ...(opts?.kitchenShortages?.length ? { kitchen_shortages: opts.kitchenShortages } : {}),
         }),
       });
       if (!res.ok) {
@@ -537,7 +538,10 @@ function OrdersPageContent() {
     if (result.ok) return true;
     if (result.shortages && confirmShipWithoutAllocate(result.shortages)) {
       setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o)));
-      const retry = await patchOrderStatus(orderId, nextStatus, prev, { skipKitchenAllocation: true });
+      const retry = await patchOrderStatus(orderId, nextStatus, prev, {
+        skipKitchenAllocation: true,
+        kitchenShortages: result.shortages,
+      });
       return retry.ok;
     }
     return false;
@@ -582,7 +586,11 @@ function OrdersPageContent() {
         const retries = await Promise.all(
           shortageById.map((row) => {
             setOrders((list) => list.map((o) => (o.id === row.id ? { ...o, status: bulkStatus } : o)));
-            return patchOrderStatus(row.id, bulkStatus, row.prev, { quiet: true, skipKitchenAllocation: true });
+            return patchOrderStatus(row.id, bulkStatus, row.prev, {
+              quiet: true,
+              skipKitchenAllocation: true,
+              kitchenShortages: row.shortages,
+            });
           }),
         );
         for (const r of retries) {

@@ -10,8 +10,10 @@ import { isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } fr
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import {
   kitchenAllocateActivityMessage,
+  previewKitchenShortagesForOrder,
   tryAllocateKitchenOnShipTransition,
 } from '@/lib/kitchen-server';
+import { formatKitchenShortageActivityLog, parseKitchenShortageResponse } from '@/lib/kitchen-ship-allocate';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 import { cleanupReplacedOrderPaymentReceipts } from '@/lib/stored-file-cleanup';
@@ -241,13 +243,23 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if ('status' in core && core.status && core.status !== existing.status) {
       await logActivity(params.id, session.userId, 'activity', session.name, `changed status to ${core.status}`);
       if (skipKitchenAllocation) {
-        await logActivity(
-          params.id,
-          session.userId,
-          'activity',
-          session.name,
-          'shipped without kitchen deduction (confirmed shortage override)',
-        );
+        let fieldsForShip: Record<string, unknown> = {};
+        try {
+          fieldsForShip = existing.fields_json ? JSON.parse(existing.fields_json) : {};
+        } catch {
+          fieldsForShip = {};
+        }
+        if (mergedFields) fieldsForShip = mergedFields;
+        const fromBody = parseKitchenShortageResponse({ shortages: body.kitchen_shortages });
+        const shortages =
+          fromBody && fromBody.length > 0
+            ? fromBody
+            : await previewKitchenShortagesForOrder(ownerId, Number(params.id), fieldsForShip);
+        const message =
+          shortages.length > 0
+            ? formatKitchenShortageActivityLog(shortages, 'manual')
+            : '已寄出但未扣廚房庫存（手動確認不扣數）';
+        await logActivity(params.id, session.userId, 'activity', session.name, message);
       } else if (kitchenAllocResult) {
         const kitchenMessage = kitchenAllocateActivityMessage(kitchenAllocResult, 'manual');
         if (kitchenMessage) {

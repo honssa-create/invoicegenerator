@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseHubImportDateRange,
+  orderCreatedInRange,
   rollingHubImportDateRange,
   subtractDaysFromIsoTimestamp,
+  orderCreatedYmdHkt,
+  hongKongDateYmd,
   wooOrderCreatedBounds,
 } from './hub-import';
 
@@ -45,13 +48,27 @@ describe('subtractDaysFromIsoTimestamp', () => {
   });
 });
 
+describe('orderCreatedInRange', () => {
+  it('uses Hong Kong calendar day, not UTC prefix', () => {
+    const range = { dateFrom: '2026-09-09', dateTo: '2026-09-09' };
+    // Sep 9 01:30 HKT = Sep 8 17:30 UTC
+    expect(orderCreatedYmdHkt('2026-09-08T17:30:00')).toBe('2026-09-09');
+    expect(orderCreatedInRange('2026-09-08T17:30:00', range)).toBe(true);
+    expect(orderCreatedInRange('2026-09-08T15:59:59Z', range)).toBe(false);
+  });
+});
+
 describe('rollingHubImportDateRange', () => {
-  it('returns an inclusive window ending today', () => {
-    const range = rollingHubImportDateRange(3);
-    expect(range.dateTo).toBe(new Date().toISOString().slice(0, 10));
-    const from = new Date(`${range.dateFrom}T00:00:00Z`);
-    const to = new Date(`${range.dateTo}T00:00:00Z`);
-    const diffDays = Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
-    expect(diffDays).toBe(2);
+  it('returns an inclusive window ending today in Hong Kong', () => {
+    const now = new Date('2026-09-08T20:00:00Z'); // Sep 9 04:00 HKT
+    const range = rollingHubImportDateRange(3, now);
+    expect(range.dateTo).toBe('2026-09-09');
+    expect(range.dateFrom).toBe('2026-09-07');
+  });
+
+  it('uses Hong Kong today when UTC is still previous day', () => {
+    const now = new Date('2026-09-08T18:00:00Z'); // Sep 9 02:00 HKT
+    expect(hongKongDateYmd(now)).toBe('2026-09-09');
+    expect(rollingHubImportDateRange(1, now).dateTo).toBe('2026-09-09');
   });
 });

@@ -1,19 +1,21 @@
 import db from './db';
 import type { HubSyncResult } from './hub';
+import { HUB_PLATFORM_PREFIX } from './hub';
 import {
   findOrderForQuickBooksInvoice,
   getSyncState,
   setSyncState,
   upsertHubInvoice,
   upsertHubOrder,
+  listHubCronOwnerUserIds,
 } from './hub-server';
-import { HUB_PLATFORM_PREFIX } from './hub';
 import { getQuickBooksCredentials, getClickUpCredentials, clickupConfigured } from './integration-settings-server';
 import { fetchClickUpListTasks, clickUpMsToDateYmd } from './clickup';
 import { mapClickUpTaskToUpsert } from './clickup-map';
 import { ensurePrepFromWeddingOrder } from './kitchen-prep-server';
 import {
   fetchWooOrders,
+  fetchWooOrderById,
   getWooStoreConfigs,
   isWooDraftOrder,
   mapCupmokaWooStatus,
@@ -38,7 +40,6 @@ import { normalizeCustomerName } from './customer-name';
 import {
   catchupIntervalElapsed,
   catchupSyncStoreKey,
-  NESTIEE_CATCHUP_WOO_STATUSES,
   shouldSkipSettledHubOrderSync,
 } from './hub-sync-perf';
 
@@ -110,7 +111,6 @@ async function fetchWooOrdersForIncrementalSync(
       createdAfter: bounds.after,
       createdBefore: bounds.before,
       dateRange: recentRange,
-      statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
     });
     merged = dedupeWooOrdersById([...merged, ...recentCreated]);
   }
@@ -130,7 +130,6 @@ async function fetchWooOrdersForIncrementalSync(
     createdAfter: bounds.after,
     createdBefore: bounds.before,
     dateRange: catchupRange,
-    statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
   });
   return {
     orders: dedupeWooOrdersById([...merged, ...createdOrders]),
@@ -195,10 +194,7 @@ export async function ingestWooOrders(
   };
 
   const dateRows = dateRange
-    ? orders.filter((o) => {
-        const day = o.date_created.slice(0, 10);
-        return day >= dateRange.dateFrom && day <= dateRange.dateTo;
-      })
+    ? orders.filter((o) => orderCreatedInRange(o.date_created, dateRange))
     : orders;
   // Honour/cupmoka skip Woo checkout drafts. Nestiee drops unmapped statuses
   // (cancelled/refunded/draft); on-hold is stored as on-hold; wc-shipped maps in mapNestieeWooStatus.
@@ -266,6 +262,32 @@ export async function ingestWooOrders(
     }
   });
   return result;
+}
+
+/** Hub owner that has Woo credentials for this store (cron owner list). */
+export async function resolveWooWebhookOwnerId(
+  platform: WooStoreConfig['platform'],
+): Promise<{ userId: number; store: WooStoreConfig } | null> {
+  const ownerIds = await listHubCronOwnerUserIds();
+  for (const userId of ownerIds) {
+    const store = (await getWooStoreConfigs(userId)).find((s) => s.platform === platform);
+    if (store) return { userId, store };
+  }
+  return null;
+}
+
+/** Ingest one Woo order pushed from a webhook (no date-range filter). */
+export async function ingestWooWebhookOrder(
+  userId: number,
+  platform: WooStoreConfig['platform'],
+  order: WooOrder,
+): Promise<HubSyncResult> {
+  let row = order;
+  if (!row.line_items?.length && row.id) {
+    const store = (await getWooStoreConfigs(userId)).find((s) => s.platform === platform);
+    if (store) row = await fetchWooOrderById(store, row.id);
+  }
+  return ingestWooOrders(userId, platform, [row]);
 }
 
 export async function syncAllWooStores(userId: number, dateRange?: HubImportDateRange): Promise<HubSyncResult[]> {

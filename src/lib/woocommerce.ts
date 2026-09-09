@@ -3,7 +3,7 @@ import { getIntegrationSettings } from './integration-settings-server';
 import { normalizeWooStoreUrl } from './woo-url';
 import { appendWooQueryAuth, parseWooApiJson, wooApiErrorMessage, wooRequestHeaders } from './woo-api';
 import type { HubImportDateRange } from './hub-import';
-import { orderCreatedInRange } from './hub-import';
+import { orderCreatedInRange, orderCreatedYmdHkt } from './hub-import';
 import { formatWooAddress } from './orders';
 import { normalizeCustomerName } from './customer-name';
 
@@ -271,6 +271,27 @@ export function wooOrderDescription(order: WooOrder): string {
   return items || `WooCommerce order #${order.number}`;
 }
 
+/** Fetch one Woo order by id (used by webhooks when payload is minimal). */
+export async function fetchWooOrderById(store: WooStoreConfig, orderId: number): Promise<WooOrder> {
+  const normalized = normalizeWooStoreUrl(store.storeUrl);
+  if (!normalized.ok) {
+    throw new Error(`${store.platform}: ${normalized.error}`);
+  }
+  const params = new URLSearchParams();
+  appendWooQueryAuth(params, store.consumerKey, store.consumerSecret);
+  const url = `${normalized.url}/wp-json/wc/v3/orders/${orderId}?${params.toString()}`;
+  const res = await fetch(url, {
+    headers: wooRequestHeaders(),
+    cache: 'no-store',
+    redirect: 'follow',
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    throw new Error(wooApiErrorMessage(res.status, body, store.platform));
+  }
+  return parseWooApiJson<WooOrder>(body, store.platform);
+}
+
 async function fetchWooOrdersPaginated(
   store: WooStoreConfig,
   storeUrl: string,
@@ -289,7 +310,8 @@ async function fetchWooOrdersPaginated(
   let page = 1;
 
   const orderBy = options?.modifiedAfter ? 'modified' : 'date';
-  const order = options?.modifiedAfter ? 'desc' : 'asc';
+  const order =
+    options?.modifiedAfter || options?.createdAfter || options?.createdBefore ? 'desc' : 'asc';
 
   while (page <= maxPages) {
     const params = new URLSearchParams();
@@ -350,7 +372,7 @@ async function fetchWooOrdersByLocalDateFilter(
     for (const order of batch) {
       if (orderCreatedInRange(order.date_created, range)) {
         matched.push(order);
-      } else if (order.date_created.slice(0, 10) < range.dateFrom) {
+      } else if (orderCreatedYmdHkt(order.date_created) < range.dateFrom) {
         reachedOlder = true;
       }
     }

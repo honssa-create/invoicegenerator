@@ -85,6 +85,7 @@ function OrderHubContent() {
   const [data, setData] = useState<HubResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState<ImportPlatform | 'all' | null>(null);
+  const [syncing, setSyncing] = useState<WooImportPlatform | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [platformFilter, setPlatformFilter] = useState<HubPlatform | 'all'>(() => {
@@ -217,6 +218,36 @@ function OrderHubContent() {
     if (!res.ok) throw new Error(d.error || 'Import failed');
     return d.result as HubSyncResult;
   };
+
+  const syncNow = async (platform: WooImportPlatform) => {
+    setSyncing(platform);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch(`/api/hub/import/${platform}/sync-now`, { method: 'POST' });
+      const text = await res.text();
+      let d: { error?: string; result?: HubSyncResult };
+      try {
+        d = JSON.parse(text);
+      } catch {
+        throw new Error('Sync failed — server returned an unexpected response.');
+      }
+      if (!res.ok) throw new Error(d.error || 'Sync failed');
+      const result = d.result as HubSyncResult;
+      setMessage(`${HUB_PLATFORM_LABELS[platform]} sync now: ${formatImportResult(result)}`);
+      if (result.errors.length) setError(result.errors.slice(0, 3).join(' · '));
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed');
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const wooWebhookUrl = (platform: WooImportPlatform) =>
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/api/webhooks/woocommerce/${platform}`
+      : '';
 
   const importPlatform = async (platform: ImportPlatform) => {
     if (!importDateFrom || !importDateTo) {
@@ -442,21 +473,41 @@ function OrderHubContent() {
                   Connect QuickBooks
                 </a>
               ) : (
-                <button
-                  onClick={() => importPlatform(platform)}
-                  disabled={!canImport || importing !== null}
-                  className="btn mt-auto bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                >
-                  {isImporting
-                    ? 'Importing…'
-                    : hasSetupError
-                      ? 'Fix in Settings'
-                      : canImport
-                        ? 'Import'
-                        : intg?.configured
-                          ? 'Connect first'
-                          : 'Configure in Settings'}
-                </button>
+                <div className="mt-auto flex flex-col gap-2">
+                  {isWooImportPlatform(platform) && canImport && (
+                    <button
+                      type="button"
+                      onClick={() => syncNow(platform)}
+                      disabled={importing !== null || syncing !== null}
+                      className="btn bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 text-sm"
+                    >
+                      {syncing === platform ? 'Syncing…' : 'Sync now (server)'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => importPlatform(platform)}
+                    disabled={!canImport || importing !== null || syncing !== null}
+                    className="btn bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    {isImporting
+                      ? 'Importing…'
+                      : hasSetupError
+                        ? 'Fix in Settings'
+                        : canImport
+                          ? 'Import date range'
+                          : intg?.configured
+                            ? 'Connect first'
+                            : 'Configure in Settings'}
+                  </button>
+                  {isWooImportPlatform(platform) && canImport && (
+                    <p className="text-[11px] text-gray-500 leading-snug">
+                      Instant sync: add Woo webhook{' '}
+                      <span className="font-mono break-all">{wooWebhookUrl(platform)}</span>
+                      {' '}· Topics: Order created, Order updated · Secret:{' '}
+                      <span className="font-mono">WOO_WEBHOOK_SECRET_{platform.toUpperCase()}</span> on Railway
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           );

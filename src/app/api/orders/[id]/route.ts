@@ -8,7 +8,10 @@ import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
 import { isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
-import { tryAllocateKitchenOnShipTransition } from '@/lib/kitchen-server';
+import {
+  kitchenAllocateActivityMessage,
+  tryAllocateKitchenOnShipTransition,
+} from '@/lib/kitchen-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
 import { cleanupReplacedOrderPaymentReceipts } from '@/lib/stored-file-cleanup';
@@ -120,7 +123,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       values.push(orderTypeFromFields(mergedFields));
     }
 
-    let kitchenAllocatedSummary: string | undefined;
+    let kitchenAllocResult:
+      | Awaited<ReturnType<typeof tryAllocateKitchenOnShipTransition>>
+      | undefined;
     if ('status' in core && typeof core.status === 'string' && core.status && core.status !== existing.status) {
       let fieldsBeforeShip: Record<string, unknown> = {};
       try {
@@ -131,24 +136,23 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       let fieldsForShip = fieldsBeforeShip;
       if (mergedFields) fieldsForShip = mergedFields;
       if (!skipKitchenAllocation) {
-        const alloc = await tryAllocateKitchenOnShipTransition(
+        kitchenAllocResult = await tryAllocateKitchenOnShipTransition(
           ownerId,
           session.userId,
           Number(params.id),
           { status: existing.status, fields: fieldsBeforeShip },
           { status: core.status, fields: fieldsForShip },
         );
-        if (alloc.triggered && !alloc.ok) {
+        if (kitchenAllocResult.triggered && !kitchenAllocResult.ok) {
           return NextResponse.json(
             {
               kitchen_shortage: true,
-              shortages: alloc.shortages,
+              shortages: kitchenAllocResult.shortages,
               error: 'Kitchen stock is not enough to auto-allocate',
             },
             { status: 409 },
           );
         }
-        if (alloc.ok && alloc.allocated && alloc.summary) kitchenAllocatedSummary = alloc.summary;
       }
     }
 
@@ -236,14 +240,19 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     if ('status' in core && core.status && core.status !== existing.status) {
       await logActivity(params.id, session.userId, 'activity', session.name, `changed status to ${core.status}`);
-      if (kitchenAllocatedSummary) {
+      if (skipKitchenAllocation) {
         await logActivity(
           params.id,
           session.userId,
           'activity',
           session.name,
-          `auto-allocated kitchen stock on ship`,
+          'shipped without kitchen deduction (confirmed shortage override)',
         );
+      } else if (kitchenAllocResult) {
+        const kitchenMessage = kitchenAllocateActivityMessage(kitchenAllocResult, 'manual');
+        if (kitchenMessage) {
+          await logActivity(params.id, session.userId, 'activity', session.name, kitchenMessage);
+        }
       }
     }
 

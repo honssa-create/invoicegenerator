@@ -1033,8 +1033,31 @@ export async function makeReturnGift(
 }
 
 export type AllocateRemainingResult =
-  | { ok: true; allocated: boolean; summary?: string }
+  | { ok: true; allocated: boolean; summary?: string; skipReason?: string }
   | { ok: false; shortages: KitchenShortage[] };
+
+function kitchenNeedsSummary(needs: KitchenNeedLine[]): string {
+  if (needs.length === 0) return 'none';
+  return needs.map((n) => n.label).join(', ');
+}
+
+/** Activity feed text for ship-triggered kitchen allocation (null = nothing to log). */
+export function kitchenAllocateActivityMessage(
+  alloc: KitchenShipTransitionAllocResult,
+  source: 'woo_sync' | 'manual',
+): string | null {
+  if (!alloc.triggered) return null;
+  const prefix = source === 'woo_sync' ? 'Woo sync: ' : '';
+  if (alloc.ok && alloc.allocated) {
+    return alloc.summary || `${prefix}auto-allocated kitchen stock on ship`.trim();
+  }
+  if (!alloc.ok) {
+    const detail = alloc.shortages.map((s) => `${s.label}: need ${s.need}, have ${s.have}`).join('; ');
+    return `${prefix}kitchen stock short — could not auto-allocate (${detail})`.trim();
+  }
+  const reason = alloc.skipReason || 'no remaining gift-box needs';
+  return `${prefix}kitchen auto-allocate skipped — ${reason}`.trim();
+}
 
 export type KitchenShipTransitionAllocResult = AllocateRemainingResult & {
   triggered: boolean;
@@ -1072,7 +1095,7 @@ export async function tryAllocateRemainingForOrder(
   const order = (await db
     .prepare('SELECT id, po_number, order_type, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, ownerId)) as OrderRow | undefined;
-  if (!order) return { ok: true, allocated: false };
+  if (!order) return { ok: true, allocated: false, skipReason: 'order not found' };
 
   const fields = orderFieldsFromRow(order);
   const ot = orderTypeFromFields(fields) || '';
@@ -1087,11 +1110,17 @@ export async function tryAllocateRemainingForOrder(
     kind = 'return_gift';
     needs = returnGiftNeeds(order, fields, fulfillments, catalog);
   } else {
-    return { ok: true, allocated: false };
+    return { ok: true, allocated: false, skipReason: 'not a Nestiee / 回禮 order' };
   }
 
   const remaining = needs.filter((n) => n.remaining > 0);
-  if (remaining.length === 0) return { ok: true, allocated: false };
+  if (remaining.length === 0) {
+    const skipReason =
+      needs.length === 0
+        ? 'no gift-box qty on order at ship time'
+        : `already fully allocated (${kitchenNeedsSummary(needs)})`;
+    return { ok: true, allocated: false, skipReason };
+  }
 
   const stockLines = remaining.map((n) => {
     let label = n.label;

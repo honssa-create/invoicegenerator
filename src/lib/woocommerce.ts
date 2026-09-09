@@ -3,7 +3,7 @@ import { getIntegrationSettings } from './integration-settings-server';
 import { normalizeWooStoreUrl } from './woo-url';
 import { appendWooQueryAuth, parseWooApiJson, wooApiErrorMessage, wooRequestHeaders } from './woo-api';
 import type { HubImportDateRange } from './hub-import';
-import { orderCreatedInRange } from './hub-import';
+import { orderCreatedInRange, orderCreatedYmdHkt } from './hub-import';
 import { formatWooAddress } from './orders';
 import { normalizeCustomerName } from './customer-name';
 
@@ -310,7 +310,8 @@ async function fetchWooOrdersPaginated(
   let page = 1;
 
   const orderBy = options?.modifiedAfter ? 'modified' : 'date';
-  const order = options?.modifiedAfter ? 'desc' : 'asc';
+  const order =
+    options?.modifiedAfter || options?.createdAfter || options?.createdBefore ? 'desc' : 'asc';
 
   while (page <= maxPages) {
     const params = new URLSearchParams();
@@ -371,7 +372,7 @@ async function fetchWooOrdersByLocalDateFilter(
     for (const order of batch) {
       if (orderCreatedInRange(order.date_created, range)) {
         matched.push(order);
-      } else if (order.date_created.slice(0, 10) < range.dateFrom) {
+      } else if (orderCreatedYmdHkt(order.date_created) < range.dateFrom) {
         reachedOlder = true;
       }
     }

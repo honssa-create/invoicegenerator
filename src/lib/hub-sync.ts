@@ -40,7 +40,6 @@ import { normalizeCustomerName } from './customer-name';
 import {
   catchupIntervalElapsed,
   catchupSyncStoreKey,
-  NESTIEE_CATCHUP_WOO_STATUSES,
   shouldSkipSettledHubOrderSync,
 } from './hub-sync-perf';
 
@@ -112,7 +111,6 @@ async function fetchWooOrdersForIncrementalSync(
       createdAfter: bounds.after,
       createdBefore: bounds.before,
       dateRange: recentRange,
-      statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
     });
     merged = dedupeWooOrdersById([...merged, ...recentCreated]);
   }
@@ -132,7 +130,6 @@ async function fetchWooOrdersForIncrementalSync(
     createdAfter: bounds.after,
     createdBefore: bounds.before,
     dateRange: catchupRange,
-    statuses: [...NESTIEE_CATCHUP_WOO_STATUSES],
   });
   return {
     orders: dedupeWooOrdersById([...merged, ...createdOrders]),
@@ -197,10 +194,7 @@ export async function ingestWooOrders(
   };
 
   const dateRows = dateRange
-    ? orders.filter((o) => {
-        const day = o.date_created.slice(0, 10);
-        return day >= dateRange.dateFrom && day <= dateRange.dateTo;
-      })
+    ? orders.filter((o) => orderCreatedInRange(o.date_created, dateRange))
     : orders;
   // Honour/cupmoka skip Woo checkout drafts. Nestiee drops unmapped statuses
   // (cancelled/refunded/draft); on-hold is stored as on-hold; wc-shipped maps in mapNestieeWooStatus.

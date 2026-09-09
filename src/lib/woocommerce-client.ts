@@ -100,7 +100,7 @@ export async function fetchWooOrdersInBrowser(
     params.set('per_page', String(perPage));
     params.set('page', String(page));
     params.set('orderby', 'date');
-    params.set('order', 'asc');
+    params.set('order', 'desc');
     params.set('after', bounds.after);
     params.set('before', bounds.before);
 

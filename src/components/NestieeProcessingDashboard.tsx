@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import {
   NESTIEE_DATE_FILTER_TYPES,
   NESTIEE_DEMAND_SCOPES,
@@ -9,6 +10,7 @@ import {
   type NestieeOrderStatusCounts,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
+import { sortGiftBoxDemandCards } from '@/lib/nestiee-gift-box-search';
 import { tapProps } from '@/lib/tap-action';
 import { bi } from '@/lib/ui-labels';
 
@@ -24,13 +26,39 @@ const DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string
   delivery_date: { en: 'By delivery date', zh: '按送貨日期' },
 };
 
-function DemandCard({ label, qty, loading }: { label: string; qty: number; loading?: boolean }) {
-  return (
-    <div className="rounded-xl bg-[#F7F2E8] px-3 py-4 min-h-[5.5rem] flex flex-col items-center justify-center text-center shadow-sm">
+function DemandCard({
+  label,
+  qty,
+  loading,
+  href,
+}: {
+  label: string;
+  qty: number;
+  loading?: boolean;
+  href?: string;
+}) {
+  const inner = (
+    <>
       <p className="text-sm sm:text-base font-bold text-gray-900 leading-snug">{label}</p>
       <p className="mt-2 text-2xl sm:text-3xl font-bold tabular-nums text-gray-900">
         {loading ? '—' : qty}
       </p>
+    </>
+  );
+  if (href && qty > 0 && !loading) {
+    return (
+      <Link
+        href={href}
+        className="rounded-xl bg-[#F7F2E8] px-3 py-4 min-h-[5.5rem] flex flex-col items-center justify-center text-center shadow-sm hover:bg-white/90 transition-colors"
+        title={bi('Find orders in Kitchen', '在廚房頁找出訂單')}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl bg-[#F7F2E8] px-3 py-4 min-h-[5.5rem] flex flex-col items-center justify-center text-center shadow-sm">
+      {inner}
     </div>
   );
 }
@@ -149,7 +177,7 @@ export default function NestieeProcessingDashboard({
   onDateFilterTypeChange: (value: NestieeDateFilterType) => void;
   loading?: boolean;
 }) {
-  const giftBoxes = demand.giftBoxes.filter((g) => loading || g.qty > 0);
+  const giftBoxes = sortGiftBoxDemandCards(demand.giftBoxes.filter((g) => loading || g.qty > 0));
   const hasDemand = giftBoxes.some((g) => g.qty > 0);
 
   return (
@@ -216,7 +244,13 @@ export default function NestieeProcessingDashboard({
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {giftBoxes.map((box) => (
-              <DemandCard key={box.id} label={box.label} qty={box.qty} loading={loading} />
+              <DemandCard
+                key={box.id}
+                label={box.label}
+                qty={box.qty}
+                loading={loading}
+                href={scope === 'processing' && box.qty > 0 ? `/kitchen?giftBox=${box.id}` : undefined}
+              />
             ))}
           </div>
         )}

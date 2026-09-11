@@ -1,9 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import DateFilterField from '@/components/DateFilterField';
 import type { ProductionScheduleSummary } from '@/lib/kitchen-production-schedule';
-import { KITCHEN_DAILY_SESSION_LIMIT } from '@/lib/kitchen-production-schedule';
+import {
+  KITCHEN_DAILY_SESSION_LIMIT,
+  KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY,
+  applyDefectsToProductionSchedule,
+  emptyDefectsByProduct,
+  parseDefectsFromStorage,
+  type ProductionScheduleDefectsByProduct,
+} from '@/lib/kitchen-production-schedule';
 import {
   NESTIEE_DATE_FILTER_TYPES,
   type NestieeDateFilterType,
@@ -23,8 +30,34 @@ export default function KitchenProductionSchedule() {
   const [schedule, setSchedule] = useState<ProductionScheduleSummary | null>(null);
   const [orderCount, setOrderCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [defects, setDefects] = useState<ProductionScheduleDefectsByProduct>(() =>
+    emptyDefectsByProduct(),
+  );
+  const [defectsHydrated, setDefectsHydrated] = useState(false);
+  const [defectModalProduct, setDefectModalProduct] = useState<string | null>(null);
+  const [defectDraft, setDefectDraft] = useState('');
 
   const hasDateFilter = Boolean(dateStart || dateEnd);
+
+  useEffect(() => {
+    setDefects(
+      parseDefectsFromStorage(
+        typeof window !== 'undefined'
+          ? localStorage.getItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY)
+          : null,
+      ),
+    );
+    setDefectsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!defectsHydrated) return;
+    try {
+      localStorage.setItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY, JSON.stringify(defects));
+    } catch {
+      /* quota / private mode */
+    }
+  }, [defects, defectsHydrated]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -48,9 +81,32 @@ export default function KitchenProductionSchedule() {
     load();
   }, [load]);
 
-  const totalSessions = schedule?.totalSessions ?? 0;
-  const totalDays = schedule?.totalDaysNeeded ?? 0;
-  const estDate = schedule?.estimatedCompletionDate ?? '—';
+  const displaySchedule = useMemo(() => {
+    if (!schedule) return null;
+    return applyDefectsToProductionSchedule(schedule, defects);
+  }, [schedule, defects]);
+
+  const totalSessions = displaySchedule?.totalSessions ?? 0;
+  const totalDays = displaySchedule?.totalDaysNeeded ?? 0;
+  const estDate = displaySchedule?.estimatedCompletionDate ?? '—';
+
+  const openDefectModal = (product: string) => {
+    setDefectModalProduct(product);
+    setDefectDraft(String(defects[product] ?? 0));
+  };
+
+  const closeDefectModal = () => {
+    setDefectModalProduct(null);
+    setDefectDraft('');
+  };
+
+  const saveDefectCount = () => {
+    if (!defectModalProduct) return;
+    const num = Number(defectDraft);
+    const value = Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+    setDefects((prev) => ({ ...prev, [defectModalProduct]: value }));
+    closeDefectModal();
+  };
 
   return (
     <div className="h-full rounded-xl border border-gray-200 bg-white p-5 flex flex-col">
@@ -141,25 +197,103 @@ export default function KitchenProductionSchedule() {
                   <span className="text-gray-400 text-xs leading-none" aria-hidden="true">ⓘ</span>
                 </span>
               </th>
+              <th className="py-2 pr-2 text-right">
+                <span
+                  className="inline-flex items-center justify-end gap-1 cursor-help"
+                  title={bi(
+                    'Defective bottles — not counted as usable stock for shortfall',
+                    '次貨樽數，不計入可用庫存',
+                  )}
+                >
+                  {bi('Defective', '次貨')}
+                  <span className="text-gray-400 text-xs leading-none" aria-hidden="true">ⓘ</span>
+                </span>
+              </th>
               <th className="py-2 pr-2 text-right">{bi('Shortfall', '尚欠')}</th>
-              <th className="py-2 text-right">{bi('Sessions', '所需轉數')}</th>
+              <th className="py-2 pr-2 text-right">{bi('Sessions', '所需轉數')}</th>
+              <th className="py-2 text-right">{bi('Action', '操作')}</th>
             </tr>
           </thead>
           <tbody>
-            {(schedule?.rows ?? []).map((row) => (
-              <tr key={row.slotId} className="border-b border-gray-50">
-                <td className="py-2 pr-2 font-medium text-gray-900">{row.product}</td>
-                <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.stock}</td>
-                <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.demand}</td>
-                <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.shortfall}</td>
-                <td className="py-2 text-right tabular-nums font-medium">
-                  {loading ? '—' : row.sessions == null ? '—' : row.sessions}
-                </td>
-              </tr>
-            ))}
+            {(displaySchedule?.rows ?? schedule?.rows ?? []).map((row) => {
+              const defectQty = defects[row.product] ?? 0;
+              return (
+                <tr key={row.slotId} className="border-b border-gray-50">
+                  <td className="py-2 pr-2 font-medium text-gray-900">{row.product}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.stock}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.demand}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-amber-800">
+                    {loading ? '—' : defectQty}
+                  </td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.shortfall}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums font-medium">
+                    {loading ? '—' : row.sessions == null ? '—' : row.sessions}
+                  </td>
+                  <td className="py-2 text-right">
+                    <button
+                      type="button"
+                      className="min-h-[36px] px-2.5 py-1 text-xs font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 whitespace-nowrap"
+                      disabled={loading}
+                      {...tapProps(() => openDefectModal(row.product))}
+                    >
+                      {bi('Add defect', '加入次貨')}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {defectModalProduct && (
+        <div
+          className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="defect-modal-title"
+          onClick={closeDefectModal}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg w-full max-w-sm p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="defect-modal-title" className="font-semibold text-gray-900">
+              {bi('Defective bottles', '次貨樽數')}
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">{defectModalProduct}</p>
+            <label className="block mt-4 text-sm font-medium text-gray-700">
+              {bi('Count (not usable as stock)', '數量（不計入庫存）')}
+              <input
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                className="mt-1 w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                value={defectDraft}
+                onChange={(e) => setDefectDraft(e.target.value)}
+                autoFocus
+              />
+            </label>
+            <div className="flex gap-2 mt-5 justify-end">
+              <button
+                type="button"
+                className="min-h-[44px] px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600"
+                {...tapProps(closeDefectModal)}
+              >
+                {bi('Cancel', '取消')}
+              </button>
+              <button
+                type="button"
+                className="min-h-[44px] px-4 py-2 text-sm rounded-lg bg-gray-900 text-white font-medium"
+                {...tapProps(saveDefectCount)}
+              >
+                {bi('Save', '儲存')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 rounded-lg bg-[#F7F2E8] border border-[#E8DCC8] px-4 py-4 space-y-2">
         <p className="text-base font-semibold text-gray-900">
@@ -182,8 +316,8 @@ export default function KitchenProductionSchedule() {
 
       <p className="text-xs text-gray-500 mt-3">
         *{bi(
-          `Kitchen daily capacity is ${KITCHEN_DAILY_SESSION_LIMIT} sessions. Closed on Sundays.`,
-          `廚房每日總產能為 ${KITCHEN_DAILY_SESSION_LIMIT} 轉。星期日休息。`,
+          `Kitchen daily capacity is ${KITCHEN_DAILY_SESSION_LIMIT} sessions. Closed on Sundays. Defective counts are saved on this device and excluded from usable stock.`,
+          `廚房每日總產能為 ${KITCHEN_DAILY_SESSION_LIMIT} 轉。星期日休息。次貨數量會儲存於本機，不計入可用庫存。`,
         )}
       </p>
     </div>

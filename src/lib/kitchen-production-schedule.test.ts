@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { finishedSku, GIFT_BOX_BOMS } from './kitchen-bom';
 import {
   addProductionDaysSkippingSundays,
+  applyDefectsToProductionSchedule,
   computeKitchenProductionSchedule,
+  emptyDefectsByProduct,
+  parseDefectsFromStorage,
   demandFrom75gBottleTotals,
   emptySlotTotals,
   giftBoxBottlesByScheduleFlavor,
@@ -156,6 +159,54 @@ describe('netProductionScheduleInputs', () => {
     expect(net.netStock['75g:osmanthus']).toBe(20);
     expect(net.netDemand['45g:rock_sugar']).toBe(10);
     expect(net.netStock['45g:rock_sugar']).toBe(5);
+  });
+});
+
+describe('applyDefectsToProductionSchedule', () => {
+  it('increases shortfall when defects reduce usable stock', () => {
+    const base = computeKitchenProductionSchedule(
+      slotTotals({ '75g:osmanthus': 50 }),
+      slotTotals({ '75g:osmanthus': 60 }),
+      '2026-09-04',
+      slotTotals({ '75g:osmanthus': 50 }),
+      slotTotals({}),
+    );
+    const osmBefore = base.rows.find((r) => r.slotId === '75g:osmanthus');
+    expect(osmBefore).toMatchObject({ demand: 50, stock: 60, shortfall: 0 });
+
+    const defects = emptyDefectsByProduct();
+    defects['75g 桂花'] = 15;
+    const adjusted = applyDefectsToProductionSchedule(base, defects);
+    const osmAfter = adjusted.rows.find((r) => r.slotId === '75g:osmanthus');
+    expect(osmAfter).toMatchObject({ stock: 60, shortfall: 5, sessions: 1 });
+  });
+
+  it('recalculates 75g session totals after defects', () => {
+    const base = computeKitchenProductionSchedule(
+      slotTotals({ '75g:red_date': 250 }),
+      slotTotals({ '75g:red_date': 100 }),
+      '2026-09-04',
+      slotTotals({ '75g:red_date': 250 }),
+      slotTotals({}),
+    );
+    expect(base.totalSessions).toBe(2);
+    const defects = emptyDefectsByProduct();
+    defects['75g 紅棗'] = 50;
+    const adjusted = applyDefectsToProductionSchedule(base, defects);
+    expect(adjusted.rows.find((r) => r.slotId === '75g:red_date')).toMatchObject({
+      shortfall: 200,
+      sessions: 2,
+    });
+    expect(adjusted.totalSessions).toBe(2);
+  });
+});
+
+describe('parseDefectsFromStorage', () => {
+  it('merges stored values with defaults for all products', () => {
+    const parsed = parseDefectsFromStorage(JSON.stringify({ '75g 桂花': 3, bad: 'x' }));
+    expect(parsed['75g 桂花']).toBe(3);
+    expect(parsed['75g 紅棗']).toBe(0);
+    expect(parsed['25g 冰糖']).toBe(0);
   });
 });
 

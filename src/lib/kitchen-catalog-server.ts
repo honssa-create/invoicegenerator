@@ -274,4 +274,13 @@ export async function ensureCatalogStockRows(userId: number, catalog: KitchenCat
       .prepare(`INSERT OR IGNORE INTO kitchen_shipping_boxes (user_id, box_id, quantity) VALUES ${placeholders}`)
       .run(...params);
   }
+
+  const airCapIds = ['single', 'double'];
+  if (airCapIds.length > 0) {
+    const placeholders = airCapIds.map(() => '(?, ?, 0)').join(', ');
+    const params = airCapIds.flatMap((id) => [userId, id]);
+    await db
+      .prepare(`INSERT OR IGNORE INTO kitchen_air_column_caps (user_id, cap_id, quantity) VALUES ${placeholders}`)
+      .run(...params);
+  }
 }

@@ -4,6 +4,7 @@ import { NESTIEE_GIFT_BOX_TYPES, NESTIEE_ORDER_TYPE } from './orders';
 import {
   isNestieeOrdersFilter,
   giftCountForOrderShippingBoxes,
+  mapAirColumnCapsForGiftCount,
   mapShippingBoxesForGiftCount,
   nestieeShipTodayDateRange,
   nestieeStatusesForDemandScope,
@@ -312,6 +313,16 @@ describe('orderMatchesNestieeShipToday', () => {
     expect(orderMatchesNestieeShipToday(nestiee('completed', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('pending payment', '2026-08-28'), today)).toBe(false);
     expect(orderMatchesNestieeShipToday(nestiee('checkout-draft', '2026-08-28'), today)).toBe(false);
+  });
+});
+
+describe('mapAirColumnCapsForGiftCount', () => {
+  it('maps gift box count to single/double caps', () => {
+    expect(mapAirColumnCapsForGiftCount(0)).toEqual({ single: 0, double: 0 });
+    expect(mapAirColumnCapsForGiftCount(1)).toEqual({ single: 1, double: 0 });
+    expect(mapAirColumnCapsForGiftCount(2)).toEqual({ single: 0, double: 1 });
+    expect(mapAirColumnCapsForGiftCount(3)).toEqual({ single: 1, double: 1 });
+    expect(mapAirColumnCapsForGiftCount(5)).toEqual({ single: 1, double: 2 });
   });
 });
 

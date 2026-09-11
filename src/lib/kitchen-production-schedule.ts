@@ -299,6 +299,73 @@ export function addProductionDaysSkippingSundays(startYmd: string, days: number)
   return dt.toISOString().slice(0, 10);
 }
 
+export const KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY =
+  'kitchen-production-schedule-defects';
+
+/** Defective bottle counts keyed by schedule product label (e.g. `75g 紅棗`). */
+export type ProductionScheduleDefectsByProduct = Record<string, number>;
+
+export function emptyDefectsByProduct(): ProductionScheduleDefectsByProduct {
+  const out: ProductionScheduleDefectsByProduct = {};
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) out[slot.label] = 0;
+  return out;
+}
+
+export function parseDefectsFromStorage(raw: string | null): ProductionScheduleDefectsByProduct {
+  const out = emptyDefectsByProduct();
+  if (!raw) return out;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+      const v = parsed[slot.label];
+      const num = typeof v === 'number' ? v : Number(v);
+      if (Number.isFinite(num)) out[slot.label] = Math.max(0, Math.floor(num));
+    }
+  } catch {
+    /* ignore corrupt storage */
+  }
+  return out;
+}
+
+/**
+ * Recompute shortfall / sessions treating defective bottles as non-usable stock.
+ * Physical `stock` on each row is unchanged; planning uses stock − defects.
+ */
+export function applyDefectsToProductionSchedule(
+  summary: ProductionScheduleSummary,
+  defectsByProduct: ProductionScheduleDefectsByProduct,
+): ProductionScheduleSummary {
+  const rows: ProductionScheduleRow[] = summary.rows.map((row) => {
+    const defects = Math.max(0, Math.floor(defectsByProduct[row.product] || 0));
+    const usableStock = Math.max(0, row.stock - defects);
+    const shortfall = Math.max(0, row.demand - usableStock);
+    const slot = PRODUCTION_SCHEDULE_SLOTS.find((s) => s.id === row.slotId);
+    const sessions =
+      slot?.capacity === '75g' && slot.sessionBottles
+        ? shortfall > 0
+          ? Math.ceil(shortfall / slot.sessionBottles)
+          : null
+        : null;
+    return { ...row, shortfall, sessions };
+  });
+
+  const totalSessions = rows.reduce((sum, row) => sum + (row.sessions || 0), 0);
+  const totalDaysNeeded =
+    totalSessions > 0 ? Math.ceil(totalSessions / KITCHEN_DAILY_SESSION_LIMIT) : 0;
+  const estimatedCompletionDate = addProductionDaysSkippingSundays(
+    summary.today,
+    totalDaysNeeded,
+  );
+
+  return {
+    ...summary,
+    rows,
+    totalSessions,
+    totalDaysNeeded,
+    estimatedCompletionDate,
+  };
+}
+
 export function computeKitchenProductionSchedule(
   demandBySlot: ProductionScheduleSlotTotals,
   stockBySlot: ProductionScheduleSlotTotals,

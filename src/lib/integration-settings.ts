@@ -55,6 +55,8 @@ export interface WooStoreSettings {
   url: string;
   key: string;
   secret: string;
+  /** Shared with WooCommerce webhook "Secret" for instant order sync. */
+  webhook_secret: string;
 }
 
 export interface WooStoreSettingsMasked {
@@ -63,6 +65,8 @@ export interface WooStoreSettingsMasked {
   key_hint: string;
   secret_set: boolean;
   secret_hint: string;
+  webhook_secret_set: boolean;
+  webhook_secret_hint: string;
 }
 
 export interface QuickBooksSettings {
@@ -162,10 +166,10 @@ export const WOO_PLATFORM_LABELS: Record<WooPlatformKey, string> = {
 
 export const EMPTY_INTEGRATION_SETTINGS: IntegrationSettings = {
   woocommerce: {
-    nestiee: { url: '', key: '', secret: '' },
-    honour: { url: '', key: '', secret: '' },
-    honour_en: { url: '', key: '', secret: '' },
-    cupmoka: { url: '', key: '', secret: '' },
+    nestiee: { url: '', key: '', secret: '', webhook_secret: '' },
+    honour: { url: '', key: '', secret: '', webhook_secret: '' },
+    honour_en: { url: '', key: '', secret: '', webhook_secret: '' },
+    cupmoka: { url: '', key: '', secret: '', webhook_secret: '' },
   },
   quickbooks: {
     client_id: '',

@@ -503,8 +503,7 @@ function OrderHubContent() {
                     <p className="text-[11px] text-gray-500 leading-snug">
                       Instant sync: add Woo webhook{' '}
                       <span className="font-mono break-all">{wooWebhookUrl(platform)}</span>
-                      {' '}· Topics: Order created, Order updated · Secret:{' '}
-                      <span className="font-mono">WOO_WEBHOOK_SECRET_{platform.toUpperCase()}</span> on Railway
+                      {' '}· Topics: Order created, Order updated · Secret: set in Settings → API Integrations
                     </p>
                   )}
                 </div>

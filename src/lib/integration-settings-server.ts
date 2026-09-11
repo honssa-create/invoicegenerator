@@ -40,16 +40,25 @@ function parseResendBrand(
   };
 }
 
+function normalizeWooStoreSettings(store: Partial<WooStoreSettings> | undefined): WooStoreSettings {
+  return {
+    url: typeof store?.url === 'string' ? store.url : '',
+    key: typeof store?.key === 'string' ? store.key : '',
+    secret: typeof store?.secret === 'string' ? store.secret : '',
+    webhook_secret: typeof store?.webhook_secret === 'string' ? store.webhook_secret : '',
+  };
+}
+
 function parseSettings(json: string | null | undefined): IntegrationSettings {
   if (!json) return structuredClone(EMPTY_INTEGRATION_SETTINGS);
   try {
     const parsed = JSON.parse(json) as Partial<IntegrationSettings>;
     return {
       woocommerce: {
-        nestiee: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.nestiee, ...parsed.woocommerce?.nestiee },
-        honour: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.honour, ...parsed.woocommerce?.honour },
-        honour_en: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.honour_en, ...parsed.woocommerce?.honour_en },
-        cupmoka: { ...EMPTY_INTEGRATION_SETTINGS.woocommerce.cupmoka, ...parsed.woocommerce?.cupmoka },
+        nestiee: normalizeWooStoreSettings({ ...EMPTY_INTEGRATION_SETTINGS.woocommerce.nestiee, ...parsed.woocommerce?.nestiee }),
+        honour: normalizeWooStoreSettings({ ...EMPTY_INTEGRATION_SETTINGS.woocommerce.honour, ...parsed.woocommerce?.honour }),
+        honour_en: normalizeWooStoreSettings({ ...EMPTY_INTEGRATION_SETTINGS.woocommerce.honour_en, ...parsed.woocommerce?.honour_en }),
+        cupmoka: normalizeWooStoreSettings({ ...EMPTY_INTEGRATION_SETTINGS.woocommerce.cupmoka, ...parsed.woocommerce?.cupmoka }),
       },
       quickbooks: { ...EMPTY_INTEGRATION_SETTINGS.quickbooks, ...parsed.quickbooks },
       yedpay: { ...EMPTY_INTEGRATION_SETTINGS.yedpay, ...parsed.yedpay },
@@ -89,10 +98,13 @@ function envWoo(platform: WooPlatformKey): WooStoreSettings {
     cupmoka: 'CUPMOKA',
   };
   const key = envMap[platform];
+  const webhookPerPlatform = process.env[`WOO_WEBHOOK_SECRET_${key}`]?.trim() || '';
+  const webhookGlobal = process.env.WOO_WEBHOOK_SECRET?.trim() || '';
   return {
     url: process.env[`WOOCOMMERCE_${key}_URL`]?.trim() || '',
     key: process.env[`WOOCOMMERCE_${key}_KEY`]?.trim() || '',
     secret: process.env[`WOOCOMMERCE_${key}_SECRET`]?.trim() || '',
+    webhook_secret: webhookPerPlatform || webhookGlobal,
   };
 }
 
@@ -132,6 +144,7 @@ function mergeWithEnvDefaults(settings: IntegrationSettings): IntegrationSetting
       url: normalized.ok ? normalized.url : url,
       key: pick(db.key, env.key),
       secret: pick(db.secret, env.secret),
+      webhook_secret: pick(db.webhook_secret, env.webhook_secret),
     };
   };
 
@@ -216,12 +229,15 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
   const maskWoo = (store: WooStoreSettings) => {
     const key = maskSecret(store.key);
     const secret = maskSecret(store.secret);
+    const webhookSecret = maskSecret(store.webhook_secret);
     return {
       url: store.url,
       key_set: key.set,
       key_hint: key.hint,
       secret_set: secret.set,
       secret_hint: secret.hint,
+      webhook_secret_set: webhookSecret.set,
+      webhook_secret_hint: webhookSecret.hint,
     };
   };
 
@@ -372,6 +388,10 @@ export async function saveIntegrationSettings(userId: number, update: Integratio
         url,
         key: keepOrReplace(current.woocommerce[platform].key, patch.key),
         secret: keepOrReplace(current.woocommerce[platform].secret, patch.secret),
+        webhook_secret: keepOrReplace(
+          current.woocommerce[platform].webhook_secret,
+          patch.webhook_secret,
+        ),
       };
     }
   }

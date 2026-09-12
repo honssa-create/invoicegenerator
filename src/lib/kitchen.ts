@@ -149,6 +149,14 @@ export interface ShippingBoxRow {
   needed: number;
 }
 
+export interface AirColumnCapRow {
+  capId: string;
+  label: string;
+  quantity: number;
+  needed: number;
+  used: number;
+}
+
 export interface RawRow {
   name: string;
   unit: string;
@@ -215,12 +223,14 @@ export interface KitchenDemand {
   finished: Record<string, number>;
   raw: Record<string, number>;
   shippingBoxes: Record<string, number>;
+  airColumnCaps: Record<string, number>;
 }
 
 export interface KitchenState {
   giftBoxes: GiftBoxRow[];
   finished: FinishedRow[];
   shippingBoxes: ShippingBoxRow[];
+  airColumnCaps: AirColumnCapRow[];
   raw: RawRow[];
   demand: KitchenDemand;
   openOrders: KitchenOpenOrder[];

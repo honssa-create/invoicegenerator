@@ -197,6 +197,149 @@ export function shippingBoxDisplayLabel(box: Pick<NestieeDemandShippingBox, 'lab
   return `${box.label}(${box.size})`;
 }
 
+export type NestieeAirColumnCapId = 'single' | 'double';
+
+export interface NestieeAirColumnCapSlot {
+  id: NestieeAirColumnCapId;
+  label: string;
+  qty: number;
+}
+
+export const NESTIEE_AIR_COLUMN_CAP_SLOTS: NestieeAirColumnCapSlot[] = [
+  { id: 'single', label: '氣柱帽 - 單', qty: 0 },
+  { id: 'double', label: '氣柱帽 - 雙', qty: 0 },
+];
+
+/** Air column caps per order from total 禮盒 count in that order. */
+export function mapAirColumnCapsForGiftCount(giftBoxes: number): Record<NestieeAirColumnCapId, number> {
+  const count = Math.max(0, Math.floor(giftBoxes));
+  return {
+    single: count % 2,
+    double: Math.floor(count / 2),
+  };
+}
+
+function addAirColumnCapsForOrderGiftTotal(
+  totals: Map<NestieeAirColumnCapId, number>,
+  orderGiftTotal: number,
+): void {
+  const caps = mapAirColumnCapsForGiftCount(orderGiftTotal);
+  totals.set('single', (totals.get('single') || 0) + caps.single);
+  totals.set('double', (totals.get('double') || 0) + caps.double);
+}
+
+export interface NestieeAirColumnCapsSummary {
+  caps: NestieeAirColumnCapSlot[];
+  orderCount: number;
+  dateStart: string;
+  dateEnd: string;
+  dateFilterType: NestieeDateFilterType;
+}
+
+/**
+ * Processing Nestiee orders — air caps needed (optional date filter on order/delivery date).
+ */
+export function summarizeNestieeAirColumnCapsNeeded(
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  giftBoxTypes: Array<{ qtyKey: string; active?: boolean }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): NestieeAirColumnCapsSummary {
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  const activeTypes = giftBoxTypes.filter((g) => g.active !== false);
+  const totals = new Map<NestieeAirColumnCapId, number>();
+  for (const slot of NESTIEE_AIR_COLUMN_CAP_SLOTS) totals.set(slot.id, 0);
+
+  let orderCount = 0;
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+    if (!orderMatchesNestieeDemandScope(order.status, 'processing')) continue;
+    if (
+      !orderMatchesNestieeDateRange(order, {
+        dateStart,
+        dateEnd,
+        dateFilterType,
+      })
+    ) {
+      continue;
+    }
+    orderCount += 1;
+    const fields = hydrateNestieeGiftBoxQtys({ ...(order.fields || {}) });
+    const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
+    addAirColumnCapsForOrderGiftTotal(totals, orderGiftTotal);
+  }
+
+  return {
+    caps: NESTIEE_AIR_COLUMN_CAP_SLOTS.map((slot) => ({
+      id: slot.id,
+      label: slot.label,
+      qty: totals.get(slot.id) || 0,
+    })),
+    orderCount,
+    dateStart,
+    dateEnd,
+    dateFilterType,
+  };
+}
+
+/**
+ * Shipped/completed Nestiee orders — air caps used (estimated) in a date range.
+ */
+export function summarizeNestieeUsedAirColumnCaps(
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  giftBoxTypes: Array<{ qtyKey: string; active?: boolean }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): NestieeAirColumnCapsSummary {
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  const activeTypes = giftBoxTypes.filter((g) => g.active !== false);
+  const totals = new Map<NestieeAirColumnCapId, number>();
+  for (const slot of NESTIEE_AIR_COLUMN_CAP_SLOTS) totals.set(slot.id, 0);
+
+  let orderCount = 0;
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+    if (!orderMatchesNestieeDemandScope(order.status, 'shipped')) continue;
+    if (
+      !orderMatchesNestieeDateRange(order, {
+        dateStart,
+        dateEnd,
+        dateFilterType,
+      })
+    ) {
+      continue;
+    }
+    orderCount += 1;
+    const fields = hydrateNestieeGiftBoxQtys({ ...(order.fields || {}) });
+    const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
+    addAirColumnCapsForOrderGiftTotal(totals, orderGiftTotal);
+  }
+
+  return {
+    caps: NESTIEE_AIR_COLUMN_CAP_SLOTS.map((slot) => ({
+      id: slot.id,
+      label: slot.label,
+      qty: totals.get(slot.id) || 0,
+    })),
+    orderCount,
+    dateStart,
+    dateEnd,
+    dateFilterType,
+  };
+}
+
 /** Per-order gift count fed into shipping-box mapping (minimum 1 outer box per order). */
 export function giftCountForOrderShippingBoxes(totalGiftBoxes: number): number {
   const count = Math.max(0, Math.floor(totalGiftBoxes));

@@ -39,20 +39,30 @@ import {
 import { resolveRawStockName, defaultGiftBoxGlassBottleStockName, BIRD_NEST_TYPES, BIRD_NEST_TYPE_LABELS, type BirdNestType } from '@/lib/kitchen-prep';
 import { type StockMaps } from '@/lib/kitchen-bom';
 import { buildKitchenPrepCreateHref, type PrepCapacity } from '@/lib/kitchen-prep';
-import { BTN, TITLE, bi } from '@/lib/ui-labels';
+import { BTN, FILTER, TITLE, bi } from '@/lib/ui-labels';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { kitchenOrderHasGiftBox } from '@/lib/nestiee-gift-box-search';
+import DateFilterField from '@/components/DateFilterField';
+import {
+  NESTIEE_DATE_FILTER_TYPES,
+  type NestieeDateFilterType,
+} from '@/lib/nestiee-order-demand';
 
 type Modal = 'gift' | 'return' | 'restock' | null;
 
 type AdjustStockMode = 'set' | 'add';
 
 type AdjustStockTarget = {
-  kind: 'raw' | 'finished' | 'gift_box' | 'shipping_box';
+  kind: 'raw' | 'finished' | 'gift_box' | 'shipping_box' | 'air_column_cap';
   key: string;
   label: string;
   current: number;
   unit?: string;
+};
+
+const PACKAGING_DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string }> = {
+  order_date: { en: 'By order date', zh: '落下單日期' },
+  delivery_date: { en: 'By delivery date', zh: '按送貨日期' },
 };
 
 const KITCHEN_TABLE_PAGE_SIZE = 20;
@@ -198,6 +208,10 @@ function KitchenPageContent() {
   const [ordersExpanded, setOrdersExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [packagingDateStart, setPackagingDateStart] = useState('');
+  const [packagingDateEnd, setPackagingDateEnd] = useState('');
+  const [packagingDateFilterType, setPackagingDateFilterType] =
+    useState<NestieeDateFilterType>('delivery_date');
   const inventoryLoadedRef = useRef(false);
   const ordersLoadedRef = useRef(false);
   const movementsLoadedRef = useRef(false);
@@ -282,7 +296,11 @@ function KitchenPageContent() {
   const loadInventory = async () => {
     setInventoryLoading(true);
     try {
-      const res = await fetch('/api/kitchen/inventory');
+      const params = new URLSearchParams();
+      if (packagingDateStart) params.set('dateStart', packagingDateStart);
+      if (packagingDateEnd) params.set('dateEnd', packagingDateEnd);
+      params.set('dateFilterType', packagingDateFilterType);
+      const res = await fetch(`/api/kitchen/inventory?${params}`);
       const data = await res.json();
       if (!res.ok) return;
       inventoryLoadedRef.current = true;
@@ -291,6 +309,12 @@ function KitchenPageContent() {
       setInventoryLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!inventoryLoadedRef.current) return;
+    void loadInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when packaging date filter changes
+  }, [packagingDateStart, packagingDateEnd, packagingDateFilterType]);
 
   const ensureInventory = async () => {
     if (inventoryLoadedRef.current) return;
@@ -1000,6 +1024,9 @@ function KitchenPageContent() {
   const shortfall = (have: number, need: number) =>
     need > have ? 'text-red-600 font-semibold' : 'text-green-600';
 
+  const packagingShortfall = (stock: number, used: number, needed: number) =>
+    needed > Math.max(0, stock - used) ? 'text-red-600 font-semibold' : 'text-green-600';
+
   if (!state) {
     return (
       <AppLayout>
@@ -1197,6 +1224,47 @@ function KitchenPageContent() {
           <h2 className="font-semibold text-gray-900 mb-3">
             {bi('Finished bottles / Boxes', '成品樽 / Boxes 紙箱')}
           </h2>
+          <p className="text-xs text-gray-500 mb-2">
+            {bi(
+              'Date filter below applies to 氣柱帽 need/used counts.',
+              '下方日期篩選適用於氣柱帽「需要／已用」。',
+            )}
+          </p>
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-2 mb-3">
+            <div className="grid grid-cols-2 gap-2 sm:contents">
+              <DateFilterField
+                label={FILTER.startDate}
+                value={packagingDateStart}
+                onChange={setPackagingDateStart}
+              />
+              <DateFilterField
+                label={FILTER.endDate}
+                value={packagingDateEnd}
+                onChange={setPackagingDateEnd}
+              />
+            </div>
+            <div
+              className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs self-start"
+              role="group"
+            >
+              {NESTIEE_DATE_FILTER_TYPES.map((option) => {
+                const active = packagingDateFilterType === option;
+                const label = PACKAGING_DATE_FILTER_LABELS[option];
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`min-h-[36px] px-2 py-1 rounded-md font-medium ${
+                      active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
+                    }`}
+                    {...tapProps(() => setPackagingDateFilterType(option))}
+                  >
+                    {bi(label.en, label.zh)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -1270,6 +1338,66 @@ function KitchenPageContent() {
                                     key: box.boxId,
                                     label: box.label,
                                     current: box.quantity,
+                                  })
+                                }
+                                className="text-xs text-brand-600 hover:underline disabled:opacity-40"
+                              >
+                                設定
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </>
+                )}
+                {(state.airColumnCaps ?? []).length > 0 && (
+                  <>
+                    <tr aria-hidden="true">
+                      <td colSpan={state.isAdmin ? 4 : 3} className="p-0 h-0 border-t-2 border-gray-300" />
+                    </tr>
+                    <tr>
+                      <td
+                        colSpan={state.isAdmin ? 5 : 4}
+                        className="py-2 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                      >
+                        {bi('Air column caps', '氣柱帽')}
+                      </td>
+                    </tr>
+                    <tr className="text-left text-gray-500 border-b text-xs">
+                      <th className="py-1 pr-2">{bi('Item', '項目')}</th>
+                      <th className="py-1 pr-2 text-right">{bi('Stock', '庫存')}</th>
+                      <th className="py-1 pr-2 text-right">{bi('Used', '已用')}</th>
+                      <th className="py-1 text-right">{bi('Need', '需要')}</th>
+                      {state.isAdmin && <th className="py-1 text-right">Admin</th>}
+                    </tr>
+                    {(state.airColumnCaps ?? []).map((cap) => {
+                      const stock = cap.quantity;
+                      const used = cap.used;
+                      const needed = cap.needed;
+                      const remaining = Math.max(0, stock - used);
+                      return (
+                        <tr key={cap.capId} className="border-b border-gray-50 bg-gray-50/50">
+                          <td className="py-2 pr-2">{cap.label}</td>
+                          <td className="py-2 pr-2 text-right font-medium tabular-nums">{stock}</td>
+                          <td className="py-2 pr-2 text-right tabular-nums">{used}</td>
+                          <td
+                            className={`py-2 text-right tabular-nums ${packagingShortfall(stock, used, needed)}`}
+                            title={bi(`Remaining usable: ${remaining}`, `可用餘量：${remaining}`)}
+                          >
+                            {needed}
+                          </td>
+                          {state.isAdmin && (
+                            <td className="py-2 text-right">
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  openAdjustStock({
+                                    kind: 'air_column_cap',
+                                    key: cap.capId,
+                                    label: cap.label,
+                                    current: cap.quantity,
                                   })
                                 }
                                 className="text-xs text-brand-600 hover:underline disabled:opacity-40"

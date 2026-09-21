@@ -12,6 +12,7 @@ import { tapProps } from '@/lib/tap-action';
 import {
   giftBoxMinStock,
   giftBoxTopUpQty,
+  kitchenStockQty,
   KITCHEN_ACTIONS,
   KITCHEN_ACTION_LABELS,
   expandGiftBoxBom,
@@ -740,23 +741,19 @@ function KitchenPageContent() {
     const order = completeOrder;
     const pending = order.needs.filter((n) => !n.done && n.remaining > 0);
 
-    // Re-check stock for the whole order before deducting.
+    // Re-check stock for the whole order before deducting (gift boxes may go negative).
     let probe: StockMaps = stockMaps;
     for (const n of pending) {
+      if (n.needKey.startsWith('gift:')) {
+        continue;
+      }
       if (!isNeedStockEnough(n, probe)) {
         flash(bi('Not enough stock to complete this order', '庫存不足，無法完成此訂單'), 'error');
         clearOrderTicks(order.id);
         setCompleteOrder(null);
         return;
       }
-      if (n.needKey.startsWith('gift:')) {
-        const boxType = n.needKey.slice('gift:'.length);
-        probe = stockAfterReservation(probe, {
-          finished: {},
-          raw: {},
-          giftBoxes: { [boxType]: n.remaining },
-        });
-      } else if (n.needKey.startsWith('bottle:')) {
+      if (n.needKey.startsWith('bottle:')) {
         const sku = n.needKey.slice('bottle:'.length);
         probe = stockAfterReservation(probe, {
           finished: { [sku]: n.remaining },
@@ -1158,18 +1155,23 @@ function KitchenPageContent() {
           <h2 className="font-semibold text-gray-900 mb-3">{bi('Gift boxes', '禮盒庫存')}</h2>
           <ul className="divide-y divide-gray-100">
             {state.giftBoxes.map((g) => {
-              const have = availableStockMaps.giftBoxes[g.boxType] ?? g.quantity;
+              const have = kitchenStockQty(
+                availableStockMaps.giftBoxes[g.boxType] ?? g.quantity,
+              );
               const needed = Math.max(0, g.needed - (tempReserved.gift[g.boxType] || 0));
               const low = giftBoxTopUpQty(g.quantity, giftMinStock) > 0;
+              const stockNegative = have < 0;
               return (
                 <li
                   key={g.boxType}
-                  className={`flex items-center gap-2 py-2 ${low ? 'bg-amber-50/60 -mx-2 px-2 rounded-lg' : ''}`}
+                  className={`flex items-center gap-2 py-2 ${low || stockNegative ? 'bg-amber-50/60 -mx-2 px-2 rounded-lg' : ''}`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-gray-900">{g.label}</div>
                     <div className="text-xs text-gray-500 mt-0.5">
-                      <span className={low ? 'text-red-600 font-medium' : ''}>
+                      <span
+                        className={stockNegative || low ? 'text-red-600 font-medium tabular-nums' : 'tabular-nums'}
+                      >
                         {bi('Stock', '庫存')} {have}
                       </span>
                       <span className="mx-1">·</span>

@@ -4,6 +4,7 @@ import {
   KITCHEN_ACTION_LABELS,
   roundRawQty,
   formatRawQty,
+  kitchenStockQty,
   type KitchenState,
   type KitchenOpenOrder,
   type KitchenNeedLine,
@@ -255,7 +256,7 @@ async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<K
   for (const g of giftTypes) giftBoxes[g.id] = 0;
   for (const r of giftRows) {
     if (giftBoxes[r.box_type] !== undefined || giftTypes.some((g) => g.id === r.box_type)) {
-      giftBoxes[r.box_type] = Number(r.quantity) || 0;
+      giftBoxes[r.box_type] = kitchenStockQty(r.quantity);
     }
   }
 
@@ -620,7 +621,7 @@ function buildInventoryRows(
   const giftBoxes = activeGiftBoxTypes(catalog).map((g) => ({
     boxType: g.id,
     label: g.label,
-    quantity: stock.giftBoxes[g.id] || 0,
+    quantity: kitchenStockQty(stock.giftBoxes[g.id]),
     needed: demand.giftBoxes[g.id] || 0,
   }));
 
@@ -1056,13 +1057,6 @@ export async function allocateGiftBox(
     return { error: `超過剩餘需要（最多 ${line.remaining}）` };
   }
 
-  const stock = await loadStockMaps(ownerId, catalog);
-  if ((stock.giftBoxes[boxType] || 0) < qty) {
-    return {
-      error: `禮盒庫存不足：${giftBoxLabel(boxType, catalog)}（需要 ${qty}，現有 ${stock.giftBoxes[boxType] || 0}）`,
-    };
-  }
-
   const deltas: MovementDeltas = {
     giftBoxDeltas: [{ boxType, delta: -qty }],
     finishedDeltas: [],
@@ -1238,7 +1232,8 @@ export async function tryAllocateRemainingForOrder(
 
   const stock = await loadStockMaps(ownerId, catalog);
   const shortages = kitchenShortagesFromNeeds(stockLines, stock);
-  if (shortages.length > 0) return { ok: false, shortages };
+  // Gift boxes may go negative; only block auto-allocate for return-gift bottle shortages.
+  if (kind === 'return_gift' && shortages.length > 0) return { ok: false, shortages };
 
   const giftBoxDeltas: MovementDeltas['giftBoxDeltas'] = [];
   const finishedDeltas: MovementDeltas['finishedDeltas'] = [];

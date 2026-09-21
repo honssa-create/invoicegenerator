@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { giftBoxTopUpQty, giftBoxMinStock, GIFT_BOX_MIN_STOCK, GIFT_BOX_MIN_STOCK_HOLIDAY } from './kitchen';
+import {
+  giftBoxTopUpQty,
+  giftBoxMinStock,
+  kitchenStockQty,
+  GIFT_BOX_MIN_STOCK,
+  GIFT_BOX_MIN_STOCK_HOLIDAY,
+} from './kitchen';
 import { expandGiftBoxBom, finishedShortfallsByCapacity, finishedSku } from './kitchen-bom';
 import { defaultPrepStatusForCreate } from './kitchen-prep';
+
+describe('kitchenStockQty', () => {
+  it('preserves negative quantities', () => {
+    expect(kitchenStockQty(-3)).toBe(-3);
+    expect(kitchenStockQty(0)).toBe(0);
+    expect(kitchenStockQty('bad')).toBe(0);
+  });
+});
 
 describe('giftBoxTopUpQty', () => {
   it('returns 0 when at or above minimum', () => {

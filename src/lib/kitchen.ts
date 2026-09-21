@@ -83,6 +83,12 @@ export function giftBoxTopUpQty(quantity: number, minStock: number = GIFT_BOX_MI
   return Math.max(0, min - q);
 }
 
+/** Preserve negative on-hand counts (do not use `|| 0`, which keeps negatives but clarifies intent). */
+export function kitchenStockQty(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export interface RawMaterialDef {
   name: string;
   unit: string;

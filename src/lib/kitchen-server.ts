@@ -605,6 +605,10 @@ export interface GetStateOptions {
   includeOrders?: boolean;
   /** When set, skips a second loadKitchenCatalog inside getState (bootstrap / combined routes). */
   catalogBundle?: KitchenCatalogBundle;
+  /**
+   * Default follows includeInventory. Set false on lite shell bootstrap to skip kitchen_prep_orders scan.
+   */
+  includePrepRawDemand?: boolean;
 }
 
 const EMPTY_STOCK: KitchenStockMaps = {
@@ -731,6 +735,45 @@ export async function getKitchenShippingBoxInventoryRows(
   }));
 }
 
+/** One stock read + open-order shipping need for kitchen widgets (avoids duplicate loadStockMaps / getOpenOrdersSlice). */
+export async function getKitchenWidgetInventoryContext(
+  userId: number,
+  catalogBundle: KitchenCatalogBundle,
+): Promise<{
+  stockSnapshot: Pick<KitchenInventorySlice, 'giftBoxes' | 'finished'>;
+  shippingInventory: Array<{ boxId: string; label: string; quantity: number; needed: number }>;
+}> {
+  const { catalog } = catalogBundle;
+  await ensureSeed(userId, catalog);
+  const fulfillments = await loadFulfillments(userId);
+  const [stock, openResult] = await Promise.all([
+    loadStockMaps(userId, catalog),
+    loadOpenOrders(userId, fulfillments, catalog),
+  ]);
+  const emptyDemand: KitchenState['demand'] = {
+    giftBoxes: {},
+    finished: {},
+    raw: {},
+    shippingBoxes: Object.fromEntries(
+      NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => [slot.id, 0]),
+    ) as Record<string, number>,
+    airColumnCaps: Object.fromEntries(
+      NESTIEE_AIR_COLUMN_CAP_SLOTS.map((slot) => [slot.id, 0]),
+    ) as Record<string, number>,
+  };
+  const built = buildInventoryRows(catalog, stock, emptyDemand);
+  const shippingInventory = NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
+    boxId: slot.id,
+    label: shippingBoxDisplayLabel(slot),
+    quantity: stock.shippingBoxes[slot.id] || 0,
+    needed: openResult.shippingDemand[slot.id] || 0,
+  }));
+  return {
+    stockSnapshot: { giftBoxes: built.giftBoxes, finished: built.finished },
+    shippingInventory,
+  };
+}
+
 /** On-hand gift boxes + finished bottles only (no open-order scan). */
 export async function getKitchenStockSnapshot(
   userId: number,
@@ -820,10 +863,13 @@ export async function getOpenOrdersSlice(userId: number): Promise<KitchenOrdersS
   return { openOrders, demand };
 }
 
+const holidayModeCache = new Map<number, boolean>();
+
 export async function getState(userId: number, opts?: GetStateOptions): Promise<KitchenState> {
   const includeMovements = opts?.includeMovements !== false;
   const includeInventory = opts?.includeInventory !== false;
   const includeOrders = opts?.includeOrders !== false;
+  const includePrepRawDemand = opts?.includePrepRawDemand ?? includeInventory;
 
   const { catalog, formulas } = opts?.catalogBundle ?? await loadKitchenCatalog(userId);
   await ensureSeed(userId, catalog);
@@ -845,8 +891,10 @@ export async function getState(userId: number, opts?: GetStateOptions): Promise<
   const independentPromise = Promise.all([
     includeInventory ? loadStockMaps(userId, catalog) : Promise.resolve(EMPTY_STOCK),
     includeMovements ? loadKitchenMovements(userId) : Promise.resolve([] as KitchenMovement[]),
-    loadUnfinishedPrepRawDemand(userId, formulas),
-    getHolidayMode(userId),
+    includePrepRawDemand
+      ? loadUnfinishedPrepRawDemand(userId, formulas)
+      : Promise.resolve({} as Record<string, number>),
+    getHolidayModeCached(userId),
   ]);
 
   const [openOrdersResult, [stock, movements, unfinishedRaw, holidayMode]] = await Promise.all([
@@ -892,6 +940,19 @@ async function getHolidayMode(userId: number): Promise<boolean> {
   return Boolean(row?.holiday_mode);
 }
 
+async function getHolidayModeCached(userId: number): Promise<boolean> {
+  const hit = holidayModeCache.get(userId);
+  if (hit !== undefined) return hit;
+  const mode = await getHolidayMode(userId);
+  holidayModeCache.set(userId, mode);
+  return mode;
+}
+
+export function invalidateKitchenHolidayModeCache(userId?: number) {
+  if (userId == null) holidayModeCache.clear();
+  else holidayModeCache.delete(userId);
+}
+
 export async function setHolidayMode(
   ownerId: number,
   isAdmin: boolean,
@@ -907,6 +968,7 @@ export async function setHolidayMode(
          updated_at = datetime('now')`
     )
     .run(ownerId, holidayMode ? 1 : 0);
+  invalidateKitchenHolidayModeCache(ownerId);
   return { state: await getState(ownerId, { isAdmin: true }) };
 }
 

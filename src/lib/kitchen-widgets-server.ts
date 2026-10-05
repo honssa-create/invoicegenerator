@@ -1,11 +1,7 @@
 import db from '@/lib/db';
 import type { KitchenCatalogBundle } from '@/lib/kitchen-catalog';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
-import {
-  getKitchenShippingBoxInventoryRows,
-  getKitchenStockSnapshot,
-  resolveKitchenOwnerUserId,
-} from '@/lib/kitchen-server';
+import { getKitchenWidgetInventoryContext, resolveKitchenOwnerUserId } from '@/lib/kitchen-server';
 import {
   computeKitchenProductionSchedule,
   giftBoxSupplyByScheduleSlot,
@@ -77,17 +73,14 @@ export async function loadKitchenWidgets(
     ? Promise.resolve(catalogBundle)
     : loadKitchenCatalog(ownerId);
 
-  const [bundle, fulfillments, stockSnapshot, shippingInventory] = await Promise.all([
-    bundlePromise,
-    loadFulfillments(ownerId),
-    catalogBundle
-      ? getKitchenStockSnapshot(ownerId, catalogBundle)
-      : bundlePromise.then((b) => getKitchenStockSnapshot(ownerId, b)),
-    catalogBundle
-      ? getKitchenShippingBoxInventoryRows(ownerId, catalogBundle)
-      : bundlePromise.then((b) => getKitchenShippingBoxInventoryRows(ownerId, b)),
-  ]);
+  const bundle = await bundlePromise;
   const { catalog, formulas } = bundle;
+
+  const [fulfillments, widgetInventory] = await Promise.all([
+    loadFulfillments(ownerId),
+    getKitchenWidgetInventoryContext(ownerId, bundle),
+  ]);
+  const { stockSnapshot, shippingInventory } = widgetInventory;
 
   const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({
     id: g.id,

@@ -329,7 +329,20 @@ export async function readKitchenCapacityOptions(
   return data;
 }
 
+const CATALOG_BUNDLE_CACHE_TTL_MS = 60_000;
+const catalogBundleCache = new Map<number, { at: number; bundle: KitchenCatalogBundle }>();
+
+export function invalidateKitchenCatalogBundleCache(userId?: number) {
+  if (userId == null) catalogBundleCache.clear();
+  else catalogBundleCache.delete(userId);
+}
+
 export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalogBundle> {
+  const cached = catalogBundleCache.get(userId);
+  if (cached && Date.now() - cached.at < CATALOG_BUNDLE_CACHE_TTL_MS) {
+    return cached.bundle;
+  }
+
   await ensureSettingsRow(userId);
   const row = (await db
     .prepare(
@@ -355,10 +368,14 @@ export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalog
     hasFormulas &&
     row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION
   ) {
-    return { catalog, formulas };
+    const bundle = { catalog, formulas };
+    catalogBundleCache.set(userId, { at: Date.now(), bundle });
+    return bundle;
   }
 
-  return runCatalogMerges(userId, catalog, formulas, { hasCatalog, hasFormulas, row });
+  const merged = await runCatalogMerges(userId, catalog, formulas, { hasCatalog, hasFormulas, row });
+  catalogBundleCache.set(userId, { at: Date.now(), bundle: merged });
+  return merged;
 }
 
 export async function saveKitchenCatalog(
@@ -394,6 +411,9 @@ export async function saveKitchenCatalog(
     );
 
   await ensureCatalogStockRows(ownerId, next.catalog);
+
+  invalidateKitchenCatalogBundleCache(ownerId);
+  capacityOptionsCache.delete(ownerId);
 
   return { bundle: next };
 }

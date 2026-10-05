@@ -1,12 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import {
-  completePrepProduction,
-  getPrepOrder,
-  resolveKitchenOwnerUserId,
-} from '@/lib/kitchen-prep-server';
-import { computePrepCalculationForOrder, type PrepCompletionSplit } from '@/lib/kitchen-prep';
-import { readKitchenStewFormulas } from '@/lib/kitchen-catalog-server';
+import { completePrepProduction, getPrepOrder } from '@/lib/kitchen-prep-server';
+import { type PrepCompletionSplit } from '@/lib/kitchen-prep';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -36,21 +31,17 @@ export async function POST(request: Request, { params }: { params: { id: string 
         }))
       : undefined;
 
-    const order = await completePrepProduction(params.id, session.userId, session.name, {
+    const result = await completePrepProduction(params.id, session.userId, session.name, {
       actual_yield: actualYield,
       completion_remarks: body.completion_remarks ?? null,
       splits,
-    });
+    }, { existing });
 
-    if (!order) {
+    if (!result) {
       return NextResponse.json({ error: 'Failed to complete production' }, { status: 500 });
     }
 
-    const kitchenOwnerId = await resolveKitchenOwnerUserId();
-    const formulas = await readKitchenStewFormulas(kitchenOwnerId);
-    const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
-
-    return NextResponse.json({ order, calculation });
+    return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to complete production';
     return NextResponse.json({ error: message }, { status: 400 });

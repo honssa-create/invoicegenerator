@@ -109,6 +109,7 @@ function OrdersPageContent() {
   const urlType = searchParams.get('type');
   const urlStatus = searchParams.get('status');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [creatingStatus, setCreatingStatus] = useState<string | null>(null);
@@ -158,6 +159,8 @@ function OrdersPageContent() {
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<number>>(new Set());
 
   const isNestieeFilter = isNestieeOrdersFilter(orderType);
+  const shipTodayFilter = isNestieeFilter && nestieeDemandScope === 'ship_today';
+  const useServerPaging = view === 'line' && dashFocus === 'all' && !shipTodayFilter;
 
   const nestieeStatusCounts = useMemo(
     () =>
@@ -191,17 +194,55 @@ function OrdersPageContent() {
       .finally(() => setNestieeDemandLoading(false));
   }, [orderType, dateStart, dateEnd, nestieeDemandScope, dateFilterType]);
 
-  const load = () => {
+  const buildOrdersListQuery = useCallback(() => {
+    const params = new URLSearchParams();
+    if (useServerPaging) {
+      params.set('limit', String(PAGE_SIZE));
+      params.set('offset', String((page - 1) * PAGE_SIZE));
+    } else {
+      params.set('limit', '2500');
+      params.set('offset', '0');
+    }
+    if (orderType) params.set('orderType', orderType);
+    if (status) params.set('status', status);
+    if (search.trim()) params.set('search', search.trim());
+    if (dateStart) params.set('dateStart', dateStart);
+    if (dateEnd) params.set('dateEnd', dateEnd);
+    if (isNestieeFilter) {
+      params.set('nestieeDates', '1');
+      params.set('dateFilterType', dateFilterType);
+    }
+    return params;
+  }, [
+    useServerPaging,
+    page,
+    orderType,
+    status,
+    search,
+    dateStart,
+    dateEnd,
+    isNestieeFilter,
+    dateFilterType,
+  ]);
+
+  const load = useCallback(() => {
     setLoading(true);
-    fetch('/api/orders')
+    const qs = buildOrdersListQuery().toString();
+    fetch(`/api/orders?${qs}`)
       .then((r) => r.json())
-      .then((d) => setOrders(d.orders || []))
+      .then((d) => {
+        setOrders(d.orders || []);
+        setOrdersTotal(typeof d.total === 'number' ? d.total : (d.orders?.length ?? 0));
+      })
       .finally(() => {
         setLoading(false);
         loadNestieeDemand();
       });
-  };
-  useEffect(() => { load(); }, []);
+  }, [buildOrdersListQuery, loadNestieeDemand]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     loadNestieeDemand();
@@ -268,12 +309,21 @@ function OrdersPageContent() {
     return orders.filter((o) => orderMatchesTypeFilter(getOrderType(o), orderType));
   }, [orders, orderType]);
 
-  const dashCounts = useMemo(() => summarizeOrderDashboard(scopedOrders), [scopedOrders]);
+  const dashCounts = useMemo(() => {
+    const base = summarizeOrderDashboard(scopedOrders);
+    if (useServerPaging && dashFocus === 'all') {
+      return { ...base, total: ordersTotal };
+    }
+    return base;
+  }, [scopedOrders, useServerPaging, dashFocus, ordersTotal]);
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const shipToday = isNestieeFilter && nestieeDemandScope === 'ship_today';
     let list = orders.filter((o) => {
+      if (useServerPaging) {
+        if (shipTodayFilter) return orderMatchesNestieeShipToday(o);
+        return true;
+      }
       if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
       if (q) {
         const hay = [
@@ -289,7 +339,7 @@ function OrdersPageContent() {
           .toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (shipToday) {
+      if (shipTodayFilter) {
         return orderMatchesNestieeShipToday(o);
       }
       if (isNestieeFilter) {
@@ -329,12 +379,37 @@ function OrdersPageContent() {
       return dir * base || b.id - a.id;
     });
     return list;
-  }, [orders, dateStart, dateEnd, orderType, status, search, sort, dashFocus, isNestieeFilter, nestieeDemandScope, dateFilterType]);
+  }, [
+    orders,
+    dateStart,
+    dateEnd,
+    orderType,
+    status,
+    search,
+    sort,
+    dashFocus,
+    isNestieeFilter,
+    nestieeDemandScope,
+    dateFilterType,
+    useServerPaging,
+    shipTodayFilter,
+  ]);
 
-  const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
-  const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
-  const pageEnd = Math.min(pageStart + PAGE_SIZE, displayed.length);
-  const pageRows = displayed.slice(pageStart, pageEnd);
+  const totalPages = useServerPaging
+    ? Math.max(1, Math.ceil(ordersTotal / PAGE_SIZE))
+    : Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
+  const pageStart = useServerPaging
+    ? displayed.length
+      ? (page - 1) * PAGE_SIZE
+      : 0
+    : displayed.length
+      ? (page - 1) * PAGE_SIZE
+      : 0;
+  const pageEnd = useServerPaging
+    ? Math.min(pageStart + displayed.length, ordersTotal)
+    : Math.min(pageStart + PAGE_SIZE, displayed.length);
+  const pageRows = useServerPaging ? displayed : displayed.slice(pageStart, pageEnd);
+  const listTotal = useServerPaging ? ordersTotal : displayed.length;
 
   const selectedOrders = useMemo(
     () => orders.filter((o) => selectedOrderIds.has(o.id)),
@@ -392,7 +467,7 @@ function OrdersPageContent() {
       return;
     }
     setPage(1);
-  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus, nestieeDemandScope, dateFilterType]);
+  }, [dateStart, dateEnd, orderType, status, search, sort, dashFocus, nestieeDemandScope, dateFilterType, view]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -840,7 +915,7 @@ function OrdersPageContent() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 text-sm">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                 <div className="text-gray-600">
-                  Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+                  Showing {pageStart + 1}–{pageEnd} of {listTotal}
                 </div>
                 {selectedOrderIds.size > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
@@ -957,10 +1032,10 @@ function OrdersPageContent() {
               </tbody>
             </table>
             </div>
-            {displayed.length > PAGE_SIZE && (
+            {listTotal > PAGE_SIZE && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 text-sm">
                 <div className="text-gray-600">
-                  Showing {pageStart + 1}–{pageEnd} of {displayed.length}
+                  Showing {pageStart + 1}–{pageEnd} of {listTotal}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button

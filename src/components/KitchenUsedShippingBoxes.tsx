@@ -28,7 +28,18 @@ function shortfallClass(shortfall: number): string {
   return shortfall > 0 ? 'text-red-600 font-semibold' : 'text-green-600';
 }
 
-export default function KitchenUsedShippingBoxes() {
+type KitchenUsedShippingBoxesProps = {
+  embedded?: boolean;
+  loading?: boolean;
+  dateStart?: string;
+  dateEnd?: string;
+  dateFilterType?: NestieeDateFilterType;
+  summary?: NestieeUsedShippingBoxesSummary | null;
+  shippingInventory?: ShippingInventoryRow[];
+};
+
+export default function KitchenUsedShippingBoxes(props: KitchenUsedShippingBoxesProps = {}) {
+  const embedded = Boolean(props.embedded);
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('order_date');
@@ -36,9 +47,16 @@ export default function KitchenUsedShippingBoxes() {
   const [shippingInventory, setShippingInventory] = useState<ShippingInventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const hasDateFilter = Boolean(dateStart || dateEnd);
+  const effectiveSummary = embedded ? props.summary ?? null : summary;
+  const effectiveInventory = embedded ? props.shippingInventory ?? [] : shippingInventory;
+  const effectiveLoading = embedded ? Boolean(props.loading) : loading;
+  const effectiveDateStart = embedded ? props.dateStart ?? '' : dateStart;
+  const effectiveDateEnd = embedded ? props.dateEnd ?? '' : dateEnd;
+
+  const hasDateFilter = Boolean(effectiveDateStart || effectiveDateEnd);
 
   const load = useCallback(() => {
+    if (embedded) return;
     setLoading(true);
     const params = new URLSearchParams();
     if (dateStart) params.set('dateStart', dateStart);
@@ -54,7 +72,7 @@ export default function KitchenUsedShippingBoxes() {
         /* keep previous */
       })
       .finally(() => setLoading(false));
-  }, [dateStart, dateEnd, dateFilterType]);
+  }, [dateStart, dateEnd, dateFilterType, embedded]);
 
   useEffect(() => {
     load();
@@ -62,12 +80,12 @@ export default function KitchenUsedShippingBoxes() {
 
   const inventoryById = useMemo(() => {
     const map = new Map<string, ShippingInventoryRow>();
-    for (const row of shippingInventory) map.set(row.boxId, row);
+    for (const row of effectiveInventory) map.set(row.boxId, row);
     return map;
-  }, [shippingInventory]);
+  }, [effectiveInventory]);
 
   const rows = NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => {
-    const used = summary?.shippingBoxes.find((b) => b.id === slot.id)?.qty ?? 0;
+    const used = effectiveSummary?.shippingBoxes.find((b) => b.id === slot.id)?.qty ?? 0;
     const inv = inventoryById.get(slot.id);
     const stock = inv?.quantity ?? 0;
     const needed = inv?.needed ?? 0;
@@ -100,20 +118,21 @@ export default function KitchenUsedShippingBoxes() {
           </p>
         </div>
         <p className="text-xs text-gray-500 shrink-0">
-          {loading
+          {effectiveLoading
             ? bi('Loading…', '載入中…')
             : hasDateFilter
               ? bi(
-                  `${summary?.orderCount ?? 0} shipped order(s) in range`,
-                  `日期範圍內 ${summary?.orderCount ?? 0} 張已出貨訂單`,
+                  `${effectiveSummary?.orderCount ?? 0} shipped order(s) in range`,
+                  `日期範圍內 ${effectiveSummary?.orderCount ?? 0} 張已出貨訂單`,
                 )
               : bi(
-                  `${summary?.orderCount ?? 0} shipped order(s)`,
-                  `${summary?.orderCount ?? 0} 張已出貨訂單`,
+                  `${effectiveSummary?.orderCount ?? 0} shipped order(s)`,
+                  `${effectiveSummary?.orderCount ?? 0} 張已出貨訂單`,
                 )}
         </p>
       </div>
 
+      {!embedded ? (
       <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-4">
         <div className="grid grid-cols-2 gap-3 sm:contents">
           <DateFilterField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
@@ -154,6 +173,7 @@ export default function KitchenUsedShippingBoxes() {
           {bi('Clear dates', '清除日期')}
         </button>
       </div>
+      ) : null}
 
       <p className="text-xs text-gray-500 mb-3">
         {bi('Date filter applies to used counts only.', '日期篩選只影響「已用」欄。')}
@@ -175,31 +195,31 @@ export default function KitchenUsedShippingBoxes() {
               <tr key={row.id} className="border-b border-gray-50">
                 <td className="py-2 pr-2">{row.label}</td>
                 <td className="py-2 pr-2 text-right font-medium tabular-nums">
-                  {loading ? '—' : row.stock}
+                  {effectiveLoading ? '—' : row.stock}
                 </td>
                 <td className="py-2 pr-2 text-right tabular-nums">
-                  {loading ? '—' : row.needed}
+                  {effectiveLoading ? '—' : row.needed}
                 </td>
                 <td
-                  className={`py-2 pr-2 text-right tabular-nums ${loading ? '' : shortfallClass(row.shortfall)}`}
+                  className={`py-2 pr-2 text-right tabular-nums ${effectiveLoading ? '' : shortfallClass(row.shortfall)}`}
                 >
-                  {loading ? '—' : row.shortfall}
+                  {effectiveLoading ? '—' : row.shortfall}
                 </td>
                 <td className="py-2 text-right font-medium tabular-nums">
-                  {loading ? '—' : row.used}
+                  {effectiveLoading ? '—' : row.used}
                 </td>
               </tr>
             ))}
             <tr className="font-semibold text-gray-900 border-t border-gray-200">
               <td className="py-2 pr-2">{bi('Total', '合計')}</td>
-              <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : totalStock}</td>
-              <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : totalNeeded}</td>
+              <td className="py-2 pr-2 text-right tabular-nums">{effectiveLoading ? '—' : totalStock}</td>
+              <td className="py-2 pr-2 text-right tabular-nums">{effectiveLoading ? '—' : totalNeeded}</td>
               <td
-                className={`py-2 pr-2 text-right tabular-nums ${loading ? '' : shortfallClass(totalShortfall)}`}
+                className={`py-2 pr-2 text-right tabular-nums ${effectiveLoading ? '' : shortfallClass(totalShortfall)}`}
               >
-                {loading ? '—' : totalShortfall}
+                {effectiveLoading ? '—' : totalShortfall}
               </td>
-              <td className="py-2 text-right tabular-nums">{loading ? '—' : totalUsed}</td>
+              <td className="py-2 text-right tabular-nums">{effectiveLoading ? '—' : totalUsed}</td>
             </tr>
           </tbody>
         </table>
@@ -212,7 +232,7 @@ export default function KitchenUsedShippingBoxes() {
         )}
       </p>
 
-      {!loading && (summary?.orderCount ?? 0) === 0 && (
+      {!effectiveLoading && (effectiveSummary?.orderCount ?? 0) === 0 && (
         <p className="text-sm text-gray-500 mt-2">
           {bi(
             'No shipped/completed Nestiee orders in this date range.',

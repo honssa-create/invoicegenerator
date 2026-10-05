@@ -6,7 +6,7 @@ import {
   listPrepOrdersWithCapacities,
   resolveKitchenOwnerUserId,
 } from '@/lib/kitchen-prep-server';
-import { PREP_ORDER_TYPES, validatePrepFlavorQtys, type PrepCapacity } from '@/lib/kitchen-prep';
+import { PREP_ORDER_TYPES, PREP_STATUSES, validatePrepFlavorQtys, type PrepCapacity, type PrepStatus } from '@/lib/kitchen-prep';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 
 function parseYmd(raw: string | null): string {
@@ -17,15 +17,26 @@ function parseYmd(raw: string | null): string {
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const ownerId = await resolveKitchenOwnerUserId();
   const params = new URL(request.url).searchParams;
   const dateStart = parseYmd(params.get('dateStart'));
   const dateEnd = parseYmd(params.get('dateEnd'));
-  const { orders, capacities } = await listPrepOrdersWithCapacities(ownerId, {
-    dateStart,
-    dateEnd,
+  const statusRaw = params.get('status')?.trim() || '';
+  const statusFilter = PREP_STATUSES.includes(statusRaw as PrepStatus)
+    ? (statusRaw as PrepStatus)
+    : undefined;
+  const excludeCompleted = params.get('active') === '1' && !statusFilter;
+  const includeCapacities = params.get('capacities') !== '0';
+
+  const ownerId = await resolveKitchenOwnerUserId();
+  const { orders, capacities } = await listPrepOrdersWithCapacities(
+    ownerId,
+    { dateStart, dateEnd, excludeCompleted, status: statusFilter },
+    includeCapacities,
+  );
+  return NextResponse.json({
+    orders,
+    ...(capacities ? { capacities } : {}),
   });
-  return NextResponse.json({ orders, capacities });
 }
 
 export async function POST(request: Request) {

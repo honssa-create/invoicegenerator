@@ -153,19 +153,37 @@ async function nextOrderCode(_userId?: number): Promise<string> {
   return `PREP-${String(n).padStart(4, '0')}`;
 }
 
+/** List table + completion modal from list — omits notes / completion meta / timestamps. */
 const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
   qty_osmanthus, qty_red_date, qty_rock_sugar, actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
-  bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar, notes,
-  expected_yield, actual_yield, completion_remarks, completed_at, completed_by, stewing_started_at,
-  created_at, updated_at`;
+  bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
+  expected_yield, actual_yield, stewing_started_at`;
+
+type ListPrepRow = Omit<
+  PrepRow,
+  'notes' | 'completion_remarks' | 'completed_at' | 'completed_by' | 'completion_splits_json' | 'created_at' | 'updated_at'
+>;
 
 export type ListPrepOrdersOpts = {
   dateStart?: string;
   dateEnd?: string;
+  /** When true, omit completed rows (matches default “active” list filter). */
+  excludeCompleted?: boolean;
+  /** Exact status match (e.g. scheduled). */
+  status?: PrepStatus;
 };
 
-function hydrateListRow(row: PrepRow): PrepOrder {
-  const order = hydrate({ ...row, completion_splits_json: null });
+function hydrateListRow(row: ListPrepRow): PrepOrder {
+  const order = hydrate({
+    ...row,
+    notes: null,
+    completion_remarks: null,
+    completed_at: null,
+    completed_by: null,
+    completion_splits_json: null,
+    created_at: '',
+    updated_at: '',
+  });
   return { ...order, completion_splits: null };
 }
 
@@ -186,23 +204,33 @@ export async function listPrepOrders(
     where += ' AND stewing_date <= ?';
     params.push(dateEnd);
   }
+  if (opts.status) {
+    where += ' AND status = ?';
+    params.push(opts.status);
+  } else if (opts.excludeCompleted) {
+    where += " AND status != 'completed'";
+  }
   const rows = (await db
     .prepare(
       `SELECT ${PREP_LIST_COLUMNS} FROM kitchen_prep_orders
        ${where}
        ORDER BY stewing_date ASC, id ASC`
     )
-    .all(...params)) as PrepRow[];
+    .all(...params)) as ListPrepRow[];
   return rows.map(hydrateListRow);
 }
 
 export async function listPrepOrdersWithCapacities(
   ownerId: number,
   opts: ListPrepOrdersOpts = {},
-): Promise<{ orders: PrepOrder[]; capacities: Array<{ id: string; label: string; sortOrder: number }> }> {
+  includeCapacities = true,
+): Promise<{
+  orders: PrepOrder[];
+  capacities: Array<{ id: string; label: string; sortOrder: number }> | null;
+}> {
   const [orders, capacities] = await Promise.all([
     listPrepOrders(ownerId, opts),
-    readKitchenCapacityOptions(ownerId),
+    includeCapacities ? readKitchenCapacityOptions(ownerId) : Promise.resolve(null),
   ]);
   return { orders, capacities };
 }

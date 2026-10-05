@@ -300,9 +300,20 @@ export async function readKitchenPrepDetailContext(userId: number): Promise<{
   return { formulas: bundle.formulas, capacities };
 }
 
+const CAPACITY_OPTIONS_CACHE_TTL_MS = 60_000;
+const capacityOptionsCache = new Map<
+  number,
+  { at: number; data: Array<{ id: string; label: string; sortOrder: number }> }
+>();
+
 export async function readKitchenCapacityOptions(
   userId: number,
 ): Promise<Array<{ id: string; label: string; sortOrder: number }>> {
+  const cached = capacityOptionsCache.get(userId);
+  if (cached && Date.now() - cached.at < CAPACITY_OPTIONS_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   await ensureSettingsRow(userId);
   const row = (await db
     .prepare('SELECT catalog_json FROM kitchen_settings WHERE user_id = ?')
@@ -311,9 +322,11 @@ export async function readKitchenCapacityOptions(
   const catalog = row?.catalog_json
     ? normalizeCatalogBundle(parseJson(row.catalog_json, defaults.catalog), null, defaults).catalog
     : defaults.catalog;
-  return [...catalog.capacities]
+  const data = [...catalog.capacities]
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
     .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+  capacityOptionsCache.set(userId, { at: Date.now(), data });
+  return data;
 }
 
 export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalogBundle> {

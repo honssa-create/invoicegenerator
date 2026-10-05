@@ -532,6 +532,36 @@ export async function createPrepOrdersBatch(
   });
 }
 
+/** Status workflow only (完成備料 / 開始炖製) — one SELECT + one UPDATE. */
+export async function advancePrepOrderStatus(
+  id: number | string,
+  nextStatus: PrepStatus,
+): Promise<PrepOrder | null> {
+  const existing = await getPrepOrder(id);
+  if (!existing) return null;
+
+  let stewingStartedAt = existing.stewing_started_at;
+  if (nextStatus === 'stewing' && existing.status !== 'stewing') {
+    stewingStartedAt = hkNowDateTime();
+  } else if (nextStatus !== 'stewing' && nextStatus !== 'completed') {
+    stewingStartedAt = null;
+  }
+
+  await db
+    .prepare(
+      `UPDATE kitchen_prep_orders
+       SET status = ?, stewing_started_at = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(nextStatus, stewingStartedAt, id);
+
+  return {
+    ...existing,
+    status: nextStatus,
+    stewing_started_at: stewingStartedAt,
+  };
+}
+
 export async function updatePrepOrder(
   id: number | string,
   input: Partial<{
@@ -550,14 +580,19 @@ export async function updatePrepOrder(
     bird_nest_rock_sugar?: BirdNestType;
     notes: string | null;
     allowEmptyQtys: boolean;
-  }>
+  }>,
+  opts?: {
+    existing?: PrepOrder;
+    stewFormulas?: StewFormulas;
+    skipRefetch?: boolean;
+  },
 ): Promise<PrepOrder | null> {
-  const existing = await getPrepOrder(id);
+  const existing = opts?.existing ?? (await getPrepOrder(id));
   if (!existing) return null;
 
-  const kitchenOwnerId = await resolveKitchenOwnerUserId();
-  const formulas = await readKitchenStewFormulas(kitchenOwnerId);
-  const stew = formulas.stewFormulas;
+  const stew =
+    opts?.stewFormulas ??
+    (await readKitchenStewFormulas(await resolveKitchenOwnerUserId())).stewFormulas;
   const capacity = input.capacity ?? existing.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
   const qtyRed = isRedDateAllowed(capacity, stew)
@@ -633,6 +668,27 @@ export async function updatePrepOrder(
       stewingStartedAt,
       id
     );
+
+  if (opts?.skipRefetch) {
+    return {
+      ...existing,
+      stewing_date: input.stewing_date ?? existing.stewing_date,
+      order_type: input.order_type ?? existing.order_type,
+      capacity,
+      status: nextStatus,
+      qty_osmanthus: qtyOsmanthus,
+      qty_red_date: qtyRed,
+      qty_rock_sugar: qtyRock,
+      actual_qty_osmanthus: actualOsmanthus,
+      actual_qty_red_date: actualRed,
+      actual_qty_rock_sugar: actualRock,
+      bird_nest_osmanthus: input.bird_nest_osmanthus ?? existing.bird_nest_osmanthus,
+      bird_nest_red_date: input.bird_nest_red_date ?? existing.bird_nest_red_date,
+      bird_nest_rock_sugar: input.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
+      notes: input.notes !== undefined ? input.notes : existing.notes,
+      stewing_started_at: stewingStartedAt,
+    };
+  }
   return await getPrepOrder(id);
 }
 
@@ -650,9 +706,10 @@ export async function completePrepProduction(
     actual_yield: number;
     completion_remarks?: string | null;
     splits?: PrepCompletionSplit[];
-  }
-): Promise<PrepOrder | null> {
-  const existing = await getPrepOrder(id);
+  },
+  opts?: { existing?: PrepOrder },
+): Promise<{ order: PrepOrder; calculation: PrepCalculation } | null> {
+  const existing = opts?.existing ?? (await getPrepOrder(id));
   if (!existing) return null;
   if (existing.status === 'completed') return null;
 
@@ -710,6 +767,7 @@ export async function completePrepProduction(
     if (stockResult.error) throw new Error(stockResult.error);
   }
 
+  const completedAt = hkNowDateTime();
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET
@@ -723,7 +781,7 @@ export async function completePrepProduction(
        updated_at = datetime('now')
      WHERE id = ?`
     )
-    .run(expectedYield, actualYield, remarks, splitsJson, hkNowDateTime(), operatorName, id);
+    .run(expectedYield, actualYield, remarks, splitsJson, completedAt, operatorName, id);
 
   const activityBody = buildKitchenCompletionActivityBody(
     existing.order_code,
@@ -744,7 +802,17 @@ export async function completePrepProduction(
     );
   }
 
-  return await getPrepOrder(id);
+  const order: PrepOrder = {
+    ...existing,
+    status: 'completed',
+    expected_yield: expectedYield,
+    actual_yield: actualYield,
+    completion_remarks: remarks,
+    completion_splits: splits.length > 0 ? splits : null,
+    completed_at: completedAt,
+    completed_by: operatorName,
+  };
+  return { order, calculation };
 }
 
 /** Find prep linked to an order (company-wide). */

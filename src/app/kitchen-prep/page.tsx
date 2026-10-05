@@ -384,6 +384,20 @@ function KitchenPrepListContent() {
       setCompleteOrder(order);
       return;
     }
+    const previousStatus = order.status;
+    const previousStewingStarted = order.stewing_started_at;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === order.id
+          ? {
+              ...o,
+              status: action.nextStatus,
+              stewing_started_at:
+                action.nextStatus === 'stewing' ? o.stewing_started_at || '…' : o.stewing_started_at,
+            }
+          : o,
+      ),
+    );
     setAdvancingId(order.id);
     const res = await fetch(`/api/kitchen-prep/${order.id}`, {
       method: 'PATCH',
@@ -393,9 +407,17 @@ function KitchenPrepListContent() {
     const data = await res.json();
     setAdvancingId(null);
     if (!res.ok) {
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === order.id
+            ? { ...o, status: previousStatus, stewing_started_at: previousStewingStarted }
+            : o,
+        ),
+      );
       setError(data.error || bi('Failed to update status', '更新狀態失敗'));
       return;
     }
+    clearKitchenPrepListCache();
     setOrders((prev) => prev.map((o) => (o.id === order.id ? data.order : o)));
   };
 
@@ -796,6 +818,7 @@ function KitchenPrepListContent() {
           onClose={() => setCompleteOrder(null)}
           onCompleted={(updated) => {
             setCompleteOrder(null);
+            clearKitchenPrepListCache();
             setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
           }}
         />

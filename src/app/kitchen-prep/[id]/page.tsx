@@ -19,6 +19,7 @@ import {
   formulaSummaryForCapacity,
   isRedDateAllowed,
   resolveActualQty,
+  computePrepCalculationForOrder,
   type BirdNestType,
   type PrepCalculation,
   type PrepOrder,
@@ -147,6 +148,18 @@ export default function KitchenPrepDetailPage() {
       setShowComplete(true);
       return;
     }
+    const previousStatus = order.status;
+    const previousStewingStarted = order.stewing_started_at;
+    setOrder((o) =>
+      o
+        ? {
+            ...o,
+            status: action.nextStatus,
+            stewing_started_at:
+              action.nextStatus === 'stewing' ? o.stewing_started_at || '…' : o.stewing_started_at,
+          }
+        : o,
+    );
     setAdvancingStatus(true);
     setError('');
     const res = await fetch(`/api/kitchen-prep/${id}`, {
@@ -157,11 +170,14 @@ export default function KitchenPrepDetailPage() {
     const d = await res.json();
     setAdvancingStatus(false);
     if (!res.ok) {
+      setOrder((o) =>
+        o ? { ...o, status: previousStatus, stewing_started_at: previousStewingStarted } : o,
+      );
       setError(d.error || MSG.saveFailed);
       return;
     }
     setOrder(d.order);
-    setCalc(d.calculation);
+    if (d.calculation) setCalc(d.calculation);
   };
 
   const input = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
@@ -413,7 +429,7 @@ export default function KitchenPrepDetailPage() {
           onCompleted={(updated) => {
             setShowComplete(false);
             setOrder(updated);
-            load();
+            setCalc(computePrepCalculationForOrder(updated));
           }}
         />
       )}

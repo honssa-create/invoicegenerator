@@ -171,7 +171,15 @@ async function runCatalogMerges(
  * Stew formulas for prep calculator — skips full catalog merge when DB version is current.
  * Falls back to {@link loadKitchenCatalog} when migrations are pending.
  */
+const STEW_FORMULAS_CACHE_TTL_MS = 60_000;
+const stewFormulasCache = new Map<number, { at: number; formulas: KitchenFormulas }>();
+
 export async function readKitchenStewFormulas(userId: number): Promise<KitchenFormulas> {
+  const cached = stewFormulasCache.get(userId);
+  if (cached && Date.now() - cached.at < STEW_FORMULAS_CACHE_TTL_MS) {
+    return cached.formulas;
+  }
+
   await ensureSettingsRow(userId);
   const row = (await db
     .prepare(
@@ -184,13 +192,17 @@ export async function readKitchenStewFormulas(userId: number): Promise<KitchenFo
   const defaults = defaultKitchenCatalogBundle();
   const hasFormulas = Boolean(row?.formulas_json);
   if (hasFormulas && row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION) {
-    return normalizeCatalogBundle(
+    const formulas = normalizeCatalogBundle(
       null,
       parseJson(row!.formulas_json, defaults.formulas),
       defaults,
     ).formulas;
+    stewFormulasCache.set(userId, { at: Date.now(), formulas });
+    return formulas;
   }
-  return (await loadKitchenCatalog(userId)).formulas;
+  const formulas = (await loadKitchenCatalog(userId)).formulas;
+  stewFormulasCache.set(userId, { at: Date.now(), formulas });
+  return formulas;
 }
 
 /** Gift box types + BOMs for Nestiee demand rollup — avoids full catalog merge when version is current. */
@@ -414,6 +426,7 @@ export async function saveKitchenCatalog(
 
   invalidateKitchenCatalogBundleCache(ownerId);
   capacityOptionsCache.delete(ownerId);
+  stewFormulasCache.delete(ownerId);
 
   return { bundle: next };
 }

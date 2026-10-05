@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -24,6 +24,11 @@ import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 import { prefetchKitchenPrepDetail } from '@/lib/kitchen-prep-detail-cache';
+import {
+  peekKitchenPrepListCache,
+  prepListCacheKey,
+  setKitchenPrepListCache,
+} from '@/lib/kitchen-prep-list-cache';
 
 const STATUS_COLORS: Record<string, string> = {
   not_started: 'bg-gray-100 text-gray-600',
@@ -237,32 +242,68 @@ function KitchenPrepListContent() {
 
   useModalUnsavedWarning(showForm, form);
 
-  const load = () => {
-    setLoading(true);
+  const hasServerCapacitiesRef = useRef(false);
+
+  const applyListPayload = (d: { orders?: PrepOrder[]; capacities?: { id: string; label: string }[] }) => {
+    setOrders(d.orders || []);
+    const caps = d.capacities;
+    if (caps?.length) {
+      hasServerCapacitiesRef.current = true;
+      setCapacityOptions(
+        caps.map((c) => ({
+          id: c.id,
+          label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
+        })),
+      );
+    }
+  };
+
+  const load = (background = false) => {
+    const cacheKey = prepListCacheKey(dateStart, dateEnd, status);
+    if (!background) {
+      const cached = peekKitchenPrepListCache(cacheKey);
+      if (cached) {
+        applyListPayload(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+    }
+
     const qs = new URLSearchParams();
     if (dateStart) qs.set('dateStart', dateStart);
     if (dateEnd) qs.set('dateEnd', dateEnd);
+    if (status === PREP_STATUS_FILTER_ACTIVE) qs.set('active', '1');
+    else if (status) qs.set('status', status);
+    if (hasServerCapacitiesRef.current) qs.set('capacities', '0');
+
     const suffix = qs.toString() ? `?${qs}` : '';
     return fetch(`/api/kitchen-prep${suffix}`)
       .then((r) => r.json())
       .then((d) => {
-        setOrders(d.orders || []);
-        const caps = d?.capacities as { id: string; label: string; sortOrder?: number }[] | undefined;
-        if (caps?.length) {
-          setCapacityOptions(
-            caps.map((c) => ({
-              id: c.id,
-              label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
-            })),
-          );
-        }
+        applyListPayload(d);
+        const prev = peekKitchenPrepListCache(cacheKey);
+        setKitchenPrepListCache(cacheKey, {
+          orders: d.orders || [],
+          capacities: d.capacities ?? prev?.capacities,
+        });
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!background) setLoading(false);
+      });
   };
 
   useEffect(() => {
-    void load();
-  }, [dateStart, dateEnd]);
+    const cacheKey = prepListCacheKey(dateStart, dateEnd, status);
+    const cached = peekKitchenPrepListCache(cacheKey);
+    if (cached) {
+      applyListPayload(cached);
+      setLoading(false);
+      void load(true);
+      return;
+    }
+    void load(false);
+  }, [dateStart, dateEnd, status]);
 
   useEffect(() => {
     writeListUi(KITCHEN_PREP_LIST_UI_KEY, { dateStart, dateEnd, search, status, sortKey, sortDir });

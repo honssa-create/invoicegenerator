@@ -1433,21 +1433,26 @@ function KitchenPageContent() {
               </thead>
               <tbody>
                 {state.raw.filter((r) => !isReserveRawMaterial(r.name) && !isUntrackedStewIngredient(r.name) && r.name !== '燕餅' && r.name !== '玻璃燉瓶').map((r) => {
-                  const have = availableStockMaps.raw[r.name] ?? r.quantity;
+                  const have = kitchenStockQty(availableStockMaps.raw[r.name] ?? r.quantity);
                   const needed = r.needed;
                   const available = have - needed;
+                  const stockNegative = have < 0;
                   return (
                   <tr key={r.name} className="border-b border-gray-50">
                     <td className="py-2 pr-2">
                       {r.name}
                       <span className="text-gray-400 text-xs ml-1">{r.unit}</span>
                     </td>
-                    <td className="py-2 pr-2 text-right font-medium">{formatRawQty(have, r.unit)}</td>
+                    <td
+                      className={`py-2 pr-2 text-right font-medium ${stockNegative ? 'text-red-600' : ''}`}
+                    >
+                      {formatRawQty(have, r.unit)}
+                    </td>
                     <td className={`py-2 pr-2 text-right ${shortfall(have, needed)}`}>
                       {formatRawQty(needed, r.unit)}
                     </td>
                     <td className={`py-2 text-right font-medium ${available < 0 ? 'text-red-600' : ''}`}>
-                      {formatRawQty(available < 0 ? 0 : available, r.unit)}
+                      {formatRawQty(available, r.unit)}
                     </td>
                     {state.isAdmin && (
                       <td className="py-2 text-right">

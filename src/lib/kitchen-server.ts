@@ -249,7 +249,7 @@ async function loadStockMaps(userId: number, catalog: KitchenCatalog): Promise<K
   for (const r of rawRows) {
     const def = rawDefs.find((m) => m.name === r.name);
     if (!def) continue;
-    raw[r.name] = roundRawQty(Number(r.total_stock) || 0, def.unit || 'g');
+    raw[r.name] = roundRawQty(kitchenStockQty(r.total_stock), def.unit || 'g');
   }
 
   const giftBoxes: Record<string, number> = {};
@@ -1491,16 +1491,6 @@ export async function addFinishedFromStewing(
 
   if (input.remarks?.trim()) {
     summaryParts.push(`備註: ${input.remarks.trim()}`);
-  }
-
-  const stock = await loadStockMaps(ownerId, catalog);
-  for (const r of rawDeltas) {
-    if ((stock.raw[r.name] || 0) + r.delta < 0) {
-      const unit = catalog.rawMaterials.find((m) => m.name === r.name)?.unit || 'g';
-      return {
-        error: `原料庫存不足：${r.name}（需要 ${formatRawQty(Math.abs(r.delta), unit)}${unit === 'g' ? 'g' : unit}，現有 ${formatRawQty(stock.raw[r.name] || 0, unit)}${unit === 'g' ? 'g' : unit}）`,
-      };
-    }
   }
 
   const deltas: MovementDeltas = {

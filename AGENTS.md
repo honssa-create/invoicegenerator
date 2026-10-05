@@ -24,6 +24,7 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by **PostgreSQL**
 - Optional **`PG_POOL_MAX`** (default `10`) — raise only when logs show pool wait; keep Postgres on **private networking** next to the app.
 - **`/kitchen`**: prefer `GET /api/kitchen/bootstrap?lite=1&inventory=0&orders=0&movements=0` for first paint; load inventory / open orders / movement history via `/api/kitchen/inventory`, `/api/kitchen/orders`, `/api/kitchen/movements` when the user expands those sections (or `widgets=1` for dashboard widgets).
 - **`/kitchen-prep`**: list uses `active=1`, date range, and `capacities=0`; client list cache in `kitchen-prep-list-cache.ts`. Status-only `PATCH` and bulk status use the fast SQL path in `kitchen-prep-server.ts`.
+- Kitchen **mutations** return `getKitchenMutationState` (inventory + open orders + demand, no movement list unless void). The `/kitchen` client merges movement history from cache when the response omits it.
 - Keep **`kitchen_settings.catalog_merge_version`** current (saved via Kitchen catalog admin) so reads use the fast JSON path instead of re-running catalog merge migrations on every cache miss.
 
 ### Expenses / receipt scanning / Excel export

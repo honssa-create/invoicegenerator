@@ -899,6 +899,9 @@ async function runBootDataFixes(): Promise<void> {
   }
 
   await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_activity_logs_entity_created ON activity_logs(entity_type, entity_id, created_at DESC, id DESC)
+  `);
+  await client().query(`
     CREATE INDEX IF NOT EXISTS idx_kitchen_prep_active_date ON kitchen_prep_orders(user_id, stewing_date ASC, id ASC)
       WHERE status != 'completed'
   `);

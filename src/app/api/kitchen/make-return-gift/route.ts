@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { resolveKitchenOwnerUserId, makeReturnGift, getState } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, makeReturnGift } from '@/lib/kitchen-server';
 
 export async function POST(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -21,8 +21,7 @@ export async function POST(request: Request) {
         : undefined,
     });
     if (result.error) return NextResponse.json({ error: result.error }, { status: 400 });
-    const state = await getState(ownerId, { isAdmin: session.role === 'admin' });
-    return NextResponse.json({ state });
+    return NextResponse.json({ state: result.state });
   } catch {
     return NextResponse.json({ error: 'Failed to make return gift' }, { status: 500 });
   }

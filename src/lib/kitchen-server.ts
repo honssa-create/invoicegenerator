@@ -721,11 +721,12 @@ export async function getKitchenShippingBoxInventoryRows(
   userId: number,
   catalogBundle?: KitchenCatalogBundle,
 ): Promise<Array<{ boxId: string; label: string; quantity: number; needed: number }>> {
-  const { catalog } = catalogBundle ?? await loadKitchenCatalog(userId);
+  const bundle = catalogBundle ?? await loadKitchenCatalog(userId);
+  const { catalog } = bundle;
   await ensureSeed(userId, catalog);
   const [stock, open] = await Promise.all([
     loadStockMaps(userId, catalog),
-    getOpenOrdersSlice(userId),
+    getOpenOrdersSlice(userId, bundle),
   ]);
   return NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
     boxId: slot.id,
@@ -844,8 +845,11 @@ export async function getInventorySlice(
 export type KitchenOrdersSlice = Pick<KitchenState, 'openOrders' | 'demand'>;
 
 /** Load Nestiee / 回禮 open orders and derived demand. */
-export async function getOpenOrdersSlice(userId: number): Promise<KitchenOrdersSlice> {
-  const { catalog, formulas } = await loadKitchenCatalog(userId);
+export async function getOpenOrdersSlice(
+  userId: number,
+  catalogBundle?: KitchenCatalogBundle,
+): Promise<KitchenOrdersSlice> {
+  const { catalog, formulas } = catalogBundle ?? await loadKitchenCatalog(userId);
   await ensureSeed(userId, catalog);
 
   const [fulfillments, unfinishedRaw] = await Promise.all([
@@ -928,6 +932,29 @@ export async function getState(userId: number, opts?: GetStateOptions): Promise<
   };
 }
 
+/**
+ * Fresh inventory + open-order demand after kitchen mutations.
+ * Skips movement history unless includeMovements (e.g. void) — client preserves cached movements.
+ */
+export async function getKitchenMutationState(
+  userId: number,
+  opts: {
+    isAdmin?: boolean;
+    catalogBundle?: KitchenCatalogBundle;
+    includeMovements?: boolean;
+  } = {},
+): Promise<KitchenState> {
+  const bundle = opts.catalogBundle ?? await loadKitchenCatalog(userId);
+  return getState(userId, {
+    isAdmin: opts.isAdmin,
+    catalogBundle: bundle,
+    includeMovements: opts.includeMovements ?? false,
+    includeInventory: true,
+    includeOrders: true,
+    includePrepRawDemand: true,
+  });
+}
+
 async function getHolidayMode(userId: number): Promise<boolean> {
   await db
     .prepare(
@@ -969,7 +996,7 @@ export async function setHolidayMode(
     )
     .run(ownerId, holidayMode ? 1 : 0);
   invalidateKitchenHolidayModeCache(ownerId);
-  return { state: await getState(ownerId, { isAdmin: true }) };
+  return { state: await getKitchenMutationState(ownerId, { isAdmin: true }) };
 }
 
 async function applyDeltas(userId: number, deltas: MovementDeltas, catalog: KitchenCatalog) {
@@ -1049,7 +1076,8 @@ export async function makeGiftBox(
   state?: KitchenState;
   finished_shortfalls?: { capacity: string; qtys: { osmanthus: number; red_date: number; rock_sugar: number } }[];
 }> {
-  const { catalog, formulas } = await loadKitchenCatalog(ownerId);
+  const bundle = await loadKitchenCatalog(ownerId);
+  const { catalog, formulas } = bundle;
   await ensureSeed(ownerId, catalog);
   const boxType = input.boxType;
   if (!catalog.giftBoxTypes.some((g) => g.id === boxType && g.active)) {
@@ -1124,7 +1152,7 @@ export async function makeGiftBox(
     );
   });
 
-  return { state: await getState(ownerId) };
+  return { state: await getKitchenMutationState(ownerId, { catalogBundle: bundle }) };
 }
 
 /** Allocate already-packaged gift boxes to a Nestiee order (does not touch unfinished bottles). */
@@ -1133,7 +1161,8 @@ export async function allocateGiftBox(
   actorId: number,
   input: { boxType: string; quantity: number; orderId: number }
 ): Promise<{ error?: string; state?: KitchenState }> {
-  const { catalog } = await loadKitchenCatalog(ownerId);
+  const bundle = await loadKitchenCatalog(ownerId);
+  const { catalog } = bundle;
   await ensureSeed(ownerId, catalog);
   const boxType = input.boxType;
   if (!catalog.giftBoxTypes.some((g) => g.id === boxType)) {
@@ -1187,7 +1216,7 @@ export async function allocateGiftBox(
     );
   });
 
-  return { state: await getState(ownerId) };
+  return { state: await getKitchenMutationState(ownerId, { catalogBundle: bundle }) };
 }
 
 export async function makeReturnGift(
@@ -1195,7 +1224,8 @@ export async function makeReturnGift(
   actorId: number,
   input: { orderId: number; lines?: { needKey: string; qty: number }[] }
 ): Promise<{ error?: string; state?: KitchenState }> {
-  const { catalog } = await loadKitchenCatalog(ownerId);
+  const bundle = await loadKitchenCatalog(ownerId);
+  const { catalog } = bundle;
   await ensureSeed(ownerId, catalog);
   const orderId = Number(input.orderId);
   const row = (await db
@@ -1266,7 +1296,7 @@ export async function makeReturnGift(
     );
   });
 
-  return { state: await getState(ownerId) };
+  return { state: await getKitchenMutationState(ownerId, { catalogBundle: bundle }) };
 }
 
 export type AllocateRemainingResult =
@@ -1387,7 +1417,8 @@ export async function restockRaw(
     deltas: { name: string; qty: number }[];
   }
 ): Promise<{ error?: string; state?: KitchenState }> {
-  const { catalog } = await loadKitchenCatalog(ownerId);
+  const bundle = await loadKitchenCatalog(ownerId);
+  const { catalog } = bundle;
   await ensureSeed(ownerId, catalog);
   const allowedRaw = new Set(catalog.rawMaterials.map((m) => m.name));
   const rawDeltas: MovementDeltas['rawDeltas'] = [];
@@ -1426,7 +1457,7 @@ export async function restockRaw(
     await insertMovement(ownerId, actorId, 'restock_raw', { summary: summaryParts.join('\n'), deltas }, null);
   });
 
-  return { state: await getState(ownerId) };
+  return { state: await getKitchenMutationState(ownerId, { catalogBundle: bundle }) };
 }
 
 /** Admin: set absolute stock for raw / finished / gift box / shipping box. */
@@ -1441,7 +1472,8 @@ export async function adjustStock(
   }
 ): Promise<{ error?: string; state?: KitchenState }> {
   if (!isAdmin) return { error: 'Only admin can adjust stock' };
-  const { catalog } = await loadKitchenCatalog(ownerId);
+  const bundle = await loadKitchenCatalog(ownerId);
+  const { catalog } = bundle;
   await ensureSeed(ownerId, catalog);
   const kind = input.kind;
   const key = String(input.key || '').trim();
@@ -1508,7 +1540,7 @@ export async function adjustStock(
       { summary, deltas, kind, key, from, to },
       null
     );
-    return { state: await getState(ownerId, { isAdmin: true }) };
+    return { state: await getKitchenMutationState(ownerId, { isAdmin: true, catalogBundle: bundle }) };
   } else if (kind === 'air_column_cap') {
     const slot = NESTIEE_AIR_COLUMN_CAP_SLOTS.find((s) => s.id === key);
     if (!slot) return { error: `Unknown air column cap: ${key}` };
@@ -1528,7 +1560,7 @@ export async function adjustStock(
       { summary, deltas, kind, key, from, to },
       null
     );
-    return { state: await getState(ownerId, { isAdmin: true }) };
+    return { state: await getKitchenMutationState(ownerId, { isAdmin: true, catalogBundle: bundle }) };
   } else {
     return { error: 'Invalid kind' };
   }
@@ -1544,7 +1576,7 @@ export async function adjustStock(
     );
   });
 
-  return { state: await getState(ownerId, { isAdmin: true }) };
+  return { state: await getKitchenMutationState(ownerId, { isAdmin: true, catalogBundle: bundle }) };
 }
 
 /** Add finished bottles + consume raw from Kitchen Prep 完成燉製. */
@@ -1756,5 +1788,7 @@ export async function voidMovement(
     }
   });
 
-  return { state: await getState(ownerId, { isAdmin: true }) };
+  return {
+    state: await getKitchenMutationState(ownerId, { isAdmin: true, includeMovements: true }),
+  };
 }

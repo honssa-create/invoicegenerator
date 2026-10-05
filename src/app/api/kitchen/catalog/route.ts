@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { resolveKitchenOwnerUserId } from '@/lib/kitchen-server';
 import { loadKitchenCatalog, saveKitchenCatalog } from '@/lib/kitchen-catalog-server';
-import { invalidateKitchenSeedCache, getState } from '@/lib/kitchen-server';
+import { invalidateKitchenSeedCache, getKitchenMutationState } from '@/lib/kitchen-server';
 import type { KitchenCatalog, KitchenFormulas } from '@/lib/kitchen-catalog';
 
 export async function GET(request: Request) {
@@ -34,7 +34,10 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
     invalidateKitchenSeedCache(ownerId);
-    const state = await getState(ownerId, { isAdmin: true });
+    const state = await getKitchenMutationState(ownerId, {
+      isAdmin: true,
+      catalogBundle: result.bundle,
+    });
     return NextResponse.json({ catalog: result.bundle?.catalog, formulas: result.bundle?.formulas, state });
   } catch {
     return NextResponse.json({ error: 'Failed to save catalog' }, { status: 500 });

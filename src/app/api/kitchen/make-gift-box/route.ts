@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { resolveKitchenOwnerUserId, makeGiftBox, getState } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, makeGiftBox } from '@/lib/kitchen-server';
 import { parseBirdNestType } from '@/lib/kitchen-prep';
 
 export async function POST(request: Request) {
@@ -29,8 +29,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const state = result.state || (await getState(ownerId, { isAdmin: session.role === 'admin' }));
-    return NextResponse.json({ state });
+    return NextResponse.json({ state: result.state });
   } catch {
     return NextResponse.json({ error: 'Failed to make gift box' }, { status: 500 });
   }

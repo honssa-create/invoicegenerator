@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
-import { resolveKitchenOwnerUserId, voidMovement, getState } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, voidMovement } from '@/lib/kitchen-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -15,8 +15,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       const status = result.error.includes('Only admin') ? 403 : 400;
       return NextResponse.json({ error: result.error }, { status });
     }
-    const state = await getState(ownerId, { isAdmin: session.role === 'admin' });
-    return NextResponse.json({ state });
+    return NextResponse.json({ state: result.state });
   } catch {
     return NextResponse.json({ error: 'Failed to void movement' }, { status: 500 });
   }

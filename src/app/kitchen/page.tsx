@@ -441,8 +441,22 @@ function KitchenPageContent() {
     if (!next) return;
     inventoryLoadedRef.current = true;
     ordersLoadedRef.current = true;
-    movementsLoadedRef.current = true;
-    setState(next);
+    setState((prev) => {
+      const catalog =
+        next.catalog?.giftBoxTypes?.length ? next.catalog : prev?.catalog ?? next.catalog;
+      const formulas = next.formulas?.giftBoxBoms ? next.formulas : prev?.formulas ?? next.formulas;
+      if (catalog && formulas) {
+        catalogBundleRef.current = { catalog, formulas };
+      }
+      const movements =
+        next.movements && next.movements.length > 0
+          ? next.movements
+          : prev?.movements ?? [];
+      if (next.movements && next.movements.length > 0) {
+        movementsLoadedRef.current = true;
+      }
+      return { ...next, catalog, formulas, movements };
+    });
   };
 
   const flash = (text: string, kind: 'success' | 'error' = 'success') => setToast({ text, kind });

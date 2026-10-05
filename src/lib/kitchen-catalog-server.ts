@@ -267,11 +267,33 @@ export async function readKitchenGiftBoxDemandData(userId: number): Promise<{
   };
 }
 
+const PREP_DETAIL_CONTEXT_CACHE_TTL_MS = 120_000;
+const prepDetailContextCache = new Map<
+  number,
+  {
+    at: number;
+    data: {
+      formulas: KitchenFormulas;
+      capacities: Array<{ id: string; label: string; sortOrder: number }>;
+    };
+  }
+>();
+
+export function invalidateKitchenPrepDetailContextCache(userId?: number) {
+  if (userId == null) prepDetailContextCache.clear();
+  else prepDetailContextCache.delete(userId);
+}
+
 /** Formulas + capacity labels for prep detail — one settings row read on the fast path. */
 export async function readKitchenPrepDetailContext(userId: number): Promise<{
   formulas: KitchenFormulas;
   capacities: Array<{ id: string; label: string; sortOrder: number }>;
 }> {
+  const cached = prepDetailContextCache.get(userId);
+  if (cached && Date.now() - cached.at < PREP_DETAIL_CONTEXT_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   await ensureSettingsRow(userId);
   const row = (await db
     .prepare(
@@ -302,17 +324,21 @@ export async function readKitchenPrepDetailContext(userId: number): Promise<{
     const capacities = [...catalog.capacities]
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
       .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
-    return { formulas, capacities };
+    const data = { formulas, capacities };
+    prepDetailContextCache.set(userId, { at: Date.now(), data });
+    return data;
   }
 
   const bundle = await loadKitchenCatalog(userId);
   const capacities = [...bundle.catalog.capacities]
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
     .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
-  return { formulas: bundle.formulas, capacities };
+  const data = { formulas: bundle.formulas, capacities };
+  prepDetailContextCache.set(userId, { at: Date.now(), data });
+  return data;
 }
 
-const CAPACITY_OPTIONS_CACHE_TTL_MS = 60_000;
+const CAPACITY_OPTIONS_CACHE_TTL_MS = 120_000;
 const capacityOptionsCache = new Map<
   number,
   { at: number; data: Array<{ id: string; label: string; sortOrder: number }> }
@@ -425,6 +451,7 @@ export async function saveKitchenCatalog(
   await ensureCatalogStockRows(ownerId, next.catalog);
 
   invalidateKitchenCatalogBundleCache(ownerId);
+  invalidateKitchenPrepDetailContextCache(ownerId);
   capacityOptionsCache.delete(ownerId);
   stewFormulasCache.delete(ownerId);
 

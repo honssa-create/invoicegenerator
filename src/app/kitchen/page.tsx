@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
 import KitchenWidgetsPanel from '@/components/KitchenWidgetsPanel';
+import type { KitchenWidgetsPayload } from '@/lib/kitchen-widgets-server';
 import TapButton from '@/components/TapButton';
 import { tapProps } from '@/lib/tap-action';
 import {
@@ -200,6 +201,9 @@ function KitchenPageContent() {
   const searchParams = useSearchParams();
   const [state, setState] = useState<KitchenState | null>(null);
   const [shellLoading, setShellLoading] = useState(true);
+  const [bootstrapWidgets, setBootstrapWidgets] = useState<
+    KitchenWidgetsPayload | null | undefined
+  >(undefined);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -348,9 +352,13 @@ function KitchenPageContent() {
   const loadShell = async () => {
     setShellLoading(true);
     try {
-      const res = await fetch('/api/kitchen/state?lite=1&inventory=0&orders=0');
+      const res = await fetch('/api/kitchen/bootstrap?lite=1&inventory=0&orders=0');
       const data = await res.json();
       if (!res.ok) return;
+      catalogBundleRef.current = {
+        catalog: data.catalog,
+        formulas: data.formulas,
+      };
       setState((prev) => {
         const merged = mergeCatalogIntoState(data.state, prev?.movements);
         if (merged) {
@@ -373,7 +381,7 @@ function KitchenPageContent() {
   const loadInitial = async () => {
     setShellLoading(true);
     try {
-      const res = await fetch('/api/kitchen/bootstrap?lite=1&inventory=0&orders=0');
+      const res = await fetch('/api/kitchen/bootstrap?lite=1&inventory=0&orders=0&widgets=1');
       const data = await res.json();
       if (!res.ok) return;
 
@@ -387,6 +395,9 @@ function KitchenPageContent() {
         const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
         if (first) setGiftType((cur) => cur || first);
       }
+      setBootstrapWidgets(
+        data.widgets && typeof data.widgets === 'object' ? (data.widgets as KitchenWidgetsPayload) : null,
+      );
     } finally {
       setShellLoading(false);
     }
@@ -1097,7 +1108,10 @@ function KitchenPageContent() {
         />
       )}
 
-      <KitchenWidgetsPanel />
+      <KitchenWidgetsPanel
+        waitForBootstrap={bootstrapWidgets === undefined}
+        initialPayload={bootstrapWidgets ?? null}
+      />
 
       {/* Inventory — expanded by default */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">

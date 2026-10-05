@@ -33,6 +33,7 @@ import {
   finishedSkusFromCatalog,
   finishedSkuLabelFromCatalog,
   type CatalogGiftBoxType,
+  type KitchenCatalogBundle,
 } from './kitchen-catalog';
 import { ensureCatalogStockRows, loadKitchenCatalog } from './kitchen-catalog-server';
 import {
@@ -602,6 +603,8 @@ export interface GetStateOptions {
   includeInventory?: boolean;
   /** Default true. Set false to skip open-order reads (empty list until lazy-loaded). */
   includeOrders?: boolean;
+  /** When set, skips a second loadKitchenCatalog inside getState (bootstrap / combined routes). */
+  catalogBundle?: KitchenCatalogBundle;
 }
 
 const EMPTY_STOCK: KitchenStockMaps = {
@@ -712,8 +715,9 @@ async function loadNestieeOrdersForPackagingStats(userId: number) {
 /** Nestiee shipping-box stock vs open-order need (no full inventory slice). */
 export async function getKitchenShippingBoxInventoryRows(
   userId: number,
+  catalogBundle?: KitchenCatalogBundle,
 ): Promise<Array<{ boxId: string; label: string; quantity: number; needed: number }>> {
-  const { catalog } = await loadKitchenCatalog(userId);
+  const { catalog } = catalogBundle ?? await loadKitchenCatalog(userId);
   await ensureSeed(userId, catalog);
   const [stock, open] = await Promise.all([
     loadStockMaps(userId, catalog),
@@ -730,8 +734,9 @@ export async function getKitchenShippingBoxInventoryRows(
 /** On-hand gift boxes + finished bottles only (no open-order scan). */
 export async function getKitchenStockSnapshot(
   userId: number,
+  catalogBundle?: KitchenCatalogBundle,
 ): Promise<Pick<KitchenInventorySlice, 'giftBoxes' | 'finished'>> {
-  const { catalog } = await loadKitchenCatalog(userId);
+  const { catalog } = catalogBundle ?? await loadKitchenCatalog(userId);
   await ensureSeed(userId, catalog);
   const stock = await loadStockMaps(userId, catalog);
   const emptyDemand: KitchenState['demand'] = {
@@ -820,7 +825,7 @@ export async function getState(userId: number, opts?: GetStateOptions): Promise<
   const includeInventory = opts?.includeInventory !== false;
   const includeOrders = opts?.includeOrders !== false;
 
-  const { catalog, formulas } = await loadKitchenCatalog(userId);
+  const { catalog, formulas } = opts?.catalogBundle ?? await loadKitchenCatalog(userId);
   await ensureSeed(userId, catalog);
 
   const fulfillmentsPromise = includeOrders

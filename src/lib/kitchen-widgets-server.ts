@@ -1,4 +1,5 @@
 import db from '@/lib/db';
+import type { KitchenCatalogBundle } from '@/lib/kitchen-catalog';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import {
   getKitchenShippingBoxInventoryRows,
@@ -68,15 +69,25 @@ export type KitchenWidgetsPayload = {
 export async function loadKitchenWidgets(
   ownerId: number,
   params: KitchenWidgetsParams,
+  catalogBundle?: KitchenCatalogBundle,
 ): Promise<KitchenWidgetsPayload> {
   const { dateStart, dateEnd, dateFilterType, today } = params;
 
-  const [{ catalog, formulas }, fulfillments, stockSnapshot, shippingInventory] = await Promise.all([
-    loadKitchenCatalog(ownerId),
+  const bundlePromise = catalogBundle
+    ? Promise.resolve(catalogBundle)
+    : loadKitchenCatalog(ownerId);
+
+  const [bundle, fulfillments, stockSnapshot, shippingInventory] = await Promise.all([
+    bundlePromise,
     loadFulfillments(ownerId),
-    getKitchenStockSnapshot(ownerId),
-    getKitchenShippingBoxInventoryRows(ownerId),
+    catalogBundle
+      ? getKitchenStockSnapshot(ownerId, catalogBundle)
+      : bundlePromise.then((b) => getKitchenStockSnapshot(ownerId, b)),
+    catalogBundle
+      ? getKitchenShippingBoxInventoryRows(ownerId, catalogBundle)
+      : bundlePromise.then((b) => getKitchenShippingBoxInventoryRows(ownerId, b)),
   ]);
+  const { catalog, formulas } = bundle;
 
   const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({
     id: g.id,
@@ -204,6 +215,7 @@ export async function loadKitchenWidgets(
 export async function loadKitchenWidgetsForRequest(
   ownerId: number,
   searchParams: URLSearchParams,
+  catalogBundle?: KitchenCatalogBundle,
 ): Promise<KitchenWidgetsPayload> {
   const dateStartRaw = searchParams.get('dateStart')?.trim() || '';
   const dateEndRaw = searchParams.get('dateEnd')?.trim() || '';
@@ -213,7 +225,7 @@ export async function loadKitchenWidgetsForRequest(
   const dateFilterType = parseNestieeDateFilterType(searchParams.get('dateFilterType'));
   const todayRaw = searchParams.get('today')?.trim() || '';
   const today = isYmd(todayRaw) ? todayRaw : localDateYmd();
-  return loadKitchenWidgets(ownerId, { dateStart, dateEnd, dateFilterType, today });
+  return loadKitchenWidgets(ownerId, { dateStart, dateEnd, dateFilterType, today }, catalogBundle);
 }
 
 /** Re-export for routes that only need owner id resolution at call site. */

@@ -19,6 +19,13 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by **PostgreSQL**
 - Auth uses JWT session cookies (`jose`) + bcrypt (`bcryptjs`). `JWT_SECRET` is optional in dev (falls back to a dev default); set it for production.
 - Data is isolated per user; every API route scopes queries by the authenticated `user_id`.
 
+### Performance (Railway / kitchen / prep)
+- Set **`KITCHEN_OWNER_USER_ID`** (or **`HUB_OWNER_USER_ID`**) to the org admin user id so kitchen + kitchen-prep skip cold `users` lookups on every request.
+- Optional **`PG_POOL_MAX`** (default `10`) — raise only when logs show pool wait; keep Postgres on **private networking** next to the app.
+- **`/kitchen`**: prefer `GET /api/kitchen/bootstrap?lite=1&inventory=0&orders=0&movements=0` for first paint; load inventory / open orders / movement history via `/api/kitchen/inventory`, `/api/kitchen/orders`, `/api/kitchen/movements` when the user expands those sections (or `widgets=1` for dashboard widgets).
+- **`/kitchen-prep`**: list uses `active=1`, date range, and `capacities=0`; client list cache in `kitchen-prep-list-cache.ts`. Status-only `PATCH` and bulk status use the fast SQL path in `kitchen-prep-server.ts`.
+- Keep **`kitchen_settings.catalog_merge_version`** current (saved via Kitchen catalog admin) so reads use the fast JSON path instead of re-running catalog merge migrations on every cache miss.
+
 ### Expenses / receipt scanning / Excel export
 - Receipt scanning (`POST /api/expenses/scan`, `src/lib/receipt.ts`) prefers OpenAI vision when `OPENAI_API_KEY` is set, otherwise falls back to **tesseract.js OCR**. On the first OCR call, tesseract.js downloads its language model(s) from a CDN and caches them, so the first scan needs network access and is slower than later ones. Default `OCR_LANGS` is `eng+chi_sim` (English + simplified Chinese); set e.g. `eng+chi_tra+chi_sim` for traditional Chinese too — extra languages trigger additional one-time model downloads. Neither key nor extra languages are required for the feature to work.
 - Uploaded receipt images are stored on disk at `data/receipts/` (gitignored) when R2 is not configured, or in **Cloudflare R2** when `R2_*` env vars are set (`saveReceipt` stores a public URL in the DB). On Railway, set `RECEIPTS_DIR=/data/receipts` on a mounted volume (or use R2). **Redeploy wipes the container filesystem** — without R2 or a volume path, DB rows keep `receipt_path` filenames but files disappear. Imported image links store `expense_receipts.source_url` as a preview fallback; production without R2/volume keeps the remote URL as `path` instead of ephemeral disk.

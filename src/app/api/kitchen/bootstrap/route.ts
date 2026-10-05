@@ -18,6 +18,9 @@ export async function GET(request: Request) {
   const includeInventory = params.get('inventory') !== '0';
   const includeOrders = params.get('orders') !== '0';
   const includeWidgets = params.get('widgets') === '1';
+  const movementsParam = params.get('movements');
+  const includeMovements =
+    movementsParam === '1' ? true : movementsParam === '0' ? false : !lite;
 
   const ownerId = await resolveKitchenOwnerUserId();
   const bundle = await loadKitchenCatalog(ownerId);
@@ -25,7 +28,7 @@ export async function GET(request: Request) {
   const [state, widgets] = await Promise.all([
     getState(ownerId, {
       isAdmin: session.role === 'admin',
-      includeMovements: !lite,
+      includeMovements,
       includeInventory,
       includeOrders,
       includePrepRawDemand: includeInventory,

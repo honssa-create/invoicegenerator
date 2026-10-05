@@ -23,6 +23,7 @@ import {
   validatePrepFlavorQtys,
   weddingPrepStatusFromDate,
   hkNowDateTime,
+  nextStewingStartedAt,
   type BirdNestType,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
@@ -340,6 +341,16 @@ export async function getPrepOrder(id: number | string): Promise<PrepOrder | nul
   return row ? hydrate(row) : null;
 }
 
+async function getPrepOrdersByIds(ids: number[]): Promise<Map<number, PrepOrder>> {
+  const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+  if (unique.length === 0) return new Map();
+  const placeholders = unique.map(() => '?').join(', ');
+  const rows = (await db
+    .prepare(`SELECT * FROM kitchen_prep_orders WHERE id IN (${placeholders})`)
+    .all(...unique)) as PrepRow[];
+  return new Map(rows.map((row) => [row.id, hydrate(row)]));
+}
+
 export type PrepOrderDetailPayload = {
   order: PrepOrder;
   calculation: PrepCalculation;
@@ -536,16 +547,12 @@ export async function createPrepOrdersBatch(
 export async function advancePrepOrderStatus(
   id: number | string,
   nextStatus: PrepStatus,
+  existingRow?: PrepOrder | null,
 ): Promise<PrepOrder | null> {
-  const existing = await getPrepOrder(id);
+  const existing = existingRow ?? (await getPrepOrder(id));
   if (!existing) return null;
 
-  let stewingStartedAt = existing.stewing_started_at;
-  if (nextStatus === 'stewing' && existing.status !== 'stewing') {
-    stewingStartedAt = hkNowDateTime();
-  } else if (nextStatus !== 'stewing' && nextStatus !== 'completed') {
-    stewingStartedAt = null;
-  }
+  const stewingStartedAt = nextStewingStartedAt(existing, nextStatus);
 
   await db
     .prepare(
@@ -576,8 +583,11 @@ export async function bulkSetPrepOrderStatus(
   const not_found: number[] = [];
   const skipped: number[] = [];
 
+  const byId = await getPrepOrdersByIds(uniqueIds);
+  const toUpdate: PrepOrder[] = [];
+
   for (const id of uniqueIds) {
-    const existing = await getPrepOrder(id);
+    const existing = byId.get(id);
     if (!existing) {
       not_found.push(id);
       continue;
@@ -590,9 +600,27 @@ export async function bulkSetPrepOrderStatus(
       updated.push(existing);
       continue;
     }
-    const order = await advancePrepOrderStatus(id, nextStatus);
-    if (order) updated.push(order);
-    else not_found.push(id);
+    toUpdate.push(existing);
+  }
+
+  if (toUpdate.length > 0) {
+    await db.transaction(async () => {
+      for (const existing of toUpdate) {
+        const stewingStartedAt = nextStewingStartedAt(existing, nextStatus);
+        await db
+          .prepare(
+            `UPDATE kitchen_prep_orders
+             SET status = ?, stewing_started_at = ?, updated_at = datetime('now')
+             WHERE id = ?`,
+          )
+          .run(nextStatus, stewingStartedAt, existing.id);
+        updated.push({
+          ...existing,
+          status: nextStatus,
+          stewing_started_at: stewingStartedAt,
+        });
+      }
+    });
   }
 
   return { updated, not_found, skipped };

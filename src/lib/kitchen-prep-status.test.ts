@@ -3,6 +3,7 @@ import {
   defaultPrepStatusForCreate,
   getPrepStatusAction,
   hkNowDateTime,
+  nextStewingStartedAt,
   weddingPrepStatusFromDate,
 } from './kitchen-prep';
 
@@ -39,6 +40,25 @@ describe('defaultPrepStatusForCreate', () => {
     expect(
       weddingPrepStatusFromDate('2026-07-01', { hasProductionDate: true, today: '2026-08-03' })
     ).toBe('scheduled');
+  });
+});
+
+describe('nextStewingStartedAt', () => {
+  it('sets timestamp when entering stewing', () => {
+    const at = nextStewingStartedAt(
+      { status: 'prepped', stewing_started_at: null },
+      'stewing',
+    );
+    expect(at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('clears timestamp when leaving stewing for prepped', () => {
+    expect(
+      nextStewingStartedAt(
+        { status: 'stewing', stewing_started_at: '2026-01-01 12:00:00' },
+        'prepped',
+      ),
+    ).toBeNull();
   });
 });
 

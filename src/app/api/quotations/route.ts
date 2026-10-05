@@ -15,6 +15,12 @@ export async function GET(request: Request) {
   if (searchParams.get('fields') === 'options') {
     return NextResponse.json({ quotations: await listQuotationOptions(ownerId) });
   }
+  const limitParam = searchParams.get('limit');
+  if (limitParam != null) {
+    const { parseQuotationListQuery, listQuotationsPage } = await import('@/lib/quotation-list-page');
+    const page = await listQuotationsPage(ownerId, parseQuotationListQuery(searchParams));
+    return NextResponse.json(page);
+  }
   return NextResponse.json({ quotations: await listQuotations(ownerId) });
 }
 

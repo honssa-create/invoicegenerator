@@ -1,6 +1,14 @@
 import db from './db';
 import type { Order } from './orders';
 import { hydrateNestieeGiftBoxQtys, orderDueDate } from './orders';
+import { pickThumbnailFile } from './attachment-files';
+import {
+  buildOrderListFilterSql,
+  orderListQueryForDashboardCards,
+  type OrderListQuery,
+} from './order-list-filters';
+import { countOrderListDashboard } from './order-list-dashboard';
+import type { OrderDashboardCounts } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
 import { formatCustomerPartyBlock } from './customer-party';
@@ -28,7 +36,21 @@ interface OrderRow {
   attended_at: string | null;
 }
 
-async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
+export type GetOrderOpts = {
+  withActivities?: boolean;
+  withLinkedDocs?: boolean;
+  withFiles?: boolean;
+};
+
+async function hydrate(row: OrderRow, withRelations: GetOrderOpts | boolean): Promise<Order> {
+  const rel: GetOrderOpts =
+    typeof withRelations === 'boolean'
+      ? {
+          withActivities: withRelations,
+          withLinkedDocs: withRelations,
+          withFiles: withRelations,
+        }
+      : withRelations;
   let fields: Record<string, string | boolean> = {};
   try {
     fields = row.fields_json ? JSON.parse(row.fields_json) : {};
@@ -37,16 +59,18 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   }
   hydrateNestieeGiftBoxQtys(fields);
 
-  const files = withRelations
+  const files = rel.withFiles
     ? (await db
         .prepare('SELECT id, path, original_name FROM order_files WHERE order_id = ? ORDER BY id')
         .all(row.id) as Order['files'])
     : [];
 
-  const activities = withRelations ? (await getActivities('order', row.id) as Order['activities']) : [];
+  const activities = rel.withActivities
+    ? (await getActivities('order', row.id) as Order['activities'])
+    : [];
 
   let linkedInvoice: Order['linked_invoice'] = null;
-  if (withRelations) {
+  if (rel.withLinkedDocs) {
     const invRow = await db
       .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
       .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
@@ -73,7 +97,7 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   }
 
   const linkedQuotation =
-    withRelations && row.quotation_id
+    rel.withLinkedDocs && row.quotation_id
       ? (await db
           .prepare('SELECT id, quote_number, status FROM quotations WHERE id = ? AND user_id = ?')
           .get(row.quotation_id, row.user_id) as Order['linked_quotation'] | undefined) || null
@@ -108,11 +132,20 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   };
 }
 
-export async function getOrder(id: number | string, userId: number): Promise<Order | null> {
+export async function getOrder(
+  id: number | string,
+  userId: number,
+  opts?: GetOrderOpts,
+): Promise<Order | null> {
   const row = await db
     .prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?')
     .get(id, userId) as OrderRow | undefined;
-  return row ? await hydrate(row, true) : null;
+  const rel: GetOrderOpts = opts ?? {
+    withActivities: true,
+    withLinkedDocs: true,
+    withFiles: true,
+  };
+  return row ? await hydrate(row, rel) : null;
 }
 
 /** List orders without order_files / activities / linked docs (detail uses getOrder). */
@@ -128,9 +161,6 @@ const LIST_FIELD_KEYS = [
   'order_type',
   'due_date',
   'client_delivery_date',
-  'honour_lines',
-  'nestiee_lines',
-  'cupmoka_lines',
   'tracking_no',
   'payment_status_label',
   'qty_rock_sugar',
@@ -176,9 +206,6 @@ interface LeanOrderRow {
   f_order_type: string | null;
   f_due_date: string | null;
   f_client_delivery_date: string | null;
-  f_honour_lines: string | null;
-  f_nestiee_lines: string | null;
-  f_cupmoka_lines: string | null;
   f_tracking_no: string | null;
   f_payment_status_label: string | null;
   f_qty_rock_sugar: string | null;
@@ -222,9 +249,6 @@ function leanRowToOrder(row: LeanOrderRow): Order {
   set('order_type', row.f_order_type);
   set('due_date', row.f_due_date);
   set('client_delivery_date', row.f_client_delivery_date);
-  set('honour_lines', row.f_honour_lines);
-  set('nestiee_lines', row.f_nestiee_lines);
-  set('cupmoka_lines', row.f_cupmoka_lines);
   set('tracking_no', row.f_tracking_no);
   set('payment_status_label', row.f_payment_status_label);
   set('qty_rock_sugar', row.f_qty_rock_sugar);
@@ -287,9 +311,31 @@ export type ListOrdersSummaryOpts = {
   paymentMonth?: string;
   /** Only orders that have any primary payment field set (accounting ledger). */
   withPaymentFields?: boolean;
-  /** Attach order_files (board thumbnails + attachment counts). Off for accounting/cashflow. */
+  /** Attach every order_files row (heavy). Prefer includeFileListMeta for list/board. */
   includeFiles?: boolean;
+  /** Thumbnail + attachment count only (default for order list API). */
+  includeFileListMeta?: boolean;
+  /** List page filters (orders UI). */
+  listQuery?: OrderListQuery;
+  limit?: number;
+  offset?: number;
 };
+
+export type OrderListPage = {
+  orders: Order[];
+  total: number;
+  limit: number;
+  offset: number;
+  dashboard: OrderDashboardCounts;
+};
+
+const ORDER_LIST_FROM = `FROM orders o
+       LEFT JOIN LATERAL (
+         SELECT CASE
+           WHEN o.fields_json IS NULL OR btrim(o.fields_json) = '' THEN '{}'::jsonb
+           ELSE o.fields_json::jsonb
+         END AS fj
+       ) AS j ON true`;
 
 /** Batch-load design-proof attachments for a lean order list (one query). */
 async function attachOrderFiles(orders: Order[]): Promise<Order[]> {
@@ -316,14 +362,139 @@ async function attachOrderFiles(orders: Order[]): Promise<Order[]> {
   return orders;
 }
 
+/** One thumbnail (if any) + total attachment count — avoids loading every proof file. */
+async function attachOrderListFileMeta(orders: Order[]): Promise<Order[]> {
+  if (!orders.length) return orders;
+  const ids = orders.map((o) => o.id);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const countRows = (await db
+    .prepare(
+      `SELECT order_id, COUNT(*)::int AS cnt FROM order_files
+       WHERE order_id IN (${placeholders}) GROUP BY order_id`
+    )
+    .all(...ids)) as Array<{ order_id: number; cnt: number }>;
+  const countByOrder = new Map(countRows.map((r) => [r.order_id, r.cnt]));
+
+  const thumbIdSet = new Set<number>();
+  for (const o of orders) {
+    const raw = o.fields?.thumbnail_file_id;
+    const id = typeof raw === 'string' ? parseInt(raw, 10) : typeof raw === 'number' ? raw : 0;
+    if (id > 0) thumbIdSet.add(id);
+  }
+
+  const fileById = new Map<number, Order['files'][number]>();
+  if (thumbIdSet.size) {
+    const thumbIds = Array.from(thumbIdSet);
+    const thumbPlaceholders = thumbIds.map(() => '?').join(',');
+    const thumbRows = (await db
+      .prepare(
+        `SELECT id, order_id, path, original_name FROM order_files
+         WHERE id IN (${thumbPlaceholders})`
+      )
+      .all(...thumbIds)) as Array<{
+      id: number;
+      order_id: number;
+      path: string;
+      original_name: string | null;
+    }>;
+    for (const r of thumbRows) {
+      fileById.set(r.id, { id: r.id, path: r.path, original_name: r.original_name });
+    }
+  }
+
+  const firstByOrder = new Map<number, Order['files'][number]>();
+  const firstRows = (await db
+    .prepare(
+      `SELECT DISTINCT ON (order_id) id, order_id, path, original_name
+       FROM order_files
+       WHERE order_id IN (${placeholders})
+       ORDER BY order_id, id ASC`
+    )
+    .all(...ids)) as Array<{
+    id: number;
+    order_id: number;
+    path: string;
+    original_name: string | null;
+  }>;
+  for (const r of firstRows) {
+    firstByOrder.set(r.order_id, { id: r.id, path: r.path, original_name: r.original_name });
+  }
+
+  for (const o of orders) {
+    o.attachment_count = countByOrder.get(o.id) || 0;
+    const thumbRaw = o.fields?.thumbnail_file_id;
+    const thumbId =
+      typeof thumbRaw === 'string' ? parseInt(thumbRaw, 10) : typeof thumbRaw === 'number' ? thumbRaw : 0;
+    const filesForPick: Order['files'] = [];
+    const fromFirst = firstByOrder.get(o.id);
+    if (fromFirst) filesForPick.push(fromFirst);
+    if (thumbId > 0) {
+      const explicit = fileById.get(thumbId);
+      if (explicit && !filesForPick.some((f) => f.id === explicit.id)) filesForPick.push(explicit);
+    }
+    const thumb = pickThumbnailFile(filesForPick, o.fields);
+    o.files = thumb ? [thumb] : [];
+  }
+  return orders;
+}
+
 /**
  * Lean list for table/board/accounting/cashflow: core columns + list field keys via jsonb,
  * without parsing full fields_json blobs in Node.
  */
-export async function listOrdersSummary(
+export async function listOrdersPage(
   userId: number,
-  opts: ListOrdersSummaryOpts = {}
-): Promise<Order[]> {
+  opts: ListOrdersSummaryOpts = {},
+): Promise<OrderListPage> {
+  const limit = Math.min(5000, Math.max(1, opts.limit ?? 200));
+  const offset = Math.max(0, opts.offset ?? 0);
+  const { whereExtra, params } = buildListWhere(userId, opts);
+  const listQuery = opts.listQuery ?? {};
+
+  const countParams: (string | number)[] = [userId];
+  const countWhere = buildOrderListFilterSql(listQuery, countParams);
+
+  const [dashboard, totalRow, rows] = await Promise.all([
+    countOrderListDashboard(userId, orderListQueryForDashboardCards(listQuery)),
+    db
+      .prepare(
+        `SELECT COUNT(*)::int AS total
+         ${ORDER_LIST_FROM}
+         WHERE o.user_id = ?${countWhere}`
+      )
+      .get(...countParams) as Promise<{ total: number } | undefined>,
+    (async () => {
+      const listParams = [...params, limit, offset];
+      return (await db
+    .prepare(
+      `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
+              o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
+              o.quotation_id, o.total_amount, o.created_at, o.updated_at,
+              o.source_platform, o.attended_at,
+              ${LIST_FIELD_SQL}
+       ${ORDER_LIST_FROM}
+       WHERE o.user_id = ?${whereExtra}
+       ORDER BY o.updated_at DESC, o.id DESC
+       LIMIT ? OFFSET ?`
+      )
+        .all(...listParams)) as LeanOrderRow[];
+    })(),
+  ]);
+
+  const total = Number(totalRow?.total) || 0;
+
+  let orders = rows.map(leanRowToOrder);
+  if (opts.includeFiles) orders = await attachOrderFiles(orders);
+  else if (opts.includeFileListMeta !== false) orders = await attachOrderListFileMeta(orders);
+
+  return { orders, total, limit, offset, dashboard };
+}
+
+function buildListWhere(
+  userId: number,
+  opts: ListOrdersSummaryOpts,
+): { whereExtra: string; params: (string | number)[] } {
   const params: (string | number)[] = [userId];
   let whereExtra = '';
 
@@ -359,6 +530,23 @@ export async function listOrdersSummary(
     )`;
   }
 
+  if (opts.listQuery) {
+    whereExtra += buildOrderListFilterSql(opts.listQuery, params);
+  }
+
+  return { whereExtra, params };
+}
+
+export async function listOrdersSummary(
+  userId: number,
+  opts: ListOrdersSummaryOpts = {}
+): Promise<Order[]> {
+  if (opts.limit != null || opts.offset != null || opts.listQuery) {
+    const page = await listOrdersPage(userId, opts);
+    return page.orders;
+  }
+  const { whereExtra, params } = buildListWhere(userId, opts);
+
   const rows = (await db
     .prepare(
       `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
@@ -366,13 +554,7 @@ export async function listOrdersSummary(
               o.quotation_id, o.total_amount, o.created_at, o.updated_at,
               o.source_platform, o.attended_at,
               ${LIST_FIELD_SQL}
-       FROM orders o
-       LEFT JOIN LATERAL (
-         SELECT CASE
-           WHEN o.fields_json IS NULL OR btrim(o.fields_json) = '' THEN '{}'::jsonb
-           ELSE o.fields_json::jsonb
-         END AS fj
-       ) AS j ON true
+       ${ORDER_LIST_FROM}
        WHERE o.user_id = ?${whereExtra}
        ORDER BY o.updated_at DESC, o.id DESC`
     )
@@ -380,6 +562,7 @@ export async function listOrdersSummary(
 
   const orders = rows.map(leanRowToOrder);
   if (opts.includeFiles) return attachOrderFiles(orders);
+  if (opts.includeFileListMeta !== false) return attachOrderListFileMeta(orders);
   return orders;
 }
 

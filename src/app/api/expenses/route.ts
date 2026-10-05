@@ -24,8 +24,17 @@ export async function GET(request: Request) {
   const category = searchParams.get('category');
   const status = searchParams.get('status');
   const idsParam = searchParams.get('ids');
+  const limitParam = searchParams.get('limit');
 
   const ownerId = await getDataOwnerId(session);
+
+  if (limitParam != null && !idsParam) {
+    const { parseExpenseListQuery, listExpensesPage } = await import('@/lib/expense-list-page');
+    const operatorUserId = session.role === 'operator' ? session.userId : undefined;
+    const query = parseExpenseListQuery(searchParams, { operatorUserId });
+    const page = await listExpensesPage(ownerId, query);
+    return NextResponse.json(page);
+  }
   let query = 'SELECT * FROM expenses WHERE user_id = ?';
   const params: (string | number)[] = [ownerId];
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { resolveKitchenOwnerUserId, getInventorySlice } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, getKitchenStockSnapshot } from '@/lib/kitchen-server';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import {
   computeKitchenProductionSchedule,
@@ -111,7 +111,7 @@ export async function GET(request: Request) {
       fulfillments,
     );
 
-    const inventory = await getInventorySlice(ownerId);
+    const inventory = await getKitchenStockSnapshot(ownerId);
     const giftBoxBottles = giftBoxSupplyByScheduleSlot(
       inventory.giftBoxes.map((g) => ({ boxType: g.boxType, quantity: g.quantity })),
       formulas.giftBoxBoms,

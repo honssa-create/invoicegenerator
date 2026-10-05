@@ -299,6 +299,215 @@ export function addProductionDaysSkippingSundays(startYmd: string, days: number)
   return dt.toISOString().slice(0, 10);
 }
 
+export const KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY =
+  'kitchen-production-schedule-defects';
+
+/** Append-only defect log (v2). */
+export const KITCHEN_PRODUCTION_SCHEDULE_DEFECT_LOG_STORAGE_KEY =
+  'kitchen-production-schedule-defect-log';
+
+export const PRODUCTION_DEFECT_REASONS = [
+  { id: 'cap_damaged', en: 'Damaged / dented cap', zh: '蓋崩/蓋凹' },
+  { id: 'black_spot', en: 'Black spots', zh: '有黑點' },
+  { id: 'other', en: 'Other', zh: '其他' },
+] as const;
+
+export type ProductionDefectReasonId = (typeof PRODUCTION_DEFECT_REASONS)[number]['id'];
+
+export type ProductionScheduleDefectLogEntry = {
+  id: string;
+  product: string;
+  qty: number;
+  reason: ProductionDefectReasonId;
+  remarks: string;
+  createdAt: string;
+};
+
+/** Defective bottle counts keyed by schedule product label (e.g. `75g 紅棗`). */
+export type ProductionScheduleDefectsByProduct = Record<string, number>;
+
+export function defectReasonLabel(
+  reason: ProductionDefectReasonId,
+  locale: 'en' | 'zh' = 'zh',
+): string {
+  const row = PRODUCTION_DEFECT_REASONS.find((r) => r.id === reason);
+  if (!row) return reason;
+  return locale === 'en' ? row.en : row.zh;
+}
+
+export function sumDefectsByProductFromLog(
+  log: ProductionScheduleDefectLogEntry[],
+): ProductionScheduleDefectsByProduct {
+  const out = emptyDefectsByProduct();
+  for (const entry of log) {
+    if (!entry.product) continue;
+    const qty = Math.max(0, Math.floor(Number(entry.qty) || 0));
+    if (qty <= 0) continue;
+    out[entry.product] = (out[entry.product] || 0) + qty;
+  }
+  return out;
+}
+
+function parseDefectReason(raw: unknown): ProductionDefectReasonId {
+  const id = String(raw || '').trim();
+  if (PRODUCTION_DEFECT_REASONS.some((r) => r.id === id)) return id as ProductionDefectReasonId;
+  return 'other';
+}
+
+export function parseDefectLogFromStorage(raw: string | null): ProductionScheduleDefectLogEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const out: ProductionScheduleDefectLogEntry[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      const product = String(row.product || '').trim();
+      if (!product) continue;
+      const qty = Math.max(0, Math.floor(Number(row.qty) || 0));
+      if (qty <= 0) continue;
+      out.push({
+        id: String(row.id || `log-${product}-${out.length}`),
+        product,
+        qty,
+        reason: parseDefectReason(row.reason),
+        remarks: String(row.remarks || '').trim(),
+        createdAt: String(row.createdAt || ''),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** One-time import from v1 per-product totals. */
+export function migrateLegacyDefectCountsToLog(
+  counts: ProductionScheduleDefectsByProduct,
+  createdAt = new Date().toISOString(),
+): ProductionScheduleDefectLogEntry[] {
+  const entries: ProductionScheduleDefectLogEntry[] = [];
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+    const qty = Math.max(0, Math.floor(counts[slot.label] || 0));
+    if (qty <= 0) continue;
+    entries.push({
+      id: `legacy-${slot.id}`,
+      product: slot.label,
+      qty,
+      reason: 'other',
+      remarks: 'Migrated from previous device total',
+      createdAt,
+    });
+  }
+  return entries;
+}
+
+export function loadProductionDefectLogFromStorage(
+  logRaw: string | null,
+  legacyCountsRaw: string | null,
+): ProductionScheduleDefectLogEntry[] {
+  const fromLog = parseDefectLogFromStorage(logRaw);
+  if (fromLog.length) return fromLog;
+  const legacy = parseDefectsFromStorage(legacyCountsRaw);
+  return migrateLegacyDefectCountsToLog(legacy);
+}
+
+export function appendProductionDefectLogEntry(
+  log: ProductionScheduleDefectLogEntry[],
+  entry: Omit<ProductionScheduleDefectLogEntry, 'id' | 'createdAt'> & {
+    id?: string;
+    createdAt?: string;
+  },
+): ProductionScheduleDefectLogEntry[] {
+  const qty = Math.max(0, Math.floor(Number(entry.qty) || 0));
+  if (qty <= 0) return log;
+  const next: ProductionScheduleDefectLogEntry = {
+    id: entry.id || `def-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    product: entry.product,
+    qty,
+    reason: parseDefectReason(entry.reason),
+    remarks: String(entry.remarks || '').trim(),
+    createdAt: entry.createdAt || new Date().toISOString(),
+  };
+  return [...log, next];
+}
+
+export function formatDefectLogTimestamp(createdAt: string): string {
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return createdAt;
+  return d.toLocaleString('zh-HK', {
+    timeZone: 'Asia/Hong_Kong',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+export function emptyDefectsByProduct(): ProductionScheduleDefectsByProduct {
+  const out: ProductionScheduleDefectsByProduct = {};
+  for (const slot of PRODUCTION_SCHEDULE_SLOTS) out[slot.label] = 0;
+  return out;
+}
+
+export function parseDefectsFromStorage(raw: string | null): ProductionScheduleDefectsByProduct {
+  const out = emptyDefectsByProduct();
+  if (!raw) return out;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const slot of PRODUCTION_SCHEDULE_SLOTS) {
+      const v = parsed[slot.label];
+      const num = typeof v === 'number' ? v : Number(v);
+      if (Number.isFinite(num)) out[slot.label] = Math.max(0, Math.floor(num));
+    }
+  } catch {
+    /* ignore corrupt storage */
+  }
+  return out;
+}
+
+/**
+ * Recompute shortfall / sessions treating defective bottles as non-usable stock.
+ * Physical `stock` on each row is unchanged; planning uses stock − defects.
+ */
+export function applyDefectsToProductionSchedule(
+  summary: ProductionScheduleSummary,
+  defectsByProduct: ProductionScheduleDefectsByProduct,
+): ProductionScheduleSummary {
+  const rows: ProductionScheduleRow[] = summary.rows.map((row) => {
+    const defects = Math.max(0, Math.floor(defectsByProduct[row.product] || 0));
+    const usableStock = Math.max(0, row.stock - defects);
+    const shortfall = Math.max(0, row.demand - usableStock);
+    const slot = PRODUCTION_SCHEDULE_SLOTS.find((s) => s.id === row.slotId);
+    const sessions =
+      slot?.capacity === '75g' && slot.sessionBottles
+        ? shortfall > 0
+          ? Math.ceil(shortfall / slot.sessionBottles)
+          : null
+        : null;
+    return { ...row, shortfall, sessions };
+  });
+
+  const totalSessions = rows.reduce((sum, row) => sum + (row.sessions || 0), 0);
+  const totalDaysNeeded =
+    totalSessions > 0 ? Math.ceil(totalSessions / KITCHEN_DAILY_SESSION_LIMIT) : 0;
+  const estimatedCompletionDate = addProductionDaysSkippingSundays(
+    summary.today,
+    totalDaysNeeded,
+  );
+
+  return {
+    ...summary,
+    rows,
+    totalSessions,
+    totalDaysNeeded,
+    estimatedCompletionDate,
+  };
+}
+
 export function computeKitchenProductionSchedule(
   demandBySlot: ProductionScheduleSlotTotals,
   stockBySlot: ProductionScheduleSlotTotals,

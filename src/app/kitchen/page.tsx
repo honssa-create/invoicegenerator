@@ -373,19 +373,15 @@ function KitchenPageContent() {
   const loadInitial = async () => {
     setShellLoading(true);
     try {
-      const [stateRes, catalogRes] = await Promise.all([
-        fetch('/api/kitchen/state?lite=1&inventory=0&orders=0'),
-        fetch('/api/kitchen/catalog'),
-      ]);
-      const stateData = await stateRes.json();
-      const catalogData = await catalogRes.json();
-      if (!stateRes.ok || !catalogRes.ok) return;
+      const res = await fetch('/api/kitchen/bootstrap?lite=1&inventory=0&orders=0');
+      const data = await res.json();
+      if (!res.ok) return;
 
       catalogBundleRef.current = {
-        catalog: catalogData.catalog,
-        formulas: catalogData.formulas,
+        catalog: data.catalog,
+        formulas: data.formulas,
       };
-      const merged = mergeCatalogIntoState(stateData.state, []);
+      const merged = mergeCatalogIntoState(data.state, []);
       if (merged) {
         setState(merged);
         const first = activeGiftBoxTypes(merged.catalog)[0]?.id;

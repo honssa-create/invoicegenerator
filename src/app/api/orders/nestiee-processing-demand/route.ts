@@ -2,12 +2,10 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
-import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
-import { NESTIEE_ORDER_TYPE, localDateYmd } from '@/lib/orders';
+import { readKitchenGiftBoxDemandData } from '@/lib/kitchen-catalog-server';
+import { localDateYmd } from '@/lib/orders';
 import {
-  nestieeStatusesForDemandScope,
-  orderMatchesNestieeDateRange,
-  orderMatchesNestieeShipToday,
+  buildNestieeDemandListFilterSql,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
@@ -27,6 +25,14 @@ function isYmd(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+const NESTIEE_DEMAND_FROM = `FROM orders o
+       LEFT JOIN LATERAL (
+         SELECT CASE
+           WHEN o.fields_json IS NULL OR btrim(o.fields_json) = '' THEN '{}'::jsonb
+           ELSE o.fields_json::jsonb
+         END AS fj
+       ) AS j ON true`;
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -40,60 +46,44 @@ export async function GET(request: Request) {
   const dateFilterType = parseNestieeDateFilterType(url.searchParams.get('dateFilterType'));
   const todayRaw = url.searchParams.get('today')?.trim() || '';
   const today = isYmd(todayRaw) ? todayRaw : localDateYmd();
-  const statuses = [...nestieeStatusesForDemandScope(scope)];
 
   const ownerId = await getDataOwnerId(session);
   try {
-    const statusPlaceholders = statuses.map(() => '?').join(', ');
-    const clauses = [
-      'user_id = ?',
-      `status IN (${statusPlaceholders})`,
-      `(
-         order_type = ?
-         OR COALESCE(fields_json::jsonb->>'order_type', '') = ?
-       )`,
-    ];
-    const params: Array<string | number> = [ownerId, ...statuses, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE];
+    const params: Array<string | number> = [ownerId];
+    const whereExtra = buildNestieeDemandListFilterSql(
+      scope,
+      { dateStart, dateEnd, dateFilterType, today },
+      params,
+    );
 
-    const rows = (await db
-      .prepare(
-        `SELECT status, fields_json, order_type, created_at
-         FROM orders
-         WHERE ${clauses.join('\n           AND ')}
-         ORDER BY id DESC`
-      )
-      .all(...params)) as Array<{
-      status: string | null;
-      fields_json: string | null;
-      order_type: string | null;
-      created_at: string | null;
-    }>;
+    const [{ giftBoxTypes, giftBoxBoms }, rows] = await Promise.all([
+      readKitchenGiftBoxDemandData(ownerId),
+      (async () =>
+        (await db
+          .prepare(
+            `SELECT o.status, o.fields_json, o.order_type, o.created_at
+             ${NESTIEE_DEMAND_FROM}
+             WHERE o.user_id = ?${whereExtra}
+             ORDER BY o.id DESC`
+          )
+          .all(...params)) as Array<{
+          status: string | null;
+          fields_json: string | null;
+          order_type: string | null;
+          created_at: string | null;
+        }>)(),
+    ]);
 
-    const orders = rows
-      .map((row) => ({
-        status: row.status || '',
-        fields: parseFields(row.fields_json),
-        created_at: row.created_at || '',
-      }))
-      .filter((order) =>
-        scope === 'ship_today'
-          ? orderMatchesNestieeShipToday(order, today)
-          : orderMatchesNestieeDateRange(order, { dateStart, dateEnd, dateFilterType }),
-      );
-
-    const { catalog, formulas } = await loadKitchenCatalog(ownerId);
-    const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({
-      id: g.id,
-      label: g.label,
-      qtyKey: g.qtyKey,
-      sortOrder: g.sortOrder,
-      active: g.active,
+    const orders = rows.map((row) => ({
+      status: row.status || '',
+      fields: parseFields(row.fields_json),
+      created_at: row.created_at || '',
     }));
 
     const demand = summarizeNestieeProcessingDemand(
       orders,
       giftBoxTypes,
-      formulas.giftBoxBoms,
+      giftBoxBoms,
       scope,
       { today },
     );

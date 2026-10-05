@@ -15,4 +15,10 @@ describe('buildOrderListFilterSql', () => {
     expect(sql).toContain('o.status');
     expect(params).toEqual(['processing']);
   });
+
+  it('adds unshipped dash focus', () => {
+    const params: (string | number)[] = [];
+    const sql = buildOrderListFilterSql({ dashFocus: 'unshipped', today: '2026-10-05' }, params);
+    expect(sql).toContain('NOT');
+  });
 });

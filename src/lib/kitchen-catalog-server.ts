@@ -193,6 +193,68 @@ export async function readKitchenStewFormulas(userId: number): Promise<KitchenFo
   return (await loadKitchenCatalog(userId)).formulas;
 }
 
+/** Gift box types + BOMs for Nestiee demand rollup — avoids full catalog merge when version is current. */
+export async function readKitchenGiftBoxDemandData(userId: number): Promise<{
+  giftBoxTypes: Array<{
+    id: string;
+    label: string;
+    qtyKey: string;
+    sortOrder: number;
+    active: boolean;
+  }>;
+  giftBoxBoms: KitchenFormulas['giftBoxBoms'];
+}> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare(
+      'SELECT catalog_json, formulas_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?'
+    )
+    .get(userId)) as
+    | { catalog_json: string | null; formulas_json: string | null; catalog_merge_version: string | null }
+    | undefined;
+
+  const defaults = defaultKitchenCatalogBundle();
+  const hasCatalog = Boolean(row?.catalog_json);
+  const hasFormulas = Boolean(row?.formulas_json);
+  if (
+    hasCatalog &&
+    hasFormulas &&
+    row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION
+  ) {
+    const catalog = normalizeCatalogBundle(
+      parseJson(row!.catalog_json, defaults.catalog),
+      null,
+      defaults,
+    ).catalog;
+    const formulas = normalizeCatalogBundle(
+      null,
+      parseJson(row!.formulas_json, defaults.formulas),
+      defaults,
+    ).formulas;
+    return {
+      giftBoxTypes: catalog.giftBoxTypes.map((g) => ({
+        id: g.id,
+        label: g.label,
+        qtyKey: g.qtyKey,
+        sortOrder: g.sortOrder ?? 0,
+        active: g.active !== false,
+      })),
+      giftBoxBoms: formulas.giftBoxBoms,
+    };
+  }
+  const bundle = await loadKitchenCatalog(userId);
+  return {
+    giftBoxTypes: bundle.catalog.giftBoxTypes.map((g) => ({
+      id: g.id,
+      label: g.label,
+      qtyKey: g.qtyKey,
+      sortOrder: g.sortOrder ?? 0,
+      active: g.active !== false,
+    })),
+    giftBoxBoms: bundle.formulas.giftBoxBoms,
+  };
+}
+
 export async function readKitchenCapacityOptions(
   userId: number,
 ): Promise<Array<{ id: string; label: string; sortOrder: number }>> {

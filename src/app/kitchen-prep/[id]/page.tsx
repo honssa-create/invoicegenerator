@@ -24,6 +24,11 @@ import {
   type PrepOrder,
 } from '@/lib/kitchen-prep';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
+import {
+  peekKitchenPrepDetailCache,
+  setKitchenPrepDetailCache,
+  type KitchenPrepDetailPayload,
+} from '@/lib/kitchen-prep-detail-cache';
 
 export default function KitchenPrepDetailPage() {
   const params = useParams();
@@ -44,27 +49,43 @@ export default function KitchenPrepDetailPage() {
   const patchQueueRef = useRef(Promise.resolve());
   const patchSeqRef = useRef(0);
 
-  const load = () => {
-    setLoading(true);
+  const applyDetail = (d: KitchenPrepDetailPayload) => {
+    setOrder(d.order);
+    setCalc(d.calculation);
+    if (d.capacities?.length) {
+      setCapacityOptions(
+        d.capacities.map((c) => ({
+          id: c.id,
+          label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
+        })),
+      );
+    }
+    setKitchenPrepDetailCache(id, d);
+  };
+
+  const load = (background = false) => {
+    if (!background) setLoading(true);
     return fetch(`/api/kitchen-prep/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.order) {
-          setOrder(d.order);
-          setCalc(d.calculation);
-        }
-        const caps = d?.capacities as { id: string; label: string }[] | undefined;
-        if (caps?.length) {
-          setCapacityOptions(
-            caps.map((c) => ({ id: c.id, label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id })),
-          );
+          applyDetail(d as KitchenPrepDetailPayload);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!background) setLoading(false);
+      });
   };
 
   useEffect(() => {
-    void load();
+    const cached = peekKitchenPrepDetailCache(id);
+    if (cached) {
+      applyDetail(cached);
+      setLoading(false);
+      void load(true);
+      return;
+    }
+    void load(false);
   }, [id]);
 
   const patch = (body: Record<string, unknown>) => {

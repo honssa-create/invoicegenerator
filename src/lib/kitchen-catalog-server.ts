@@ -255,6 +255,51 @@ export async function readKitchenGiftBoxDemandData(userId: number): Promise<{
   };
 }
 
+/** Formulas + capacity labels for prep detail — one settings row read on the fast path. */
+export async function readKitchenPrepDetailContext(userId: number): Promise<{
+  formulas: KitchenFormulas;
+  capacities: Array<{ id: string; label: string; sortOrder: number }>;
+}> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare(
+      'SELECT catalog_json, formulas_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?',
+    )
+    .get(userId)) as
+    | { catalog_json: string | null; formulas_json: string | null; catalog_merge_version: string | null }
+    | undefined;
+
+  const defaults = defaultKitchenCatalogBundle();
+  const hasCatalog = Boolean(row?.catalog_json);
+  const hasFormulas = Boolean(row?.formulas_json);
+  if (
+    hasCatalog &&
+    hasFormulas &&
+    row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION
+  ) {
+    const catalog = normalizeCatalogBundle(
+      parseJson(row!.catalog_json, defaults.catalog),
+      null,
+      defaults,
+    ).catalog;
+    const formulas = normalizeCatalogBundle(
+      null,
+      parseJson(row!.formulas_json, defaults.formulas),
+      defaults,
+    ).formulas;
+    const capacities = [...catalog.capacities]
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+    return { formulas, capacities };
+  }
+
+  const bundle = await loadKitchenCatalog(userId);
+  const capacities = [...bundle.catalog.capacities]
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+  return { formulas: bundle.formulas, capacities };
+}
+
 export async function readKitchenCapacityOptions(
   userId: number,
 ): Promise<Array<{ id: string; label: string; sortOrder: number }>> {

@@ -14,20 +14,29 @@ import {
   type BirdNestType,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
-import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
+import {
+  loadKitchenCatalog,
+  readKitchenCapacityOptions,
+  readKitchenStewFormulas,
+} from '@/lib/kitchen-catalog-server';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const order = await getPrepOrder(params.id);
+  const [kitchenOwnerId, order] = await Promise.all([
+    resolveKitchenOwnerUserId(),
+    getPrepOrder(params.id),
+  ]);
   if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const kitchenOwnerId = await resolveKitchenOwnerUserId();
-  const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
+  const [formulas, capacities] = await Promise.all([
+    readKitchenStewFormulas(kitchenOwnerId),
+    readKitchenCapacityOptions(kitchenOwnerId),
+  ]);
   const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
 
-  return NextResponse.json({ order, calculation });
+  return NextResponse.json({ order, calculation, capacities });
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
@@ -40,8 +49,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
-    const { catalog, formulas } = await loadKitchenCatalog(kitchenOwnerId);
-    const allowedCaps = new Set(catalog.capacities.map((c) => c.id));
+    const [capacityOptions, formulas] = await Promise.all([
+      readKitchenCapacityOptions(kitchenOwnerId),
+      readKitchenStewFormulas(kitchenOwnerId),
+    ]);
+    const allowedCaps = new Set(capacityOptions.map((c) => c.id));
     const capacity = (
       body.capacity && allowedCaps.has(body.capacity) ? body.capacity : existing.capacity
     ) as PrepCapacity;

@@ -22,7 +22,7 @@ import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
 import { finishedSku } from './kitchen-bom';
 import { addFinishedFromStewing, resolveKitchenOwnerUserId } from './kitchen-server';
-import { loadKitchenCatalog, readKitchenCapacityOptions } from './kitchen-catalog-server';
+import { readKitchenCapacityOptions, readKitchenStewFormulas } from './kitchen-catalog-server';
 
 export { resolveKitchenOwnerUserId };
 
@@ -225,7 +225,7 @@ export async function createPrepOrder(
     allowEmptyQtys?: boolean;
   }
 ): Promise<PrepOrder> {
-  const { formulas } = await loadKitchenCatalog(userId);
+  const formulas = await readKitchenStewFormulas(userId);
   const stew = formulas.stewFormulas;
   const capacity = input.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? 0);
@@ -303,7 +303,7 @@ export async function createPrepOrdersBatch(
     lines: PrepCapacityLine[];
   }
 ): Promise<PrepOrder[]> {
-  const { formulas } = await loadKitchenCatalog(userId);
+  const formulas = await readKitchenStewFormulas(userId);
   const stew = formulas.stewFormulas;
   const baseCode = input.order_code?.trim();
 
@@ -371,7 +371,7 @@ export async function updatePrepOrder(
   if (!existing) return null;
 
   const kitchenOwnerId = await resolveKitchenOwnerUserId();
-  const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
+  const formulas = await readKitchenStewFormulas(kitchenOwnerId);
   const stew = formulas.stewFormulas;
   const capacity = input.capacity ?? existing.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
@@ -472,7 +472,7 @@ export async function completePrepProduction(
   if (existing.status === 'completed') return null;
 
   const kitchenOwnerId = await resolveKitchenOwnerUserId();
-  const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
+  const formulas = await readKitchenStewFormulas(kitchenOwnerId);
   const stew = formulas.stewFormulas;
 
   const calculation = computePrepCalculationForOrder(existing, stew);

@@ -44,33 +44,28 @@ export default function KitchenPrepDetailPage() {
   const patchQueueRef = useRef(Promise.resolve());
   const patchSeqRef = useRef(0);
 
-  const load = () =>
-    fetch(`/api/kitchen-prep/${id}`)
+  const load = () => {
+    setLoading(true);
+    return fetch(`/api/kitchen-prep/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.order) {
           setOrder(d.order);
           setCalc(d.calculation);
         }
+        const caps = d?.capacities as { id: string; label: string }[] | undefined;
+        if (caps?.length) {
+          setCapacityOptions(
+            caps.map((c) => ({ id: c.id, label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id })),
+          );
+        }
       })
       .finally(() => setLoading(false));
-
-  useEffect(() => { load(); }, [id]);
+  };
 
   useEffect(() => {
-    fetch('/api/kitchen/catalog')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const caps = d?.catalog?.capacities as { id: string; label: string; sortOrder?: number }[] | undefined;
-        if (!caps?.length) return;
-        setCapacityOptions(
-          [...caps]
-            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-            .map((c) => ({ id: c.id, label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id }))
-        );
-      })
-      .catch(() => undefined);
-  }, []);
+    void load();
+  }, [id]);
 
   const patch = (body: Record<string, unknown>) => {
     const seq = ++patchSeqRef.current;

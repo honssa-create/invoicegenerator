@@ -171,7 +171,7 @@ async function runCatalogMerges(
  * Stew formulas for prep calculator — skips full catalog merge when DB version is current.
  * Falls back to {@link loadKitchenCatalog} when migrations are pending.
  */
-const STEW_FORMULAS_CACHE_TTL_MS = 60_000;
+const STEW_FORMULAS_CACHE_TTL_MS = 120_000;
 const stewFormulasCache = new Map<number, { at: number; formulas: KitchenFormulas }>();
 
 export async function readKitchenStewFormulas(userId: number): Promise<KitchenFormulas> {
@@ -341,7 +341,7 @@ export async function readKitchenCapacityOptions(
   return data;
 }
 
-const CATALOG_BUNDLE_CACHE_TTL_MS = 60_000;
+const CATALOG_BUNDLE_CACHE_TTL_MS = 120_000;
 const catalogBundleCache = new Map<number, { at: number; bundle: KitchenCatalogBundle }>();
 
 export function invalidateKitchenCatalogBundleCache(userId?: number) {

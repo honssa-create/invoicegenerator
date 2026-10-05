@@ -350,7 +350,7 @@ function KitchenPageContent() {
     }
   };
 
-  const BOOTSTRAP_LITE_URL = '/api/kitchen/bootstrap?lite=1&inventory=0&orders=0';
+  const BOOTSTRAP_LITE_URL = '/api/kitchen/bootstrap?lite=1&inventory=0&orders=0&movements=0';
 
   const applyBootstrapPayload = (
     data: KitchenBootstrapLitePayload,

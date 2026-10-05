@@ -779,6 +779,10 @@ CREATE INDEX IF NOT EXISTS idx_kitchen_fulfillments_order ON kitchen_order_fulfi
 
 CREATE INDEX IF NOT EXISTS idx_kitchen_prep_user ON kitchen_prep_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_kitchen_prep_date ON kitchen_prep_orders(user_id, stewing_date);
+CREATE INDEX IF NOT EXISTS idx_kitchen_prep_active_date ON kitchen_prep_orders(user_id, stewing_date ASC, id ASC)
+  WHERE status != 'completed';
+CREATE INDEX IF NOT EXISTS idx_kitchen_prep_unfinished ON kitchen_prep_orders(user_id)
+  WHERE status != 'completed';
 
 CREATE INDEX IF NOT EXISTS idx_stock_items_user ON stock_items(user_id);
 

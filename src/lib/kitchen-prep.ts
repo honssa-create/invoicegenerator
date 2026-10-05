@@ -163,6 +163,20 @@ export type PrepStatusAction =
   | { type: 'advance'; nextStatus: PrepStatus; label: string }
   | { type: 'complete'; label: string };
 
+/** Stewing start timestamp when advancing prep workflow status (shared by API bulk + single). */
+export function nextStewingStartedAt(
+  existing: { status: PrepStatus; stewing_started_at: string | null },
+  nextStatus: PrepStatus,
+): string | null {
+  if (nextStatus === 'stewing' && existing.status !== 'stewing') {
+    return hkNowDateTime();
+  }
+  if (nextStatus !== 'stewing' && nextStatus !== 'completed') {
+    return null;
+  }
+  return existing.stewing_started_at;
+}
+
 /** Primary workflow button for scheduled → prepped → stewing → completed. */
 export function getPrepStatusAction(status: PrepStatus): PrepStatusAction | null {
   switch (status) {

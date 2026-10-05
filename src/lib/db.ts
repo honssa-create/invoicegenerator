@@ -898,6 +898,15 @@ async function runBootDataFixes(): Promise<void> {
     );
   }
 
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_kitchen_prep_active_date ON kitchen_prep_orders(user_id, stewing_date ASC, id ASC)
+      WHERE status != 'completed'
+  `);
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_kitchen_prep_unfinished ON kitchen_prep_orders(user_id)
+      WHERE status != 'completed'
+  `);
+
   const { migrateNestieeGiftBoxQtysOnce } = await import('./nestiee-gift-box-server');
   await migrateNestieeGiftBoxQtysOnce();
 }

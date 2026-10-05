@@ -57,3 +57,8 @@ export function setKitchenPrepListCache(key: string, data: KitchenPrepListCacheP
   store[key] = entry;
   writeStorage(store);
 }
+
+export function clearKitchenPrepListCache() {
+  MEMORY.clear();
+  storage()?.removeItem(STORAGE_KEY);
+}

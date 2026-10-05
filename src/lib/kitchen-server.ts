@@ -709,6 +709,28 @@ async function loadNestieeOrdersForPackagingStats(userId: number) {
   });
 }
 
+/** On-hand gift boxes + finished bottles only (no open-order scan). */
+export async function getKitchenStockSnapshot(
+  userId: number,
+): Promise<Pick<KitchenInventorySlice, 'giftBoxes' | 'finished'>> {
+  const { catalog } = await loadKitchenCatalog(userId);
+  await ensureSeed(userId, catalog);
+  const stock = await loadStockMaps(userId, catalog);
+  const emptyDemand: KitchenState['demand'] = {
+    giftBoxes: {},
+    finished: {},
+    raw: {},
+    shippingBoxes: Object.fromEntries(
+      NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => [slot.id, 0]),
+    ) as Record<string, number>,
+    airColumnCaps: Object.fromEntries(
+      NESTIEE_AIR_COLUMN_CAP_SLOTS.map((slot) => [slot.id, 0]),
+    ) as Record<string, number>,
+  };
+  const built = buildInventoryRows(catalog, stock, emptyDemand);
+  return { giftBoxes: built.giftBoxes, finished: built.finished };
+}
+
 /** Load on-hand stock quantities merged with current open-order demand. */
 export async function getInventorySlice(
   userId: number,

@@ -1,6 +1,7 @@
 import db from './db';
 import type { Order } from './orders';
 import { hydrateNestieeGiftBoxQtys, orderDueDate } from './orders';
+import { pickThumbnailFile } from './attachment-files';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
 import { formatCustomerPartyBlock } from './customer-party';
@@ -128,9 +129,6 @@ const LIST_FIELD_KEYS = [
   'order_type',
   'due_date',
   'client_delivery_date',
-  'honour_lines',
-  'nestiee_lines',
-  'cupmoka_lines',
   'tracking_no',
   'payment_status_label',
   'qty_rock_sugar',
@@ -176,9 +174,6 @@ interface LeanOrderRow {
   f_order_type: string | null;
   f_due_date: string | null;
   f_client_delivery_date: string | null;
-  f_honour_lines: string | null;
-  f_nestiee_lines: string | null;
-  f_cupmoka_lines: string | null;
   f_tracking_no: string | null;
   f_payment_status_label: string | null;
   f_qty_rock_sugar: string | null;
@@ -222,9 +217,6 @@ function leanRowToOrder(row: LeanOrderRow): Order {
   set('order_type', row.f_order_type);
   set('due_date', row.f_due_date);
   set('client_delivery_date', row.f_client_delivery_date);
-  set('honour_lines', row.f_honour_lines);
-  set('nestiee_lines', row.f_nestiee_lines);
-  set('cupmoka_lines', row.f_cupmoka_lines);
   set('tracking_no', row.f_tracking_no);
   set('payment_status_label', row.f_payment_status_label);
   set('qty_rock_sugar', row.f_qty_rock_sugar);
@@ -287,8 +279,10 @@ export type ListOrdersSummaryOpts = {
   paymentMonth?: string;
   /** Only orders that have any primary payment field set (accounting ledger). */
   withPaymentFields?: boolean;
-  /** Attach order_files (board thumbnails + attachment counts). Off for accounting/cashflow. */
+  /** Attach every order_files row (heavy). Prefer includeFileListMeta for list/board. */
   includeFiles?: boolean;
+  /** Thumbnail + attachment count only (default for order list API). */
+  includeFileListMeta?: boolean;
 };
 
 /** Batch-load design-proof attachments for a lean order list (one query). */
@@ -312,6 +306,83 @@ async function attachOrderFiles(orders: Order[]): Promise<Order[]> {
   }
   for (const o of orders) {
     o.files = map.get(o.id) || [];
+  }
+  return orders;
+}
+
+/** One thumbnail (if any) + total attachment count — avoids loading every proof file. */
+async function attachOrderListFileMeta(orders: Order[]): Promise<Order[]> {
+  if (!orders.length) return orders;
+  const ids = orders.map((o) => o.id);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const countRows = (await db
+    .prepare(
+      `SELECT order_id, COUNT(*)::int AS cnt FROM order_files
+       WHERE order_id IN (${placeholders}) GROUP BY order_id`
+    )
+    .all(...ids)) as Array<{ order_id: number; cnt: number }>;
+  const countByOrder = new Map(countRows.map((r) => [r.order_id, r.cnt]));
+
+  const thumbIdSet = new Set<number>();
+  for (const o of orders) {
+    const raw = o.fields?.thumbnail_file_id;
+    const id = typeof raw === 'string' ? parseInt(raw, 10) : typeof raw === 'number' ? raw : 0;
+    if (id > 0) thumbIdSet.add(id);
+  }
+
+  const fileById = new Map<number, Order['files'][number]>();
+  if (thumbIdSet.size) {
+    const thumbIds = Array.from(thumbIdSet);
+    const thumbPlaceholders = thumbIds.map(() => '?').join(',');
+    const thumbRows = (await db
+      .prepare(
+        `SELECT id, order_id, path, original_name FROM order_files
+         WHERE id IN (${thumbPlaceholders})`
+      )
+      .all(...thumbIds)) as Array<{
+      id: number;
+      order_id: number;
+      path: string;
+      original_name: string | null;
+    }>;
+    for (const r of thumbRows) {
+      fileById.set(r.id, { id: r.id, path: r.path, original_name: r.original_name });
+    }
+  }
+
+  const firstByOrder = new Map<number, Order['files'][number]>();
+  const firstRows = (await db
+    .prepare(
+      `SELECT DISTINCT ON (order_id) id, order_id, path, original_name
+       FROM order_files
+       WHERE order_id IN (${placeholders})
+       ORDER BY order_id, id ASC`
+    )
+    .all(...ids)) as Array<{
+    id: number;
+    order_id: number;
+    path: string;
+    original_name: string | null;
+  }>;
+  for (const r of firstRows) {
+    firstByOrder.set(r.order_id, { id: r.id, path: r.path, original_name: r.original_name });
+  }
+
+  for (const o of orders) {
+    o.attachment_count = countByOrder.get(o.id) || 0;
+    const thumbRaw = o.fields?.thumbnail_file_id;
+    const thumbId =
+      typeof thumbRaw === 'string' ? parseInt(thumbRaw, 10) : typeof thumbRaw === 'number' ? thumbRaw : 0;
+    const filesForPick: Order['files'] = [];
+    const fromFirst = firstByOrder.get(o.id);
+    if (fromFirst) filesForPick.push(fromFirst);
+    if (thumbId > 0) {
+      const explicit = fileById.get(thumbId);
+      if (explicit && !filesForPick.some((f) => f.id === explicit.id)) filesForPick.push(explicit);
+    }
+    const thumb = pickThumbnailFile(filesForPick, o.fields);
+    o.files = thumb ? [thumb] : [];
   }
   return orders;
 }
@@ -380,6 +451,7 @@ export async function listOrdersSummary(
 
   const orders = rows.map(leanRowToOrder);
   if (opts.includeFiles) return attachOrderFiles(orders);
+  if (opts.includeFileListMeta !== false) return attachOrderListFileMeta(orders);
   return orders;
 }
 

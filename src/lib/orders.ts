@@ -1122,6 +1122,8 @@ export interface Order extends CoreColumns {
   total_amount: number | null;
   fields: Record<string, string | boolean>;
   files: OrderFile[];
+  /** Set on list API when only thumbnail is loaded; use for attachment badge count. */
+  attachment_count?: number;
   activities: OrderActivity[];
   linked_invoice: LinkedInvoice | null;
   linked_quotation: LinkedQuotation | null;

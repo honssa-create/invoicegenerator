@@ -9,10 +9,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Keep JWT permissions in sync with role_permissions for middleware route guards.
-  const payload = await buildSessionPayload(session.userId);
-  if (payload) {
-    await setSessionCookie(await createToken(payload));
+  const url = new URL(request.url);
+  const forceRefresh = url.searchParams.get('refresh') === '1';
+  let permissions = session.permissions;
+  let readOnlySections = session.readOnlySections ?? [];
+
+  if (forceRefresh) {
+    const payload = await buildSessionPayload(session.userId);
+    if (payload) {
+      await setSessionCookie(await createToken(payload));
+      permissions = payload.permissions;
+      readOnlySections = payload.readOnlySections;
+    }
   }
 
   const user = await db
@@ -37,8 +45,8 @@ export async function GET(request: Request) {
       company_name: user.company_name,
       role: session.role,
       role_label: ROLE_LABELS[session.role],
-      permissions: payload?.permissions ?? session.permissions,
-      readOnlySections: payload?.readOnlySections ?? session.readOnlySections,
+      permissions,
+      readOnlySections,
       created_at: user.created_at,
     },
   });

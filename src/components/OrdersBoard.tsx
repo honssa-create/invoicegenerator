@@ -168,7 +168,7 @@ function OrderCard({
         <div className="flex items-center gap-3 pt-1 text-[11px] text-gray-500">
           <span className="inline-flex items-center gap-1" title="Attachments">
             <PaperclipIcon className="text-gray-400" />
-            {order.files.length}
+            {order.attachment_count ?? order.files.length}
           </span>
           <span className="inline-flex items-center gap-1" title="Delivery">
             <CalendarIcon className="text-gray-400" />

@@ -121,6 +121,11 @@ type SortDir = 'asc' | 'desc';
 const KITCHEN_PREP_LIST_UI_KEY = 'kitchen-prep-list-ui';
 const SORT_KEYS: SortKey[] = ['stewing_date', 'order_code', 'capacity', 'status'];
 
+/** Client-only filter: all non-completed prep orders. */
+const PREP_STATUS_FILTER_ACTIVE = 'active';
+
+type PrepStatusFilter = PrepStatus | '' | typeof PREP_STATUS_FILTER_ACTIVE;
+
 type KitchenPrepListUiState = {
   dateStart: string;
   dateEnd: string;
@@ -137,21 +142,54 @@ function localIsoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function thisWeekRange(date = new Date()): { start: string; end: string } {
+function addCalendarDays(date: Date, days: number): Date {
   const d = new Date(date);
-  const weekday = d.getDay();
-  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
-  const start = new Date(d);
-  start.setDate(d.getDate() + mondayOffset);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  return { start: localIsoDate(start), end: localIsoDate(end) };
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function todayRange(date = new Date()): { start: string; end: string } {
+  const iso = localIsoDate(date);
+  return { start: iso, end: iso };
+}
+
+function tomorrowRange(date = new Date()): { start: string; end: string } {
+  const iso = localIsoDate(addCalendarDays(date, 1));
+  return { start: iso, end: iso };
+}
+
+/** Rolling 14-day window: today through today + 13. */
+function next14DaysRange(date = new Date()): { start: string; end: string } {
+  return {
+    start: localIsoDate(date),
+    end: localIsoDate(addCalendarDays(date, 13)),
+  };
+}
+
+function next7DaysRange(date = new Date()): { start: string; end: string } {
+  return {
+    start: localIsoDate(date),
+    end: localIsoDate(addCalendarDays(date, 6)),
+  };
 }
 
 function thisMonthRange(date = new Date()): { start: string; end: string } {
   const start = new Date(date.getFullYear(), date.getMonth(), 1);
   const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
   return { start: localIsoDate(start), end: localIsoDate(end) };
+}
+
+function parseCapacityGrams(capacity: string): number {
+  const m = /^(\d+)g/.exec(capacity);
+  return m ? Number(m[1]) : 0;
+}
+
+function parseStatusFilter(raw: string | undefined, fallback: PrepStatusFilter): PrepStatusFilter {
+  if (raw === undefined) return fallback;
+  if (raw === PREP_STATUS_FILTER_ACTIVE) return PREP_STATUS_FILTER_ACTIVE;
+  if (raw === '') return '';
+  if ((PREP_STATUSES as readonly string[]).includes(raw)) return raw as PrepStatus;
+  return fallback;
 }
 
 export default function KitchenPrepListPage() {
@@ -191,13 +229,12 @@ function KitchenPrepListContent() {
     const dir = savedUi?.sortDir;
     return dir === 'asc' || dir === 'desc' ? dir : 'asc';
   });
-  const defaultMonth = useMemo(() => thisMonthRange(), []);
-  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? defaultMonth.start);
-  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? defaultMonth.end);
-  const [status, setStatus] = useState<PrepStatus | ''>(() => {
-    const saved = savedUi?.status;
-    return saved && (PREP_STATUSES as readonly string[]).includes(saved) ? (saved as PrepStatus) : '';
-  });
+  const defaultRange = useMemo(() => next14DaysRange(), []);
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? defaultRange.start);
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? defaultRange.end);
+  const [status, setStatus] = useState<PrepStatusFilter>(() =>
+    parseStatusFilter(savedUi?.status, PREP_STATUS_FILTER_ACTIVE),
+  );
   const [search, setSearch] = useState(savedUi?.search ?? '');
   const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
     PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
@@ -250,7 +287,9 @@ function KitchenPrepListContent() {
     return orders.filter((o) => {
       if (dateStart && o.stewing_date < dateStart) return false;
       if (dateEnd && o.stewing_date > dateEnd) return false;
-      if (status && o.status !== status) return false;
+      if (status === PREP_STATUS_FILTER_ACTIVE) {
+        if (o.status === 'completed') return false;
+      } else if (status && o.status !== status) return false;
       if (!q) return true;
       const haystack = [
         o.stewing_date,
@@ -280,24 +319,40 @@ function KitchenPrepListContent() {
     return list;
   }, [filteredOrders, sortKey, sortDir]);
 
-  const applyThisWeek = () => {
-    const { start, end } = thisWeekRange();
-    setDateStart(start);
-    setDateEnd(end);
-  };
-
-  const applyThisMonth = () => {
-    const { start, end } = thisMonthRange();
+  const applyDateRange = (start: string, end: string) => {
     setDateStart(start);
     setDateEnd(end);
   };
 
   const clearFilters = () => {
-    setDateStart('');
-    setDateEnd('');
-    setStatus('');
+    const { start, end } = next14DaysRange();
+    setDateStart(start);
+    setDateEnd(end);
+    setStatus(PREP_STATUS_FILTER_ACTIVE);
     setSearch('');
   };
+
+  const tableSections = useMemo(() => {
+    if (sortKey !== 'stewing_date') return null;
+    const sections: Array<{
+      date: string;
+      count: number;
+      totalGrams: number;
+      orders: PrepOrder[];
+    }> = [];
+    let i = 0;
+    while (i < sortedOrders.length) {
+      const date = sortedOrders[i].stewing_date;
+      const group: PrepOrder[] = [];
+      while (i < sortedOrders.length && sortedOrders[i].stewing_date === date) {
+        group.push(sortedOrders[i]);
+        i += 1;
+      }
+      const totalGrams = group.reduce((sum, o) => sum + parseCapacityGrams(o.capacity), 0);
+      sections.push({ date, count: group.length, totalGrams, orders: group });
+    }
+    return sections;
+  }, [sortedOrders, sortKey]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -403,6 +458,80 @@ function KitchenPrepListContent() {
       return new Set([...Array.from(prev), ...sortedOrders.map((o) => o.id)]);
     });
   };
+
+  const renderOrderRow = (o: PrepOrder) => (
+    <tr
+      key={o.id}
+      onClick={() => router.push(`/kitchen-prep/${o.id}`)}
+      onMouseEnter={() => prefetchKitchenPrepDetail(o.id)}
+      onFocus={() => prefetchKitchenPrepDetail(o.id)}
+      className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''}`}
+    >
+      <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected.has(o.id)}
+          onChange={() => toggleSelect(o.id)}
+          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+          aria-label={bi(`Select ${o.order_code}`, `選擇 ${o.order_code}`)}
+        />
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{o.stewing_date}</td>
+      <td className="px-4 py-3 font-mono text-brand-600">
+        {o.linked_order_id ? (
+          <Link href={`/orders/${o.linked_order_id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
+            {o.order_code}
+          </Link>
+        ) : (
+          o.order_code
+        )}
+      </td>
+      <td className="px-4 py-3 text-gray-700">{PREP_ORDER_TYPE_LABELS[o.order_type]}</td>
+      <td className="px-4 py-3 font-semibold text-gray-800">{PREP_CAPACITY_LABELS[o.capacity]}</td>
+      <td className="px-4 py-3">
+        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>
+          {PREP_STATUS_LABELS[o.status]}
+        </span>
+        {o.status === 'completed' && o.actual_yield != null && (
+          <p className="text-xs text-gray-500 mt-1">
+            Yield {o.actual_yield}
+            {o.expected_yield != null && o.actual_yield !== o.expected_yield && (
+              <span className="text-red-600 font-medium"> / exp {o.expected_yield}</span>
+            )}
+          </p>
+        )}
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap text-gray-600 tabular-nums">
+        {o.stewing_started_at || '—'}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <div className="inline-flex items-center justify-end gap-2">
+          {(() => {
+            const action = getPrepStatusAction(o.status);
+            if (!action) return null;
+            return (
+              <button
+                type="button"
+                disabled={advancingId === o.id}
+                onClick={(e) => { void handleStatusAction(o, e); }}
+                className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap disabled:opacity-50"
+              >
+                {advancingId === o.id ? '更新中…' : action.label}
+              </button>
+            );
+          })()}
+          <button
+            type="button"
+            disabled={deletingId === o.id || bulkDeleting}
+            onClick={(e) => { e.stopPropagation(); remove(o.id); }}
+            className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-medium rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap"
+          >
+            {deletingId === o.id ? BTN.deleting : BTN.delete}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
 
   const remove = async (id: number) => {
     if (
@@ -520,9 +649,12 @@ function KitchenPrepListContent() {
           <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Status', '狀態')}</label>
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value as PrepStatus | '')}
+            onChange={(e) => setStatus(e.target.value as PrepStatusFilter)}
             className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
           >
+            <option value={PREP_STATUS_FILTER_ACTIVE}>
+              {bi('Active (hide completed)', '進行中（隱藏已完成）')}
+            </option>
             <option value="">{BTN.all}</option>
             {PREP_STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -533,16 +665,59 @@ function KitchenPrepListContent() {
         </div>
       </FilterBar>
 
-      <p className="text-sm text-gray-600 -mt-4 mb-6">
-        {bi('Quick filters:', '快速篩選：')}{' '}
-        <button type="button" onClick={applyThisWeek} className="text-brand-600 hover:text-brand-700 hover:underline font-medium">
-          {bi('This week', '本週')}
-        </button>
-        <span className="text-gray-400 mx-1">·</span>
-        <button type="button" onClick={applyThisMonth} className="text-brand-600 hover:text-brand-700 hover:underline font-medium">
-          {bi('This month', '本月')}
-        </button>
-      </p>
+      <div className="text-sm text-gray-600 -mt-4 mb-6 flex flex-wrap items-center gap-x-1 gap-y-2">
+        <span className="font-medium text-gray-700">{bi('Quick filters:', '快速篩選：')}</span>
+        {(
+          [
+            {
+              label: bi('Today', '今日'),
+              onClick: () => {
+                const { start, end } = todayRange();
+                applyDateRange(start, end);
+              },
+            },
+            {
+              label: bi('Tomorrow', '明日'),
+              onClick: () => {
+                const { start, end } = tomorrowRange();
+                applyDateRange(start, end);
+              },
+            },
+            {
+              label: bi('Next 7 days', '未來 7 日'),
+              onClick: () => {
+                const { start, end } = next7DaysRange();
+                applyDateRange(start, end);
+              },
+            },
+            {
+              label: bi('Next 14 days', '未來 14 日'),
+              onClick: () => {
+                const { start, end } = next14DaysRange();
+                applyDateRange(start, end);
+              },
+            },
+            {
+              label: bi('This month', '本月'),
+              onClick: () => {
+                const { start, end } = thisMonthRange();
+                applyDateRange(start, end);
+              },
+            },
+          ] as const
+        ).map((item, idx) => (
+          <span key={item.label} className="inline-flex items-center gap-1">
+            {idx > 0 ? <span className="text-gray-300 hidden sm:inline">·</span> : null}
+            <button
+              type="button"
+              onClick={item.onClick}
+              className="text-brand-600 hover:text-brand-700 hover:underline font-medium whitespace-nowrap"
+            >
+              {item.label}
+            </button>
+          </span>
+        ))}
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
@@ -592,79 +767,23 @@ function KitchenPrepListContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sortedOrders.map((o) => (
-                <tr
-                  key={o.id}
-                  onClick={() => router.push(`/kitchen-prep/${o.id}`)}
-                  onMouseEnter={() => prefetchKitchenPrepDetail(o.id)}
-                  onFocus={() => prefetchKitchenPrepDetail(o.id)}
-                  className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''}`}
-                >
-                  <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(o.id)}
-                      onChange={() => toggleSelect(o.id)}
-                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-                      aria-label={bi(`Select ${o.order_code}`, `選擇 ${o.order_code}`)}
-                    />
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{o.stewing_date}</td>
-                  <td className="px-4 py-3 font-mono text-brand-600">
-                    {o.linked_order_id ? (
-                      <Link href={`/orders/${o.linked_order_id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
-                        {o.order_code}
-                      </Link>
-                    ) : (
-                      o.order_code
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">{PREP_ORDER_TYPE_LABELS[o.order_type]}</td>
-                  <td className="px-4 py-3 font-semibold text-gray-800">{PREP_CAPACITY_LABELS[o.capacity]}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>
-                      {PREP_STATUS_LABELS[o.status]}
-                    </span>
-                    {o.status === 'completed' && o.actual_yield != null && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Yield {o.actual_yield}
-                        {o.expected_yield != null && o.actual_yield !== o.expected_yield && (
-                          <span className="text-red-600 font-medium"> / exp {o.expected_yield}</span>
-                        )}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-600 tabular-nums">
-                    {o.stewing_started_at || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex items-center justify-end gap-2">
-                      {(() => {
-                        const action = getPrepStatusAction(o.status);
-                        if (!action) return null;
-                        return (
-                          <button
-                            type="button"
-                            disabled={advancingId === o.id}
-                            onClick={(e) => { void handleStatusAction(o, e); }}
-                            className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap disabled:opacity-50"
-                          >
-                            {advancingId === o.id ? '更新中…' : action.label}
-                          </button>
-                        );
-                      })()}
-                      <button
-                        type="button"
-                        disabled={deletingId === o.id || bulkDeleting}
-                        onClick={(e) => { e.stopPropagation(); remove(o.id); }}
-                        className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-medium rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap"
-                      >
-                        {deletingId === o.id ? BTN.deleting : BTN.delete}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {tableSections
+                ? tableSections.flatMap((section) => [
+                    <tr key={`section-${section.date}`} className="bg-gray-50/90 border-y border-gray-200">
+                      <td colSpan={8} className="px-4 py-2.5 text-xs font-semibold text-gray-700 tracking-wide">
+                        {section.date}
+                        <span className="text-gray-500 font-normal">
+                          {' '}
+                          · {bi(`${section.count} order(s)`, `${section.count} 筆訂單`)}
+                          {section.totalGrams > 0
+                            ? ` · ${bi(`total ${section.totalGrams}g`, `共 ${section.totalGrams}g`)}`
+                            : ''}
+                        </span>
+                      </td>
+                    </tr>,
+                    ...section.orders.map((o) => renderOrderRow(o)),
+                  ])
+                : sortedOrders.map((o) => renderOrderRow(o))}
             </tbody>
           </table>
         )}

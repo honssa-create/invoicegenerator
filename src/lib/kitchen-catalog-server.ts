@@ -166,6 +166,23 @@ async function runCatalogMerges(
  * Load effective catalog + formulas for an org. Seeds JSON columns from code defaults
  * when null so subsequent reads are stable.
  */
+/** Capacity dropdown labels only — skips catalog merge migrations (fast path for prep list). */
+export async function readKitchenCapacityOptions(
+  userId: number,
+): Promise<Array<{ id: string; label: string; sortOrder: number }>> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare('SELECT catalog_json FROM kitchen_settings WHERE user_id = ?')
+    .get(userId)) as { catalog_json: string | null } | undefined;
+  const defaults = defaultKitchenCatalogBundle();
+  const catalog = row?.catalog_json
+    ? normalizeCatalogBundle(parseJson(row.catalog_json, defaults.catalog), null, defaults).catalog
+    : defaults.catalog;
+  return [...catalog.capacities]
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+}
+
 export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalogBundle> {
   await ensureSettingsRow(userId);
   const row = (await db

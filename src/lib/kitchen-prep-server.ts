@@ -22,7 +22,7 @@ import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
 import { finishedSku } from './kitchen-bom';
 import { addFinishedFromStewing, resolveKitchenOwnerUserId } from './kitchen-server';
-import { loadKitchenCatalog } from './kitchen-catalog-server';
+import { loadKitchenCatalog, readKitchenCapacityOptions } from './kitchen-catalog-server';
 
 export { resolveKitchenOwnerUserId };
 
@@ -141,15 +141,58 @@ async function nextOrderCode(_userId?: number): Promise<string> {
   return `PREP-${String(n).padStart(4, '0')}`;
 }
 
-/** Company-wide prep schedule — not scoped to the logged-in user. */
-export async function listPrepOrders(): Promise<PrepOrder[]> {
+const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
+  qty_osmanthus, qty_red_date, qty_rock_sugar, actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
+  bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar, notes,
+  expected_yield, actual_yield, completion_remarks, completed_at, completed_by, stewing_started_at,
+  created_at, updated_at`;
+
+export type ListPrepOrdersOpts = {
+  dateStart?: string;
+  dateEnd?: string;
+};
+
+function hydrateListRow(row: PrepRow): PrepOrder {
+  const order = hydrate({ ...row, completion_splits_json: null });
+  return { ...order, completion_splits: null };
+}
+
+/** Org kitchen prep rows (kitchen owner), optional stewing_date range. */
+export async function listPrepOrders(
+  ownerId: number,
+  opts: ListPrepOrdersOpts = {},
+): Promise<PrepOrder[]> {
+  const params: (string | number)[] = [ownerId];
+  let where = 'WHERE user_id = ?';
+  const dateStart = opts.dateStart?.trim() || '';
+  const dateEnd = opts.dateEnd?.trim() || '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStart)) {
+    where += ' AND stewing_date >= ?';
+    params.push(dateStart);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) {
+    where += ' AND stewing_date <= ?';
+    params.push(dateEnd);
+  }
   const rows = (await db
     .prepare(
-      `SELECT * FROM kitchen_prep_orders
+      `SELECT ${PREP_LIST_COLUMNS} FROM kitchen_prep_orders
+       ${where}
        ORDER BY stewing_date ASC, id ASC`
     )
-    .all()) as PrepRow[];
-  return rows.map(hydrate);
+    .all(...params)) as PrepRow[];
+  return rows.map(hydrateListRow);
+}
+
+export async function listPrepOrdersWithCapacities(
+  ownerId: number,
+  opts: ListPrepOrdersOpts = {},
+): Promise<{ orders: PrepOrder[]; capacities: Array<{ id: string; label: string; sortOrder: number }> }> {
+  const [orders, capacities] = await Promise.all([
+    listPrepOrders(ownerId, opts),
+    readKitchenCapacityOptions(ownerId),
+  ]);
+  return { orders, capacities };
 }
 
 export async function getPrepOrder(id: number | string): Promise<PrepOrder | null> {

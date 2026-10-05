@@ -894,6 +894,38 @@ export async function getPrepByLinkedOrderId(
   return row ? hydrate(row) : null;
 }
 
+/** True when ensurePrepFromWeddingOrder would not change the linked prep row. */
+function weddingPrepSyncUnchanged(
+  existing: PrepOrder,
+  fields: Record<string, string>,
+  stewingDate: string,
+  capacity: PrepCapacity,
+  qtyOsmanthus: number,
+  qtyRedDate: number,
+  qtyRockSugar: number,
+  actualOsmanthus: number,
+  actualRedDate: number,
+  actualRockSugar: number,
+  statusUpdate: PrepStatus,
+): boolean {
+  if (existing.stewing_date !== stewingDate) return false;
+  if (existing.capacity !== capacity) return false;
+  if (existing.qty_osmanthus !== qtyOsmanthus) return false;
+  if (existing.qty_red_date !== qtyRedDate) return false;
+  if (existing.qty_rock_sugar !== qtyRockSugar) return false;
+  if (existing.status !== statusUpdate) return false;
+  if ((fields.actual_qty_osmanthus || '').trim()) {
+    if ((existing.actual_qty_osmanthus ?? 0) !== actualOsmanthus) return false;
+  }
+  if ((fields.actual_qty_red_date || '').trim()) {
+    if ((existing.actual_qty_red_date ?? 0) !== actualRedDate) return false;
+  }
+  if ((fields.actual_qty_rock_sugar || '').trim()) {
+    if ((existing.actual_qty_rock_sugar ?? 0) !== actualRockSugar) return false;
+  }
+  return true;
+}
+
 function parseOrderFields(fieldsJson: string | null | undefined): Record<string, string> {
   try {
     const raw = fieldsJson ? JSON.parse(fieldsJson) : {};
@@ -986,6 +1018,24 @@ export async function ensurePrepFromWeddingOrder(
     existing.status === 'not_started' || existing.status === 'scheduled'
       ? nextStatus
       : existing.status;
+
+  if (
+    weddingPrepSyncUnchanged(
+      existing,
+      fields,
+      stewingDate,
+      capacity,
+      qtyOsmanthus,
+      qtyRedDate,
+      qtyRockSugar,
+      actualOsmanthus,
+      actualRedDate,
+      actualRockSugar,
+      statusUpdate,
+    )
+  ) {
+    return existing;
+  }
 
   const updated = await updatePrepOrder(existing.id, {
     stewing_date: stewingDate,

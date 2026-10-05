@@ -760,6 +760,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_quotation ON orders(quotation_id) WHERE qu
 CREATE INDEX IF NOT EXISTS idx_order_files_order ON order_files(order_id);
 
 CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_entity_created ON activity_logs(entity_type, entity_id, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_invoice_files_invoice ON invoice_files(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_order_id ON invoices(order_id) WHERE order_id IS NOT NULL;

@@ -562,6 +562,42 @@ export async function advancePrepOrderStatus(
   };
 }
 
+export async function bulkSetPrepOrderStatus(
+  ids: number[],
+  nextStatus: PrepStatus,
+): Promise<{ updated: PrepOrder[]; not_found: number[]; skipped: number[] }> {
+  if (nextStatus === 'completed') {
+    throw new Error('Bulk status cannot set completed — use the completion modal per order');
+  }
+  const uniqueIds = Array.from(
+    new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)),
+  );
+  const updated: PrepOrder[] = [];
+  const not_found: number[] = [];
+  const skipped: number[] = [];
+
+  for (const id of uniqueIds) {
+    const existing = await getPrepOrder(id);
+    if (!existing) {
+      not_found.push(id);
+      continue;
+    }
+    if (existing.status === 'completed') {
+      skipped.push(id);
+      continue;
+    }
+    if (existing.status === nextStatus) {
+      updated.push(existing);
+      continue;
+    }
+    const order = await advancePrepOrderStatus(id, nextStatus);
+    if (order) updated.push(order);
+    else not_found.push(id);
+  }
+
+  return { updated, not_found, skipped };
+}
+
 export async function updatePrepOrder(
   id: number | string,
   input: Partial<{

@@ -12,6 +12,7 @@ import {
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUSES,
+  PREP_STATUSES_BULK_EDIT,
   PREP_STATUS_LABELS,
   getPrepStatusAction,
   isRedDateAllowed,
@@ -222,6 +223,8 @@ function KitchenPrepListContent() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkStatusUpdating, setBulkStatusUpdating] = useState(false);
+  const [bulkStatusTarget, setBulkStatusTarget] = useState<PrepStatus>('prepped');
   const [sortKey, setSortKey] = useState<SortKey>(() => {
     const key = savedUi?.sortKey;
     return key && SORT_KEYS.includes(key) ? key : 'stewing_date';
@@ -600,6 +603,42 @@ function KitchenPrepListContent() {
     });
   };
 
+  const applyBulkStatus = async (targetStatus: PrepStatus) => {
+    if (!selected.size || bulkStatusUpdating || bulkDeleting) return;
+    const ids = Array.from(selected);
+    setBulkStatusUpdating(true);
+    setError('');
+    try {
+      const res = await fetch('/api/kitchen-prep/bulk-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, status: targetStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || bi('Failed to update status', '更新狀態失敗'));
+        return;
+      }
+      const byId = new Map<number, PrepOrder>(
+        (data.updated as PrepOrder[]).map((o) => [o.id, o]),
+      );
+      setOrders((prev) => prev.map((o) => byId.get(o.id) ?? o));
+      clearKitchenPrepListCache();
+      if (data.skipped?.length) {
+        setError(
+          bi(
+            `Updated ${data.updated?.length ?? 0}; skipped ${data.skipped.length} already completed.`,
+            `已更新 ${data.updated?.length ?? 0} 張；略過 ${data.skipped.length} 張已完成。`,
+          ),
+        );
+      }
+    } catch {
+      setError(bi('Failed to update status', '更新狀態失敗'));
+    } finally {
+      setBulkStatusUpdating(false);
+    }
+  };
+
   const deleteSelected = async () => {
     if (!selected.size || bulkDeleting) return;
     const ids = Array.from(selected);
@@ -653,11 +692,52 @@ function KitchenPrepListContent() {
           <h1 className="page-title">{TITLE.kitchenPrep}</h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">{bi('Scheduled stewing orders — click a row to open the ingredient calculator', '排程燉製訂單 — 點擊列開啟配料計算器')}</p>
         </div>
-        <div className="page-actions">
+        <div className="page-actions flex flex-wrap items-center gap-2">
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5">
+              <span className="text-xs font-medium text-gray-500 px-1">
+                {bi('Bulk', '批量')} ({selected.size})
+              </span>
+              <button
+                type="button"
+                disabled={bulkStatusUpdating || bulkDeleting}
+                onClick={() => { void applyBulkStatus('prepped'); }}
+                className="px-3 py-1.5 text-sm font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                {bulkStatusUpdating ? '…' : '完成備料'}
+              </button>
+              <button
+                type="button"
+                disabled={bulkStatusUpdating || bulkDeleting}
+                onClick={() => { void applyBulkStatus('stewing'); }}
+                className="px-3 py-1.5 text-sm font-bold rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
+              >
+                {bulkStatusUpdating ? '…' : '開始炖製'}
+              </button>
+              <select
+                value={bulkStatusTarget}
+                onChange={(e) => setBulkStatusTarget(e.target.value as PrepStatus)}
+                className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50"
+                aria-label={bi('Bulk status', '批量狀態')}
+              >
+                {PREP_STATUSES_BULK_EDIT.map((s) => (
+                  <option key={s} value={s}>{PREP_STATUS_LABELS[s]}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={bulkStatusUpdating || bulkDeleting}
+                onClick={() => { void applyBulkStatus(bulkStatusTarget); }}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {bulkStatusUpdating ? bi('Updating…', '更新中…') : bi('Set status', '設定狀態')}
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => { void deleteSelected(); }}
-            disabled={selected.size === 0 || bulkDeleting}
+            disabled={selected.size === 0 || bulkDeleting || bulkStatusUpdating}
             className="px-4 py-2 bg-white border border-red-200 text-red-700 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {bulkDeleting

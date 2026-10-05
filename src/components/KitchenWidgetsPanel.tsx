@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import DateFilterField from '@/components/DateFilterField';
 import KitchenProductionSchedule from '@/components/KitchenProductionSchedule';
 import KitchenUsedShippingBoxes from '@/components/KitchenUsedShippingBoxes';
+import type { KitchenWidgetsPayload } from '@/lib/kitchen-widgets-server';
 import type { ProductionScheduleSummary } from '@/lib/kitchen-production-schedule';
 import {
   NESTIEE_DATE_FILTER_TYPES,
@@ -25,7 +26,35 @@ type ShippingInventoryRow = {
   needed: number;
 };
 
-export default function KitchenWidgetsPanel() {
+type KitchenWidgetsPanelProps = {
+  /** Parent kitchen page bundles widgets in bootstrap; skip duplicate fetch until resolved. */
+  waitForBootstrap?: boolean;
+  initialPayload?: KitchenWidgetsPayload | null;
+};
+
+function applyWidgetsPayload(
+  d: KitchenWidgetsPayload,
+  setters: {
+    setSchedule: (v: ProductionScheduleSummary | null) => void;
+    setScheduleOrderCount: (n: number) => void;
+    setUsedSummary: (v: NestieeUsedShippingBoxesSummary | null) => void;
+    setShippingInventory: (v: ShippingInventoryRow[]) => void;
+  },
+) {
+  if (d.productionSchedule?.schedule) setters.setSchedule(d.productionSchedule.schedule);
+  if (typeof d.productionSchedule?.orderCount === 'number') {
+    setters.setScheduleOrderCount(d.productionSchedule.orderCount);
+  }
+  if (d.usedShippingBoxes?.summary) setters.setUsedSummary(d.usedShippingBoxes.summary);
+  if (Array.isArray(d.usedShippingBoxes?.shippingInventory)) {
+    setters.setShippingInventory(d.usedShippingBoxes.shippingInventory);
+  }
+}
+
+export default function KitchenWidgetsPanel({
+  waitForBootstrap = false,
+  initialPayload = null,
+}: KitchenWidgetsPanelProps) {
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('delivery_date');
@@ -34,6 +63,18 @@ export default function KitchenWidgetsPanel() {
   const [scheduleOrderCount, setScheduleOrderCount] = useState(0);
   const [usedSummary, setUsedSummary] = useState<NestieeUsedShippingBoxesSummary | null>(null);
   const [shippingInventory, setShippingInventory] = useState<ShippingInventoryRow[]>([]);
+
+  const bootstrapHandled = useRef(false);
+  const skipNextFilterFetch = useRef(false);
+
+  const applyPayload = useCallback((d: KitchenWidgetsPayload) => {
+    applyWidgetsPayload(d, {
+      setSchedule,
+      setScheduleOrderCount,
+      setUsedSummary,
+      setShippingInventory,
+    });
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -44,24 +85,37 @@ export default function KitchenWidgetsPanel() {
     fetch(`/api/kitchen/widgets?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d?.productionSchedule?.schedule) setSchedule(d.productionSchedule.schedule);
-        if (typeof d?.productionSchedule?.orderCount === 'number') {
-          setScheduleOrderCount(d.productionSchedule.orderCount);
-        }
-        if (d?.usedShippingBoxes?.summary) setUsedSummary(d.usedShippingBoxes.summary);
-        if (Array.isArray(d?.usedShippingBoxes?.shippingInventory)) {
-          setShippingInventory(d.usedShippingBoxes.shippingInventory);
-        }
+        if (d) applyPayload(d as KitchenWidgetsPayload);
       })
       .catch(() => {
         /* keep previous */
       })
       .finally(() => setLoading(false));
-  }, [dateStart, dateEnd, dateFilterType]);
+  }, [dateStart, dateEnd, dateFilterType, applyPayload]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (waitForBootstrap) return;
+    if (!bootstrapHandled.current) {
+      bootstrapHandled.current = true;
+      if (initialPayload) {
+        applyPayload(initialPayload);
+        setLoading(false);
+        skipNextFilterFetch.current = true;
+      } else {
+        void load();
+      }
+      return;
+    }
+  }, [waitForBootstrap, initialPayload, load, applyPayload]);
+
+  useEffect(() => {
+    if (waitForBootstrap || !bootstrapHandled.current) return;
+    if (skipNextFilterFetch.current) {
+      skipNextFilterFetch.current = false;
+      return;
+    }
+    void load();
+  }, [dateStart, dateEnd, dateFilterType, load, waitForBootstrap]);
 
   const hasDateFilter = Boolean(dateStart || dateEnd);
 
@@ -116,7 +170,7 @@ export default function KitchenWidgetsPanel() {
       <div className="grid lg:grid-cols-2 gap-6 items-stretch">
         <KitchenUsedShippingBoxes
           embedded
-          loading={loading}
+          loading={loading || waitForBootstrap}
           dateStart={dateStart}
           dateEnd={dateEnd}
           dateFilterType={dateFilterType}
@@ -125,7 +179,7 @@ export default function KitchenWidgetsPanel() {
         />
         <KitchenProductionSchedule
           embedded
-          loading={loading}
+          loading={loading || waitForBootstrap}
           dateStart={dateStart}
           dateEnd={dateEnd}
           dateFilterType={dateFilterType}

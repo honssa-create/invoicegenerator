@@ -76,17 +76,17 @@ export function giftBoxMinStock(holidayMode = false): number {
   return holidayMode ? GIFT_BOX_MIN_STOCK_HOLIDAY : GIFT_BOX_MIN_STOCK;
 }
 
+/** Preserve signed on-hand counts when reading from DB (negative stock allowed). */
+export function kitchenStockQty(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** How many units to package to reach the minimum (0 if already at/above). */
 export function giftBoxTopUpQty(quantity: number, minStock: number = GIFT_BOX_MIN_STOCK): number {
   const q = Number.isFinite(quantity) ? Math.floor(quantity) : 0;
   const min = Number.isFinite(minStock) ? Math.floor(minStock) : GIFT_BOX_MIN_STOCK;
   return Math.max(0, min - q);
-}
-
-/** Preserve negative on-hand counts (do not use `|| 0`, which keeps negatives but clarifies intent). */
-export function kitchenStockQty(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : 0;
 }
 
 export interface RawMaterialDef {

@@ -167,6 +167,32 @@ async function runCatalogMerges(
  * when null so subsequent reads are stable.
  */
 /** Capacity dropdown labels only — skips catalog merge migrations (fast path for prep list). */
+/**
+ * Stew formulas for prep calculator — skips full catalog merge when DB version is current.
+ * Falls back to {@link loadKitchenCatalog} when migrations are pending.
+ */
+export async function readKitchenStewFormulas(userId: number): Promise<KitchenFormulas> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare(
+      'SELECT formulas_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?'
+    )
+    .get(userId)) as
+    | { formulas_json: string | null; catalog_merge_version: string | null }
+    | undefined;
+
+  const defaults = defaultKitchenCatalogBundle();
+  const hasFormulas = Boolean(row?.formulas_json);
+  if (hasFormulas && row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION) {
+    return normalizeCatalogBundle(
+      null,
+      parseJson(row!.formulas_json, defaults.formulas),
+      defaults,
+    ).formulas;
+  }
+  return (await loadKitchenCatalog(userId)).formulas;
+}
+
 export async function readKitchenCapacityOptions(
   userId: number,
 ): Promise<Array<{ id: string; label: string; sortOrder: number }>> {

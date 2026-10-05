@@ -6,7 +6,7 @@ import {
   resolveKitchenOwnerUserId,
 } from '@/lib/kitchen-prep-server';
 import { computePrepCalculationForOrder, type PrepCompletionSplit } from '@/lib/kitchen-prep';
-import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
+import { readKitchenStewFormulas } from '@/lib/kitchen-catalog-server';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
@@ -47,7 +47,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
-    const { formulas } = await loadKitchenCatalog(kitchenOwnerId);
+    const formulas = await readKitchenStewFormulas(kitchenOwnerId);
     const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
 
     return NextResponse.json({ order, calculation });

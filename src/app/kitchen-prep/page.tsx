@@ -179,11 +179,6 @@ function thisMonthRange(date = new Date()): { start: string; end: string } {
   return { start: localIsoDate(start), end: localIsoDate(end) };
 }
 
-function parseCapacityGrams(capacity: string): number {
-  const m = /^(\d+)g/.exec(capacity);
-  return m ? Number(m[1]) : 0;
-}
-
 function parseStatusFilter(raw: string | undefined, fallback: PrepStatusFilter): PrepStatusFilter {
   if (raw === undefined) return fallback;
   if (raw === PREP_STATUS_FILTER_ACTIVE) return PREP_STATUS_FILTER_ACTIVE;
@@ -331,28 +326,6 @@ function KitchenPrepListContent() {
     setStatus(PREP_STATUS_FILTER_ACTIVE);
     setSearch('');
   };
-
-  const tableSections = useMemo(() => {
-    if (sortKey !== 'stewing_date') return null;
-    const sections: Array<{
-      date: string;
-      count: number;
-      totalGrams: number;
-      orders: PrepOrder[];
-    }> = [];
-    let i = 0;
-    while (i < sortedOrders.length) {
-      const date = sortedOrders[i].stewing_date;
-      const group: PrepOrder[] = [];
-      while (i < sortedOrders.length && sortedOrders[i].stewing_date === date) {
-        group.push(sortedOrders[i]);
-        i += 1;
-      }
-      const totalGrams = group.reduce((sum, o) => sum + parseCapacityGrams(o.capacity), 0);
-      sections.push({ date, count: group.length, totalGrams, orders: group });
-    }
-    return sections;
-  }, [sortedOrders, sortKey]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -767,23 +740,7 @@ function KitchenPrepListContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {tableSections
-                ? tableSections.flatMap((section) => [
-                    <tr key={`section-${section.date}`} className="bg-gray-50/90 border-y border-gray-200">
-                      <td colSpan={8} className="px-4 py-2.5 text-xs font-semibold text-gray-700 tracking-wide">
-                        {section.date}
-                        <span className="text-gray-500 font-normal">
-                          {' '}
-                          · {bi(`${section.count} order(s)`, `${section.count} 筆訂單`)}
-                          {section.totalGrams > 0
-                            ? ` · ${bi(`total ${section.totalGrams}g`, `共 ${section.totalGrams}g`)}`
-                            : ''}
-                        </span>
-                      </td>
-                    </tr>,
-                    ...section.orders.map((o) => renderOrderRow(o)),
-                  ])
-                : sortedOrders.map((o) => renderOrderRow(o))}
+              {sortedOrders.map((o) => renderOrderRow(o))}
             </tbody>
           </table>
         )}

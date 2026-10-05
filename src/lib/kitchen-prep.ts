@@ -154,6 +154,11 @@ export const PREP_STATUS_LABELS: Record<PrepStatus, string> = {
   completed: '已完成',
 };
 
+/** Status values allowed in bulk edit (completion still uses the yield modal). */
+export const PREP_STATUSES_BULK_EDIT: PrepStatus[] = PREP_STATUSES.filter(
+  (s) => s !== 'completed',
+);
+
 export type PrepStatusAction =
   | { type: 'advance'; nextStatus: PrepStatus; label: string }
   | { type: 'complete'; label: string };
@@ -161,6 +166,8 @@ export type PrepStatusAction =
 /** Primary workflow button for scheduled → prepped → stewing → completed. */
 export function getPrepStatusAction(status: PrepStatus): PrepStatusAction | null {
   switch (status) {
+    case 'not_started':
+      return { type: 'advance', nextStatus: 'prepped', label: '完成備料' };
     case 'scheduled':
       return { type: 'advance', nextStatus: 'prepped', label: '完成備料' };
     case 'prepped':

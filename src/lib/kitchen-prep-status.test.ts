@@ -58,7 +58,11 @@ describe('getPrepStatusAction', () => {
       type: 'complete',
       label: '完成炖製',
     });
-    expect(getPrepStatusAction('not_started')).toBeNull();
+    expect(getPrepStatusAction('not_started')).toMatchObject({
+      type: 'advance',
+      nextStatus: 'prepped',
+      label: '完成備料',
+    });
     expect(getPrepStatusAction('completed')).toBeNull();
   });
 });

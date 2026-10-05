@@ -140,6 +140,17 @@ export async function getRoleAccessFromDb(
   return loadRoleAccessFromDb(role);
 }
 
+const ROLE_PERM_CACHE_TTL_MS = 60_000;
+const rolePermCache = new Map<
+  UserRole,
+  { at: number; permissions: PermissionSection[]; readOnlySections: PermissionSection[] }
+>();
+
+export function invalidateRolePermissionCache(role?: UserRole): void {
+  if (role) rolePermCache.delete(role);
+  else rolePermCache.clear();
+}
+
 export async function getRolePermissionLists(role: UserRole): Promise<{
   permissions: PermissionSection[];
   readOnlySections: PermissionSection[];
@@ -147,11 +158,17 @@ export async function getRolePermissionLists(role: UserRole): Promise<{
   if (role === 'admin') {
     return { permissions: [...ALL_SECTIONS], readOnlySections: [] };
   }
+  const cached = rolePermCache.get(role);
+  if (cached && Date.now() - cached.at < ROLE_PERM_CACHE_TTL_MS) {
+    return { permissions: cached.permissions, readOnlySections: cached.readOnlySections };
+  }
   const map = await getRoleAccessFromDb(role);
-  return {
+  const result = {
     permissions: ALL_SECTIONS.filter((s) => sectionAccessAllowsView(map[s])),
     readOnlySections: ALL_SECTIONS.filter((s) => map[s] === 'read'),
   };
+  rolePermCache.set(role, { at: Date.now(), ...result });
+  return result;
 }
 
 /** @deprecated Prefer getRoleAccessFromDb */
@@ -238,6 +255,7 @@ export async function saveRolePermissions(
       await upsert.run(role, section, allowedFromAccess(level), level);
     }
   });
+  invalidateRolePermissionCache(role);
 }
 
 export interface UserRow {

@@ -17,8 +17,14 @@ export async function GET(request: Request) {
   if (searchParams.get('fields') === 'options') {
     return NextResponse.json({ invoices: await listInvoiceOptions(ownerId) });
   }
-  const status = searchParams.get('status') || undefined;
+  const limitParam = searchParams.get('limit');
+  if (limitParam != null) {
+    const { parseInvoiceListQuery, listInvoicesPage } = await import('@/lib/invoice-list-page');
+    const page = await listInvoicesPage(ownerId, parseInvoiceListQuery(searchParams));
+    return NextResponse.json(page);
+  }
 
+  const status = searchParams.get('status') || undefined;
   const invoices = await listInvoices(ownerId, status ? { status } : {});
   return NextResponse.json({ invoices });
 }

@@ -190,8 +190,9 @@ function KitchenPrepListContent() {
     const dir = savedUi?.sortDir;
     return dir === 'asc' || dir === 'desc' ? dir : 'asc';
   });
-  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? '');
-  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? '');
+  const defaultMonth = useMemo(() => thisMonthRange(), []);
+  const [dateStart, setDateStart] = useState(savedUi?.dateStart ?? defaultMonth.start);
+  const [dateEnd, setDateEnd] = useState(savedUi?.dateEnd ?? defaultMonth.end);
   const [status, setStatus] = useState<PrepStatus | ''>(() => {
     const saved = savedUi?.status;
     return saved && (PREP_STATUSES as readonly string[]).includes(saved) ? (saved as PrepStatus) : '';
@@ -203,32 +204,36 @@ function KitchenPrepListContent() {
 
   useModalUnsavedWarning(showForm, form);
 
-  const load = () =>
-    fetch('/api/kitchen-prep')
+  const load = () => {
+    setLoading(true);
+    const qs = new URLSearchParams();
+    if (dateStart) qs.set('dateStart', dateStart);
+    if (dateEnd) qs.set('dateEnd', dateEnd);
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return fetch(`/api/kitchen-prep${suffix}`)
       .then((r) => r.json())
-      .then((d) => setOrders(d.orders || []))
+      .then((d) => {
+        setOrders(d.orders || []);
+        const caps = d?.capacities as { id: string; label: string; sortOrder?: number }[] | undefined;
+        if (caps?.length) {
+          setCapacityOptions(
+            caps.map((c) => ({
+              id: c.id,
+              label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
+            })),
+          );
+        }
+      })
       .finally(() => setLoading(false));
+  };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    void load();
+  }, [dateStart, dateEnd]);
 
   useEffect(() => {
     writeListUi(KITCHEN_PREP_LIST_UI_KEY, { dateStart, dateEnd, search, status, sortKey, sortDir });
   }, [dateStart, dateEnd, search, status, sortKey, sortDir]);
-
-  useEffect(() => {
-    fetch('/api/kitchen/catalog')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const caps = d?.catalog?.capacities as { id: string; label: string; sortOrder?: number }[] | undefined;
-        if (!caps?.length) return;
-        setCapacityOptions(
-          [...caps]
-            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-            .map((c) => ({ id: c.id, label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id }))
-        );
-      })
-      .catch(() => undefined);
-  }, []);
 
   useEffect(() => {
     const prefill = parsePrefillForm(searchParams);

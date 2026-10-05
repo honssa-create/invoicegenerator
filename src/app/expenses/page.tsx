@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { StatCard } from '@/components/ui';
@@ -112,6 +112,7 @@ export default function ExpensesPage() {
   const router = useRouter();
   const savedUi = useMemo(() => readListUi<ExpensesListUiState>(EXPENSES_LIST_UI_KEY), []);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expensesTotal, setExpensesTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -166,24 +167,36 @@ export default function ExpensesPage() {
   const bottomScrollRef = useRef<HTMLDivElement>(null);
   const [tableScrollWidth, setTableScrollWidth] = useState(0);
 
-  const loadExpenses = () => {
+  const loadExpenses = useCallback(() => {
     setLoading(true);
-    fetch('/api/expenses')
+    const params = new URLSearchParams();
+    params.set('limit', String(pageSize));
+    params.set('offset', String((page - 1) * pageSize));
+    if (filters.dateStart) params.set('dateStart', filters.dateStart);
+    if (filters.dateEnd) params.set('dateEnd', filters.dateEnd);
+    if (filters.fundingSource) params.set('fundingSource', filters.fundingSource);
+    if (filters.reason) params.set('reason', filters.reason);
+    if (filters.platform) params.set('platform', filters.platform);
+    if (filters.search.trim()) params.set('search', filters.search.trim());
+    fetch(`/api/expenses?${params}`)
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
         if (!ok) {
           setToast({ msg: data.error || 'Failed to load expenses', kind: 'error' });
           setExpenses([]);
+          setExpensesTotal(0);
           return;
         }
         setExpenses(data.expenses || []);
+        setExpensesTotal(typeof data.total === 'number' ? data.total : (data.expenses?.length ?? 0));
       })
       .catch(() => {
         setToast({ msg: 'Failed to load expenses', kind: 'error' });
         setExpenses([]);
+        setExpensesTotal(0);
       })
       .finally(() => setLoading(false));
-  };
+  }, [filters, page, pageSize]);
 
   const loadOptions = () => {
     fetch('/api/expense-options')
@@ -196,6 +209,9 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     loadExpenses();
+  }, [loadExpenses]);
+
+  useEffect(() => {
     loadOptions();
   }, []);
 
@@ -226,41 +242,8 @@ export default function ExpensesPage() {
   );
 
   const displayed = useMemo(() => {
-    const q = filters.search.trim().toLowerCase();
-    let list = expenses.filter((e) => {
-      if (filters.dateStart && (!e.paid_date || e.paid_date < filters.dateStart)) return false;
-      if (filters.dateEnd && (!e.paid_date || e.paid_date > filters.dateEnd)) return false;
-      if (filters.fundingSource) {
-        const src = e.funding_source || legacyPaymentToFundingSource(e.payment_method);
-        if (src !== filters.fundingSource) return false;
-      }
-      if (filters.reason && e.category !== filters.reason) return false;
-      if (filters.platform && e.platform !== filters.platform) return false;
-      if (q) {
-        const hay = [
-          e.batch_id,
-          e.receipt_no,
-          e.merchant,
-          e.supplier_input,
-          e.platform,
-          e.payment_channel,
-          e.funding_source,
-          e.card_last4,
-          e.payment_method,
-          expensePaymentDisplay(e),
-          e.category,
-          e.notes,
-          e.special_notes,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
     const dir = sort.dir === 'asc' ? 1 : -1;
-    list = [...list].sort((a, b) => {
+    const list = [...expenses].sort((a, b) => {
       let base: number;
       switch (sort.key) {
         case 'batch':
@@ -305,12 +288,12 @@ export default function ExpensesPage() {
       return dir * base;
     });
     return list;
-  }, [expenses, filters, sort]);
+  }, [expenses, sort]);
 
-  const totalPages = Math.max(1, Math.ceil(displayed.length / pageSize));
-  const pageStart = displayed.length ? (page - 1) * pageSize : 0;
-  const pageEnd = Math.min(page * pageSize, displayed.length);
-  const pagedRows = displayed.slice(pageStart, pageEnd);
+  const totalPages = Math.max(1, Math.ceil(expensesTotal / pageSize));
+  const pageStart = expensesTotal ? (page - 1) * pageSize : 0;
+  const pageEnd = Math.min(pageStart + displayed.length, expensesTotal);
+  const pagedRows = displayed;
 
   useEffect(() => {
     writeListUi(EXPENSES_LIST_UI_KEY, { filters, sort, pageSize, page });

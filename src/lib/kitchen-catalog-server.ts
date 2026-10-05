@@ -166,6 +166,111 @@ async function runCatalogMerges(
  * Load effective catalog + formulas for an org. Seeds JSON columns from code defaults
  * when null so subsequent reads are stable.
  */
+/** Capacity dropdown labels only — skips catalog merge migrations (fast path for prep list). */
+/**
+ * Stew formulas for prep calculator — skips full catalog merge when DB version is current.
+ * Falls back to {@link loadKitchenCatalog} when migrations are pending.
+ */
+export async function readKitchenStewFormulas(userId: number): Promise<KitchenFormulas> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare(
+      'SELECT formulas_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?'
+    )
+    .get(userId)) as
+    | { formulas_json: string | null; catalog_merge_version: string | null }
+    | undefined;
+
+  const defaults = defaultKitchenCatalogBundle();
+  const hasFormulas = Boolean(row?.formulas_json);
+  if (hasFormulas && row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION) {
+    return normalizeCatalogBundle(
+      null,
+      parseJson(row!.formulas_json, defaults.formulas),
+      defaults,
+    ).formulas;
+  }
+  return (await loadKitchenCatalog(userId)).formulas;
+}
+
+/** Gift box types + BOMs for Nestiee demand rollup — avoids full catalog merge when version is current. */
+export async function readKitchenGiftBoxDemandData(userId: number): Promise<{
+  giftBoxTypes: Array<{
+    id: string;
+    label: string;
+    qtyKey: string;
+    sortOrder: number;
+    active: boolean;
+  }>;
+  giftBoxBoms: KitchenFormulas['giftBoxBoms'];
+}> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare(
+      'SELECT catalog_json, formulas_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?'
+    )
+    .get(userId)) as
+    | { catalog_json: string | null; formulas_json: string | null; catalog_merge_version: string | null }
+    | undefined;
+
+  const defaults = defaultKitchenCatalogBundle();
+  const hasCatalog = Boolean(row?.catalog_json);
+  const hasFormulas = Boolean(row?.formulas_json);
+  if (
+    hasCatalog &&
+    hasFormulas &&
+    row?.catalog_merge_version === KITCHEN_CATALOG_MERGE_VERSION
+  ) {
+    const catalog = normalizeCatalogBundle(
+      parseJson(row!.catalog_json, defaults.catalog),
+      null,
+      defaults,
+    ).catalog;
+    const formulas = normalizeCatalogBundle(
+      null,
+      parseJson(row!.formulas_json, defaults.formulas),
+      defaults,
+    ).formulas;
+    return {
+      giftBoxTypes: catalog.giftBoxTypes.map((g) => ({
+        id: g.id,
+        label: g.label,
+        qtyKey: g.qtyKey,
+        sortOrder: g.sortOrder ?? 0,
+        active: g.active !== false,
+      })),
+      giftBoxBoms: formulas.giftBoxBoms,
+    };
+  }
+  const bundle = await loadKitchenCatalog(userId);
+  return {
+    giftBoxTypes: bundle.catalog.giftBoxTypes.map((g) => ({
+      id: g.id,
+      label: g.label,
+      qtyKey: g.qtyKey,
+      sortOrder: g.sortOrder ?? 0,
+      active: g.active !== false,
+    })),
+    giftBoxBoms: bundle.formulas.giftBoxBoms,
+  };
+}
+
+export async function readKitchenCapacityOptions(
+  userId: number,
+): Promise<Array<{ id: string; label: string; sortOrder: number }>> {
+  await ensureSettingsRow(userId);
+  const row = (await db
+    .prepare('SELECT catalog_json FROM kitchen_settings WHERE user_id = ?')
+    .get(userId)) as { catalog_json: string | null } | undefined;
+  const defaults = defaultKitchenCatalogBundle();
+  const catalog = row?.catalog_json
+    ? normalizeCatalogBundle(parseJson(row.catalog_json, defaults.catalog), null, defaults).catalog
+    : defaults.catalog;
+  return [...catalog.capacities]
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+}
+
 export async function loadKitchenCatalog(userId: number): Promise<KitchenCatalogBundle> {
   await ensureSettingsRow(userId);
   const row = (await db
@@ -272,6 +377,15 @@ export async function ensureCatalogStockRows(userId: number, catalog: KitchenCat
     const params = shippingIds.flatMap((id) => [userId, id]);
     await db
       .prepare(`INSERT OR IGNORE INTO kitchen_shipping_boxes (user_id, box_id, quantity) VALUES ${placeholders}`)
+      .run(...params);
+  }
+
+  const airCapIds = ['single', 'double'];
+  if (airCapIds.length > 0) {
+    const placeholders = airCapIds.map(() => '(?, ?, 0)').join(', ');
+    const params = airCapIds.flatMap((id) => [userId, id]);
+    await db
+      .prepare(`INSERT OR IGNORE INTO kitchen_air_column_caps (user_id, cap_id, quantity) VALUES ${placeholders}`)
       .run(...params);
   }
 }

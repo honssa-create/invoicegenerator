@@ -6,10 +6,16 @@ import type { ProductionScheduleSummary } from '@/lib/kitchen-production-schedul
 import {
   KITCHEN_DAILY_SESSION_LIMIT,
   KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY,
+  KITCHEN_PRODUCTION_SCHEDULE_DEFECT_LOG_STORAGE_KEY,
+  PRODUCTION_DEFECT_REASONS,
+  appendProductionDefectLogEntry,
   applyDefectsToProductionSchedule,
-  emptyDefectsByProduct,
-  parseDefectsFromStorage,
-  type ProductionScheduleDefectsByProduct,
+  defectReasonLabel,
+  formatDefectLogTimestamp,
+  loadProductionDefectLogFromStorage,
+  sumDefectsByProductFromLog,
+  type ProductionDefectReasonId,
+  type ProductionScheduleDefectLogEntry,
 } from '@/lib/kitchen-production-schedule';
 import {
   NESTIEE_DATE_FILTER_TYPES,
@@ -41,12 +47,22 @@ export default function KitchenProductionSchedule(props: KitchenProductionSchedu
   const [schedule, setSchedule] = useState<ProductionScheduleSummary | null>(null);
   const [orderCount, setOrderCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [defects, setDefects] = useState<ProductionScheduleDefectsByProduct>(() =>
-    emptyDefectsByProduct(),
-  );
+  const [defectLog, setDefectLog] = useState<ProductionScheduleDefectLogEntry[]>([]);
   const [defectsHydrated, setDefectsHydrated] = useState(false);
   const [defectModalProduct, setDefectModalProduct] = useState<string | null>(null);
-  const [defectDraft, setDefectDraft] = useState('');
+  const [defectDraftQty, setDefectDraftQty] = useState('1');
+  const [defectReason, setDefectReason] = useState<ProductionDefectReasonId>('cap_damaged');
+  const [defectRemarks, setDefectRemarks] = useState('');
+
+  const defects = useMemo(() => sumDefectsByProductFromLog(defectLog), [defectLog]);
+
+  const defectLogForModal = useMemo(() => {
+    if (!defectModalProduct) return [];
+    return defectLog
+      .filter((e) => e.product === defectModalProduct)
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [defectLog, defectModalProduct]);
 
   const effectiveDateStart = embedded ? props.dateStart ?? '' : dateStart;
   const effectiveDateEnd = embedded ? props.dateEnd ?? '' : dateEnd;
@@ -60,11 +76,11 @@ export default function KitchenProductionSchedule(props: KitchenProductionSchedu
   const hasDateFilter = Boolean(effectiveDateStart || effectiveDateEnd);
 
   useEffect(() => {
-    setDefects(
-      parseDefectsFromStorage(
-        typeof window !== 'undefined'
-          ? localStorage.getItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY)
-          : null,
+    if (typeof window === 'undefined') return;
+    setDefectLog(
+      loadProductionDefectLogFromStorage(
+        localStorage.getItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECT_LOG_STORAGE_KEY),
+        localStorage.getItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY),
       ),
     );
     setDefectsHydrated(true);
@@ -73,11 +89,11 @@ export default function KitchenProductionSchedule(props: KitchenProductionSchedu
   useEffect(() => {
     if (!defectsHydrated) return;
     try {
-      localStorage.setItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECTS_STORAGE_KEY, JSON.stringify(defects));
+      localStorage.setItem(KITCHEN_PRODUCTION_SCHEDULE_DEFECT_LOG_STORAGE_KEY, JSON.stringify(defectLog));
     } catch {
       /* quota / private mode */
     }
-  }, [defects, defectsHydrated]);
+  }, [defectLog, defectsHydrated]);
 
   const load = useCallback(() => {
     if (embedded) return;
@@ -113,20 +129,31 @@ export default function KitchenProductionSchedule(props: KitchenProductionSchedu
 
   const openDefectModal = (product: string) => {
     setDefectModalProduct(product);
-    setDefectDraft(String(defects[product] ?? 0));
+    setDefectDraftQty('1');
+    setDefectReason('cap_damaged');
+    setDefectRemarks('');
   };
 
   const closeDefectModal = () => {
     setDefectModalProduct(null);
-    setDefectDraft('');
+    setDefectDraftQty('1');
+    setDefectRemarks('');
   };
 
-  const saveDefectCount = () => {
+  const saveDefectEntry = () => {
     if (!defectModalProduct) return;
-    const num = Number(defectDraft);
-    const value = Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
-    setDefects((prev) => ({ ...prev, [defectModalProduct]: value }));
-    closeDefectModal();
+    const qty = Math.max(0, Math.floor(Number(defectDraftQty) || 0));
+    if (qty <= 0) return;
+    setDefectLog((prev) =>
+      appendProductionDefectLogEntry(prev, {
+        product: defectModalProduct,
+        qty,
+        reason: defectReason,
+        remarks: defectRemarks,
+      }),
+    );
+    setDefectDraftQty('1');
+    setDefectRemarks('');
   };
 
   return (
@@ -278,41 +305,119 @@ export default function KitchenProductionSchedule(props: KitchenProductionSchedu
           onClick={closeDefectModal}
         >
           <div
-            className="bg-white rounded-xl shadow-lg w-full max-w-sm p-5"
+            className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="defect-modal-title" className="font-semibold text-gray-900">
-              {bi('Defective bottles', '次貨樽數')}
+              {bi('Add defective bottles', '加入次貨')}
             </h3>
             <p className="text-sm text-gray-500 mt-1">{defectModalProduct}</p>
+            <p className="text-xs text-amber-800 mt-2">
+              {bi(
+                `Current total: ${defects[defectModalProduct] ?? 0} (not usable as stock)`,
+                `目前次貨合計：${defects[defectModalProduct] ?? 0} 樽（不計入可用庫存）`,
+              )}
+            </p>
+
             <label className="block mt-4 text-sm font-medium text-gray-700">
-              {bi('Count (not usable as stock)', '數量（不計入庫存）')}
+              {bi('Quantity to add', '本次次貨數量')}
               <input
                 type="number"
-                min={0}
+                min={1}
                 step={1}
                 inputMode="numeric"
                 className="mt-1 w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                value={defectDraft}
-                onChange={(e) => setDefectDraft(e.target.value)}
+                value={defectDraftQty}
+                onChange={(e) => setDefectDraftQty(e.target.value)}
                 autoFocus
               />
             </label>
-            <div className="flex gap-2 mt-5 justify-end">
+
+            <fieldset className="mt-4">
+              <legend className="text-sm font-medium text-gray-700">
+                {bi('Reason', '原因')}
+              </legend>
+              <div className="mt-2 space-y-2">
+                {PRODUCTION_DEFECT_REASONS.map((r) => (
+                  <label
+                    key={r.id}
+                    className="flex items-center gap-2 min-h-[44px] text-sm text-gray-800 cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      name="defect-reason"
+                      className="h-4 w-4"
+                      checked={defectReason === r.id}
+                      onChange={() => setDefectReason(r.id)}
+                    />
+                    {bi(r.en, r.zh)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <label className="block mt-4 text-sm font-medium text-gray-700">
+              {bi('Remarks (optional)', '備註（選填）')}
+              <textarea
+                rows={2}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y"
+                value={defectRemarks}
+                onChange={(e) => setDefectRemarks(e.target.value)}
+                placeholder={bi('e.g. batch / line note', '例如：批次、線位')}
+              />
+            </label>
+
+            <div className="flex gap-2 mt-5 justify-end flex-wrap">
               <button
                 type="button"
                 className="min-h-[44px] px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600"
                 {...tapProps(closeDefectModal)}
               >
-                {bi('Cancel', '取消')}
+                {bi('Close', '關閉')}
               </button>
               <button
                 type="button"
                 className="min-h-[44px] px-4 py-2 text-sm rounded-lg bg-gray-900 text-white font-medium"
-                {...tapProps(saveDefectCount)}
+                {...tapProps(saveDefectEntry)}
               >
-                {bi('Save', '儲存')}
+                {bi('Add entry', '加入紀錄')}
               </button>
+            </div>
+
+            <div className="mt-6 border-t border-gray-100 pt-4">
+              <h4 className="text-sm font-semibold text-gray-900">
+                {bi('Defect activity log', '次貨活動紀錄')}
+              </h4>
+              {defectLogForModal.length === 0 ? (
+                <p className="text-sm text-gray-500 mt-2">{bi('No entries yet.', '尚無紀錄。')}</p>
+              ) : (
+                <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                  {defectLogForModal.map((entry) => (
+                    <li
+                      key={entry.id}
+                      className="text-sm rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-gray-900 tabular-nums">
+                          +{entry.qty} {bi('btl', '樽')}
+                        </span>
+                        <time className="text-xs text-gray-500" dateTime={entry.createdAt}>
+                          {formatDefectLogTimestamp(entry.createdAt)}
+                        </time>
+                      </div>
+                      <p className="text-gray-700 mt-0.5">
+                        {bi(
+                          defectReasonLabel(entry.reason, 'en'),
+                          defectReasonLabel(entry.reason, 'zh'),
+                        )}
+                      </p>
+                      {entry.remarks ? (
+                        <p className="text-gray-600 text-xs mt-1 whitespace-pre-wrap">{entry.remarks}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>
@@ -339,8 +444,8 @@ export default function KitchenProductionSchedule(props: KitchenProductionSchedu
 
       <p className="text-xs text-gray-500 mt-3">
         *{bi(
-          `Kitchen daily capacity is ${KITCHEN_DAILY_SESSION_LIMIT} sessions. Closed on Sundays. Defective counts are saved on this device and excluded from usable stock.`,
-          `廚房每日總產能為 ${KITCHEN_DAILY_SESSION_LIMIT} 轉。星期日休息。次貨數量會儲存於本機，不計入可用庫存。`,
+          `Kitchen daily capacity is ${KITCHEN_DAILY_SESSION_LIMIT} sessions. Closed on Sundays. Defect entries are append-only, saved on this device, and excluded from usable stock.`,
+          `廚房每日總產能為 ${KITCHEN_DAILY_SESSION_LIMIT} 轉。星期日休息。次貨以追加紀錄方式儲存於本機，不計入可用庫存。`,
         )}
       </p>
     </div>

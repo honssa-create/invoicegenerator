@@ -14,7 +14,9 @@ import {
   giftBoxSupplyByScheduleSlot,
   grossDemandFromRemainingGiftBoxes,
   KITCHEN_DAILY_SESSION_LIMIT,
+  migrateLegacyDefectCountsToLog,
   netProductionScheduleInputs,
+  sumDefectsByProductFromLog,
   type ProductionScheduleSlotId,
   type ProductionScheduleSlotTotals,
   scheduleFlavorForGiftBoxFinishedSku,
@@ -207,6 +209,41 @@ describe('parseDefectsFromStorage', () => {
     expect(parsed['75g 桂花']).toBe(3);
     expect(parsed['75g 紅棗']).toBe(0);
     expect(parsed['25g 冰糖']).toBe(0);
+  });
+});
+
+describe('production defect log v2', () => {
+  it('sums quantities per product from append-only log', () => {
+    const log = [
+      {
+        id: '1',
+        product: '75g 桂花',
+        qty: 2,
+        reason: 'cap_damaged' as const,
+        remarks: '',
+        createdAt: '2026-09-01T10:00:00.000Z',
+      },
+      {
+        id: '2',
+        product: '75g 桂花',
+        qty: 3,
+        reason: 'black_spot' as const,
+        remarks: 'line 1',
+        createdAt: '2026-09-02T10:00:00.000Z',
+      },
+    ];
+    const sums = sumDefectsByProductFromLog(log);
+    expect(sums['75g 桂花']).toBe(5);
+    expect(sums['75g 紅棗']).toBe(0);
+  });
+
+  it('migrates legacy per-product totals into log entries', () => {
+    const legacy = emptyDefectsByProduct();
+    legacy['45g 冰糖'] = 4;
+    const log = migrateLegacyDefectCountsToLog(legacy, '2026-09-01T12:00:00.000Z');
+    expect(log).toHaveLength(1);
+    expect(log[0].qty).toBe(4);
+    expect(sumDefectsByProductFromLog(log)['45g 冰糖']).toBe(4);
   });
 });
 

@@ -4,7 +4,19 @@ import {
   WEDDING_GIFT_ORDER_TYPE,
   localDateYmd,
 } from './orders';
-import { parseNestieeDateFilterType, type NestieeDateFilterType } from './nestiee-order-demand';
+import {
+  nestieeShipTodayDateRange,
+  parseNestieeDateFilterType,
+  type NestieeDateFilterType,
+} from './nestiee-order-demand';
+import { addCalendarDays } from './wedding-gift-confirmation';
+import {
+  buildOrderDeliveryDateExpr,
+  buildOrderDueDateSql,
+  buildOrderIsShippedSql,
+} from './order-list-shipped-sql';
+
+export type OrderDashFocus = 'all' | 'unshipped' | 'urgent';
 
 export type OrderListQuery = {
   orderType?: string;
@@ -15,6 +27,11 @@ export type OrderListQuery = {
   nestieeDates?: boolean;
   dateFilterType?: NestieeDateFilterType;
   search?: string;
+  dashFocus?: OrderDashFocus;
+  /** Nestiee list: processing orders due to ship today … today+4 (delivery date). */
+  nestieeShipToday?: boolean;
+  /** YYYY-MM-DD for urgent dash / ship-today windows (defaults to server local date). */
+  today?: string;
 };
 
 export type OrderListPagination = {
@@ -34,6 +51,12 @@ export function parseOrderListQuery(searchParams: URLSearchParams): OrderListQue
   const nestieeDates = searchParams.get('nestieeDates') === '1';
   const dateFilterType = parseNestieeDateFilterType(searchParams.get('dateFilterType'));
   const search = searchParams.get('search')?.trim() || '';
+  const dashRaw = searchParams.get('dashFocus')?.trim() || '';
+  const dashFocus: OrderDashFocus =
+    dashRaw === 'unshipped' || dashRaw === 'urgent' ? dashRaw : 'all';
+  const nestieeShipToday = searchParams.get('nestieeShipToday') === '1';
+  const todayRaw = searchParams.get('today')?.trim() || '';
+  const today = YMD.test(todayRaw) ? todayRaw : localDateYmd();
   const limitRaw = Number(searchParams.get('limit'));
   const offsetRaw = Number(searchParams.get('offset'));
   const all = searchParams.get('all') === '1';
@@ -49,10 +72,15 @@ export function parseOrderListQuery(searchParams: URLSearchParams): OrderListQue
     nestieeDates,
     dateFilterType,
     search,
+    dashFocus,
+    nestieeShipToday,
+    today,
     limit,
     offset,
   };
 }
+
+export { buildOrderDeliveryDateExpr } from './order-list-shipped-sql';
 
 /** SQL fragments appended after `WHERE o.user_id = ?`. */
 export function buildOrderListFilterSql(
@@ -97,14 +125,17 @@ export function buildOrderListFilterSql(
 
   const dateStart = query.dateStart || '';
   const dateEnd = query.dateEnd || '';
-  if (dateStart || dateEnd) {
+  if (query.nestieeShipToday) {
+    const today = query.today || localDateYmd();
+    const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);
+    const dueExpr = buildOrderDeliveryDateExpr();
+    where += ` AND COALESCE(o.status, '') = 'processing'`;
+    where += ` AND ${dueExpr} <> ''`;
+    where += ` AND ${dueExpr} >= ? AND ${dueExpr} <= ?`;
+    params.push(dateStart, dateEnd);
+  } else if (dateStart || dateEnd) {
     if (query.nestieeDates && parseNestieeDateFilterType(query.dateFilterType) === 'delivery_date') {
-      const dueExpr = `COALESCE(
-        NULLIF(TRIM(j.fj->>'client_delivery_date'), ''),
-        NULLIF(TRIM(j.fj->>'due_date'), ''),
-        NULLIF(TRIM(o.delivery_date), ''),
-        ''
-      )`;
+      const dueExpr = buildOrderDeliveryDateExpr();
       where += ` AND ${dueExpr} <> ''`;
       if (dateStart) {
         where += ` AND ${dueExpr} >= ?`;
@@ -139,7 +170,26 @@ export function buildOrderListFilterSql(
     params.push(like, like, like, like);
   }
 
+  const dash = query.dashFocus || 'all';
+  if (dash === 'unshipped' || dash === 'urgent') {
+    const shipped = buildOrderIsShippedSql();
+    where += ` AND NOT (${shipped})`;
+    if (dash === 'urgent') {
+      const due = buildOrderDueDateSql();
+      const today = query.today || localDateYmd();
+      const urgentLimit = addCalendarDays(today, 2);
+      where += ` AND ${due} <> '' AND ${due} <= ?`;
+      params.push(urgentLimit);
+    }
+  }
+
   return where;
+}
+
+/** List query for dashboard card counts — excludes dash-focus / ship-today list narrowing. */
+export function orderListQueryForDashboardCards(query: OrderListQuery): OrderListQuery {
+  const { dashFocus: _d, nestieeShipToday: _s, ...rest } = query;
+  return rest;
 }
 
 export function defaultOrderListLimitForView(view: 'line' | 'board' | 'calendar'): number {

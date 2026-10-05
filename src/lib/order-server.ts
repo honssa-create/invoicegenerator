@@ -2,7 +2,11 @@ import db from './db';
 import type { Order } from './orders';
 import { hydrateNestieeGiftBoxQtys, orderDueDate } from './orders';
 import { pickThumbnailFile } from './attachment-files';
-import { buildOrderListFilterSql, type OrderListQuery } from './order-list-filters';
+import {
+  buildOrderListFilterSql,
+  orderListQueryForDashboardCards,
+  type OrderListQuery,
+} from './order-list-filters';
 import { countOrderListDashboard } from './order-list-dashboard';
 import type { OrderDashboardCounts } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
@@ -32,7 +36,21 @@ interface OrderRow {
   attended_at: string | null;
 }
 
-async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
+export type GetOrderOpts = {
+  withActivities?: boolean;
+  withLinkedDocs?: boolean;
+  withFiles?: boolean;
+};
+
+async function hydrate(row: OrderRow, withRelations: GetOrderOpts | boolean): Promise<Order> {
+  const rel: GetOrderOpts =
+    typeof withRelations === 'boolean'
+      ? {
+          withActivities: withRelations,
+          withLinkedDocs: withRelations,
+          withFiles: withRelations,
+        }
+      : withRelations;
   let fields: Record<string, string | boolean> = {};
   try {
     fields = row.fields_json ? JSON.parse(row.fields_json) : {};
@@ -41,16 +59,18 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   }
   hydrateNestieeGiftBoxQtys(fields);
 
-  const files = withRelations
+  const files = rel.withFiles
     ? (await db
         .prepare('SELECT id, path, original_name FROM order_files WHERE order_id = ? ORDER BY id')
         .all(row.id) as Order['files'])
     : [];
 
-  const activities = withRelations ? (await getActivities('order', row.id) as Order['activities']) : [];
+  const activities = rel.withActivities
+    ? (await getActivities('order', row.id) as Order['activities'])
+    : [];
 
   let linkedInvoice: Order['linked_invoice'] = null;
-  if (withRelations) {
+  if (rel.withLinkedDocs) {
     const invRow = await db
       .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
       .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
@@ -77,7 +97,7 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   }
 
   const linkedQuotation =
-    withRelations && row.quotation_id
+    rel.withLinkedDocs && row.quotation_id
       ? (await db
           .prepare('SELECT id, quote_number, status FROM quotations WHERE id = ? AND user_id = ?')
           .get(row.quotation_id, row.user_id) as Order['linked_quotation'] | undefined) || null
@@ -112,11 +132,20 @@ async function hydrate(row: OrderRow, withRelations: boolean): Promise<Order> {
   };
 }
 
-export async function getOrder(id: number | string, userId: number): Promise<Order | null> {
+export async function getOrder(
+  id: number | string,
+  userId: number,
+  opts?: GetOrderOpts,
+): Promise<Order | null> {
   const row = await db
     .prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?')
     .get(id, userId) as OrderRow | undefined;
-  return row ? await hydrate(row, true) : null;
+  const rel: GetOrderOpts = opts ?? {
+    withActivities: true,
+    withLinkedDocs: true,
+    withFiles: true,
+  };
+  return row ? await hydrate(row, rel) : null;
 }
 
 /** List orders without order_files / activities / linked docs (detail uses getOrder). */
@@ -423,8 +452,18 @@ export async function listOrdersPage(
   const { whereExtra, params } = buildListWhere(userId, opts);
   const listQuery = opts.listQuery ?? {};
 
-  const [dashboard, rows] = await Promise.all([
-    countOrderListDashboard(userId, listQuery),
+  const countParams: (string | number)[] = [userId];
+  const countWhere = buildOrderListFilterSql(listQuery, countParams);
+
+  const [dashboard, totalRow, rows] = await Promise.all([
+    countOrderListDashboard(userId, orderListQueryForDashboardCards(listQuery)),
+    db
+      .prepare(
+        `SELECT COUNT(*)::int AS total
+         ${ORDER_LIST_FROM}
+         WHERE o.user_id = ?${countWhere}`
+      )
+      .get(...countParams) as Promise<{ total: number } | undefined>,
     (async () => {
       const listParams = [...params, limit, offset];
       return (await db
@@ -443,7 +482,7 @@ export async function listOrdersPage(
     })(),
   ]);
 
-  const total = dashboard.total;
+  const total = Number(totalRow?.total) || 0;
 
   let orders = rows.map(leanRowToOrder);
   if (opts.includeFiles) orders = await attachOrderFiles(orders);

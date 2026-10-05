@@ -5,10 +5,12 @@ import {
   hydrateNestieeGiftBoxQtys,
   isNestieeOrderType,
   localDateYmd,
+  NESTIEE_ORDER_TYPE,
   orderDueDate,
   orderTypeFromFields,
 } from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
+import { buildOrderDeliveryDateExpr } from './order-list-shipped-sql';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
@@ -616,4 +618,65 @@ export function summarizeNestieeUsedShippingBoxes(
     dateEnd,
     dateFilterType,
   };
+}
+
+/** SQL after `WHERE o.user_id = ?` (requires lateral `j`). */
+export function buildNestieeDemandListFilterSql(
+  scope: NestieeDemandScope,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+    today?: string;
+  },
+  params: (string | number)[],
+): string {
+  let where = ` AND (
+    COALESCE(o.order_type, '') = ?
+    OR COALESCE(j.fj->>'order_type', '') = ?
+  )`;
+  params.push(NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE);
+
+  const statuses = nestieeStatusesForDemandScope(scope);
+  const statusPh = statuses.map(() => '?').join(', ');
+  where += ` AND COALESCE(o.status, '') IN (${statusPh})`;
+  params.push(...statuses);
+
+  const today = opts.today || localDateYmd();
+  if (scope === 'ship_today') {
+    const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);
+    const dueExpr = buildOrderDeliveryDateExpr();
+    where += ` AND ${dueExpr} <> '' AND ${dueExpr} >= ? AND ${dueExpr} <= ?`;
+    params.push(dateStart, dateEnd);
+    return where;
+  }
+
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  if (!dateStart && !dateEnd) return where;
+
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  if (dateFilterType === 'delivery_date') {
+    const dueExpr = buildOrderDeliveryDateExpr();
+    where += ` AND ${dueExpr} <> ''`;
+    if (dateStart) {
+      where += ` AND ${dueExpr} >= ?`;
+      params.push(dateStart);
+    }
+    if (dateEnd) {
+      where += ` AND ${dueExpr} <= ?`;
+      params.push(dateEnd);
+    }
+  } else {
+    const createdExpr = `COALESCE(NULLIF(TRIM(LEFT(o.created_at, 10)), ''), '')`;
+    if (dateStart) {
+      where += ` AND (${createdExpr} = '' OR ${createdExpr} >= ?)`;
+      params.push(dateStart);
+    }
+    if (dateEnd) {
+      where += ` AND (${createdExpr} = '' OR ${createdExpr} <= ?)`;
+      params.push(dateEnd);
+    }
+  }
+  return where;
 }

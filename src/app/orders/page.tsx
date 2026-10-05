@@ -160,7 +160,7 @@ function OrdersPageContent() {
 
   const isNestieeFilter = isNestieeOrdersFilter(orderType);
   const shipTodayFilter = isNestieeFilter && nestieeDemandScope === 'ship_today';
-  const useServerPaging = view === 'line' && dashFocus === 'all' && !shipTodayFilter;
+  const useServerPaging = view === 'line';
 
   const nestieeStatusCounts = useMemo(
     () =>
@@ -212,6 +212,9 @@ function OrdersPageContent() {
       params.set('nestieeDates', '1');
       params.set('dateFilterType', dateFilterType);
     }
+    if (dashFocus !== 'all') params.set('dashFocus', dashFocus);
+    if (shipTodayFilter) params.set('nestieeShipToday', '1');
+    params.set('today', localDateYmd());
     return params;
   }, [
     useServerPaging,
@@ -223,6 +226,8 @@ function OrdersPageContent() {
     dateEnd,
     isNestieeFilter,
     dateFilterType,
+    dashFocus,
+    shipTodayFilter,
   ]);
 
   const load = useCallback(() => {
@@ -314,10 +319,7 @@ function OrdersPageContent() {
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = orders.filter((o) => {
-      if (useServerPaging) {
-        if (shipTodayFilter) return orderMatchesNestieeShipToday(o);
-        return true;
-      }
+      if (useServerPaging) return true;
       if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
       if (q) {
         const hay = [

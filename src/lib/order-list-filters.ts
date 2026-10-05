@@ -32,6 +32,9 @@ export type OrderListQuery = {
   nestieeShipToday?: boolean;
   /** YYYY-MM-DD for urgent dash / ship-today windows (defaults to server local date). */
   today?: string;
+  /** Board/calendar: only orders updated within the last N days when no date filter set. */
+  recentDays?: number;
+  listView?: 'line' | 'board' | 'calendar';
 };
 
 export type OrderListPagination = {
@@ -57,6 +60,14 @@ export function parseOrderListQuery(searchParams: URLSearchParams): OrderListQue
   const nestieeShipToday = searchParams.get('nestieeShipToday') === '1';
   const todayRaw = searchParams.get('today')?.trim() || '';
   const today = YMD.test(todayRaw) ? todayRaw : localDateYmd();
+  const listViewRaw = searchParams.get('listView')?.trim() || '';
+  const listView: OrderListQuery['listView'] =
+    listViewRaw === 'board' || listViewRaw === 'calendar' ? listViewRaw : 'line';
+  const recentDaysRaw = Number(searchParams.get('recentDays'));
+  const recentDays =
+    Number.isFinite(recentDaysRaw) && recentDaysRaw > 0
+      ? Math.min(365, Math.floor(recentDaysRaw))
+      : 0;
   const limitRaw = Number(searchParams.get('limit'));
   const offsetRaw = Number(searchParams.get('offset'));
   const all = searchParams.get('all') === '1';
@@ -75,6 +86,8 @@ export function parseOrderListQuery(searchParams: URLSearchParams): OrderListQue
     dashFocus,
     nestieeShipToday,
     today,
+    recentDays,
+    listView,
     limit,
     offset,
   };
@@ -158,16 +171,24 @@ export function buildOrderListFilterSql(
     }
   }
 
+  if (query.recentDays && query.recentDays > 0) {
+    where += ` AND o.updated_at >= (CURRENT_TIMESTAMP - (?::int * INTERVAL '1 day'))`;
+    params.push(query.recentDays);
+  }
+
   const q = (query.search || '').trim();
   if (q) {
     const like = `%${q.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+    const nestiee = query.orderType === 'nestiee';
     where += ` AND (
       o.reference_number ILIKE ? ESCAPE '\\'
       OR COALESCE(o.po_number, '') ILIKE ? ESCAPE '\\'
       OR COALESCE(o.name, '') ILIKE ? ESCAPE '\\'
       OR COALESCE(o.description, '') ILIKE ? ESCAPE '\\'
+      ${nestiee ? "OR COALESCE(o.fields_json, '') ILIKE ? ESCAPE '\\'" : ''}
     )`;
     params.push(like, like, like, like);
+    if (nestiee) params.push(like);
   }
 
   const dash = query.dashFocus || 'all';

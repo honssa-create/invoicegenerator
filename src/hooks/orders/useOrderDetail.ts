@@ -11,6 +11,7 @@ import {
 } from '@/lib/kitchen-ship-allocate';
 import { isUnattendedImportedOrder, NESTIEE_GIFT_BOX_TYPES, type Order } from '@/lib/orders';
 import type { OrderDetailPatchPayload } from '@/components/orders/order-detail-types';
+import type { ActivityRow } from '@/lib/activity';
 import { MSG, bi } from '@/lib/ui-labels';
 
 export interface InvoiceOption {
@@ -37,6 +38,7 @@ export function useOrderDetail(orderId: string) {
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [supplierOptions, setSupplierOptions] = useState<string[]>([...DEFAULT_OPTIONS.supplier]);
   const [nestieeGiftBoxes, setNestieeGiftBoxes] = useState(NESTIEE_GIFT_BOX_TYPES);
+  const [initialActivities, setInitialActivities] = useState<ActivityRow[] | null>(null);
 
   const bigDayPersistedRef = useRef('');
   const bigDaySavedOnChangeRef = useRef<string | null>(null);
@@ -186,6 +188,9 @@ export function useOrderDetail(orderId: string) {
         if (Array.isArray(d.nestieeGiftBoxes) && d.nestieeGiftBoxes.length) {
           setNestieeGiftBoxes(d.nestieeGiftBoxes);
         }
+        if (Array.isArray(d.activities)) {
+          setInitialActivities(d.activities as ActivityRow[]);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -229,6 +234,7 @@ export function useOrderDetail(orderId: string) {
     supplierOptions,
     setSupplierOptions,
     nestieeGiftBoxes,
+    initialActivities,
     bigDayPersistedRef,
     bigDaySavedOnChangeRef,
     patch,

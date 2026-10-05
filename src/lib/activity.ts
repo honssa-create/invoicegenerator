@@ -36,7 +36,23 @@ export async function logActivity(
   ).run(type, entityId, userId, kind, author, body);
 }
 
-export async function getActivities(type: EntityType, entityId: number | string): Promise<ActivityRow[]> {
+export async function getActivities(
+  type: EntityType,
+  entityId: number | string,
+  limit?: number,
+): Promise<ActivityRow[]> {
+  if (limit != null && limit > 0) {
+    const cap = Math.min(500, Math.floor(limit));
+    const rows = (await db
+      .prepare(
+        `SELECT id, kind, author, body, created_at FROM activity_logs
+         WHERE entity_type = ? AND entity_id = ?
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`
+      )
+      .all(type, entityId, cap)) as ActivityRow[];
+    return rows.reverse();
+  }
   return await db
     .prepare(
       'SELECT id, kind, author, body, created_at FROM activity_logs WHERE entity_type = ? AND entity_id = ? ORDER BY created_at ASC, id ASC'

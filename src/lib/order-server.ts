@@ -3,6 +3,8 @@ import type { Order } from './orders';
 import { hydrateNestieeGiftBoxQtys, orderDueDate } from './orders';
 import { pickThumbnailFile } from './attachment-files';
 import { buildOrderListFilterSql, type OrderListQuery } from './order-list-filters';
+import { countOrderListDashboard } from './order-list-dashboard';
+import type { OrderDashboardCounts } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
 import { formatCustomerPartyBlock } from './customer-party';
@@ -295,6 +297,7 @@ export type OrderListPage = {
   total: number;
   limit: number;
   offset: number;
+  dashboard: OrderDashboardCounts;
 };
 
 const ORDER_LIST_FROM = `FROM orders o
@@ -418,16 +421,13 @@ export async function listOrdersPage(
   const limit = Math.min(5000, Math.max(1, opts.limit ?? 200));
   const offset = Math.max(0, opts.offset ?? 0);
   const { whereExtra, params } = buildListWhere(userId, opts);
-  const countRow = (await db
-    .prepare(
-      `SELECT COUNT(*)::int AS cnt ${ORDER_LIST_FROM}
-       WHERE o.user_id = ?${whereExtra}`
-    )
-    .get(...params)) as { cnt: number } | undefined;
-  const total = Number(countRow?.cnt) || 0;
+  const listQuery = opts.listQuery ?? {};
 
-  const listParams = [...params, limit, offset];
-  const rows = (await db
+  const [dashboard, rows] = await Promise.all([
+    countOrderListDashboard(userId, listQuery),
+    (async () => {
+      const listParams = [...params, limit, offset];
+      return (await db
     .prepare(
       `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
               o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
@@ -438,14 +438,18 @@ export async function listOrdersPage(
        WHERE o.user_id = ?${whereExtra}
        ORDER BY o.updated_at DESC, o.id DESC
        LIMIT ? OFFSET ?`
-    )
-    .all(...listParams)) as LeanOrderRow[];
+      )
+        .all(...listParams)) as LeanOrderRow[];
+    })(),
+  ]);
+
+  const total = dashboard.total;
 
   let orders = rows.map(leanRowToOrder);
   if (opts.includeFiles) orders = await attachOrderFiles(orders);
   else if (opts.includeFileListMeta !== false) orders = await attachOrderListFileMeta(orders);
 
-  return { orders, total, limit, offset };
+  return { orders, total, limit, offset, dashboard };
 }
 
 function buildListWhere(

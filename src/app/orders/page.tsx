@@ -22,7 +22,6 @@ import {
   statusesForOrderType,
   isUnattendedImportedOrder,
   localDateYmd,
-  summarizeOrderDashboard,
   summarizeOrderListProducts,
   type Order,
 } from '@/lib/orders';
@@ -110,6 +109,7 @@ function OrdersPageContent() {
   const urlStatus = searchParams.get('status');
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersTotal, setOrdersTotal] = useState(0);
+  const [dashCounts, setDashCounts] = useState({ total: 0, unshipped: 0, urgent: 0 });
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [creatingStatus, setCreatingStatus] = useState<string | null>(null);
@@ -233,6 +233,13 @@ function OrdersPageContent() {
       .then((d) => {
         setOrders(d.orders || []);
         setOrdersTotal(typeof d.total === 'number' ? d.total : (d.orders?.length ?? 0));
+        if (d.dashboard && typeof d.dashboard.total === 'number') {
+          setDashCounts({
+            total: d.dashboard.total,
+            unshipped: Number(d.dashboard.unshipped) || 0,
+            urgent: Number(d.dashboard.urgent) || 0,
+          });
+        }
       })
       .finally(() => {
         setLoading(false);
@@ -303,19 +310,6 @@ function OrdersPageContent() {
   useEffect(() => {
     if (status && !statusOptions.includes(status)) setStatus('');
   }, [status, statusOptions]);
-
-  const scopedOrders = useMemo(() => {
-    if (!orderType) return orders;
-    return orders.filter((o) => orderMatchesTypeFilter(getOrderType(o), orderType));
-  }, [orders, orderType]);
-
-  const dashCounts = useMemo(() => {
-    const base = summarizeOrderDashboard(scopedOrders);
-    if (useServerPaging && dashFocus === 'all') {
-      return { ...base, total: ordersTotal };
-    }
-    return base;
-  }, [scopedOrders, useServerPaging, dashFocus, ordersTotal]);
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();

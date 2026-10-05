@@ -2,6 +2,7 @@ import db from './db';
 import { mergedOptions } from './expense-options-server';
 import { listInvoiceOptions } from './invoices';
 import { readKitchenGiftBoxDemandData } from './kitchen-catalog-server';
+import { getActivities } from './activity';
 import { getOrder } from './order-server';
 import { parseOrderTags } from './orders';
 import { listQuotationOptions } from './quotation-server';
@@ -42,6 +43,7 @@ async function listAccountUsers(ownerId: number) {
 export async function loadOrderDetailBootstrap(ownerId: number, orderId: string) {
   const [
     order,
+    activities,
     giftData,
     invoices,
     quotations,
@@ -54,6 +56,7 @@ export async function loadOrderDetailBootstrap(ownerId: number, orderId: string)
       withLinkedDocs: true,
       withFiles: true,
     }),
+    getActivities('order', orderId, 40),
     readKitchenGiftBoxDemandData(ownerId),
     listInvoiceOptions(ownerId),
     listQuotationOptions(ownerId),
@@ -74,6 +77,7 @@ export async function loadOrderDetailBootstrap(ownerId: number, orderId: string)
 
   return {
     order,
+    activities,
     invoices,
     quotations,
     accountUsers: users,

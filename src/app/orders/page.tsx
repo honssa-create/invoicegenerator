@@ -32,7 +32,7 @@ import {
   orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
-  summarizeNestieeOrderStatusCounts,
+  type NestieeOrderStatusCounts,
   type NestieeDateFilterType,
   type NestieeDemandScope,
   type NestieeProcessingDemand,
@@ -162,16 +162,26 @@ function OrdersPageContent() {
   const shipTodayFilter = isNestieeFilter && nestieeDemandScope === 'ship_today';
   const useServerPaging = view === 'line';
 
-  const nestieeStatusCounts = useMemo(
-    () =>
-      summarizeNestieeOrderStatusCounts(orders, {
-        dateStart,
-        dateEnd,
-        dateFilterType,
-        today: localDateYmd(),
-      }),
-    [orders, dateStart, dateEnd, dateFilterType],
-  );
+  const [nestieeStatusCounts, setNestieeStatusCounts] = useState<NestieeOrderStatusCounts>({
+    processing: 0,
+    completed: 0,
+    shipWithinDays: 0,
+  });
+
+  const loadNestieeStatusCounts = useCallback(() => {
+    if (!isNestieeFilter) return;
+    const params = new URLSearchParams();
+    if (dateStart) params.set('dateStart', dateStart);
+    if (dateEnd) params.set('dateEnd', dateEnd);
+    params.set('dateFilterType', dateFilterType);
+    params.set('today', localDateYmd());
+    fetch(`/api/orders/nestiee-status-counts?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.counts) setNestieeStatusCounts(d.counts);
+      })
+      .catch(() => undefined);
+  }, [isNestieeFilter, dateStart, dateEnd, dateFilterType]);
 
   const loadNestieeDemand = useCallback(() => {
     if (!isNestieeOrdersFilter(orderType)) return;
@@ -200,8 +210,10 @@ function OrdersPageContent() {
       params.set('limit', String(PAGE_SIZE));
       params.set('offset', String((page - 1) * PAGE_SIZE));
     } else {
-      params.set('limit', '2500');
+      params.set('limit', '800');
       params.set('offset', '0');
+      params.set('listView', view);
+      if (!dateStart && !dateEnd) params.set('recentDays', '120');
     }
     if (orderType) params.set('orderType', orderType);
     if (status) params.set('status', status);
@@ -228,6 +240,7 @@ function OrdersPageContent() {
     dateFilterType,
     dashFocus,
     shipTodayFilter,
+    view,
   ]);
 
   const load = useCallback(() => {
@@ -259,6 +272,10 @@ function OrdersPageContent() {
   useEffect(() => {
     loadNestieeDemand();
   }, [loadNestieeDemand]);
+
+  useEffect(() => {
+    loadNestieeStatusCounts();
+  }, [loadNestieeStatusCounts]);
 
   // Sidebar type shortcuts: /orders?type=<exact order type> wins over the last saved type.
   // Nestiee shortcut also passes status=processing.

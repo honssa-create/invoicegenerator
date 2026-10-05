@@ -23,6 +23,7 @@ import {
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { readListUi, writeListUi } from '@/lib/list-ui-storage';
+import { prefetchKitchenPrepDetail } from '@/lib/kitchen-prep-detail-cache';
 
 const STATUS_COLORS: Record<string, string> = {
   not_started: 'bg-gray-100 text-gray-600',
@@ -595,6 +596,8 @@ function KitchenPrepListContent() {
                 <tr
                   key={o.id}
                   onClick={() => router.push(`/kitchen-prep/${o.id}`)}
+                  onMouseEnter={() => prefetchKitchenPrepDetail(o.id)}
+                  onFocus={() => prefetchKitchenPrepDetail(o.id)}
                   className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''}`}
                 >
                   <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>

@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '@/lib/auth';
 import {
   deletePrepOrder,
   getPrepOrder,
+  loadPrepOrderDetail,
   resolveKitchenOwnerUserId,
   updatePrepOrder,
 } from '@/lib/kitchen-prep-server';
@@ -14,29 +15,16 @@ import {
   type BirdNestType,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
-import {
-  loadKitchenCatalog,
-  readKitchenCapacityOptions,
-  readKitchenStewFormulas,
-} from '@/lib/kitchen-catalog-server';
+import { readKitchenPrepDetailContext } from '@/lib/kitchen-catalog-server';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const [kitchenOwnerId, order] = await Promise.all([
-    resolveKitchenOwnerUserId(),
-    getPrepOrder(params.id),
-  ]);
-  if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const detail = await loadPrepOrderDetail(params.id);
+  if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const [formulas, capacities] = await Promise.all([
-    readKitchenStewFormulas(kitchenOwnerId),
-    readKitchenCapacityOptions(kitchenOwnerId),
-  ]);
-  const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
-
-  return NextResponse.json({ order, calculation, capacities });
+  return NextResponse.json(detail);
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
@@ -49,10 +37,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
-    const [capacityOptions, formulas] = await Promise.all([
-      readKitchenCapacityOptions(kitchenOwnerId),
-      readKitchenStewFormulas(kitchenOwnerId),
-    ]);
+    const { capacities: capacityOptions, formulas } =
+      await readKitchenPrepDetailContext(kitchenOwnerId);
     const allowedCaps = new Set(capacityOptions.map((c) => c.id));
     const capacity = (
       body.capacity && allowedCaps.has(body.capacity) ? body.capacity : existing.capacity

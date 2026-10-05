@@ -1,6 +1,14 @@
 import db from './db';
 import { trashKitchenPrep } from '@/lib/trash';
-import type { PrepCapacity, PrepCompletionSplit, PrepFlavor, PrepOrder, PrepOrderType, PrepStatus } from './kitchen-prep';
+import type {
+  PrepCalculation,
+  PrepCapacity,
+  PrepCompletionSplit,
+  PrepFlavor,
+  PrepOrder,
+  PrepOrderType,
+  PrepStatus,
+} from './kitchen-prep';
 import {
   PREP_FLAVORS,
   buildKitchenCompletionActivityBody,
@@ -22,7 +30,11 @@ import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
 import { finishedSku } from './kitchen-bom';
 import { addFinishedFromStewing, resolveKitchenOwnerUserId } from './kitchen-server';
-import { readKitchenCapacityOptions, readKitchenStewFormulas } from './kitchen-catalog-server';
+import {
+  readKitchenCapacityOptions,
+  readKitchenPrepDetailContext,
+  readKitchenStewFormulas,
+} from './kitchen-catalog-server';
 
 export { resolveKitchenOwnerUserId };
 
@@ -200,6 +212,31 @@ export async function getPrepOrder(id: number | string): Promise<PrepOrder | nul
     .prepare('SELECT * FROM kitchen_prep_orders WHERE id = ?')
     .get(id)) as PrepRow | undefined;
   return row ? hydrate(row) : null;
+}
+
+export type PrepOrderDetailPayload = {
+  order: PrepOrder;
+  calculation: PrepCalculation;
+  capacities: Array<{ id: string; label: string }>;
+};
+
+/** Kitchen prep detail API — minimal DB round-trips (order + one settings read). */
+export async function loadPrepOrderDetail(
+  id: number | string,
+): Promise<PrepOrderDetailPayload | null> {
+  const [ownerId, order] = await Promise.all([
+    resolveKitchenOwnerUserId(),
+    getPrepOrder(id),
+  ]);
+  if (!order || order.user_id !== ownerId) return null;
+
+  const { formulas, capacities } = await readKitchenPrepDetailContext(ownerId);
+  const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
+  return {
+    order,
+    calculation,
+    capacities: capacities.map((c) => ({ id: c.id, label: c.label })),
+  };
 }
 
 export async function createPrepOrder(

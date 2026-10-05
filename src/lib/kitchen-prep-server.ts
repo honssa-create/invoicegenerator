@@ -30,11 +30,14 @@ import { addCalendarDays } from './wedding-gift-confirmation';
 import { logActivity } from './activity';
 import { finishedSku } from './kitchen-bom';
 import { addFinishedFromStewing, resolveKitchenOwnerUserId } from './kitchen-server';
+import type { KitchenFormulas } from './kitchen-catalog';
 import {
   readKitchenCapacityOptions,
   readKitchenPrepDetailContext,
   readKitchenStewFormulas,
 } from './kitchen-catalog-server';
+
+type StewFormulas = KitchenFormulas['stewFormulas'];
 
 export { resolveKitchenOwnerUserId };
 
@@ -137,7 +140,7 @@ function hydrate(row: PrepRow): PrepOrder {
   };
 }
 
-async function nextOrderCode(_userId?: number): Promise<string> {
+async function nextPrepSerialStart(): Promise<number> {
   const row = (await db
     .prepare(
       `SELECT order_code FROM kitchen_prep_orders
@@ -150,7 +153,102 @@ async function nextOrderCode(_userId?: number): Promise<string> {
     const m = /PREP-(\d+)/.exec(row.order_code);
     if (m) n = Number(m[1]) + 1;
   }
+  return n;
+}
+
+async function nextOrderCode(_userId?: number): Promise<string> {
+  const n = await nextPrepSerialStart();
   return `PREP-${String(n).padStart(4, '0')}`;
+}
+
+async function allocatePrepOrderCodes(count: number): Promise<string[]> {
+  if (count <= 0) return [];
+  const start = await nextPrepSerialStart();
+  return Array.from({ length: count }, (_, i) => `PREP-${String(start + i).padStart(4, '0')}`);
+}
+
+type InsertPrepInput = {
+  stewing_date: string;
+  order_type: PrepOrderType;
+  capacity: PrepCapacity;
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+  actual_qty_osmanthus: number;
+  actual_qty_red_date: number;
+  actual_qty_rock_sugar: number;
+  linked_order_id: number | null;
+  order_code: string;
+  notes: string | null;
+  status: PrepStatus;
+  bird_nest_osmanthus: BirdNestType;
+  bird_nest_red_date: BirdNestType;
+  bird_nest_rock_sugar: BirdNestType;
+};
+
+async function insertPrepOrderRow(userId: number, row: InsertPrepInput): Promise<number> {
+  const res = await db
+    .prepare(
+      `INSERT INTO kitchen_prep_orders
+         (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
+          qty_osmanthus, qty_red_date, qty_rock_sugar,
+          actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
+          bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
+          notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    )
+    .run(
+      userId,
+      row.order_code,
+      row.linked_order_id,
+      row.stewing_date,
+      row.order_type,
+      row.capacity,
+      row.status,
+      row.qty_osmanthus,
+      row.qty_red_date,
+      row.qty_rock_sugar,
+      row.actual_qty_osmanthus,
+      row.actual_qty_red_date,
+      row.actual_qty_rock_sugar,
+      row.bird_nest_osmanthus,
+      row.bird_nest_red_date,
+      row.bird_nest_rock_sugar,
+      row.notes,
+    );
+  return Number(res.lastInsertRowid);
+}
+
+function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): PrepOrder {
+  return {
+    id,
+    user_id: userId,
+    order_code: row.order_code,
+    linked_order_id: row.linked_order_id,
+    stewing_date: row.stewing_date,
+    order_type: row.order_type,
+    capacity: row.capacity,
+    status: row.status,
+    qty_osmanthus: row.qty_osmanthus,
+    qty_red_date: row.qty_red_date,
+    qty_rock_sugar: row.qty_rock_sugar,
+    actual_qty_osmanthus: row.actual_qty_osmanthus,
+    actual_qty_red_date: row.actual_qty_red_date,
+    actual_qty_rock_sugar: row.actual_qty_rock_sugar,
+    bird_nest_osmanthus: row.bird_nest_osmanthus,
+    bird_nest_red_date: row.bird_nest_red_date,
+    bird_nest_rock_sugar: row.bird_nest_rock_sugar,
+    notes: row.notes,
+    expected_yield: null,
+    actual_yield: null,
+    completion_remarks: null,
+    completed_at: null,
+    completed_by: null,
+    stewing_started_at: null,
+    completion_splits: null,
+    created_at: '',
+    updated_at: '',
+  };
 }
 
 /** List table + completion modal from list — omits notes / completion meta / timestamps. */
@@ -288,10 +386,15 @@ export async function createPrepOrder(
     bird_nest_rock_sugar?: BirdNestType;
     /** Linked 回禮 auto-create may have qtys filled later. */
     allowEmptyQtys?: boolean;
-  }
+  },
+  opts?: {
+    stewFormulas?: StewFormulas;
+    orderCode?: string;
+    /** When false, returns row built from insert (avoids extra SELECT). */
+    refetch?: boolean;
+  },
 ): Promise<PrepOrder> {
-  const formulas = await readKitchenStewFormulas(userId);
-  const stew = formulas.stewFormulas;
+  const stew = opts?.stewFormulas ?? (await readKitchenStewFormulas(userId)).stewFormulas;
   const capacity = input.capacity;
   const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? 0);
   const qtyRed = isRedDateAllowed(capacity, stew) ? Math.max(0, input.qty_red_date ?? 0) : 0;
@@ -317,36 +420,33 @@ export async function createPrepOrder(
       hasProductionDate: true,
     });
 
-  const res = await db
-    .prepare(
-      `INSERT INTO kitchen_prep_orders
-         (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
-          qty_osmanthus, qty_red_date, qty_rock_sugar,
-          actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
-          bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
-          notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    )
-    .run(
-      userId,
-      input.order_code?.trim() || await nextOrderCode(userId),
-      input.linked_order_id ?? null,
-      input.stewing_date,
-      input.order_type,
-      capacity,
-      status,
-      qtyOsmanthus,
-      qtyRed,
-      qtyRock,
-      actualOsmanthus,
-      actualRed,
-      actualRock,
-      input.bird_nest_osmanthus ?? 'large',
-      input.bird_nest_red_date ?? 'large',
-      input.bird_nest_rock_sugar ?? 'large',
-      input.notes?.trim() || null
-    );
-  return (await getPrepOrder(Number(res.lastInsertRowid)))!;
+  const orderCode =
+    input.order_code?.trim() || opts?.orderCode || (await nextOrderCode(userId));
+
+  const insertRow: InsertPrepInput = {
+    stewing_date: input.stewing_date,
+    order_type: input.order_type,
+    capacity,
+    qty_osmanthus: qtyOsmanthus,
+    qty_red_date: qtyRed,
+    qty_rock_sugar: qtyRock,
+    actual_qty_osmanthus: actualOsmanthus,
+    actual_qty_red_date: actualRed,
+    actual_qty_rock_sugar: actualRock,
+    linked_order_id: input.linked_order_id ?? null,
+    order_code: orderCode,
+    notes: input.notes?.trim() || null,
+    status,
+    bird_nest_osmanthus: input.bird_nest_osmanthus ?? 'large',
+    bird_nest_red_date: input.bird_nest_red_date ?? 'large',
+    bird_nest_rock_sugar: input.bird_nest_rock_sugar ?? 'large',
+  };
+
+  const id = await insertPrepOrderRow(userId, insertRow);
+  if (opts?.refetch === false) {
+    return prepOrderFromInsert(userId, id, insertRow);
+  }
+  return (await getPrepOrder(id))!;
 }
 
 export interface PrepCapacityLine {
@@ -366,47 +466,67 @@ export async function createPrepOrdersBatch(
     notes?: string | null;
     status?: PrepStatus;
     lines: PrepCapacityLine[];
-  }
+  },
+  opts?: { stewFormulas?: StewFormulas },
 ): Promise<PrepOrder[]> {
-  const formulas = await readKitchenStewFormulas(userId);
-  const stew = formulas.stewFormulas;
+  const stew = opts?.stewFormulas ?? (await readKitchenStewFormulas(userId)).stewFormulas;
   const baseCode = input.order_code?.trim();
+  const defaultStatus =
+    input.status ??
+    defaultPrepStatusForCreate(input.order_type, input.stewing_date, {
+      hasProductionDate: true,
+    });
 
   const prepared = input.lines.map((line) => {
+    const capacity = line.capacity;
+    const qtyOsmanthus = Math.max(0, line.qty_osmanthus ?? 0);
+    const qtyRed = isRedDateAllowed(capacity, stew) ? Math.max(0, line.qty_red_date ?? 0) : 0;
+    const qtyRock = Math.max(0, line.qty_rock_sugar ?? 0);
     const qtys = {
-      osmanthus: Math.max(0, line.qty_osmanthus ?? 0),
-      red_date: Math.max(0, line.qty_red_date ?? 0),
-      rock_sugar: Math.max(0, line.qty_rock_sugar ?? 0),
+      osmanthus: qtyOsmanthus,
+      red_date: qtyRed,
+      rock_sugar: qtyRock,
     };
     const validationErr = validatePrepFlavorQtys(line.capacity, qtys, { formulas: stew });
     if (validationErr) throw new Error(validationErr);
-    return { line, qtys };
+    return { line, qtys, capacity };
   });
 
   return await db.transaction(async () => {
+    const autoCodes = baseCode ? [] : await allocatePrepOrderCodes(prepared.length);
+    let autoIdx = 0;
     const created: PrepOrder[] = [];
-    for (const { line, qtys } of prepared) {
-      let orderCode: string | undefined;
+
+    for (const { line, qtys, capacity } of prepared) {
+      let orderCode: string;
       if (baseCode) {
         orderCode = input.lines.length > 1 ? `${baseCode}-${line.capacity}` : baseCode;
       } else if (input.lines.length > 1) {
-        orderCode = `${await nextOrderCode(userId)}-${line.capacity}`;
+        orderCode = `${autoCodes[autoIdx++]}-${line.capacity}`;
+      } else {
+        orderCode = autoCodes[autoIdx++] ?? (await nextOrderCode(userId));
       }
 
-      created.push(
-        await createPrepOrder(userId, {
-          stewing_date: input.stewing_date,
-          order_type: input.order_type,
-          capacity: line.capacity,
-          qty_osmanthus: qtys.osmanthus,
-          qty_red_date: qtys.red_date,
-          qty_rock_sugar: qtys.rock_sugar,
-          linked_order_id: input.linked_order_id ?? null,
-          order_code: orderCode,
-          notes: input.notes,
-          status: input.status,
-        })
-      );
+      const insertRow: InsertPrepInput = {
+        stewing_date: input.stewing_date,
+        order_type: input.order_type,
+        capacity,
+        qty_osmanthus: qtys.osmanthus,
+        qty_red_date: qtys.red_date,
+        qty_rock_sugar: qtys.rock_sugar,
+        actual_qty_osmanthus: qtys.osmanthus,
+        actual_qty_red_date: qtys.red_date,
+        actual_qty_rock_sugar: qtys.rock_sugar,
+        linked_order_id: input.linked_order_id ?? null,
+        order_code: orderCode,
+        notes: input.notes?.trim() || null,
+        status: defaultStatus,
+        bird_nest_osmanthus: 'large',
+        bird_nest_red_date: 'large',
+        bird_nest_rock_sugar: 'large',
+      };
+      const id = await insertPrepOrderRow(userId, insertRow);
+      created.push(prepOrderFromInsert(userId, id, insertRow));
     }
     return created;
   });

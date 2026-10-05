@@ -7,7 +7,7 @@ import {
   resolveKitchenOwnerUserId,
 } from '@/lib/kitchen-prep-server';
 import { PREP_ORDER_TYPES, PREP_STATUSES, validatePrepFlavorQtys, type PrepCapacity, type PrepStatus } from '@/lib/kitchen-prep';
-import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
+import { readKitchenPrepDetailContext } from '@/lib/kitchen-catalog-server';
 
 function parseYmd(raw: string | null): string {
   const v = raw?.trim() || '';
@@ -51,8 +51,9 @@ export async function POST(request: Request) {
     }
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
-    const { catalog, formulas } = await loadKitchenCatalog(kitchenOwnerId);
-    const allowedCaps = new Set(catalog.capacities.map((c) => c.id));
+    const { capacities, formulas } = await readKitchenPrepDetailContext(kitchenOwnerId);
+    const stew = formulas.stewFormulas;
+    const allowedCaps = new Set(capacities.map((c) => c.id));
 
     if (Array.isArray(body.lines) && body.lines.length > 0) {
       const lines = body.lines
@@ -73,14 +74,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'At least one valid capacity line is required' }, { status: 400 });
       }
 
-      const orders = await createPrepOrdersBatch(kitchenOwnerId, {
-        stewing_date: body.stewing_date,
-        order_type,
-        linked_order_id: body.linked_order_id ?? null,
-        order_code: body.order_code,
-        notes: body.notes,
-        lines,
-      });
+      const orders = await createPrepOrdersBatch(
+        kitchenOwnerId,
+        {
+          stewing_date: body.stewing_date,
+          order_type,
+          linked_order_id: body.linked_order_id ?? null,
+          order_code: body.order_code,
+          notes: body.notes,
+          lines,
+        },
+        { stewFormulas: stew },
+      );
 
       return NextResponse.json({ orders, order: orders[0] }, { status: 201 });
     }
@@ -92,23 +97,27 @@ export async function POST(request: Request) {
       rock_sugar: Number(body.qty_rock_sugar) || 0,
     };
     const validationErr = validatePrepFlavorQtys(capacity, qtys, {
-      formulas: formulas.stewFormulas,
+      formulas: stew,
     });
     if (validationErr) {
       return NextResponse.json({ error: validationErr }, { status: 400 });
     }
 
-    const order = await createPrepOrder(kitchenOwnerId, {
-      stewing_date: body.stewing_date,
-      order_type,
-      capacity,
-      qty_osmanthus: qtys.osmanthus,
-      qty_red_date: qtys.red_date,
-      qty_rock_sugar: qtys.rock_sugar,
-      linked_order_id: body.linked_order_id ?? null,
-      order_code: body.order_code,
-      notes: body.notes,
-    });
+    const order = await createPrepOrder(
+      kitchenOwnerId,
+      {
+        stewing_date: body.stewing_date,
+        order_type,
+        capacity,
+        qty_osmanthus: qtys.osmanthus,
+        qty_red_date: qtys.red_date,
+        qty_rock_sugar: qtys.rock_sugar,
+        linked_order_id: body.linked_order_id ?? null,
+        order_code: body.order_code,
+        notes: body.notes,
+      },
+      { stewFormulas: stew, refetch: false },
+    );
     return NextResponse.json({ order, orders: [order] }, { status: 201 });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to create prep order';

@@ -24,6 +24,7 @@ import { BTN, TITLE, bi } from '@/lib/ui-labels';
 import { useModalUnsavedWarning } from '@/hooks/useUnsavedChangesWarning';
 import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 import { prefetchKitchenPrepDetail } from '@/lib/kitchen-prep-detail-cache';
+import { clearKitchenPrepListCache } from '@/lib/kitchen-prep-list-cache';
 import {
   peekKitchenPrepListCache,
   prepListCacheKey,
@@ -441,11 +442,13 @@ function KitchenPrepListContent() {
     const d = await res.json();
     setSaving(false);
     if (!res.ok) { setError(d.error || 'Failed'); return; }
+    clearKitchenPrepListCache();
     setShowForm(false);
     setForm(EMPTY);
     if (d.orders?.length > 1) {
-      load();
-    } else {
+      void load();
+    } else if (d.order) {
+      prefetchKitchenPrepDetail(d.order.id);
       router.push(`/kitchen-prep/${d.order.id}`);
     }
   };

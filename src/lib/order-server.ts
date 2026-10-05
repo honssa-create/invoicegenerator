@@ -2,6 +2,7 @@ import db from './db';
 import type { Order } from './orders';
 import { hydrateNestieeGiftBoxQtys, orderDueDate } from './orders';
 import { pickThumbnailFile } from './attachment-files';
+import { buildOrderListFilterSql, type OrderListQuery } from './order-list-filters';
 import { getActivities, logActivity as logActivityUnified } from './activity';
 import { getInvoiceWithDetails } from './invoices';
 import { formatCustomerPartyBlock } from './customer-party';
@@ -283,7 +284,26 @@ export type ListOrdersSummaryOpts = {
   includeFiles?: boolean;
   /** Thumbnail + attachment count only (default for order list API). */
   includeFileListMeta?: boolean;
+  /** List page filters (orders UI). */
+  listQuery?: OrderListQuery;
+  limit?: number;
+  offset?: number;
 };
+
+export type OrderListPage = {
+  orders: Order[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+const ORDER_LIST_FROM = `FROM orders o
+       LEFT JOIN LATERAL (
+         SELECT CASE
+           WHEN o.fields_json IS NULL OR btrim(o.fields_json) = '' THEN '{}'::jsonb
+           ELSE o.fields_json::jsonb
+         END AS fj
+       ) AS j ON true`;
 
 /** Batch-load design-proof attachments for a lean order list (one query). */
 async function attachOrderFiles(orders: Order[]): Promise<Order[]> {
@@ -391,10 +411,47 @@ async function attachOrderListFileMeta(orders: Order[]): Promise<Order[]> {
  * Lean list for table/board/accounting/cashflow: core columns + list field keys via jsonb,
  * without parsing full fields_json blobs in Node.
  */
-export async function listOrdersSummary(
+export async function listOrdersPage(
   userId: number,
-  opts: ListOrdersSummaryOpts = {}
-): Promise<Order[]> {
+  opts: ListOrdersSummaryOpts = {},
+): Promise<OrderListPage> {
+  const limit = Math.min(5000, Math.max(1, opts.limit ?? 200));
+  const offset = Math.max(0, opts.offset ?? 0);
+  const { whereExtra, params } = buildListWhere(userId, opts);
+  const countRow = (await db
+    .prepare(
+      `SELECT COUNT(*)::int AS cnt ${ORDER_LIST_FROM}
+       WHERE o.user_id = ?${whereExtra}`
+    )
+    .get(...params)) as { cnt: number } | undefined;
+  const total = Number(countRow?.cnt) || 0;
+
+  const listParams = [...params, limit, offset];
+  const rows = (await db
+    .prepare(
+      `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
+              o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
+              o.quotation_id, o.total_amount, o.created_at, o.updated_at,
+              o.source_platform, o.attended_at,
+              ${LIST_FIELD_SQL}
+       ${ORDER_LIST_FROM}
+       WHERE o.user_id = ?${whereExtra}
+       ORDER BY o.updated_at DESC, o.id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...listParams)) as LeanOrderRow[];
+
+  let orders = rows.map(leanRowToOrder);
+  if (opts.includeFiles) orders = await attachOrderFiles(orders);
+  else if (opts.includeFileListMeta !== false) orders = await attachOrderListFileMeta(orders);
+
+  return { orders, total, limit, offset };
+}
+
+function buildListWhere(
+  userId: number,
+  opts: ListOrdersSummaryOpts,
+): { whereExtra: string; params: (string | number)[] } {
   const params: (string | number)[] = [userId];
   let whereExtra = '';
 
@@ -430,6 +487,23 @@ export async function listOrdersSummary(
     )`;
   }
 
+  if (opts.listQuery) {
+    whereExtra += buildOrderListFilterSql(opts.listQuery, params);
+  }
+
+  return { whereExtra, params };
+}
+
+export async function listOrdersSummary(
+  userId: number,
+  opts: ListOrdersSummaryOpts = {}
+): Promise<Order[]> {
+  if (opts.limit != null || opts.offset != null || opts.listQuery) {
+    const page = await listOrdersPage(userId, opts);
+    return page.orders;
+  }
+  const { whereExtra, params } = buildListWhere(userId, opts);
+
   const rows = (await db
     .prepare(
       `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
@@ -437,13 +511,7 @@ export async function listOrdersSummary(
               o.quotation_id, o.total_amount, o.created_at, o.updated_at,
               o.source_platform, o.attended_at,
               ${LIST_FIELD_SQL}
-       FROM orders o
-       LEFT JOIN LATERAL (
-         SELECT CASE
-           WHEN o.fields_json IS NULL OR btrim(o.fields_json) = '' THEN '{}'::jsonb
-           ELSE o.fields_json::jsonb
-         END AS fj
-       ) AS j ON true
+       ${ORDER_LIST_FROM}
        WHERE o.user_id = ?${whereExtra}
        ORDER BY o.updated_at DESC, o.id DESC`
     )

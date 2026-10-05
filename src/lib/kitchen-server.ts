@@ -709,6 +709,24 @@ async function loadNestieeOrdersForPackagingStats(userId: number) {
   });
 }
 
+/** Nestiee shipping-box stock vs open-order need (no full inventory slice). */
+export async function getKitchenShippingBoxInventoryRows(
+  userId: number,
+): Promise<Array<{ boxId: string; label: string; quantity: number; needed: number }>> {
+  const { catalog } = await loadKitchenCatalog(userId);
+  await ensureSeed(userId, catalog);
+  const [stock, open] = await Promise.all([
+    loadStockMaps(userId, catalog),
+    getOpenOrdersSlice(userId),
+  ]);
+  return NESTIEE_SHIPPING_BOX_SLOTS.map((slot) => ({
+    boxId: slot.id,
+    label: shippingBoxDisplayLabel(slot),
+    quantity: stock.shippingBoxes[slot.id] || 0,
+    needed: open.demand.shippingBoxes[slot.id] || 0,
+  }));
+}
+
 /** On-hand gift boxes + finished bottles only (no open-order scan). */
 export async function getKitchenStockSnapshot(
   userId: number,

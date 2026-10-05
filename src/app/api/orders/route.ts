@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { getOrder, listOrdersSummary, logActivity } from '@/lib/order-server';
+import { getOrder, listOrdersPage, logActivity } from '@/lib/order-server';
+import { parseOrderListQuery } from '@/lib/order-list-filters';
 import { getDataOwnerId } from '@/lib/org-server';
 import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE, orderTypeFromFields, statusesForOrderType } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
@@ -20,9 +21,15 @@ export async function GET(request: Request) {
     const { listOrderOptions } = await import('@/lib/order-server');
     return NextResponse.json({ orders: await listOrderOptions(ownerId) });
   }
-  return NextResponse.json({
-    orders: await listOrdersSummary(ownerId, { includeFileListMeta: true }),
+  const parsed = parseOrderListQuery(new URL(request.url).searchParams);
+  const { limit, offset, ...listQuery } = parsed;
+  const page = await listOrdersPage(ownerId, {
+    includeFileListMeta: true,
+    listQuery,
+    limit,
+    offset,
   });
+  return NextResponse.json(page);
 }
 
 export async function POST(request: Request) {

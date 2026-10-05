@@ -23,7 +23,18 @@ const DATE_FILTER_LABELS: Record<NestieeDateFilterType, { en: string; zh: string
   delivery_date: { en: 'By delivery date', zh: '按送貨日期' },
 };
 
-export default function KitchenProductionSchedule() {
+type KitchenProductionScheduleProps = {
+  embedded?: boolean;
+  loading?: boolean;
+  dateStart?: string;
+  dateEnd?: string;
+  dateFilterType?: NestieeDateFilterType;
+  schedule?: ProductionScheduleSummary | null;
+  orderCount?: number;
+};
+
+export default function KitchenProductionSchedule(props: KitchenProductionScheduleProps = {}) {
+  const embedded = Boolean(props.embedded);
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [dateFilterType, setDateFilterType] = useState<NestieeDateFilterType>('delivery_date');
@@ -37,7 +48,16 @@ export default function KitchenProductionSchedule() {
   const [defectModalProduct, setDefectModalProduct] = useState<string | null>(null);
   const [defectDraft, setDefectDraft] = useState('');
 
-  const hasDateFilter = Boolean(dateStart || dateEnd);
+  const effectiveDateStart = embedded ? props.dateStart ?? '' : dateStart;
+  const effectiveDateEnd = embedded ? props.dateEnd ?? '' : dateEnd;
+  const effectiveDateFilterType = embedded
+    ? props.dateFilterType ?? 'delivery_date'
+    : dateFilterType;
+  const effectiveSchedule = embedded ? props.schedule ?? null : schedule;
+  const effectiveOrderCount = embedded ? props.orderCount ?? 0 : orderCount;
+  const effectiveLoading = embedded ? Boolean(props.loading) : loading;
+
+  const hasDateFilter = Boolean(effectiveDateStart || effectiveDateEnd);
 
   useEffect(() => {
     setDefects(
@@ -60,6 +80,7 @@ export default function KitchenProductionSchedule() {
   }, [defects, defectsHydrated]);
 
   const load = useCallback(() => {
+    if (embedded) return;
     setLoading(true);
     const params = new URLSearchParams();
     if (dateStart) params.set('dateStart', dateStart);
@@ -75,16 +96,16 @@ export default function KitchenProductionSchedule() {
         /* keep previous */
       })
       .finally(() => setLoading(false));
-  }, [dateStart, dateEnd, dateFilterType]);
+  }, [dateStart, dateEnd, dateFilterType, embedded]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const displaySchedule = useMemo(() => {
-    if (!schedule) return null;
-    return applyDefectsToProductionSchedule(schedule, defects);
-  }, [schedule, defects]);
+    if (!effectiveSchedule) return null;
+    return applyDefectsToProductionSchedule(effectiveSchedule, defects);
+  }, [effectiveSchedule, defects]);
 
   const totalSessions = displaySchedule?.totalSessions ?? 0;
   const totalDays = displaySchedule?.totalDaysNeeded ?? 0;
@@ -113,20 +134,21 @@ export default function KitchenProductionSchedule() {
       <div className="mb-4">
         <h2 className="font-semibold text-gray-900">燕窩生產排程</h2>
         <p className="text-sm text-gray-500 mt-1">
-          {loading
+          {effectiveLoading
             ? bi('Loading…', '載入中…')
             : hasDateFilter
               ? bi(
-                  `${orderCount} unshipped processing order(s) in range`,
-                  `日期範圍內 ${orderCount} 張未出貨處理中訂單`,
+                  `${effectiveOrderCount} unshipped processing order(s) in range`,
+                  `日期範圍內 ${effectiveOrderCount} 張未出貨處理中訂單`,
                 )
               : bi(
-                  `${orderCount} unshipped processing order(s)`,
-                  `${orderCount} 張未出貨處理中訂單`,
+                  `${effectiveOrderCount} unshipped processing order(s)`,
+                  `${effectiveOrderCount} 張未出貨處理中訂單`,
                 )}
         </p>
       </div>
 
+      {!embedded ? (
       <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-4">
         <div className="grid grid-cols-2 gap-3 sm:contents">
           <DateFilterField label={FILTER.startDate} value={dateStart} onChange={setDateStart} />
@@ -167,6 +189,7 @@ export default function KitchenProductionSchedule() {
           {bi('Clear dates', '清除日期')}
         </button>
       </div>
+      ) : null}
 
       <div className="overflow-x-auto flex-1">
         <table className="w-full text-sm">
@@ -220,20 +243,20 @@ export default function KitchenProductionSchedule() {
               return (
                 <tr key={row.slotId} className="border-b border-gray-50">
                   <td className="py-2 pr-2 font-medium text-gray-900">{row.product}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.stock}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.demand}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{effectiveLoading ? '—' : row.stock}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{effectiveLoading ? '—' : row.demand}</td>
                   <td className="py-2 pr-2 text-right tabular-nums text-amber-800">
-                    {loading ? '—' : defectQty}
+                    {effectiveLoading ? '—' : defectQty}
                   </td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{loading ? '—' : row.shortfall}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{effectiveLoading ? '—' : row.shortfall}</td>
                   <td className="py-2 pr-2 text-right tabular-nums font-medium">
-                    {loading ? '—' : row.sessions == null ? '—' : row.sessions}
+                    {effectiveLoading ? '—' : row.sessions == null ? '—' : row.sessions}
                   </td>
                   <td className="py-2 text-right">
                     <button
                       type="button"
                       className="min-h-[36px] px-2.5 py-1 text-xs font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 whitespace-nowrap"
-                      disabled={loading}
+                      disabled={effectiveLoading}
                       {...tapProps(() => openDefectModal(row.product))}
                     >
                       {bi('Add defect', '加入次貨')}
@@ -297,7 +320,7 @@ export default function KitchenProductionSchedule() {
 
       <div className="mt-5 rounded-lg bg-[#F7F2E8] border border-[#E8DCC8] px-4 py-4 space-y-2">
         <p className="text-base font-semibold text-gray-900">
-          {loading
+          {effectiveLoading
             ? '—'
             : bi(
                 `Total: ${totalSessions} session(s) (≈ ${totalDays} working day(s))`,
@@ -305,7 +328,7 @@ export default function KitchenProductionSchedule() {
               )}
         </p>
         <p className="text-base font-semibold text-gray-900">
-          {loading
+          {effectiveLoading
             ? '—'
             : bi(
                 `Est. ready date: ${estDate} (Sundays excluded)`,

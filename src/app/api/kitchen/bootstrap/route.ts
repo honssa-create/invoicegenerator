@@ -28,6 +28,7 @@ export async function GET(request: Request) {
       includeMovements: !lite,
       includeInventory,
       includeOrders,
+      includePrepRawDemand: includeInventory,
       catalogBundle: bundle,
     }),
     includeWidgets

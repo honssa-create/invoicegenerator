@@ -6,7 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import KitchenAdminPanel from '@/components/KitchenAdminPanel';
 import KitchenWidgetsPanel from '@/components/KitchenWidgetsPanel';
-import type { KitchenWidgetsPayload } from '@/lib/kitchen-widgets-server';
+import {
+  peekKitchenBootstrapLiteCache,
+  setKitchenBootstrapLiteCache,
+  type KitchenBootstrapLitePayload,
+} from '@/lib/kitchen-bootstrap-cache';
 import TapButton from '@/components/TapButton';
 import { tapProps } from '@/lib/tap-action';
 import {
@@ -201,9 +205,6 @@ function KitchenPageContent() {
   const searchParams = useSearchParams();
   const [state, setState] = useState<KitchenState | null>(null);
   const [shellLoading, setShellLoading] = useState(true);
-  const [bootstrapWidgets, setBootstrapWidgets] = useState<
-    KitchenWidgetsPayload | null | undefined
-  >(undefined);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -349,24 +350,43 @@ function KitchenPageContent() {
     }
   };
 
-  const loadShell = async () => {
-    setShellLoading(true);
+  const BOOTSTRAP_LITE_URL = '/api/kitchen/bootstrap?lite=1&inventory=0&orders=0';
+
+  const applyBootstrapPayload = (
+    data: KitchenBootstrapLitePayload,
+    opts?: { preserveMovements?: boolean },
+  ) => {
+    catalogBundleRef.current = {
+      catalog: data.catalog,
+      formulas: data.formulas,
+    };
+    setState((prev) => {
+      const movements = opts?.preserveMovements ? prev?.movements ?? [] : [];
+      const merged = mergeCatalogIntoState(data.state, movements);
+      if (merged) {
+        const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
+        if (first) setGiftType((cur) => cur || first);
+        return merged;
+      }
+      return prev;
+    });
+    setKitchenBootstrapLiteCache(data);
+  };
+
+  const fetchBootstrapLite = async (background = false) => {
+    if (!background) setShellLoading(true);
     try {
-      const res = await fetch('/api/kitchen/bootstrap?lite=1&inventory=0&orders=0');
+      const res = await fetch(BOOTSTRAP_LITE_URL);
       const data = await res.json();
       if (!res.ok) return;
-      catalogBundleRef.current = {
-        catalog: data.catalog,
-        formulas: data.formulas,
-      };
-      setState((prev) => {
-        const merged = mergeCatalogIntoState(data.state, prev?.movements);
-        if (merged) {
-          const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
-          if (first) setGiftType((cur) => cur || first);
-        }
-        return merged ?? prev;
-      });
+      applyBootstrapPayload(
+        {
+          state: data.state,
+          catalog: data.catalog,
+          formulas: data.formulas,
+        },
+        { preserveMovements: background },
+      );
       if (inventoryLoadedRef.current) {
         await loadInventory();
       }
@@ -374,33 +394,23 @@ function KitchenPageContent() {
         await loadOrders();
       }
     } finally {
-      setShellLoading(false);
+      if (!background) setShellLoading(false);
     }
   };
 
-  const loadInitial = async () => {
-    setShellLoading(true);
-    try {
-      const res = await fetch('/api/kitchen/bootstrap?lite=1&inventory=0&orders=0&widgets=1');
-      const data = await res.json();
-      if (!res.ok) return;
+  const loadShell = async () => {
+    await fetchBootstrapLite(false);
+  };
 
-      catalogBundleRef.current = {
-        catalog: data.catalog,
-        formulas: data.formulas,
-      };
-      const merged = mergeCatalogIntoState(data.state, []);
-      if (merged) {
-        setState(merged);
-        const first = activeGiftBoxTypes(merged.catalog)[0]?.id;
-        if (first) setGiftType((cur) => cur || first);
-      }
-      setBootstrapWidgets(
-        data.widgets && typeof data.widgets === 'object' ? (data.widgets as KitchenWidgetsPayload) : null,
-      );
-    } finally {
+  const loadInitial = async () => {
+    const cached = peekKitchenBootstrapLiteCache();
+    if (cached) {
+      applyBootstrapPayload(cached);
       setShellLoading(false);
+      void fetchBootstrapLite(true);
+      return;
     }
+    await fetchBootstrapLite(false);
   };
 
   const load = async (opts?: { refreshMovements?: boolean; refreshOrders?: boolean }) => {
@@ -1108,10 +1118,7 @@ function KitchenPageContent() {
         />
       )}
 
-      <KitchenWidgetsPanel
-        waitForBootstrap={bootstrapWidgets === undefined}
-        initialPayload={bootstrapWidgets ?? null}
-      />
+      <KitchenWidgetsPanel />
 
       {/* Inventory — expanded by default */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">

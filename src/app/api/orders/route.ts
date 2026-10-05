@@ -20,7 +20,9 @@ export async function GET(request: Request) {
     const { listOrderOptions } = await import('@/lib/order-server');
     return NextResponse.json({ orders: await listOrderOptions(ownerId) });
   }
-  return NextResponse.json({ orders: await listOrdersSummary(ownerId, { includeFiles: true }) });
+  return NextResponse.json({
+    orders: await listOrdersSummary(ownerId, { includeFileListMeta: true }),
+  });
 }
 
 export async function POST(request: Request) {

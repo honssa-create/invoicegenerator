@@ -3,16 +3,29 @@ import { getSessionFromRequest } from '@/lib/auth';
 import {
   createPrepOrder,
   createPrepOrdersBatch,
-  listPrepOrders,
+  listPrepOrdersWithCapacities,
   resolveKitchenOwnerUserId,
 } from '@/lib/kitchen-prep-server';
 import { PREP_ORDER_TYPES, validatePrepFlavorQtys, type PrepCapacity } from '@/lib/kitchen-prep';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 
+function parseYmd(raw: string | null): string {
+  const v = raw?.trim() || '';
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '';
+}
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  return NextResponse.json({ orders: await listPrepOrders() });
+  const ownerId = await resolveKitchenOwnerUserId();
+  const params = new URL(request.url).searchParams;
+  const dateStart = parseYmd(params.get('dateStart'));
+  const dateEnd = parseYmd(params.get('dateEnd'));
+  const { orders, capacities } = await listPrepOrdersWithCapacities(ownerId, {
+    dateStart,
+    dateEnd,
+  });
+  return NextResponse.json({ orders, capacities });
 }
 
 export async function POST(request: Request) {

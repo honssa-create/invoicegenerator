@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -41,6 +41,7 @@ export default function QuotationsPage() {
   const readOnly = isSectionReadOnly('quotations');
   const savedUi = useMemo(() => readListUi<QuotationsListUiState>(QUOTATIONS_LIST_UI_KEY), []);
   const [quotations, setQuotations] = useState<QuotationWithDetails[]>([]);
+  const [listTotal, setListTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
@@ -63,36 +64,35 @@ export default function QuotationsPage() {
   });
   const skipPageResetRef = useRef(true);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
-    fetch('/api/quotations')
+    const params = new URLSearchParams();
+    params.set('limit', String(PAGE_SIZE));
+    params.set('offset', String((page - 1) * PAGE_SIZE));
+    if (dateStart) params.set('dateStart', dateStart);
+    if (dateEnd) params.set('dateEnd', dateEnd);
+    if (client) params.set('client', client);
+    if (status) params.set('status', status);
+    if (search.trim()) params.set('search', search.trim());
+    fetch(`/api/quotations?${params}`)
       .then((r) => r.json())
-      .then((d) => setQuotations(d.quotations || []))
+      .then((d) => {
+        setQuotations(d.quotations || []);
+        setListTotal(typeof d.total === 'number' ? d.total : (d.quotations?.length ?? 0));
+      })
       .finally(() => setLoading(false));
-  };
+  }, [page, dateStart, dateEnd, client, status, search]);
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const clientOptions = Array.from(
     new Set(quotations.map((q) => q.customer_name).filter(Boolean) as string[])
   );
 
   const displayed = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let list = quotations.filter((row) => {
-      if (dateStart && row.issue_date < dateStart) return false;
-      if (dateEnd && row.issue_date > dateEnd) return false;
-      if (client && row.customer_name !== client) return false;
-      if (status && row.status !== status) return false;
-      if (q) {
-        const hay = [row.quote_number, row.customer_name].filter(Boolean).join(' ').toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
     const dir = sort.dir === 'asc' ? 1 : -1;
-    list = [...list].sort((a, b) => {
+    const list = [...quotations].sort((a, b) => {
       let base: number;
       switch (sort.key) {
         case 'number':
@@ -113,12 +113,12 @@ export default function QuotationsPage() {
       return dir * base;
     });
     return list;
-  }, [quotations, dateStart, dateEnd, client, status, search, sort]);
+  }, [quotations, sort]);
 
-  const totalPages = Math.max(1, Math.ceil(displayed.length / PAGE_SIZE));
-  const pageStart = displayed.length ? (page - 1) * PAGE_SIZE : 0;
-  const pageEnd = Math.min(page * PAGE_SIZE, displayed.length);
-  const pageRows = displayed.slice(pageStart, pageEnd);
+  const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
+  const pageStart = listTotal ? (page - 1) * PAGE_SIZE : 0;
+  const pageEnd = Math.min(pageStart + displayed.length, listTotal);
+  const pageRows = displayed;
 
   useEffect(() => {
     writeListUi(QUOTATIONS_LIST_UI_KEY, {

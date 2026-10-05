@@ -76,6 +76,12 @@ export function giftBoxMinStock(holidayMode = false): number {
   return holidayMode ? GIFT_BOX_MIN_STOCK_HOLIDAY : GIFT_BOX_MIN_STOCK;
 }
 
+/** Preserve signed on-hand counts when reading from DB (negative stock allowed). */
+export function kitchenStockQty(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** How many units to package to reach the minimum (0 if already at/above). */
 export function giftBoxTopUpQty(quantity: number, minStock: number = GIFT_BOX_MIN_STOCK): number {
   const q = Number.isFinite(quantity) ? Math.floor(quantity) : 0;
@@ -149,6 +155,14 @@ export interface ShippingBoxRow {
   needed: number;
 }
 
+export interface AirColumnCapRow {
+  capId: string;
+  label: string;
+  quantity: number;
+  needed: number;
+  used: number;
+}
+
 export interface RawRow {
   name: string;
   unit: string;
@@ -215,12 +229,14 @@ export interface KitchenDemand {
   finished: Record<string, number>;
   raw: Record<string, number>;
   shippingBoxes: Record<string, number>;
+  airColumnCaps: Record<string, number>;
 }
 
 export interface KitchenState {
   giftBoxes: GiftBoxRow[];
   finished: FinishedRow[];
   shippingBoxes: ShippingBoxRow[];
+  airColumnCaps: AirColumnCapRow[];
   raw: RawRow[];
   demand: KitchenDemand;
   openOrders: KitchenOpenOrder[];

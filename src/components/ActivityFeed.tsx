@@ -16,10 +16,17 @@ interface ActivityFeedProps {
   entityType: 'order' | 'invoice' | 'quotation';
   entityId: number | string;
   className?: string;
+  /** Preloaded from order bootstrap — skips initial fetch when set. */
+  initialActivities?: Activity[] | null;
 }
 
-export default function ActivityFeed({ entityType, entityId, className = '' }: ActivityFeedProps) {
-  const [activities, setActivities] = useState<Activity[]>([]);
+export default function ActivityFeed({
+  entityType,
+  entityId,
+  className = '',
+  initialActivities = null,
+}: ActivityFeedProps) {
+  const [activities, setActivities] = useState<Activity[]>(initialActivities ?? []);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
 
@@ -31,9 +38,13 @@ export default function ActivityFeed({ entityType, entityId, className = '' }: A
   };
 
   useEffect(() => {
+    if (initialActivities != null) {
+      setActivities(initialActivities);
+      return;
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityType, entityId]);
+  }, [entityType, entityId, initialActivities]);
 
   const post = async () => {
     const text = comment.trim();

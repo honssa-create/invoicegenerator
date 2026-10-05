@@ -28,7 +28,8 @@ export function kitchenShortagesFromNeeds(
     if (qty <= 0) continue;
     let have = 0;
     if (n.needKey.startsWith('gift:')) {
-      have = Number(stock.giftBoxes[n.needKey.slice(5)]) || 0;
+      const raw = Number(stock.giftBoxes[n.needKey.slice(5)]);
+      have = Number.isFinite(raw) ? raw : 0;
     } else if (n.needKey.startsWith('bottle:')) {
       have = Number(stock.finished[n.needKey.slice(7)]) || 0;
     } else {

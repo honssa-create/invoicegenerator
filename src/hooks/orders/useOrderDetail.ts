@@ -11,6 +11,7 @@ import {
 } from '@/lib/kitchen-ship-allocate';
 import { isUnattendedImportedOrder, NESTIEE_GIFT_BOX_TYPES, type Order } from '@/lib/orders';
 import type { OrderDetailPatchPayload } from '@/components/orders/order-detail-types';
+import type { ActivityRow } from '@/lib/activity';
 import { MSG, bi } from '@/lib/ui-labels';
 
 export interface InvoiceOption {
@@ -37,6 +38,7 @@ export function useOrderDetail(orderId: string) {
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [supplierOptions, setSupplierOptions] = useState<string[]>([...DEFAULT_OPTIONS.supplier]);
   const [nestieeGiftBoxes, setNestieeGiftBoxes] = useState(NESTIEE_GIFT_BOX_TYPES);
+  const [initialActivities, setInitialActivities] = useState<ActivityRow[] | null>(null);
 
   const bigDayPersistedRef = useRef('');
   const bigDaySavedOnChangeRef = useRef<string | null>(null);
@@ -149,16 +151,45 @@ export function useOrderDetail(orderId: string) {
     attendPostedForRef.current = null;
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/orders/${orderId}`)
+    fetch(`/api/orders/${orderId}/bootstrap`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (cancelled) return;
-        const o = d?.order || null;
+        if (cancelled || !d) return;
+        const o = d.order || null;
         setOrder(o);
         if (o) {
           bigDayPersistedRef.current = String(o.fields?.big_day || '');
           bigDaySavedOnChangeRef.current = null;
           updatedAtRef.current = o.updated_at || '';
+        }
+        if (Array.isArray(d.invoices)) {
+          setInvoices(
+            d.invoices.map((i: InvoiceOption) => ({
+              id: i.id,
+              invoice_number: i.invoice_number,
+              status: i.status,
+            })),
+          );
+        }
+        if (Array.isArray(d.quotations)) {
+          setQuotations(
+            d.quotations.map((q: QuotationOption) => ({
+              id: q.id,
+              quote_number: q.quote_number,
+              status: q.status,
+            })),
+          );
+        }
+        if (Array.isArray(d.accountUsers)) setAccountUsers(d.accountUsers);
+        if (Array.isArray(d.tagSuggestions)) setTagSuggestions(d.tagSuggestions);
+        if (Array.isArray(d.supplierOptions) && d.supplierOptions.length) {
+          setSupplierOptions(d.supplierOptions.map(String));
+        }
+        if (Array.isArray(d.nestieeGiftBoxes) && d.nestieeGiftBoxes.length) {
+          setNestieeGiftBoxes(d.nestieeGiftBoxes);
+        }
+        if (Array.isArray(d.activities)) {
+          setInitialActivities(d.activities as ActivityRow[]);
         }
       })
       .finally(() => {
@@ -187,77 +218,7 @@ export function useOrderDetail(orderId: string) {
     };
   }, [orderId, order]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/kitchen/catalog')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled || !d?.catalog?.giftBoxTypes) return;
-        const boxes = (d.catalog.giftBoxTypes as {
-          id: string;
-          label: string;
-          qtyKey: string;
-          active?: boolean;
-        }[])
-          .filter((g) => g.active !== false)
-          .map((g) => ({
-            id: g.id,
-            label: g.label,
-            qtyKey: g.qtyKey || `nestiee_gift_qty_${g.id}`,
-          }));
-        if (boxes.length) setNestieeGiftBoxes(boxes);
-      })
-      .catch(() => {
-        /* keep defaults */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useRefetchOnFocus(refetchOrder, Boolean(orderId) && !loading);
-
-  useEffect(() => {
-    fetch('/api/invoices?fields=options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) =>
-        setInvoices(
-          (d?.invoices || []).map((i: InvoiceOption) => ({
-            id: i.id,
-            invoice_number: i.invoice_number,
-            status: i.status,
-          })),
-        ),
-      )
-      .catch(() => {});
-    fetch('/api/quotations?fields=options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) =>
-        setQuotations(
-          (d?.quotations || []).map((q: QuotationOption) => ({
-            id: q.id,
-            quote_number: q.quote_number,
-            status: q.status,
-          })),
-        ),
-      )
-      .catch(() => {});
-    fetch('/api/account/users')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAccountUsers(Array.isArray(d?.users) ? d.users : []))
-      .catch(() => {});
-    fetch('/api/orders/tag-options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setTagSuggestions(Array.isArray(d?.tags) ? d.tags : []))
-      .catch(() => {});
-    fetch('/api/expense-options')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const list = d?.options?.supplier;
-        if (Array.isArray(list)) setSupplierOptions(list.map(String));
-      })
-      .catch(() => {});
-  }, []);
 
   return {
     order,
@@ -273,6 +234,7 @@ export function useOrderDetail(orderId: string) {
     supplierOptions,
     setSupplierOptions,
     nestieeGiftBoxes,
+    initialActivities,
     bigDayPersistedRef,
     bigDaySavedOnChangeRef,
     patch,

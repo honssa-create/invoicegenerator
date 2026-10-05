@@ -78,6 +78,7 @@ export default function OrderDetailPage() {
     supplierOptions,
     setSupplierOptions,
     nestieeGiftBoxes,
+    initialActivities,
     bigDayPersistedRef,
     bigDaySavedOnChangeRef,
     patch,
@@ -795,7 +796,12 @@ export default function OrderDetailPage() {
 
         {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}
         <div className="w-full lg:w-[30%] lg:h-full">
-          <ActivityFeed entityType="order" entityId={order.id} className="lg:h-full max-h-[75vh] lg:max-h-none" />
+          <ActivityFeed
+            entityType="order"
+            entityId={order.id}
+            initialActivities={initialActivities}
+            className="lg:h-full max-h-[75vh] lg:max-h-none"
+          />
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
-import { resolveKitchenOwnerUserId, getInventorySlice } from '@/lib/kitchen-server';
+import { resolveKitchenOwnerUserId, getKitchenShippingBoxInventoryRows } from '@/lib/kitchen-server';
 import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import { NESTIEE_ORDER_TYPE } from '@/lib/orders';
 import {
@@ -85,16 +85,11 @@ export async function GET(request: Request) {
       dateFilterType,
     });
 
-    const inventory = await getInventorySlice(ownerId);
+    const shippingInventory = await getKitchenShippingBoxInventoryRows(ownerId);
 
     return NextResponse.json({
       summary,
-      shippingInventory: inventory.shippingBoxes.map((b) => ({
-        boxId: b.boxId,
-        label: b.label,
-        quantity: b.quantity,
-        needed: b.needed,
-      })),
+      shippingInventory,
     });
   } catch {
     return NextResponse.json({ error: 'Failed to load used shipping boxes' }, { status: 500 });

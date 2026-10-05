@@ -5,11 +5,13 @@ import {
   hydrateNestieeGiftBoxQtys,
   isNestieeOrderType,
   localDateYmd,
+  NESTIEE_ORDER_TYPE,
   orderDueDate,
   orderTypeFromFields,
 } from './orders';
 import { orderMatchesNestieeModifiedScope } from './nestiee-woo-changes';
 import { addCalendarDays } from './wedding-gift-confirmation';
+import { buildOrderDeliveryDateExpr } from './order-list-shipped-sql';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
@@ -200,6 +202,149 @@ export const NESTIEE_SHIPPING_BOX_SLOTS: NestieeDemandShippingBox[] = [
 
 export function shippingBoxDisplayLabel(box: Pick<NestieeDemandShippingBox, 'label' | 'size'>): string {
   return `${box.label}(${box.size})`;
+}
+
+export type NestieeAirColumnCapId = 'single' | 'double';
+
+export interface NestieeAirColumnCapSlot {
+  id: NestieeAirColumnCapId;
+  label: string;
+  qty: number;
+}
+
+export const NESTIEE_AIR_COLUMN_CAP_SLOTS: NestieeAirColumnCapSlot[] = [
+  { id: 'single', label: '氣柱帽 - 單', qty: 0 },
+  { id: 'double', label: '氣柱帽 - 雙', qty: 0 },
+];
+
+/** Air column caps per order from total 禮盒 count in that order. */
+export function mapAirColumnCapsForGiftCount(giftBoxes: number): Record<NestieeAirColumnCapId, number> {
+  const count = Math.max(0, Math.floor(giftBoxes));
+  return {
+    single: count % 2,
+    double: Math.floor(count / 2),
+  };
+}
+
+function addAirColumnCapsForOrderGiftTotal(
+  totals: Map<NestieeAirColumnCapId, number>,
+  orderGiftTotal: number,
+): void {
+  const caps = mapAirColumnCapsForGiftCount(orderGiftTotal);
+  totals.set('single', (totals.get('single') || 0) + caps.single);
+  totals.set('double', (totals.get('double') || 0) + caps.double);
+}
+
+export interface NestieeAirColumnCapsSummary {
+  caps: NestieeAirColumnCapSlot[];
+  orderCount: number;
+  dateStart: string;
+  dateEnd: string;
+  dateFilterType: NestieeDateFilterType;
+}
+
+/**
+ * Processing Nestiee orders — air caps needed (optional date filter on order/delivery date).
+ */
+export function summarizeNestieeAirColumnCapsNeeded(
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  giftBoxTypes: Array<{ qtyKey: string; active?: boolean }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): NestieeAirColumnCapsSummary {
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  const activeTypes = giftBoxTypes.filter((g) => g.active !== false);
+  const totals = new Map<NestieeAirColumnCapId, number>();
+  for (const slot of NESTIEE_AIR_COLUMN_CAP_SLOTS) totals.set(slot.id, 0);
+
+  let orderCount = 0;
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+    if (!orderMatchesNestieeDemandScope(order, 'processing')) continue;
+    if (
+      !orderMatchesNestieeDateRange(order, {
+        dateStart,
+        dateEnd,
+        dateFilterType,
+      })
+    ) {
+      continue;
+    }
+    orderCount += 1;
+    const fields = hydrateNestieeGiftBoxQtys({ ...(order.fields || {}) });
+    const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
+    addAirColumnCapsForOrderGiftTotal(totals, orderGiftTotal);
+  }
+
+  return {
+    caps: NESTIEE_AIR_COLUMN_CAP_SLOTS.map((slot) => ({
+      id: slot.id,
+      label: slot.label,
+      qty: totals.get(slot.id) || 0,
+    })),
+    orderCount,
+    dateStart,
+    dateEnd,
+    dateFilterType,
+  };
+}
+
+/**
+ * Shipped/completed Nestiee orders — air caps used (estimated) in a date range.
+ */
+export function summarizeNestieeUsedAirColumnCaps(
+  orders: Array<{ status?: string; fields?: Record<string, unknown>; created_at?: string | null }>,
+  giftBoxTypes: Array<{ qtyKey: string; active?: boolean }>,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+  } = {},
+): NestieeAirColumnCapsSummary {
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  const activeTypes = giftBoxTypes.filter((g) => g.active !== false);
+  const totals = new Map<NestieeAirColumnCapId, number>();
+  for (const slot of NESTIEE_AIR_COLUMN_CAP_SLOTS) totals.set(slot.id, 0);
+
+  let orderCount = 0;
+  for (const order of orders) {
+    const orderType = orderTypeFromFields(order.fields);
+    if (!orderType || !isNestieeOrderType(orderType)) continue;
+    if (!orderMatchesNestieeDemandScope(order, 'shipped')) continue;
+    if (
+      !orderMatchesNestieeDateRange(order, {
+        dateStart,
+        dateEnd,
+        dateFilterType,
+      })
+    ) {
+      continue;
+    }
+    orderCount += 1;
+    const fields = hydrateNestieeGiftBoxQtys({ ...(order.fields || {}) });
+    const orderGiftTotal = totalGiftBoxesInOrder(fields, activeTypes);
+    addAirColumnCapsForOrderGiftTotal(totals, orderGiftTotal);
+  }
+
+  return {
+    caps: NESTIEE_AIR_COLUMN_CAP_SLOTS.map((slot) => ({
+      id: slot.id,
+      label: slot.label,
+      qty: totals.get(slot.id) || 0,
+    })),
+    orderCount,
+    dateStart,
+    dateEnd,
+    dateFilterType,
+  };
 }
 
 /** Per-order gift count fed into shipping-box mapping (minimum 1 outer box per order). */
@@ -478,4 +623,65 @@ export function summarizeNestieeUsedShippingBoxes(
     dateEnd,
     dateFilterType,
   };
+}
+
+/** SQL after `WHERE o.user_id = ?` (requires lateral `j`). */
+export function buildNestieeDemandListFilterSql(
+  scope: NestieeDemandScope,
+  opts: {
+    dateStart?: string;
+    dateEnd?: string;
+    dateFilterType?: NestieeDateFilterType;
+    today?: string;
+  },
+  params: (string | number)[],
+): string {
+  let where = ` AND (
+    COALESCE(o.order_type, '') = ?
+    OR COALESCE(j.fj->>'order_type', '') = ?
+  )`;
+  params.push(NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE);
+
+  const statuses = nestieeStatusesForDemandScope(scope);
+  const statusPh = statuses.map(() => '?').join(', ');
+  where += ` AND COALESCE(o.status, '') IN (${statusPh})`;
+  params.push(...statuses);
+
+  const today = opts.today || localDateYmd();
+  if (scope === 'ship_today') {
+    const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);
+    const dueExpr = buildOrderDeliveryDateExpr();
+    where += ` AND ${dueExpr} <> '' AND ${dueExpr} >= ? AND ${dueExpr} <= ?`;
+    params.push(dateStart, dateEnd);
+    return where;
+  }
+
+  const dateStart = opts.dateStart || '';
+  const dateEnd = opts.dateEnd || '';
+  if (!dateStart && !dateEnd) return where;
+
+  const dateFilterType = parseNestieeDateFilterType(opts.dateFilterType);
+  if (dateFilterType === 'delivery_date') {
+    const dueExpr = buildOrderDeliveryDateExpr();
+    where += ` AND ${dueExpr} <> ''`;
+    if (dateStart) {
+      where += ` AND ${dueExpr} >= ?`;
+      params.push(dateStart);
+    }
+    if (dateEnd) {
+      where += ` AND ${dueExpr} <= ?`;
+      params.push(dateEnd);
+    }
+  } else {
+    const createdExpr = `COALESCE(NULLIF(TRIM(LEFT(o.created_at, 10)), ''), '')`;
+    if (dateStart) {
+      where += ` AND (${createdExpr} = '' OR ${createdExpr} >= ?)`;
+      params.push(dateStart);
+    }
+    if (dateEnd) {
+      where += ` AND (${createdExpr} = '' OR ${createdExpr} <= ?)`;
+      params.push(dateEnd);
+    }
+  }
+  return where;
 }

@@ -10,7 +10,7 @@ import {
 import { countOrderListDashboard } from './order-list-dashboard';
 import type { OrderDashboardCounts } from './orders';
 import { getActivities, logActivity as logActivityUnified } from './activity';
-import { getInvoiceWithDetails } from './invoices';
+import { getInvoiceWithDetails, getLinkedInvoiceSummaryForOrder } from './invoices';
 import { formatCustomerPartyBlock } from './customer-party';
 
 interface OrderRow {
@@ -39,8 +39,27 @@ interface OrderRow {
 export type GetOrderOpts = {
   withActivities?: boolean;
   withLinkedDocs?: boolean;
+  /** When true, linked invoice uses header + items only (no customer join / invoice files). */
+  linkedInvoiceSummary?: boolean;
   withFiles?: boolean;
 };
+
+/** Default hydration for order detail bootstrap, focus refetch, and PATCH responses. */
+export const ORDER_DETAIL_REL_OPTS: GetOrderOpts = {
+  withActivities: false,
+  withLinkedDocs: true,
+  linkedInvoiceSummary: true,
+  withFiles: true,
+};
+
+export function parseOrderGetOpts(request: Request): GetOrderOpts {
+  const params = new URL(request.url).searchParams;
+  const withActivities = params.get('activities') === '1';
+  return {
+    ...ORDER_DETAIL_REL_OPTS,
+    withActivities,
+  };
+}
 
 async function hydrate(row: OrderRow, withRelations: GetOrderOpts | boolean): Promise<Order> {
   const rel: GetOrderOpts =
@@ -71,28 +90,32 @@ async function hydrate(row: OrderRow, withRelations: GetOrderOpts | boolean): Pr
 
   let linkedInvoice: Order['linked_invoice'] = null;
   if (rel.withLinkedDocs) {
-    const invRow = await db
-      .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
-      .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
-    if (invRow) {
-      const details = await getInvoiceWithDetails(invRow.id, row.user_id);
-      const billingFromInvoice = details?.billing_address?.trim() || '';
-      const billingFallback = details
-        ? formatCustomerPartyBlock({
-            name: details.customer_name,
-            companyName: details.customer_company_name,
-            phone: details.customer_phone,
-            email: details.email?.trim() || details.customer_email,
-            address: details.customer_address,
-          })
-        : '';
-      linkedInvoice = {
-        id: invRow.id,
-        invoice_number: invRow.invoice_number,
-        status: invRow.status,
-        total: details?.total ?? null,
-        billing_address: billingFromInvoice || billingFallback || null,
-      };
+    if (rel.linkedInvoiceSummary) {
+      linkedInvoice = await getLinkedInvoiceSummaryForOrder(row.id, row.user_id);
+    } else {
+      const invRow = await db
+        .prepare('SELECT id, invoice_number, status FROM invoices WHERE order_id = ? ORDER BY id DESC LIMIT 1')
+        .get(row.id) as { id: number; invoice_number: string; status: string } | undefined;
+      if (invRow) {
+        const details = await getInvoiceWithDetails(invRow.id, row.user_id);
+        const billingFromInvoice = details?.billing_address?.trim() || '';
+        const billingFallback = details
+          ? formatCustomerPartyBlock({
+              name: details.customer_name,
+              companyName: details.customer_company_name,
+              phone: details.customer_phone,
+              email: details.email?.trim() || details.customer_email,
+              address: details.customer_address,
+            })
+          : '';
+        linkedInvoice = {
+          id: invRow.id,
+          invoice_number: invRow.invoice_number,
+          status: invRow.status,
+          total: details?.total ?? null,
+          billing_address: billingFromInvoice || billingFallback || null,
+        };
+      }
     }
   }
 

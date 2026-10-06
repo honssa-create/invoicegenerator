@@ -801,30 +801,30 @@ export async function getKitchenStockSnapshot(
 /** Load on-hand stock quantities merged with current open-order demand. */
 export async function getInventorySlice(
   userId: number,
-  dateOpts: KitchenInventoryDateOpts = {}
+  dateOpts: KitchenInventoryDateOpts = {},
+  catalogBundle?: KitchenCatalogBundle,
 ): Promise<KitchenInventorySlice> {
-  const { catalog, formulas } = await loadKitchenCatalog(userId);
+  const bundle = catalogBundle ?? await loadKitchenCatalog(userId);
+  const { catalog, formulas } = bundle;
   await ensureSeed(userId, catalog);
-
-  const [stock, fulfillments, unfinishedRaw] = await Promise.all([
-    loadStockMaps(userId, catalog),
-    loadFulfillments(userId),
-    loadUnfinishedPrepRawDemand(userId, formulas),
-  ]);
-  const { orders: openOrders, shippingDemand, airColumnCapDemand } = await loadOpenOrders(
-    userId,
-    fulfillments,
-    catalog,
-  );
-  const demand = computeDemand(openOrders, formulas.giftBoxBoms, shippingDemand, airColumnCapDemand);
-  demand.raw = unfinishedRaw;
 
   const giftBoxTypes = catalog.giftBoxTypes.map((g) => ({
     id: g.id,
     qtyKey: g.qtyKey,
     active: g.active,
   }));
-  const packagingOrders = await loadNestieeOrdersForPackagingStats(userId);
+
+  const fulfillments = await loadFulfillments(userId);
+  const [stock, unfinishedRaw, packagingOrders, openOrderSlice] = await Promise.all([
+    loadStockMaps(userId, catalog),
+    loadUnfinishedPrepRawDemand(userId, formulas),
+    loadNestieeOrdersForPackagingStats(userId),
+    loadOpenOrders(userId, fulfillments, catalog),
+  ]);
+  const { orders: openOrders, shippingDemand, airColumnCapDemand } = openOrderSlice;
+  const demand = computeDemand(openOrders, formulas.giftBoxBoms, shippingDemand, airColumnCapDemand);
+  demand.raw = unfinishedRaw;
+
   const neededSummary = summarizeNestieeAirColumnCapsNeeded(packagingOrders, giftBoxTypes, dateOpts);
   const usedSummary = summarizeNestieeUsedAirColumnCaps(packagingOrders, giftBoxTypes, dateOpts);
   for (const slot of NESTIEE_AIR_COLUMN_CAP_SLOTS) {

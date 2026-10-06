@@ -39,7 +39,10 @@ import {
 import { getOrder } from './order-server';
 import { trySyncCustomerFromOrderRecord } from './customer-server';
 import { getWooStoreConfigs } from './woocommerce';
-import { tryAllocateKitchenOnShipTransition } from './kitchen-server';
+import {
+  kitchenAllocateActivityMessage,
+  tryAllocateKitchenOnShipTransition,
+} from './kitchen-server';
 import { logActivity } from './activity';
 
 export interface HubOrderUpsertInput {
@@ -124,31 +127,9 @@ async function applyHubShipKitchenAllocation(
   after: { status: string; fields: Record<string, unknown> },
 ): Promise<void> {
   const alloc = await tryAllocateKitchenOnShipTransition(userId, userId, orderId, before, after);
-  if (!alloc.triggered) return;
-  if (alloc.ok && alloc.allocated) {
-    await logActivity(
-      'order',
-      orderId,
-      userId,
-      'activity',
-      'System',
-      'auto-allocated kitchen stock on ship (Woo sync)',
-    );
-    return;
-  }
-  if (!alloc.ok) {
-    const detail = alloc.shortages
-      .map((s) => `${s.label}: need ${s.need}, have ${s.have}`)
-      .join('; ');
-    await logActivity(
-      'order',
-      orderId,
-      userId,
-      'activity',
-      'System',
-      `Woo sync: kitchen stock short — could not auto-allocate (${detail})`,
-    );
-  }
+  const message = kitchenAllocateActivityMessage(alloc, 'woo_sync');
+  if (!message) return;
+  await logActivity('order', orderId, userId, 'activity', 'System', message);
 }
 
 /** Upsert external order — never deletes local rows. */

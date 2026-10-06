@@ -241,6 +241,59 @@ export async function invoiceTotalsByIds(
   return out;
 }
 
+/** Linked-invoice chip on order detail — no customer join or invoice files. */
+export async function getLinkedInvoiceSummaryForOrder(
+  orderId: number | string,
+  userId: number,
+): Promise<{
+  id: number;
+  invoice_number: string;
+  status: string;
+  total: number;
+  billing_address: string | null;
+} | null> {
+  const invRow = (await db
+    .prepare(
+      `SELECT id, invoice_number, status, billing_address,
+              tax_rate, discount_type, discount_value, shipping_amount
+       FROM invoices
+       WHERE order_id = ? AND user_id = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get(orderId, userId)) as {
+    id: number;
+    invoice_number: string;
+    status: string;
+    billing_address: string | null;
+    tax_rate: number;
+    discount_type: string;
+    discount_value: number;
+    shipping_amount: number;
+  } | undefined;
+  if (!invRow) return null;
+
+  const items = (await db
+    .prepare('SELECT quantity, unit_price FROM invoice_items WHERE invoice_id = ?')
+    .all(invRow.id)) as Array<{ quantity: number; unit_price: number }>;
+
+  const { total } = calculateInvoiceTotals(items, {
+    taxRate: invRow.tax_rate,
+    discountType: invRow.discount_type,
+    discountValue: invRow.discount_value,
+    shippingAmount: invRow.shipping_amount,
+  });
+
+  const billing = invRow.billing_address?.trim() || null;
+  return {
+    id: invRow.id,
+    invoice_number: invRow.invoice_number,
+    status: invRow.status,
+    total,
+    billing_address: billing,
+  };
+}
+
 /** Dropdown options for linking invoices to orders. */
 export async function listInvoiceOptions(
   userId: number,

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
+import { loadKitchenCatalog } from '@/lib/kitchen-catalog-server';
 import { getInventorySlice, resolveKitchenOwnerUserId } from '@/lib/kitchen-server';
 import { parseNestieeDateFilterType } from '@/lib/nestiee-order-demand';
 
@@ -19,10 +20,15 @@ export async function GET(request: Request) {
   const dateFilterType = parseNestieeDateFilterType(url.searchParams.get('dateFilterType'));
 
   const ownerId = await resolveKitchenOwnerUserId();
-  const inventory = await getInventorySlice(ownerId, {
-    dateStart,
-    dateEnd,
-    dateFilterType,
-  });
+  const bundle = await loadKitchenCatalog(ownerId);
+  const inventory = await getInventorySlice(
+    ownerId,
+    {
+      dateStart,
+      dateEnd,
+      dateFilterType,
+    },
+    bundle,
+  );
   return NextResponse.json({ inventory });
 }

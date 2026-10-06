@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/auth';
 import { denyReadOnlyWrite } from '@/lib/api-guard';
-import { getOrder, logActivity } from '@/lib/order-server';
+import { getOrder, logActivity, ORDER_DETAIL_REL_OPTS, parseOrderGetOpts } from '@/lib/order-server';
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
@@ -48,7 +48,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const ownerId = await getDataOwnerId(session);
-  const order = await getOrder(params.id, ownerId);
+  const order = await getOrder(params.id, ownerId, parseOrderGetOpts(request));
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   return NextResponse.json({ order });
 }
@@ -82,7 +82,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         {
           error: CONFLICT_MESSAGE,
           conflict: true,
-          order: await getOrder(params.id, ownerId),
+          order: await getOrder(params.id, ownerId, ORDER_DETAIL_REL_OPTS),
         },
         { status: 409 },
       );
@@ -166,7 +166,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
             {
               error: CONFLICT_MESSAGE,
               conflict: true,
-              order: await getOrder(params.id, ownerId),
+              order: await getOrder(params.id, ownerId, ORDER_DETAIL_REL_OPTS),
             },
             { status: 409 },
           );
@@ -272,12 +272,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const clientSyncRequested =
       CLIENT_SYNC_CORE_KEYS.some((k) => k in core) ||
       CLIENT_SYNC_FIELD_KEYS.some((k) => k in fields);
-    const order = await getOrder(params.id, ownerId);
+    const order = await getOrder(params.id, ownerId, ORDER_DETAIL_REL_OPTS);
     if (clientSyncRequested && order?.name?.trim()) {
       await trySyncCustomerFromOrderRecord(ownerId, order);
     }
 
-    return NextResponse.json({ order: order ?? (await getOrder(params.id, ownerId)) });
+    return NextResponse.json({
+      order: order ?? (await getOrder(params.id, ownerId, ORDER_DETAIL_REL_OPTS)),
+    });
   } catch {
     return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
   }

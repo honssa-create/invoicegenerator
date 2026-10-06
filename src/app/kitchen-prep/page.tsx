@@ -246,20 +246,35 @@ function KitchenPrepListContent() {
 
   useModalUnsavedWarning(showForm, form);
 
-  const hasServerCapacitiesRef = useRef(false);
+  const capacitiesLoadingRef = useRef(false);
+  const capacitiesLoadedRef = useRef(false);
 
-  const applyListPayload = (d: { orders?: PrepOrder[]; capacities?: { id: string; label: string }[] }) => {
+  const applyCapacityOptions = (caps: { id: string; label: string }[]) => {
+    if (!caps.length) return;
+    capacitiesLoadedRef.current = true;
+    setCapacityOptions(
+      caps.map((c) => ({
+        id: c.id,
+        label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
+      })),
+    );
+  };
+
+  const loadCapacityOptions = () => {
+    if (capacitiesLoadedRef.current || capacitiesLoadingRef.current) return;
+    capacitiesLoadingRef.current = true;
+    fetch('/api/kitchen-prep/capacities')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.capacities?.length) applyCapacityOptions(d.capacities);
+      })
+      .finally(() => {
+        capacitiesLoadingRef.current = false;
+      });
+  };
+
+  const applyListPayload = (d: { orders?: PrepOrder[] }) => {
     setOrders(d.orders || []);
-    const caps = d.capacities;
-    if (caps?.length) {
-      hasServerCapacitiesRef.current = true;
-      setCapacityOptions(
-        caps.map((c) => ({
-          id: c.id,
-          label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
-        })),
-      );
-    }
   };
 
   const load = (background = false) => {
@@ -279,8 +294,6 @@ function KitchenPrepListContent() {
     if (dateEnd) qs.set('dateEnd', dateEnd);
     if (status === PREP_STATUS_FILTER_ACTIVE) qs.set('active', '1');
     else if (status) qs.set('status', status);
-    if (hasServerCapacitiesRef.current) qs.set('capacities', '0');
-
     const suffix = qs.toString() ? `?${qs}` : '';
     return fetch(`/api/kitchen-prep${suffix}`)
       .then((r) => r.json())
@@ -289,7 +302,7 @@ function KitchenPrepListContent() {
         const prev = peekKitchenPrepListCache(cacheKey);
         setKitchenPrepListCache(cacheKey, {
           orders: d.orders || [],
-          capacities: d.capacities ?? prev?.capacities,
+          capacities: prev?.capacities,
         });
       })
       .finally(() => {
@@ -312,6 +325,10 @@ function KitchenPrepListContent() {
   useEffect(() => {
     writeListUi(KITCHEN_PREP_LIST_UI_KEY, { dateStart, dateEnd, search, status, sortKey, sortDir });
   }, [dateStart, dateEnd, search, status, sortKey, sortDir]);
+
+  useEffect(() => {
+    if (showForm) loadCapacityOptions();
+  }, [showForm]);
 
   useEffect(() => {
     const prefill = parsePrefillForm(searchParams);
@@ -744,7 +761,14 @@ function KitchenPrepListContent() {
               ? BTN.deleting
               : `🗑 ${bi('Delete Selected', '刪除所選')}${selected.size > 0 ? ` (${selected.size})` : ''}`}
           </button>
-          <button onClick={() => { setError(''); setShowForm(true); }} className="btn bg-brand-600 text-white hover:bg-brand-700">
+          <button
+            onClick={() => {
+              setError('');
+              loadCapacityOptions();
+              setShowForm(true);
+            }}
+            className="btn bg-brand-600 text-white hover:bg-brand-700"
+          >
             + {bi('New Prep Order', '新增備料單')}
           </button>
         </div>

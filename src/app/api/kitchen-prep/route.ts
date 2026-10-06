@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     ? (statusRaw as PrepStatus)
     : undefined;
   const excludeCompleted = params.get('active') === '1' && !statusFilter;
-  const includeCapacities = params.get('capacities') !== '0';
+  const includeCapacities = params.get('capacities') === '1';
 
   const ownerId = await resolveKitchenOwnerUserId();
   const { orders, capacities } = await listPrepOrdersWithCapacities(

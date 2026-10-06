@@ -3,11 +3,12 @@ import { mergedOptions } from './expense-options-server';
 import { listInvoiceOptions } from './invoices';
 import { readKitchenGiftBoxDemandData } from './kitchen-catalog-server';
 import { getActivities } from './activity';
-import { getOrder } from './order-server';
+import { getOrder, ORDER_DETAIL_REL_OPTS } from './order-server';
 import { parseOrderTags } from './orders';
 import { listQuotationOptions } from './quotation-server';
+import { readOrderTagOptionsCache, writeOrderTagOptionsCache } from './order-tag-options-cache';
 
-async function listOrderTagOptions(ownerId: number): Promise<string[]> {
+async function listOrderTagOptionsUncached(ownerId: number): Promise<string[]> {
   const rows = (await db
     .prepare(
       `SELECT CASE
@@ -27,6 +28,14 @@ async function listOrderTagOptions(ownerId: number): Promise<string[]> {
     for (const t of parseOrderTags({ tags: row.tags })) tags.add(t);
   }
   return Array.from(tags).sort((a, b) => a.localeCompare(b, 'zh'));
+}
+
+async function listOrderTagOptions(ownerId: number): Promise<string[]> {
+  const cached = readOrderTagOptionsCache(ownerId);
+  if (cached) return cached;
+  const tags = await listOrderTagOptionsUncached(ownerId);
+  writeOrderTagOptionsCache(ownerId, tags);
+  return tags;
 }
 
 async function listAccountUsers(ownerId: number) {
@@ -51,11 +60,7 @@ export async function loadOrderDetailBootstrap(ownerId: number, orderId: string)
     tags,
     supplierList,
   ] = await Promise.all([
-    getOrder(orderId, ownerId, {
-      withActivities: false,
-      withLinkedDocs: true,
-      withFiles: true,
-    }),
+    getOrder(orderId, ownerId, ORDER_DETAIL_REL_OPTS),
     getActivities('order', orderId, 40),
     readKitchenGiftBoxDemandData(ownerId),
     listInvoiceOptions(ownerId),

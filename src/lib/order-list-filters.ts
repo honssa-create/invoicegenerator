@@ -30,6 +30,8 @@ export type OrderListQuery = {
   dashFocus?: OrderDashFocus;
   /** Nestiee list: processing orders due to ship today … today+4 (delivery date). */
   nestieeShipToday?: boolean;
+  /** Nestiee list: Woo pending field changes (processing orders). */
+  nestieeModified?: boolean;
   /** YYYY-MM-DD for urgent dash / ship-today windows (defaults to server local date). */
   today?: string;
   /** Board/calendar: only orders updated within the last N days when no date filter set. */
@@ -58,6 +60,7 @@ export function parseOrderListQuery(searchParams: URLSearchParams): OrderListQue
   const dashFocus: OrderDashFocus =
     dashRaw === 'unshipped' || dashRaw === 'urgent' ? dashRaw : 'all';
   const nestieeShipToday = searchParams.get('nestieeShipToday') === '1';
+  const nestieeModified = searchParams.get('nestieeModified') === '1';
   const todayRaw = searchParams.get('today')?.trim() || '';
   const today = YMD.test(todayRaw) ? todayRaw : localDateYmd();
   const listViewRaw = searchParams.get('listView')?.trim() || '';
@@ -85,6 +88,7 @@ export function parseOrderListQuery(searchParams: URLSearchParams): OrderListQue
     search,
     dashFocus,
     nestieeShipToday,
+    nestieeModified,
     today,
     recentDays,
     listView,
@@ -138,6 +142,10 @@ export function buildOrderListFilterSql(
 
   const dateStart = query.dateStart || '';
   const dateEnd = query.dateEnd || '';
+  if (query.nestieeModified) {
+    where += ` AND jsonb_exists(j.fj, 'woo_pending_changes')`;
+  }
+
   if (query.nestieeShipToday) {
     const today = query.today || localDateYmd();
     const { dateStart, dateEnd } = nestieeShipTodayDateRange(today);

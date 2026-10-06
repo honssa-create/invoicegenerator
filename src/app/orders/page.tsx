@@ -29,6 +29,7 @@ import {
   isNestieeOrdersFilter,
   NESTIEE_SHIPPING_BOX_SLOTS,
   orderMatchesNestieeDateRange,
+  orderMatchesNestieeDemandScope,
   orderMatchesNestieeShipToday,
   parseNestieeDateFilterType,
   parseNestieeDemandScope,
@@ -37,6 +38,12 @@ import {
   type NestieeDemandScope,
   type NestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
+import {
+  formatNestieeWooPendingChangeSummary,
+  hasNestieeWooPendingChanges,
+  NESTIEE_WOO_PENDING_CHANGE_LABELS,
+  parseNestieeWooPendingChanges,
+} from '@/lib/nestiee-woo-changes';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 import { orderFileUrl } from '@/lib/image-url';
@@ -226,6 +233,7 @@ function OrdersPageContent() {
     }
     if (dashFocus !== 'all') params.set('dashFocus', dashFocus);
     if (shipTodayFilter) params.set('nestieeShipToday', '1');
+    if (isNestieeFilter && nestieeDemandScope === 'modified') params.set('nestieeModified', '1');
     params.set('today', localDateYmd());
     return params;
   }, [
@@ -240,6 +248,7 @@ function OrdersPageContent() {
     dateFilterType,
     dashFocus,
     shipTodayFilter,
+    nestieeDemandScope,
     view,
   ]);
 
@@ -333,10 +342,15 @@ function OrdersPageContent() {
     if (status && !statusOptions.includes(status)) setStatus('');
   }, [status, statusOptions]);
 
+  const modifiedOnly = isNestieeFilter && nestieeDemandScope === 'modified';
+
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = orders.filter((o) => {
-      if (useServerPaging) return true;
+      if (useServerPaging) {
+        if (modifiedOnly) return orderMatchesNestieeDemandScope(o, 'modified');
+        return true;
+      }
       if (orderType && !orderMatchesTypeFilter(getOrderType(o), orderType)) return false;
       if (q) {
         const hay = [
@@ -354,6 +368,9 @@ function OrdersPageContent() {
       }
       if (shipTodayFilter) {
         return orderMatchesNestieeShipToday(o);
+      }
+      if (modifiedOnly) {
+        if (!orderMatchesNestieeDemandScope(o, 'modified')) return false;
       }
       if (isNestieeFilter) {
         if (!orderMatchesNestieeDateRange(o, { dateStart, dateEnd, dateFilterType })) return false;
@@ -406,6 +423,7 @@ function OrdersPageContent() {
     dateFilterType,
     useServerPaging,
     shipTodayFilter,
+    modifiedOnly,
   ]);
 
   const totalPages = useServerPaging
@@ -1148,10 +1166,28 @@ function OrderLineRow({
           </div>
         </td>
         <td className="px-6 py-4">
-          <Link href={`/orders/${order.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
-            {displayOrderNumber(order.po_number) || '—'}
-          </Link>
-          {order.name && <p className="mt-0.5 text-xs text-gray-400">{order.name}</p>}
+          <div className="flex items-start gap-1.5">
+            {hasNestieeWooPendingChanges(order.fields) ? (
+              <span
+                className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100"
+                title={formatNestieeWooPendingChangeSummary(parseNestieeWooPendingChanges(order.fields))}
+                aria-label={bi('Woo fields updated', 'Woo 有改動')}
+              />
+            ) : null}
+            <div>
+              <Link href={`/orders/${order.id}`} className="text-brand-600 hover:text-brand-700 font-medium text-sm">
+                {displayOrderNumber(order.po_number) || '—'}
+              </Link>
+              {order.name && <p className="mt-0.5 text-xs text-gray-400">{order.name}</p>}
+              {hasNestieeWooPendingChanges(order.fields) ? (
+                <p className="mt-0.5 text-[11px] text-amber-700">
+                  {parseNestieeWooPendingChanges(order.fields)
+                    .map((c) => `${NESTIEE_WOO_PENDING_CHANGE_LABELS[c.key].zh}已改`)
+                    .join(' · ')}
+                </p>
+              ) : null}
+            </div>
+          </div>
         </td>
         <td className="px-6 py-4 text-sm text-gray-600">{getOrderType(order) || '—'}</td>
         <td className="px-6 py-4">

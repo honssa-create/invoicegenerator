@@ -16,6 +16,7 @@ import { bi } from '@/lib/ui-labels';
 
 const SCOPE_LABELS: Record<NestieeDemandScope, { en: string; zh: string }> = {
   processing: { en: 'Processing', zh: '處理中' },
+  modified: { en: 'Updated', zh: '有改動' },
   shipped: { en: 'Shipped', zh: '已出貨' },
   all: { en: 'All', zh: '全部' },
   ship_today: { en: 'Ship today', zh: '今日出貨' },
@@ -126,6 +127,9 @@ function orderCountLabel(scope: NestieeDemandScope, count: number): string {
   if (scope === 'processing') {
     return bi(`${count} processing order(s)`, `${count} 張處理中訂單`);
   }
+  if (scope === 'modified') {
+    return bi(`${count} processing order(s) with Woo updates`, `${count} 張處理中且有 Woo 改動`);
+  }
   if (scope === 'shipped') {
     return bi(`${count} shipped order(s)`, `${count} 張已出貨訂單`);
   }
@@ -140,6 +144,12 @@ function emptyGiftBoxMessage(scope: NestieeDemandScope): string {
     return bi(
       'No 所需禮盒 quantities entered on processing orders yet.',
       '處理中訂單尚未填寫所需禮盒數量。',
+    );
+  }
+  if (scope === 'modified') {
+    return bi(
+      'No gift-box totals for orders with Woo field updates in this range.',
+      '此範圍內有 Woo 改動的訂單尚未填寫所需禮盒數量。',
     );
   }
   if (scope === 'shipped') {
@@ -211,6 +221,12 @@ export default function NestieeProcessingDashboard({
       {!loading && scope === 'ship_today' && demand.orderCount === 0 && (
         <p className="text-sm text-gray-500">
           {bi('No orders to ship today.', '今日沒有需要出貨的訂單。')}
+        </p>
+      )}
+
+      {!loading && scope === 'modified' && demand.orderCount === 0 && (
+        <p className="text-sm text-gray-500">
+          {bi('No processing orders with Woo delivery/address/notes changes.', '沒有處理中且 Woo 改過送貨日／地址／備註的訂單。')}
         </p>
       )}
 

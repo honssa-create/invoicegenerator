@@ -10,6 +10,7 @@ import {
   parseNestieeDemandScope,
   summarizeNestieeProcessingDemand,
 } from '@/lib/nestiee-order-demand';
+import { orderMatchesNestieeModifiedScope } from '@/lib/nestiee-woo-changes';
 
 function parseFields(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
@@ -74,11 +75,14 @@ export async function GET(request: Request) {
         }>)(),
     ]);
 
-    const orders = rows.map((row) => ({
+    let orders = rows.map((row) => ({
       status: row.status || '',
       fields: parseFields(row.fields_json),
       created_at: row.created_at || '',
     }));
+    if (scope === 'modified') {
+      orders = orders.filter((order) => orderMatchesNestieeModifiedScope(order));
+    }
 
     const demand = summarizeNestieeProcessingDemand(
       orders,

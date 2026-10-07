@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/rentals/meters', label: NAV.meterReadings, icon: '🔌', section: 'rental_meters' },
   { href: '/rentals/templates', label: NAV.templates, icon: '📋', section: 'rentals' },
   { href: '/expenses', label: NAV.expenses, icon: '🧾', section: 'expenses' },
+  { href: '/part-time', label: NAV.partTime, icon: '⏱️', section: 'part_time' },
   { href: '/reconciliation', label: NAV.reconciliation, icon: '🏦', section: 'reconciliation' },
   { href: '/cashflow', label: NAV.cashflow, icon: '💹', section: 'cashflow' },
   { href: '/scan-table', label: NAV.scanTable, icon: '📊', section: 'scan_table' },

@@ -111,9 +111,11 @@ export function usePartTimeRecords() {
       const next = await apiClockIn(staffId);
       setStaff((prev) => upsert(prev, next, true));
       setDirectory((prev) => (prev.length ? upsert(prev, next, false) : prev));
+      return true;
     } catch (err) {
       setError(messageOf(err));
       refreshStaff().catch(() => undefined);
+      return false;
     } finally {
       setBusyId(null);
     }

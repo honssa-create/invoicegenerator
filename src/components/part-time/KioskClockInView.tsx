@@ -12,7 +12,7 @@ type Props = {
   readOnly: boolean;
   busyId: string | null;
   error: string;
-  onClockIn: (staffId: string) => void;
+  onClockIn: (staffId: string) => Promise<boolean>;
   onClockOut: (staffId: string, signatureBase64: string) => Promise<boolean>;
 };
 
@@ -35,7 +35,8 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
   const live = (person: PartTimeStaff | null) =>
     (person && staff.find((row) => row.id === person.id)) || person;
 
-  const detailStaff = live(detail);
+  const openedWorking = Boolean(detail?.isClockedIn && detail.currentClockInTime);
+  const detailStaff = openedWorking ? live(detail) : detail;
   const signingStaff = live(signing);
 
   return (
@@ -92,7 +93,11 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
           readOnly={readOnly}
           error={error}
           onClose={() => setDetail(null)}
-          onClockIn={() => onClockIn(detailStaff.id)}
+          onClockIn={() => {
+            onClockIn(detailStaff.id).then((ok) => {
+              if (ok) setDetail(null);
+            });
+          }}
           onClockOut={() => {
             setSigning(detailStaff);
             setDetail(null);

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { calcShiftPay, formatHours, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { calcShiftPay, formatHours, formatMoney, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 import { SignaturePad, type SignaturePadHandle } from './SignaturePad';
 
 type Props = {
@@ -40,13 +40,13 @@ export default function SignatureModal({ staff, now, saving, error, onCancel, on
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center overscroll-none sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="clock-out-title">
       <div className="absolute inset-0 bg-black/45" />
-      <div className="relative z-10 flex max-h-[100dvh] w-full max-w-lg flex-col bg-white shadow-xl sm:rounded-2xl">
+      <div className="relative z-10 flex max-h-[100dvh] w-full max-w-lg flex-col overflow-y-auto bg-white shadow-xl sm:rounded-2xl">
         <div className="border-b border-gray-100 px-4 py-4">
-          <h2 id="clock-out-title" className="text-lg font-semibold text-gray-900">收工結算 / Clock out</h2>
-          <p className="mt-1 text-sm text-gray-500">工時計算至按下確認。Hours are finalized when you confirm.</p>
+          <h2 id="clock-out-title" className="text-lg font-semibold text-gray-900">放工確認 / Clock out</h2>
+          <p className="mt-1 text-sm text-gray-500">確認今日返工細節、薪金，然後簽名。Confirm today’s shift, pay, then sign.</p>
         </div>
 
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-4 py-3 text-sm">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 text-sm">
           <div>
             <dt className="text-gray-500">員工 / Name</dt>
             <dd className="font-medium text-gray-900">{staff.name}</dd>
@@ -57,15 +57,23 @@ export default function SignatureModal({ staff, now, saving, error, onCancel, on
           </div>
           <div>
             <dt className="text-gray-500">返工 / Start</dt>
-            <dd className="font-medium text-gray-900">{start.time}</dd>
+            <dd className="font-medium tabular-nums text-gray-900">{start.time}</dd>
           </div>
           <div>
-            <dt className="text-gray-500">收工 / End</dt>
-            <dd className="font-medium text-gray-900">{end.time}</dd>
+            <dt className="text-gray-500">放工 / End</dt>
+            <dd className="font-medium tabular-nums text-gray-900">{end.time}</dd>
           </div>
-          <div className="col-span-2">
+          <div>
             <dt className="text-gray-500">總工時 / Hours</dt>
-            <dd className="text-2xl font-semibold text-gray-900">{formatHours(pay.totalHours)} hrs</dd>
+            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatHours(pay.totalHours)} hrs</dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">時薪 / Rate</dt>
+            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatMoney(staff.hourlyRate)}</dd>
+          </div>
+          <div className="col-span-2 rounded-xl bg-brand-50 px-4 py-3">
+            <dt className="text-gray-500">今日薪金 / Salary</dt>
+            <dd className="text-3xl font-semibold tabular-nums text-gray-900">{formatMoney(pay.totalSalary)}</dd>
           </div>
         </dl>
 

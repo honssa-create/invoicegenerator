@@ -44,7 +44,7 @@ export default function PartTimeSalaryManager({ readOnly }: { readOnly: boolean 
           <h1 className="page-title">{view === 'kiosk' ? bi('Clock in', '兼職打卡') : TITLE.partTime}</h1>
           <p className="mt-1 text-sm text-gray-500 sm:text-base">
             {view === 'kiosk'
-              ? bi('Tap your own name to clock in or out.', '撳自己個名打卡。')
+              ? bi('Tap your name to clock in. Use 放工 when you finish.', '撳自己個名返工；收工撳放工。')
               : bi('Review hours, rates, and signatures for payroll.', '睇工時、時薪同簽名，用作出糧。')}
           </p>
         </div>

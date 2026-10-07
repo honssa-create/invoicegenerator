@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
 import { hkStamp, type PartTimeStaff } from '@/lib/part-time';
+import ClockInSuccessModal from './ClockInSuccessModal';
 import SignatureModal from './SignatureModal';
 import WorkingDetailModal from './WorkingDetailModal';
 
@@ -12,7 +13,7 @@ type Props = {
   readOnly: boolean;
   busyId: string | null;
   error: string;
-  onClockIn: (staffId: string) => void;
+  onClockIn: (staffId: string) => Promise<PartTimeStaff | null>;
   onClockOut: (staffId: string, signatureBase64: string) => Promise<boolean>;
 };
 
@@ -28,6 +29,7 @@ function useNow() {
 export default function KioskClockInView({ staff, loading, readOnly, busyId, error, onClockIn, onClockOut }: Props) {
   const now = useNow();
   const [detail, setDetail] = useState<PartTimeStaff | null>(null);
+  const [started, setStarted] = useState<PartTimeStaff | null>(null);
   const [signing, setSigning] = useState<PartTimeStaff | null>(null);
   const stamp = hkStamp(now);
   const locked = busyId !== null;
@@ -35,7 +37,8 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
   const live = (person: PartTimeStaff | null) =>
     (person && staff.find((row) => row.id === person.id)) || person;
 
-  const detailStaff = live(detail);
+  const openedWorking = Boolean(detail?.isClockedIn && detail.currentClockInTime);
+  const detailStaff = openedWorking ? live(detail) : detail;
   const signingStaff = live(signing);
 
   return (
@@ -83,7 +86,7 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
         </ul>
       )}
 
-      {detailStaff && !signingStaff && (
+      {detailStaff && !signingStaff && !started && (
         <WorkingDetailModal
           key={detailStaff.id}
           staff={detailStaff}
@@ -92,12 +95,22 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
           readOnly={readOnly}
           error={error}
           onClose={() => setDetail(null)}
-          onClockIn={() => onClockIn(detailStaff.id)}
+          onClockIn={() => {
+            onClockIn(detailStaff.id).then((next) => {
+              if (!next) return;
+              setDetail(null);
+              setStarted(next);
+            });
+          }}
           onClockOut={() => {
             setSigning(detailStaff);
             setDetail(null);
           }}
         />
+      )}
+
+      {started && !signingStaff && (
+        <ClockInSuccessModal staff={started} onClose={() => setStarted(null)} />
       )}
 
       {signingStaff && (

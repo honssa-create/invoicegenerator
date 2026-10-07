@@ -41,18 +41,22 @@ export default function PartTimeSalaryManager({ readOnly }: { readOnly: boolean 
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">{TITLE.partTime}</h1>
+          <h1 className="page-title">{view === 'kiosk' ? bi('Clock in', '兼職打卡') : TITLE.partTime}</h1>
           <p className="mt-1 text-sm text-gray-500 sm:text-base">
-            {bi('iPad clock-in with signature and salary. History stays on the server for payroll.', 'iPad 打卡、簽名及計薪。紀錄存在伺服器，方便出糧。')}
+            {view === 'kiosk'
+              ? bi('Tap your own name to clock in or out.', '撳自己個名打卡。')
+              : bi('Review hours, rates, and signatures for payroll.', '睇工時、時薪同簽名，用作出糧。')}
           </p>
         </div>
-        <button
-          type="button"
-          className="min-h-12 rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800"
-          {...tapProps(openStaff)}
-        >
-          員工 / Staff
-        </button>
+        {view === 'admin' && (
+          <button
+            type="button"
+            className="min-h-12 rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800"
+            {...tapProps(openStaff)}
+          >
+            員工 / Staff
+          </button>
+        )}
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl bg-gray-100 p-1">

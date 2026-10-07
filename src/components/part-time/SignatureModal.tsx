@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { calcShiftPay, formatHours, formatMoney, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { calcShiftPay, formatHours, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 import { SignaturePad, type SignaturePadHandle } from './SignaturePad';
 
 type Props = {
@@ -63,17 +63,9 @@ export default function SignatureModal({ staff, now, saving, error, onCancel, on
             <dt className="text-gray-500">收工 / End</dt>
             <dd className="font-medium text-gray-900">{end.time}</dd>
           </div>
-          <div>
-            <dt className="text-gray-500">總工時 / Hours</dt>
-            <dd className="font-medium text-gray-900">{formatHours(pay.totalHours)} hrs</dd>
-          </div>
-          <div>
-            <dt className="text-gray-500">時薪 / Rate</dt>
-            <dd className="font-medium text-gray-900">{formatMoney(staff.hourlyRate)}</dd>
-          </div>
           <div className="col-span-2">
-            <dt className="text-gray-500">總薪水 / Salary</dt>
-            <dd className="text-2xl font-semibold text-gray-900">{formatMoney(pay.totalSalary)}</dd>
+            <dt className="text-gray-500">總工時 / Hours</dt>
+            <dd className="text-2xl font-semibold text-gray-900">{formatHours(pay.totalHours)} hrs</dd>
           </div>
         </dl>
 

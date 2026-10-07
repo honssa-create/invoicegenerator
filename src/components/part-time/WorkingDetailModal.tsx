@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { formatElapsed, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { formatElapsed, formatHours, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 
 type Props = {
   staff: PartTimeStaff;
@@ -28,6 +28,8 @@ export default function WorkingDetailModal({
   const working = Boolean(staff.isClockedIn && staff.currentClockInTime);
   const startIso = staff.currentClockInTime || '';
   const start = startIso ? splitHkIso(startIso) : { date: '—', time: '—' };
+  const todayHours = working ? staff.shiftHours : staff.scheduledHours;
+  const hoursReady = Number(todayHours) > 0;
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -59,9 +61,21 @@ export default function WorkingDetailModal({
                 {startIso ? formatElapsed(startIso, now) : '—'}
               </dd>
             </div>
+            {Number(staff.shiftHours) > 0 && (
+              <div className="rounded-xl bg-gray-50 px-4 py-3">
+                <dt className="text-gray-500">今日工時 / Paid hours</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{formatHours(Number(staff.shiftHours))} 小時</dd>
+              </div>
+            )}
           </dl>
+        ) : hoursReady ? (
+          <div className="mt-5 rounded-xl bg-gray-50 px-4 py-6 text-center">
+            <p className="text-sm text-gray-500">今日返工時間</p>
+            <p className="mt-1 text-4xl font-semibold tabular-nums text-gray-900">{formatHours(Number(todayHours))} 小時</p>
+            <p className="mt-2 text-sm text-gray-500">確認就開始計時。Confirm to start.</p>
+          </div>
         ) : (
-          <p className="mt-5 rounded-xl bg-gray-50 px-4 py-6 text-center text-base text-gray-600">撳下面返工。Tap 返工 to start.</p>
+          <p className="mt-5 rounded-xl bg-amber-50 px-4 py-6 text-center text-base text-amber-800">未設定今日工時。請管理員先在員工設定填預定工時。Today’s hours are not set.</p>
         )}
 
         {error && <p className="mt-3 text-sm text-red-600" role="alert">{error}</p>}
@@ -86,9 +100,9 @@ export default function WorkingDetailModal({
           ) : (
             <button
               type="button"
-              disabled={readOnly || busy}
+              disabled={readOnly || busy || !hoursReady}
               className="min-h-14 rounded-xl bg-brand-600 text-base font-semibold text-white disabled:opacity-40"
-              {...tapProps(onClockIn, readOnly || busy)}
+              {...tapProps(onClockIn, readOnly || busy || !hoursReady)}
             >
               {busy ? '打卡中…' : '返工'}
             </button>

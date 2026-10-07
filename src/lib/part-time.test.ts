@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   attendanceToCsv,
+  calcScheduledPay,
   calcShiftPay,
   formatElapsed,
   formatHours,
@@ -8,6 +9,8 @@ import {
   hkMonthRange,
   hkStamp,
   parseHourlyRate,
+  parseScheduledHours,
+  resolveClockOutEnd,
   parseRecordQuery,
   parseStaffName,
   splitHkIso,
@@ -37,6 +40,34 @@ function record(overrides: Partial<AttendanceRecord> = {}): AttendanceRecord {
     ...overrides,
   };
 }
+
+describe('calcScheduledPay', () => {
+  it('pays the agreed hours times the rate', () => {
+    expect(calcScheduledPay(4, 70)).toEqual({ totalHours: 4, totalSalary: 280 });
+    expect(calcScheduledPay(4.5, 70)).toEqual({ totalHours: 4.5, totalSalary: 315 });
+  });
+
+  it('does not pay when hours were not set', () => {
+    expect(calcScheduledPay(0, 70)).toEqual({ totalHours: 0, totalSalary: 0 });
+  });
+});
+
+describe('resolveClockOutEnd', () => {
+  const start = '2026-04-07T09:00:00+08:00';
+  const now = new Date('2026-04-07T05:30:00.000Z');
+
+  it('keeps the time frozen when 放工 was tapped', () => {
+    expect(resolveClockOutEnd(start, '2026-04-07T13:20:00+08:00', now)).toEqual({
+      date: '2026-04-07',
+      time: '13:20:00',
+      iso: '2026-04-07T13:20:00+08:00',
+    });
+  });
+
+  it('falls back to the server clock when the stamp is in the future', () => {
+    expect(resolveClockOutEnd(start, '2026-04-07T18:00:00+08:00', now).iso).toBe('2026-04-07T13:30:00+08:00');
+  });
+});
 
 describe('calcShiftPay', () => {
   it('rounds 4.5 hours at $70 to $315', () => {
@@ -95,6 +126,9 @@ describe('parsers', () => {
     expect(parseStaffName('')).toBeNull();
     expect(parseHourlyRate('70')).toBe(70);
     expect(parseHourlyRate(0)).toBeNull();
+    expect(parseScheduledHours('4.5')).toBe(4.5);
+    expect(parseScheduledHours(0)).toBeNull();
+    expect(parseScheduledHours(25)).toBeNull();
   });
 
   it('rejects an inverted date range', () => {

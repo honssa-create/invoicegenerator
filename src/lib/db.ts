@@ -893,6 +893,9 @@ async function runBootDataFixes(): Promise<void> {
   }
 
   await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS attended_at TEXT`);
+  await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS scheduled_hours DOUBLE PRECISION NOT NULL DEFAULT 0`);
+  await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS shift_hours DOUBLE PRECISION`);
+  await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS shift_rate DOUBLE PRECISION`);
   const migAttended = await client().query<{ key: string }>(
     `SELECT key FROM app_migrations WHERE key = 'orders_attended_at_backfill_v1'`
   );

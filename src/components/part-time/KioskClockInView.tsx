@@ -14,7 +14,7 @@ type Props = {
   busyId: string | null;
   error: string;
   onClockIn: (staffId: string) => Promise<PartTimeStaff | null>;
-  onClockOut: (staffId: string, signatureBase64: string) => Promise<boolean>;
+  onClockOut: (staffId: string, signatureBase64: string, endedAt: string) => Promise<boolean>;
 };
 
 function useNow() {
@@ -31,6 +31,7 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
   const [detail, setDetail] = useState<PartTimeStaff | null>(null);
   const [started, setStarted] = useState<PartTimeStaff | null>(null);
   const [signing, setSigning] = useState<PartTimeStaff | null>(null);
+  const [stoppedAt, setStoppedAt] = useState<Date | null>(null);
   const stamp = hkStamp(now);
   const locked = busyId !== null;
 
@@ -38,7 +39,18 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
     (person && staff.find((row) => row.id === person.id)) || person;
 
   const openedWorking = Boolean(detail?.isClockedIn && detail.currentClockInTime);
-  const detailStaff = openedWorking ? live(detail) : detail;
+  const liveDetail = live(detail);
+  const detailStaff = !detail
+    ? null
+    : openedWorking
+      ? liveDetail
+      : {
+          ...(liveDetail || detail),
+          isClockedIn: false,
+          currentClockInTime: undefined,
+          shiftHours: undefined,
+          shiftRate: undefined,
+        };
   const signingStaff = live(signing);
 
   return (
@@ -103,6 +115,7 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
             });
           }}
           onClockOut={() => {
+            setStoppedAt(new Date());
             setSigning(detailStaff);
             setDetail(null);
           }}
@@ -117,18 +130,21 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
         <SignatureModal
           key={signingStaff.id}
           staff={signingStaff}
-          now={now}
+          endedAt={stoppedAt ?? now}
           saving={busyId === signingStaff.id}
           error={error}
           onCancel={() => {
             if (busyId === signingStaff.id) return;
             setSigning(null);
+            setStoppedAt(null);
           }}
           onConfirm={(signatureBase64) => {
-            onClockOut(signingStaff.id, signatureBase64).then((ok) => {
+            const endedAt = hkStamp(stoppedAt ?? new Date()).iso;
+            onClockOut(signingStaff.id, signatureBase64, endedAt).then((ok) => {
               if (ok) {
                 setSigning(null);
                 setDetail(null);
+                setStoppedAt(null);
               }
             });
           }}

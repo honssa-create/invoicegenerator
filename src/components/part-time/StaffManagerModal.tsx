@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { formatMoney, type PartTimeStaff, type UpdateStaffInput } from '@/lib/part-time';
+import { formatHours, formatMoney, type PartTimeStaff, type UpdateStaffInput } from '@/lib/part-time';
 
 type Props = {
   staff: PartTimeStaff[];
@@ -11,7 +11,7 @@ type Props = {
   busy: boolean;
   error: string;
   onClose: () => void;
-  onCreate: (input: { name: string; hourlyRate: number }) => Promise<PartTimeStaff | null>;
+  onCreate: (input: { name: string; hourlyRate: number; scheduledHours: number }) => Promise<PartTimeStaff | null>;
   onUpdate: (id: string, patch: UpdateStaffInput) => Promise<PartTimeStaff | null>;
 };
 
@@ -19,6 +19,7 @@ const inputCls = 'w-full rounded-lg border border-gray-300 px-3 py-3 text-base o
 
 export default function StaffManagerModal({ staff, loading, readOnly, busy, error, onClose, onCreate, onUpdate }: Props) {
   const [name, setName] = useState('');
+  const [hours, setHours] = useState('');
   const [rate, setRate] = useState('70');
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -33,19 +34,21 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
   const resetForm = () => {
     setEditingId(null);
     setName('');
+    setHours('');
     setRate('70');
   };
 
   const submit = () => {
     if (readOnly || busy) return;
     const hourlyRate = Number(rate);
+    const scheduledHours = Number(hours);
     if (editingId) {
-      onUpdate(editingId, { name, hourlyRate }).then((updated) => {
+      onUpdate(editingId, { name, hourlyRate, scheduledHours }).then((updated) => {
         if (updated) resetForm();
       });
       return;
     }
-    onCreate({ name, hourlyRate }).then((created) => {
+    onCreate({ name, hourlyRate, scheduledHours }).then((created) => {
       if (created) resetForm();
     });
   };
@@ -60,11 +63,11 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
         </div>
 
         <div className="overflow-y-auto px-4 py-4">
-          <p className="mb-3 text-sm text-gray-500">新姓名會出現在打卡畫面。時薪只影響之後的收工，已完成的更次不會改。New names show on the kiosk. Rate changes apply to later shifts.</p>
+          <p className="mb-3 text-sm text-gray-500">預定工時同埋時薪要預先設定。打卡時會顯示今日工時，確認返工後先開始計時。薪金 = 今日工時 × 時薪。返工同放工時間只作紀錄，改動唔會改已完成的更次。</p>
 
           {!readOnly && (
             <form
-              className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_8rem_auto]"
+              className="mb-4 space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 submit();
@@ -78,21 +81,41 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
                 autoComplete="off"
                 onChange={(event) => setName(event.target.value)}
               />
-              <input
-                className={inputCls}
-                value={rate}
-                inputMode="decimal"
-                type="number"
-                min="0.5"
-                step="0.5"
-                aria-label="Hourly rate"
-                onChange={(event) => setRate(event.target.value)}
-              />
-              <button type="submit" disabled={busy} className="min-h-12 rounded-xl bg-brand-600 px-4 font-semibold text-white disabled:opacity-40">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-500">預定工時 / Hours</span>
+                  <input
+                    className={inputCls}
+                    value={hours}
+                    inputMode="decimal"
+                    type="number"
+                    min="0.5"
+                    max="24"
+                    step="0.5"
+                    placeholder="4"
+                    aria-label="Scheduled hours"
+                    onChange={(event) => setHours(event.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-500">時薪 / Rate</span>
+                  <input
+                    className={inputCls}
+                    value={rate}
+                    inputMode="decimal"
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    aria-label="Hourly rate"
+                    onChange={(event) => setRate(event.target.value)}
+                  />
+                </label>
+              </div>
+              <button type="submit" disabled={busy} className="min-h-12 w-full rounded-xl bg-brand-600 px-4 font-semibold text-white disabled:opacity-40">
                 {busy ? '儲存中…' : editingId ? '更新 / Update' : '新增 / Add'}
               </button>
               {editingId && (
-                <button type="button" className="min-h-12 text-sm text-gray-500 sm:col-span-3" {...tapProps(resetForm, busy)}>
+                <button type="button" className="min-h-12 text-sm text-gray-500" {...tapProps(resetForm, busy)}>
                   取消編輯 / Cancel edit
                 </button>
               )}
@@ -109,6 +132,8 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
                   <div className="min-w-0 flex-1">
                     <p className={`truncate font-medium ${person.active ? 'text-gray-900' : 'text-gray-400'}`}>{person.name}</p>
                     <p className="text-sm text-gray-500">
+                      {person.scheduledHours > 0 ? `${formatHours(person.scheduledHours)} 小時` : '未設定工時'}
+                      {' · '}
                       {formatMoney(person.hourlyRate)} / hr
                       {person.isClockedIn ? ' · 返緊工 / Working' : ''}
                       {!person.active ? ' · 已停用' : ''}
@@ -122,6 +147,7 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
                         {...tapProps(() => {
                           setEditingId(person.id);
                           setName(person.name);
+                          setHours(person.scheduledHours > 0 ? String(person.scheduledHours) : '');
                           setRate(String(person.hourlyRate));
                         }, busy)}
                       >

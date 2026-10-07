@@ -52,7 +52,7 @@ export function fetchStaff(includeInactive = false): Promise<PartTimeStaff[]> {
   return request<{ staff: PartTimeStaff[] }>(`/api/part-time/staff${qs}`).then((data) => data.staff);
 }
 
-export function createStaff(input: { name: string; hourlyRate: number }): Promise<PartTimeStaff> {
+export function createStaff(input: { name: string; hourlyRate: number; scheduledHours: number }): Promise<PartTimeStaff> {
   return request<{ staff: PartTimeStaff }>('/api/part-time/staff', {
     method: 'POST',
     body: JSON.stringify(input),
@@ -73,10 +73,10 @@ export function clockIn(staffId: string): Promise<PartTimeStaff> {
 }
 
 /** Clock-out. Saves the shift and the signature. */
-export function createRecord(staffId: string, signatureBase64: string): Promise<AttendanceRecord> {
+export function createRecord(staffId: string, signatureBase64: string, endedAt: string): Promise<AttendanceRecord> {
   return request<{ record: AttendanceRecord }>(`/api/part-time/staff/${staffId}/clock-out`, {
     method: 'POST',
-    body: JSON.stringify({ signatureBase64 }),
+    body: JSON.stringify({ signatureBase64, endedAt }),
   }).then((data) => data.record);
 }
 

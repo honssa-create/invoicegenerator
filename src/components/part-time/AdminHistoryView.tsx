@@ -110,9 +110,11 @@ export default function AdminHistoryView({
         </button>
       </div>
 
+      <p className="mb-3 text-sm text-gray-500">薪金 = 預定工時 × 時薪。返工同放工時間只作紀錄。</p>
+
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Kpi label="總更次 / Shifts" value={String(summary.shiftCount)} />
-        <Kpi label="總工時 / Hours" value={formatHours(summary.totalHours)} />
+        <Kpi label="計薪工時 / Paid hours" value={formatHours(summary.totalHours)} />
         <Kpi label="總薪水 / Salary" value={formatMoney(summary.totalSalary)} />
       </div>
 
@@ -136,7 +138,7 @@ export default function AdminHistoryView({
                 <th className="px-3 py-3 font-medium">員工姓名 / Name</th>
                 <th className="px-3 py-3 font-medium">返工時間 / Start</th>
                 <th className="px-3 py-3 font-medium">收工時間 / End</th>
-                <th className="px-3 py-3 font-medium">總工時 / Hours</th>
+                <th className="px-3 py-3 font-medium">計薪工時 / Paid hours</th>
                 <th className="px-3 py-3 font-medium">時薪 / Rate</th>
                 <th className="px-3 py-3 font-medium">總薪水 / Salary</th>
                 <th className="px-3 py-3 font-medium">簽名 / Signature</th>

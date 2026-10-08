@@ -122,12 +122,16 @@ function rowsToAccessMap(
   return map;
 }
 
+/**
+ * Missing role/section rows are seeded at startup (ensureSchema → runBootDataFixes →
+ * ensureRolePermissionRows, re-run whenever permissions code changes) and by the admin
+ * permission matrix. A row that is still missing reads as 'none', so this per-request path
+ * only SELECTs instead of running ~40 INSERTs in a transaction on every cache miss.
+ */
 async function loadRoleAccessFromDb(
   role: UserRole,
-  rowsEnsured = false,
 ): Promise<Record<PermissionSection, SectionAccessLevel>> {
   if (role === 'admin') return adminAccessMap();
-  if (!rowsEnsured) await ensureRolePermissionRows();
 
   const rows = (await db
     .prepare('SELECT section, allowed, access_level FROM role_permissions WHERE role = ?')
@@ -142,21 +146,31 @@ export async function getRoleAccessFromDb(
   return loadRoleAccessFromDb(role);
 }
 
-const ROLE_PERM_CACHE_TTL_MS = 60_000;
-const rolePermCache = new Map<
-  UserRole,
-  { at: number; permissions: PermissionSection[]; readOnlySections: PermissionSection[] }
->();
+/**
+ * Per-process cache of role → permission lists. saveRolePermissions() invalidates the role
+ * immediately, so the TTL only bounds staleness for edits made outside this process
+ * (another replica, or a manual SQL change).
+ */
+const ROLE_PERM_CACHE_TTL_MS = 5 * 60_000;
+type RolePermissionLists = { permissions: PermissionSection[]; readOnlySections: PermissionSection[] };
+const rolePermCache = new Map<UserRole, { at: number } & RolePermissionLists>();
+/** Shares one DB load between concurrent requests for the same role (no thundering herd). */
+const rolePermInflight = new Map<UserRole, Promise<RolePermissionLists>>();
+/** Bumped on invalidation so an in-flight load started before a save cannot repopulate stale data. */
+let rolePermGeneration = 0;
 
 export function invalidateRolePermissionCache(role?: UserRole): void {
-  if (role) rolePermCache.delete(role);
-  else rolePermCache.clear();
+  rolePermGeneration++;
+  if (role) {
+    rolePermCache.delete(role);
+    rolePermInflight.delete(role);
+  } else {
+    rolePermCache.clear();
+    rolePermInflight.clear();
+  }
 }
 
-export async function getRolePermissionLists(role: UserRole): Promise<{
-  permissions: PermissionSection[];
-  readOnlySections: PermissionSection[];
-}> {
+export async function getRolePermissionLists(role: UserRole): Promise<RolePermissionLists> {
   if (role === 'admin') {
     return { permissions: [...ALL_SECTIONS], readOnlySections: [] };
   }
@@ -164,13 +178,27 @@ export async function getRolePermissionLists(role: UserRole): Promise<{
   if (cached && Date.now() - cached.at < ROLE_PERM_CACHE_TTL_MS) {
     return { permissions: cached.permissions, readOnlySections: cached.readOnlySections };
   }
-  const map = await getRoleAccessFromDb(role);
-  const result = {
-    permissions: ALL_SECTIONS.filter((s) => sectionAccessAllowsView(map[s])),
-    readOnlySections: ALL_SECTIONS.filter((s) => map[s] === 'read'),
-  };
-  rolePermCache.set(role, { at: Date.now(), ...result });
-  return result;
+  const pending = rolePermInflight.get(role);
+  if (pending) return pending;
+
+  const generation = rolePermGeneration;
+  const load = (async () => {
+    const map = await getRoleAccessFromDb(role);
+    const result: RolePermissionLists = {
+      permissions: ALL_SECTIONS.filter((s) => sectionAccessAllowsView(map[s])),
+      readOnlySections: ALL_SECTIONS.filter((s) => map[s] === 'read'),
+    };
+    if (generation === rolePermGeneration) {
+      rolePermCache.set(role, { at: Date.now(), ...result });
+    }
+    return result;
+  })();
+  rolePermInflight.set(role, load);
+  try {
+    return await load;
+  } finally {
+    if (rolePermInflight.get(role) === load) rolePermInflight.delete(role);
+  }
 }
 
 /** @deprecated Prefer getRoleAccessFromDb */
@@ -223,8 +251,8 @@ export type RoleAccessMatrix = Record<UserRole, Record<PermissionSection, Sectio
 export async function getPermissionMatrix(): Promise<RoleAccessMatrix> {
   await ensureRolePermissionRows();
   const [operator, accountant] = await Promise.all([
-    loadRoleAccessFromDb('operator', true),
-    loadRoleAccessFromDb('accountant', true),
+    loadRoleAccessFromDb('operator'),
+    loadRoleAccessFromDb('accountant'),
   ]);
   return {
     admin: adminAccessMap(),

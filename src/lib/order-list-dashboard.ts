@@ -23,14 +23,15 @@ export async function countOrderListDashboard(
   listQuery: OrderListQuery,
   opts?: { today?: string; withinDays?: number },
 ): Promise<OrderDashboardCounts> {
-  const params: (string | number)[] = [userId];
-  const whereExtra = buildOrderListFilterSql(orderListQueryForDashboardCards(listQuery), params);
   const shipped = buildOrderIsShippedSql();
   const due = buildOrderDueDateSql();
   const today = opts?.today || localDateYmd();
   const within = opts?.withinDays ?? 2;
   const urgentLimit = addCalendarDays(today, within);
-  params.push(urgentLimit);
+  // Placeholder order must match the SQL text below: the urgent-date `?` in the SELECT list
+  // comes first, then `o.user_id = ?`, then any filter placeholders appended by whereExtra.
+  const params: (string | number)[] = [urgentLimit, userId];
+  const whereExtra = buildOrderListFilterSql(orderListQueryForDashboardCards(listQuery), params);
 
   const row = (await db
     .prepare(

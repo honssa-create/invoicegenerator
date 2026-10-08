@@ -121,17 +121,21 @@ export function usePartTimeRecords() {
     }
   }, [refreshStaff]);
 
-  const clockOut = useCallback(async (staffId: string, signatureBase64: string) => {
+  const clockOut = useCallback(async (staffId: string, signatureBase64: string, endedAt: string) => {
     staffGen.current += 1;
     setBusyId(staffId);
     setError('');
     try {
-      await createRecord(staffId, signatureBase64);
+      await createRecord(staffId, signatureBase64, endedAt);
       setStaff((prev) => prev.map((row) => (
-        row.id === staffId ? { ...row, isClockedIn: false, currentClockInTime: undefined } : row
+        row.id === staffId
+          ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftHours: undefined, shiftRate: undefined }
+          : row
       )));
       setDirectory((prev) => prev.map((row) => (
-        row.id === staffId ? { ...row, isClockedIn: false, currentClockInTime: undefined } : row
+        row.id === staffId
+          ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftHours: undefined, shiftRate: undefined }
+          : row
       )));
       await reloadRecords();
       return true;
@@ -144,7 +148,7 @@ export function usePartTimeRecords() {
     }
   }, [refreshStaff, reloadRecords]);
 
-  const createStaff = useCallback(async (input: { name: string; hourlyRate: number }) => {
+  const createStaff = useCallback(async (input: { name: string; hourlyRate: number; scheduledHours: number }) => {
     staffGen.current += 1;
     setStaffBusy(true);
     setError('');

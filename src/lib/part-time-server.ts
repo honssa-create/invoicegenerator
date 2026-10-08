@@ -5,10 +5,12 @@ import {
   DEFAULT_PART_TIME_STAFF,
   EMPTY_ATTENDANCE_SUMMARY,
   attendanceToCsv,
-  calcShiftPay,
+  calcScheduledPay,
   hkStamp,
   parseHourlyRate,
+  parseScheduledHours,
   parseStaffName,
+  resolveClockOutEnd,
   splitHkIso,
   type AttendanceRecord,
   type AttendanceSummary,
@@ -21,6 +23,9 @@ type StaffRow = {
   id: number;
   name: string;
   hourly_rate: number;
+  scheduled_hours: number;
+  shift_hours: number | null;
+  shift_rate: number | null;
   clocked_in_at: string | null;
   active: number | boolean;
 };
@@ -49,18 +54,22 @@ type SummaryRow = {
 export type PartTimeFailure = { ok: false; error: string; status: number };
 export type PartTimeSuccess<T> = { ok: true; data: T };
 
-const STAFF_SQL = `SELECT id, name, hourly_rate, clocked_in_at, active
+const STAFF_SQL = `SELECT id, name, hourly_rate, scheduled_hours, shift_hours, shift_rate, clocked_in_at, active
   FROM part_time_staff
   WHERE user_id = ?`;
 
 function toStaff(row: StaffRow): PartTimeStaff {
   const clockedIn = Boolean(row.clocked_in_at);
+  const scheduledHours = Number(row.scheduled_hours);
   return {
     id: String(row.id),
     name: row.name,
     hourlyRate: Number(row.hourly_rate),
+    scheduledHours: Number.isFinite(scheduledHours) ? scheduledHours : 0,
     isClockedIn: clockedIn,
     currentClockInTime: clockedIn && row.clocked_in_at ? row.clocked_in_at : undefined,
+    shiftHours: clockedIn && row.shift_hours != null ? Number(row.shift_hours) : undefined,
+    shiftRate: clockedIn && row.shift_rate != null ? Number(row.shift_rate) : undefined,
     active: row.active === true || Number(row.active) === 1,
   };
 }
@@ -131,16 +140,18 @@ export async function listStaff(ownerId: number, includeInactive = false): Promi
 
 export async function createStaff(
   ownerId: number,
-  input: { name: unknown; hourlyRate: unknown },
+  input: { name: unknown; hourlyRate: unknown; scheduledHours: unknown },
 ): Promise<PartTimeSuccess<PartTimeStaff> | PartTimeFailure> {
   const name = parseStaffName(input.name);
   if (!name) return { ok: false, error: 'Enter a staff name 請輸入姓名', status: 400 };
   const hourlyRate = parseHourlyRate(input.hourlyRate);
   if (hourlyRate == null) return { ok: false, error: 'Hourly rate must be greater than 0 時薪必須大於 0', status: 400 };
+  const scheduledHours = parseScheduledHours(input.scheduledHours);
+  if (scheduledHours == null) return { ok: false, error: 'Today’s hours must be greater than 0 and at most 24 今日工時要大於 0，最多 24 小時', status: 400 };
   try {
     const inserted = await db
-      .prepare('INSERT INTO part_time_staff (user_id, name, hourly_rate, active) VALUES (?, ?, ?, 1)')
-      .run(ownerId, name, hourlyRate);
+      .prepare('INSERT INTO part_time_staff (user_id, name, hourly_rate, scheduled_hours, active) VALUES (?, ?, ?, ?, 1)')
+      .run(ownerId, name, hourlyRate, scheduledHours);
     const row = await db.prepare(`${STAFF_SQL} AND id = ?`).get(ownerId, inserted.lastInsertRowid) as StaffRow | undefined;
     if (!row) return { ok: false, error: 'Failed to add staff 未能新增員工', status: 500 };
     return { ok: true, data: toStaff(row) };
@@ -165,6 +176,10 @@ export async function updateStaff(
     if (!name) return { ok: false, error: 'Enter a staff name 請輸入姓名', status: 400 };
     const hourlyRate = patch.hourlyRate !== undefined ? parseHourlyRate(patch.hourlyRate) : Number(row.hourly_rate);
     if (hourlyRate == null) return { ok: false, error: 'Hourly rate must be greater than 0 時薪必須大於 0', status: 400 };
+    const scheduledHours = patch.scheduledHours !== undefined
+      ? parseScheduledHours(patch.scheduledHours)
+      : Number(row.scheduled_hours);
+    if (scheduledHours == null) return { ok: false, error: 'Today’s hours must be greater than 0 and at most 24 今日工時要大於 0，最多 24 小時', status: 400 };
 
     let active = row.active === true || Number(row.active) === 1 ? 1 : 0;
     if (patch.active !== undefined) {
@@ -176,8 +191,8 @@ export async function updateStaff(
 
     try {
       await db
-        .prepare('UPDATE part_time_staff SET name = ?, hourly_rate = ?, active = ? WHERE id = ? AND user_id = ?')
-        .run(name, hourlyRate, active, staffId, ownerId);
+        .prepare('UPDATE part_time_staff SET name = ?, hourly_rate = ?, scheduled_hours = ?, active = ? WHERE id = ? AND user_id = ?')
+        .run(name, hourlyRate, scheduledHours, active, staffId, ownerId);
     } catch (err) {
       if (isUniqueViolation(err)) return { ok: false, error: 'That name is already in use 這個姓名已存在', status: 409 };
       throw err;
@@ -185,7 +200,7 @@ export async function updateStaff(
 
     return {
       ok: true,
-      data: toStaff({ ...row, name, hourly_rate: hourlyRate, active }),
+      data: toStaff({ ...row, name, hourly_rate: hourlyRate, scheduled_hours: scheduledHours, active }),
     };
   });
 }
@@ -207,9 +222,19 @@ export async function clockIn(
       return { ok: false, error: 'Staff not found 找不到員工', status: 404 };
     }
     if (row.clocked_in_at) return { ok: false, error: 'Already clocked in 已經返工', status: 409 };
+    const scheduledHours = Number(row.scheduled_hours);
+    if (!Number.isFinite(scheduledHours) || scheduledHours <= 0) {
+      return { ok: false, error: 'Set today’s hours before clock-in 請先設定今日工時', status: 400 };
+    }
+    const rate = Number(row.hourly_rate);
     const stamp = hkStamp(now);
-    await db.prepare('UPDATE part_time_staff SET clocked_in_at = ? WHERE id = ? AND user_id = ?').run(stamp.iso, staffId, ownerId);
-    return { ok: true, data: toStaff({ ...row, clocked_in_at: stamp.iso }) };
+    await db.prepare(
+      'UPDATE part_time_staff SET clocked_in_at = ?, shift_hours = ?, shift_rate = ? WHERE id = ? AND user_id = ?',
+    ).run(stamp.iso, scheduledHours, rate, staffId, ownerId);
+    return {
+      ok: true,
+      data: toStaff({ ...row, clocked_in_at: stamp.iso, shift_hours: scheduledHours, shift_rate: rate }),
+    };
   });
 }
 
@@ -217,6 +242,7 @@ export async function clockOut(
   ownerId: number,
   staffId: number,
   signatureBase64: unknown,
+  endedAt?: unknown,
   now = new Date(),
 ): Promise<PartTimeSuccess<AttendanceRecord> | PartTimeFailure> {
   const signature = parseSignatureDataUrl(signatureBase64);
@@ -229,10 +255,11 @@ export async function clockOut(
     }
     if (!row.clocked_in_at) return { ok: false, error: 'Not clocked in 尚未返工', status: 409 };
 
-    const end = hkStamp(now);
+    const end = resolveClockOutEnd(row.clocked_in_at, endedAt, now);
     const start = splitHkIso(row.clocked_in_at);
-    const rate = Number(row.hourly_rate);
-    const pay = calcShiftPay(row.clocked_in_at, end.iso, rate);
+    const rate = row.shift_rate != null ? Number(row.shift_rate) : Number(row.hourly_rate);
+    const hours = row.shift_hours != null ? Number(row.shift_hours) : Number(row.scheduled_hours);
+    const pay = calcScheduledPay(hours, rate);
     const inserted = await db.prepare(
       `INSERT INTO part_time_attendance (
          user_id, staff_id, staff_name, work_date, start_time, end_time,
@@ -253,7 +280,9 @@ export async function clockOut(
       signature.dataUrl,
       end.iso,
     );
-    await db.prepare('UPDATE part_time_staff SET clocked_in_at = NULL WHERE id = ? AND user_id = ?').run(staffId, ownerId);
+    await db.prepare(
+      'UPDATE part_time_staff SET clocked_in_at = NULL, shift_hours = NULL, shift_rate = NULL WHERE id = ? AND user_id = ?',
+    ).run(staffId, ownerId);
 
     return {
       ok: true,

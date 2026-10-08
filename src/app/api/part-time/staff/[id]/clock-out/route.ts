@@ -9,7 +9,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const staffId = parseEntityId(params.id);
   if (!staffId) return NextResponse.json({ error: 'Staff not found 找不到員工' }, { status: 404 });
   const body = await request.json().catch(() => null);
-  const result = await clockOut(access.ownerId, staffId, body?.signatureBase64);
+  const result = await clockOut(access.ownerId, staffId, body?.signatureBase64, body?.endedAt);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ record: result.data }, { status: 201 });
 }

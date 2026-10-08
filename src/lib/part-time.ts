@@ -5,9 +5,15 @@ export interface PartTimeStaff {
   id: string;
   name: string;
   hourlyRate: number;
+  /** Hours agreed before the shift. Pay uses this, not the clock. */
+  scheduledHours: number;
   isClockedIn: boolean;
   /** ISO 8601 with +08:00. Set only while clocked in. */
   currentClockInTime?: string;
+  /** Hours confirmed when this shift started. */
+  shiftHours?: number;
+  /** Rate confirmed when this shift started. */
+  shiftRate?: number;
   active: boolean;
 }
 
@@ -44,6 +50,7 @@ export interface RecordQuery {
 export interface UpdateStaffInput {
   name?: string;
   hourlyRate?: number;
+  scheduledHours?: number;
   active?: boolean;
 }
 
@@ -92,6 +99,43 @@ export function splitHkIso(iso: string): { date: string; time: string } {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/.exec(iso);
   if (!m) return { date: iso.slice(0, 10), time: '00:00:00' };
   return { date: m[1], time: m[2] };
+}
+
+/** Pay for a shift whose hours were agreed in advance. Clock times are not used. */
+export function calcScheduledPay(hours: number, hourlyRate: number): {
+  totalHours: number;
+  totalSalary: number;
+} {
+  if (!Number.isFinite(hours) || !Number.isFinite(hourlyRate) || hours <= 0 || hourlyRate <= 0) {
+    return { totalHours: 0, totalSalary: 0 };
+  }
+  const totalHours = Number(hours.toFixed(2));
+  const totalSalary = Number((totalHours * hourlyRate).toFixed(1));
+  return { totalHours, totalSalary };
+}
+
+const HK_ISO = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\+08:00$/;
+
+/**
+ * End time frozen when 放工 is tapped. Rejects a missing, early, or future stamp
+ * and falls back to the server clock.
+ */
+export function resolveClockOutEnd(
+  startIso: string,
+  requestedIso: unknown,
+  now: Date = new Date(),
+): { date: string; time: string; iso: string } {
+  const server = hkStamp(now);
+  if (typeof requestedIso !== 'string') return server;
+  const match = HK_ISO.exec(requestedIso);
+  if (!match) return server;
+  const requestedMs = Date.parse(requestedIso);
+  const startMs = Date.parse(startIso);
+  const serverMs = Date.parse(server.iso);
+  if (!Number.isFinite(requestedMs) || !Number.isFinite(startMs) || !Number.isFinite(serverMs)) return server;
+  if (requestedMs < startMs) return server;
+  if (requestedMs > serverMs + 2 * 60 * 1000) return server;
+  return { date: match[1], time: match[2], iso: requestedIso };
 }
 
 /** totalHours rounded to 2 decimals; totalSalary = hours × rate, 1 decimal. */
@@ -146,6 +190,12 @@ export function parseStaffName(value: unknown): string | null {
   return name;
 }
 
+export function parseScheduledHours(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(n) || n <= 0 || n > 24) return null;
+  return Number(n.toFixed(2));
+}
+
 export function parseHourlyRate(value: unknown): number | null {
   const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
   if (!Number.isFinite(n) || n <= 0 || n > 9999) return null;
@@ -177,7 +227,7 @@ function csvCell(value: string | number): string {
 }
 
 export function attendanceToCsv(records: AttendanceRecord[]): string {
-  const header = ['日期', '員工姓名', '返工時間', '收工時間', '總工時', '時薪', '總薪水'];
+  const header = ['日期', '員工姓名', '返工時間', '收工時間', '計薪工時', '時薪', '總薪水'];
   const lines = [header.join(',')];
   for (const row of records) {
     lines.push(

@@ -843,6 +843,9 @@ CREATE TABLE IF NOT EXISTS part_time_staff (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   hourly_rate DOUBLE PRECISION NOT NULL,
+  scheduled_hours DOUBLE PRECISION NOT NULL DEFAULT 0,
+  shift_hours DOUBLE PRECISION,
+  shift_rate DOUBLE PRECISION,
   clocked_in_at TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS'))

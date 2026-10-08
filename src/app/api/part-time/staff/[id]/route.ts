@@ -12,6 +12,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const result = await updateStaff(access.ownerId, staffId, {
     name: body?.name,
     hourlyRate: body?.hourlyRate,
+    scheduledHours: body?.scheduledHours,
     active: typeof body?.active === 'boolean' ? body.active : undefined,
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });

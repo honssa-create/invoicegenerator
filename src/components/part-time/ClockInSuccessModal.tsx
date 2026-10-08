@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { formatHours, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 
 type Props = {
   staff: PartTimeStaff;
@@ -11,6 +11,7 @@ type Props = {
 
 export default function ClockInSuccessModal({ staff, onClose }: Props) {
   const start = staff.currentClockInTime ? splitHkIso(staff.currentClockInTime) : { date: '', time: '' };
+  const hours = staff.shiftHours ?? staff.scheduledHours;
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -35,6 +36,7 @@ export default function ClockInSuccessModal({ staff, onClose }: Props) {
         </div>
         <h2 id="clock-in-success-title" className="mt-5 text-3xl font-semibold text-gray-900">開工順利</h2>
         <p className="mt-2 text-2xl font-semibold text-gray-900">{staff.name}</p>
+        {hours > 0 && <p className="mt-3 text-lg font-semibold text-gray-700">今日 {formatHours(hours)} 小時</p>}
         <p className="mt-4 text-sm text-gray-500">上班時間 / Start</p>
         <p className="mt-1 text-4xl font-semibold tabular-nums text-brand-800">{start.time || '—'}</p>
         {start.date && <p className="mt-1 text-sm text-gray-500">{start.date}</p>}

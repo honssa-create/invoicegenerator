@@ -2,25 +2,27 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { calcShiftPay, formatHours, formatMoney, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { calcScheduledPay, formatHours, formatMoney, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 import { SignaturePad, type SignaturePadHandle } from './SignaturePad';
 
 type Props = {
   staff: PartTimeStaff;
-  now: Date;
+  endedAt: Date;
   saving: boolean;
   error: string;
   onCancel: () => void;
   onConfirm: (signatureBase64: string) => void;
 };
 
-export default function SignatureModal({ staff, now, saving, error, onCancel, onConfirm }: Props) {
+export default function SignatureModal({ staff, endedAt, saving, error, onCancel, onConfirm }: Props) {
   const padRef = useRef<SignaturePadHandle>(null);
   const [empty, setEmpty] = useState(true);
   const startIso = staff.currentClockInTime || '';
-  const end = hkStamp(now);
+  const end = hkStamp(endedAt);
   const start = startIso ? splitHkIso(startIso) : { date: end.date, time: '—' };
-  const pay = startIso ? calcShiftPay(startIso, end.iso, staff.hourlyRate) : { totalHours: 0, totalSalary: 0 };
+  const paidHours = staff.shiftHours ?? staff.scheduledHours;
+  const paidRate = staff.shiftRate ?? staff.hourlyRate;
+  const pay = calcScheduledPay(paidHours, paidRate);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -64,8 +66,8 @@ export default function SignatureModal({ staff, now, saving, error, onCancel, on
             <dd className="font-medium tabular-nums text-gray-900">{end.time}</dd>
           </div>
           <div>
-            <dt className="text-gray-500">總工時 / Hours</dt>
-            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatHours(pay.totalHours)} hrs</dd>
+            <dt className="text-gray-500">計薪工時 / Paid hours</dt>
+            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatHours(pay.totalHours)} 小時</dd>
           </div>
           <div>
             <dt className="text-gray-500">時薪 / Rate</dt>
@@ -74,6 +76,7 @@ export default function SignatureModal({ staff, now, saving, error, onCancel, on
           <div className="col-span-2 rounded-xl bg-brand-50 px-4 py-3">
             <dt className="text-gray-500">今日薪金 / Salary</dt>
             <dd className="text-3xl font-semibold tabular-nums text-gray-900">{formatMoney(pay.totalSalary)}</dd>
+            <dd className="mt-1 text-xs text-gray-500">薪金跟今日工時計算。返工同放工時間只作紀錄，計時已停。</dd>
           </div>
         </dl>
 

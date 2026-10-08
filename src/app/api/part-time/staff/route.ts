@@ -17,6 +17,7 @@ export async function POST(request: Request) {
   const result = await createStaff(access.ownerId, {
     name: body?.name,
     hourlyRate: body?.hourlyRate,
+    scheduledHours: body?.scheduledHours,
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ staff: result.data }, { status: 201 });

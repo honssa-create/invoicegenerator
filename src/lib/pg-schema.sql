@@ -754,6 +754,8 @@ CREATE INDEX IF NOT EXISTS idx_expenses_user_paid ON expenses(user_id, paid_date
 CREATE INDEX IF NOT EXISTS idx_expenses_user_created_by ON expenses(user_id, created_by_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+-- Matches listOrdersPage: WHERE o.user_id = ? ORDER BY o.updated_at DESC, o.id DESC LIMIT/OFFSET.
+CREATE INDEX IF NOT EXISTS idx_orders_user_updated ON orders(user_id, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_user_kitchen_type ON orders(user_id, order_type)
   WHERE order_type IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_orders_quotation ON orders(quotation_id) WHERE quotation_id IS NOT NULL;

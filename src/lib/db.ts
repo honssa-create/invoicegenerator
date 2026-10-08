@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { warnIfEphemeralReceiptStorage } from './receipt-storage';
 import { warnIfR2Misconfigured } from './r2';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { assignLegacyDocumentNumbers } from './record-numbering-core';
@@ -31,9 +32,19 @@ function databaseUrl(): string {
 
 function getPool(): Pool {
   if (!pool) {
+    const max = Number(process.env.PG_POOL_MAX || 10);
     pool = new Pool({
       connectionString: databaseUrl(),
-      max: Number(process.env.PG_POOL_MAX || 10),
+      max,
+      // pg-pool 3.14 (package-lock) keeps at least `min` idle clients instead of reaping them
+      // all (it does not pre-open them). Avoids a fresh TCP+auth handshake after quiet periods.
+      min: Math.min(2, max),
+      // Default is 10s: idle connections were closed and the next page load paid a reconnect.
+      idleTimeoutMillis: 300_000,
+      // TCP keepalive so long-idle pooled connections are not silently dropped by proxies/NAT.
+      keepAlive: true,
+      // NOTE: both branches are `undefined`, so this line is currently a no-op — SSL behaviour
+      // comes from DATABASE_URL (e.g. `?sslmode=...`) / PG* env vars. Left as-is on purpose.
       ssl: process.env.PGSSLMODE === 'disable' ? undefined : undefined,
     });
     pool.on('error', (err) => {
@@ -914,6 +925,61 @@ async function runBootDataFixes(): Promise<void> {
   await migrateNestieeGiftBoxQtysOnce();
 }
 
+/**
+ * Bump when runBootDataFixes() (or a helper it calls) gains a step that must run again on
+ * databases that were already migrated. As a safety net the source of db.ts and of the
+ * permission / boot-helper modules is hashed too (see BOOT_FINGERPRINT_FILES), so most edits
+ * already force one full boot on the next deploy.
+ */
+const BOOT_FIXES_VERSION = '2026-10-08.1';
+const SCHEMA_BOOT_KEY_PREFIX = 'schema_boot:';
+/** Files (under src/lib) whose content affects what the full boot does. Missing files are skipped. */
+const BOOT_FINGERPRINT_FILES = [
+  'db.ts',
+  'permissions.ts',
+  'permissions-server.ts',
+  'customer-server.ts',
+  'nestiee-gift-box-server.ts',
+  'record-numbering-core.ts',
+];
+
+/** Hash of pg-schema.sql + boot-fix version + boot helper sources. Changes ⇒ full boot runs again. */
+export function schemaBootFingerprint(schemaSql: string): string {
+  const h = crypto.createHash('sha256');
+  h.update(`boot-fixes:${BOOT_FIXES_VERSION}\n`);
+  h.update(schemaSql);
+  for (const file of BOOT_FINGERPRINT_FILES) {
+    h.update(`\n-- file:${file}\n`);
+    try {
+      h.update(fs.readFileSync(path.join(process.cwd(), 'src', 'lib', file)));
+    } catch {
+      h.update('<missing>');
+    }
+  }
+  return h.digest('hex').slice(0, 32);
+}
+
+/** One query: has this exact schema + boot-fix fingerprint already been applied to this DB? */
+async function schemaBootAlreadyApplied(key: string): Promise<boolean> {
+  if (process.env.SCHEMA_BOOT_FORCE === '1') return false;
+  try {
+    const res = await getPool().query(`SELECT 1 FROM app_migrations WHERE key = $1`, [key]);
+    return res.rows.length > 0;
+  } catch (err) {
+    // 42P01 undefined_table: fresh database, app_migrations not created yet.
+    if ((err as { code?: string } | null)?.code === '42P01') return false;
+    throw err;
+  }
+}
+
+async function markSchemaBootApplied(key: string): Promise<void> {
+  await getPool().query(`INSERT INTO app_migrations (key) VALUES ($1) ON CONFLICT DO NOTHING`, [key]);
+  await getPool().query(
+    `DELETE FROM app_migrations WHERE key LIKE '${SCHEMA_BOOT_KEY_PREFIX}%' AND key <> $1`,
+    [key],
+  );
+}
+
 export async function ensureSchema(): Promise<void> {
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
   // Nested call from boot helpers (e.g. seedRolePermissionsIfEmpty → db.prepare) must not
@@ -924,7 +990,16 @@ export async function ensureSchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = schemaBootAls
       .run(true, async () => {
+        const started = Date.now();
         const sql = await loadSchemaSql();
+        const bootKey = SCHEMA_BOOT_KEY_PREFIX + schemaBootFingerprint(sql);
+        // Fast path: an already-migrated DB with unchanged schema/boot code costs one query
+        // instead of ~250 sequential statements on the first request after every restart.
+        if (await schemaBootAlreadyApplied(bootKey)) {
+          warnIfEphemeralReceiptStorage();
+          warnIfR2Misconfigured();
+          return;
+        }
         // Autocommit each statement so AccessExclusiveLock is released between ALTERs.
         // A single multi-statement Query holds locks across invoices + reconciliation_records
         // and deadlocks concurrent JOINs (Postgres 40P01).
@@ -932,6 +1007,9 @@ export async function ensureSchema(): Promise<void> {
           await getPool().query(stmt);
         }
         await runBootDataFixes();
+        // Only recorded after everything above succeeded, so a failed boot retries in full.
+        await markSchemaBootApplied(bootKey);
+        console.info(`[InvoiceFlow] Schema + boot fixes applied in ${Date.now() - started}ms (${bootKey}).`);
         warnIfEphemeralReceiptStorage();
         warnIfR2Misconfigured();
       })

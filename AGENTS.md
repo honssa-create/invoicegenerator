@@ -15,6 +15,7 @@ InvoiceFlow is a single **Next.js 14 (App Router)** app backed by **PostgreSQL**
 
 ### Non-obvious notes
 - Schema lives in [`src/lib/pg-schema.sql`](src/lib/pg-schema.sql); applied on first DB use via [`src/lib/db.ts`](src/lib/db.ts) (`CREATE TABLE IF NOT EXISTS`). Queries use async `await db.prepare(…).get/all/run` and `await db.transaction(async () => …)` (`?` placeholders are converted to `$n`).
+- Boot migrations (pg-schema.sql + `runBootDataFixes()`) are skipped when a fingerprint of `pg-schema.sql`, `BOOT_FIXES_VERSION` and the boot helper sources (`BOOT_FINGERPRINT_FILES` in `db.ts`) is already stored in `app_migrations` (`schema_boot:<hash>`). Editing those files triggers one full boot automatically; if you add a boot fix in another file, bump `BOOT_FIXES_VERSION`. Set `SCHEMA_BOOT_FORCE=1` to force a full boot. `src/instrumentation.ts` warms this at server start.
 - On Railway: attach a Postgres plugin and set `DATABASE_URL`. Receipts stay on a volume (`RECEIPTS_DIR` / former `/data/receipts`) or R2 — not in Postgres. `DB_PATH` is no longer used for the app database.
 - Auth uses JWT session cookies (`jose`) + bcrypt (`bcryptjs`). `JWT_SECRET` is optional in dev (falls back to a dev default); set it for production.
 - Data is isolated per user; every API route scopes queries by the authenticated `user_id`.

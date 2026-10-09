@@ -5,7 +5,7 @@ import { denyReadOnlyWrite } from '@/lib/api-guard';
 import { getOrder, listOrdersPage, logActivity } from '@/lib/order-server';
 import { parseOrderListQuery } from '@/lib/order-list-filters';
 import { getDataOwnerId } from '@/lib/org-server';
-import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE, orderTypeFromFields, statusesForOrderType } from '@/lib/orders';
+import { ORDER_TYPES, WEDDING_GIFT_ORDER_TYPE, orderDueDateColumnFromFields, statusesForOrderType } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { allocateGlobalRecordNumber } from '@/lib/record-numbering';
 import { trySyncCustomerFromOrderRecord } from '@/lib/customer-server';
@@ -54,15 +54,16 @@ export async function POST(request: Request) {
     const allowedStatuses = statusesForOrderType(orderType);
     const status =
       statusRaw && allowedStatuses.includes(statusRaw) ? statusRaw : 'OPEN';
-    const fieldsJson = JSON.stringify(orderType ? { order_type: orderType } : {});
+    const fields = orderType ? { order_type: orderType } : {};
+    const fieldsJson = JSON.stringify(fields);
     const { id, referenceNumber } = await db.transaction(async () => {
       const referenceNumber = await allocateGlobalRecordNumber('order');
       const result = await db
         .prepare(
           `INSERT INTO orders (
              user_id, reference_number, po_number, name, description, status,
-             customer_email, phone, shipping_address, notes, fields_json, order_type
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             customer_email, phone, shipping_address, notes, fields_json, order_type, due_date
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           ownerId,
@@ -76,7 +77,8 @@ export async function POST(request: Request) {
           body.shipping_address?.trim() || null,
           body.notes?.trim() || null,
           fieldsJson,
-          orderType || null
+          orderType || null,
+          orderDueDateColumnFromFields(fields)
         );
       return { id: result.lastInsertRowid as number, referenceNumber };
     });

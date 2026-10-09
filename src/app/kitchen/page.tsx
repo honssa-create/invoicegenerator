@@ -387,19 +387,13 @@ function KitchenPageContent() {
         },
         { preserveMovements: background },
       );
-      if (inventoryLoadedRef.current) {
-        await loadInventory();
-      }
-      if (ordersLoadedRef.current) {
-        await loadOrders();
-      }
+      const followUps: Promise<void>[] = [];
+      if (inventoryLoadedRef.current) followUps.push(loadInventory());
+      if (ordersLoadedRef.current) followUps.push(loadOrders());
+      if (followUps.length) await Promise.all(followUps);
     } finally {
       if (!background) setShellLoading(false);
     }
-  };
-
-  const loadShell = async () => {
-    await fetchBootstrapLite(false);
   };
 
   const loadInitial = async () => {
@@ -411,16 +405,6 @@ function KitchenPageContent() {
       return;
     }
     await fetchBootstrapLite(false);
-  };
-
-  const load = async (opts?: { refreshMovements?: boolean; refreshOrders?: boolean }) => {
-    await loadShell();
-    if (opts?.refreshOrders !== false && ordersLoadedRef.current) {
-      await loadOrders();
-    }
-    if (opts?.refreshMovements !== false && movementsLoadedRef.current) {
-      await loadMovements();
-    }
   };
 
   useEffect(() => {

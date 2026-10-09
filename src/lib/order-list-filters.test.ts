@@ -5,8 +5,9 @@ describe('buildOrderListFilterSql', () => {
   it('adds order type filter for nestiee shortcut', () => {
     const params: (string | number)[] = [];
     const sql = buildOrderListFilterSql({ orderType: 'nestiee' }, params);
-    expect(sql).toContain('order_type');
-    expect(params.length).toBe(2);
+    expect(sql).toContain('o.order_type');
+    expect(sql).not.toContain("j.fj->>'order_type'");
+    expect(params.length).toBe(1);
   });
 
   it('adds status when set', () => {

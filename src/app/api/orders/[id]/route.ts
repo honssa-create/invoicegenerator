@@ -6,7 +6,7 @@ import { getOrder, logActivity, ORDER_DETAIL_REL_OPTS, parseOrderGetOpts } from 
 import { logActivity as logUnifiedActivity } from '@/lib/activity';
 import { getDataOwnerId } from '@/lib/org-server';
 import { trashOrder } from '@/lib/trash';
-import { isWeddingGiftOrderType, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
+import { isWeddingGiftOrderType, orderDueDateColumnFromFields, orderTypeFromFields, pruneStaleOrderFields } from '@/lib/orders';
 import { ensurePrepFromWeddingOrder } from '@/lib/kitchen-prep-server';
 import { tryAllocateKitchenOnShipTransition } from '@/lib/kitchen-server';
 import { CONFLICT_MESSAGE, timestampsMatch } from '@/lib/concurrency';
@@ -118,6 +118,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       values.push(JSON.stringify(mergedFields));
       setClauses.push('order_type = ?');
       values.push(orderTypeFromFields(mergedFields));
+      setClauses.push('due_date = ?');
+      values.push(orderDueDateColumnFromFields(mergedFields));
     }
 
     let kitchenAllocatedSummary: string | undefined;

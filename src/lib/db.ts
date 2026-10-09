@@ -869,6 +869,7 @@ async function runBootDataFixes(): Promise<void> {
   await migrateCustomerDedupOnce();
 
   await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT`);
+  await client().query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS due_date TEXT`);
   await client().query(`ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT`);
   await client().query(`
     CREATE INDEX IF NOT EXISTS idx_orders_user_kitchen_type ON orders(user_id, order_type)
@@ -889,6 +890,27 @@ async function runBootDataFixes(): Promise<void> {
     `);
     await client().query(
       `INSERT INTO app_migrations (key) VALUES ('orders_order_type_column_v1') ON CONFLICT DO NOTHING`
+    );
+  }
+
+  await client().query(`
+    CREATE INDEX IF NOT EXISTS idx_orders_user_due_date ON orders(user_id, due_date)
+    WHERE due_date IS NOT NULL AND btrim(due_date) <> ''
+  `);
+  const migDueDate = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'orders_due_date_column_v1'`
+  );
+  if (!migDueDate.rows.length) {
+    await client().query(`
+      UPDATE orders
+      SET due_date = NULLIF(TRIM(fields_json::jsonb->>'due_date'), '')
+      WHERE due_date IS NULL
+        AND fields_json IS NOT NULL
+        AND btrim(fields_json) <> ''
+        AND fields_json::jsonb ? 'due_date'
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('orders_due_date_column_v1') ON CONFLICT DO NOTHING`
     );
   }
 
@@ -934,7 +956,7 @@ async function runBootDataFixes(): Promise<void> {
  * permission / boot-helper modules is hashed too (see BOOT_FINGERPRINT_FILES), so most edits
  * already force one full boot on the next deploy.
  */
-const BOOT_FIXES_VERSION = '2026-10-08.1';
+const BOOT_FIXES_VERSION = '2026-10-09.1';
 const SCHEMA_BOOT_KEY_PREFIX = 'schema_boot:';
 /** Files (under src/lib) whose content affects what the full boot does. Missing files are skipped. */
 const BOOT_FINGERPRINT_FILES = [

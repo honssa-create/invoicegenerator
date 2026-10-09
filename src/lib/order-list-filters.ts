@@ -14,6 +14,7 @@ import {
   buildOrderDeliveryDateExpr,
   buildOrderDueDateSql,
   buildOrderIsShippedSql,
+  orderTypeColumnExpr,
 } from './order-list-shipped-sql';
 
 export type OrderDashFocus = 'all' | 'unshipped' | 'urgent';
@@ -103,32 +104,21 @@ export function buildOrderListFilterSql(
   let where = '';
 
   const ot = query.orderType || '';
+  const typeExpr = orderTypeColumnExpr();
   if (ot === 'honour') {
     const types = [...BADGE_ORDER_TYPES];
     const ph = types.map(() => '?').join(', ');
-    where += ` AND (
-      COALESCE(o.order_type, '') IN (${ph})
-      OR COALESCE(j.fj->>'order_type', '') IN (${ph})
-    )`;
-    params.push(...types, ...types);
+    where += ` AND ${typeExpr} IN (${ph})`;
+    params.push(...types);
   } else if (ot === 'wedding') {
-    where += ` AND (
-      COALESCE(o.order_type, '') = ?
-      OR COALESCE(j.fj->>'order_type', '') = ?
-    )`;
-    params.push(WEDDING_GIFT_ORDER_TYPE, WEDDING_GIFT_ORDER_TYPE);
+    where += ` AND ${typeExpr} = ?`;
+    params.push(WEDDING_GIFT_ORDER_TYPE);
   } else if (ot === 'nestiee') {
-    where += ` AND (
-      COALESCE(o.order_type, '') = ?
-      OR COALESCE(j.fj->>'order_type', '') = ?
-    )`;
-    params.push(NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE);
+    where += ` AND ${typeExpr} = ?`;
+    params.push(NESTIEE_ORDER_TYPE);
   } else if (ot) {
-    where += ` AND (
-      COALESCE(o.order_type, '') = ?
-      OR COALESCE(j.fj->>'order_type', '') = ?
-    )`;
-    params.push(ot, ot);
+    where += ` AND ${typeExpr} = ?`;
+    params.push(ot);
   }
 
   if (query.status) {

@@ -26,6 +26,7 @@ import {
   resolveHonourReceiptDateOnIngest,
   resolveNestieeReceiptDateOnIngest,
   pruneStaleOrderFields,
+  orderDueDateColumnFromFields,
   orderTypeFromFields,
   WEDDING_GIFT_ORDER_TYPE,
   WOO_PLATFORM_ORDER_TYPE,
@@ -422,6 +423,7 @@ export async function upsertHubOrder(
          po_number = COALESCE(?, po_number),
          fields_json = ?,
          order_type = ?,
+         due_date = ?,
          updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`
     ).run(
@@ -436,6 +438,7 @@ export async function upsertHubOrder(
       input.external_po_number?.trim() || null,
       JSON.stringify(fields),
       orderType,
+      orderDueDateColumnFromFields(fields),
       existing.id,
       userId
     );
@@ -462,8 +465,8 @@ export async function upsertHubOrder(
         `INSERT INTO orders (
            user_id, source_platform, original_order_id, system_order_no, reference_number,
            po_number, name, description, status, customer_email, phone,
-           shipping_address, total_amount, notes, fields_json, order_type, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+           shipping_address, total_amount, notes, fields_json, order_type, due_date, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
       )
       .run(
         userId,
@@ -482,6 +485,7 @@ export async function upsertHubOrder(
         importedNotes || null,
         JSON.stringify(fields),
         orderType,
+        orderDueDateColumnFromFields(fields),
         input.created_at
       );
   });

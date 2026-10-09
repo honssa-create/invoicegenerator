@@ -1203,6 +1203,14 @@ export function orderTypeFromFields(fields: Record<string, unknown> | null | und
   return t || null;
 }
 
+/** Denormalized orders.due_date — kept in sync with fields_json.due_date. */
+export function orderDueDateColumnFromFields(fields: Record<string, unknown> | null | undefined): string | null {
+  const raw = fields?.due_date;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed || null;
+}
+
 export const CUPMOKA_ORDER_TYPE = 'Cupmoka' as const;
 export function isCupmokaOrderType(t: string): boolean {
   return t === CUPMOKA_ORDER_TYPE;

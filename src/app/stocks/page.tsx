@@ -432,6 +432,7 @@ export default function StocksPage() {
                         <img
                           src={stockIconUrl(item)!}
                           alt=""
+                          loading="lazy"
                           className="h-9 w-9 rounded-md object-cover border border-gray-200 shrink-0"
                         />
                       ) : (

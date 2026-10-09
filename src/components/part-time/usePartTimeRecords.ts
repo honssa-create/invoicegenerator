@@ -48,7 +48,12 @@ export function usePartTimeRecords() {
   const staffGen = useRef(0);
   const recordsGen = useRef(0);
   const recordsLoaded = useRef(false);
+  const directoryLoaded = useRef(false);
+  const recordsKeyRef = useRef('');
   const queryRef = useRef<RecordQuery>({});
+
+  const recordsKey = (query: RecordQuery) =>
+    `${query.staffId || ''}|${query.from || ''}|${query.to || ''}`;
 
   const refreshStaff = useCallback(async () => {
     const gen = ++staffGen.current;
@@ -57,12 +62,14 @@ export function usePartTimeRecords() {
     setStaff(list);
   }, []);
 
-  const loadDirectory = useCallback(async () => {
+  const loadDirectory = useCallback(async (force = false) => {
+    if (!force && directoryLoaded.current) return;
     const gen = ++staffGen.current;
     setDirectoryLoading(true);
     try {
       const list = await fetchStaff(true);
       if (gen !== staffGen.current) return;
+      directoryLoaded.current = true;
       setDirectory(list);
       setStaff(list.filter((row) => row.active));
     } catch (err) {
@@ -72,7 +79,9 @@ export function usePartTimeRecords() {
     }
   }, []);
 
-  const loadRecords = useCallback(async (query: RecordQuery) => {
+  const loadRecords = useCallback(async (query: RecordQuery, force = false) => {
+    const key = recordsKey(query);
+    if (!force && recordsLoaded.current && recordsKeyRef.current === key) return;
     const gen = ++recordsGen.current;
     queryRef.current = query;
     if (!recordsLoaded.current) setRecordsLoading(true);
@@ -80,6 +89,7 @@ export function usePartTimeRecords() {
       const data = await fetchRecords(query);
       if (gen !== recordsGen.current) return;
       recordsLoaded.current = true;
+      recordsKeyRef.current = key;
       setRecords(data.records);
       setSummary(data.summary);
       setTruncated(data.truncated);
@@ -93,7 +103,7 @@ export function usePartTimeRecords() {
 
   const reloadRecords = useCallback(() => {
     if (!recordsLoaded.current) return Promise.resolve();
-    return loadRecords(queryRef.current);
+    return loadRecords(queryRef.current, true);
   }, [loadRecords]);
 
   const bootStaff = useCallback(() => {
@@ -137,7 +147,7 @@ export function usePartTimeRecords() {
           ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftHours: undefined, shiftRate: undefined }
           : row
       )));
-      await reloadRecords();
+      void reloadRecords();
       return true;
     } catch (err) {
       setError(messageOf(err));
@@ -156,7 +166,7 @@ export function usePartTimeRecords() {
       const next = await apiCreateStaff(input);
       setStaff((prev) => upsert(prev, next, true));
       setDirectory((prev) => upsert(prev, next, false));
-      await loadDirectory();
+      await loadDirectory(true);
       return next;
     } catch (err) {
       setError(messageOf(err));
@@ -174,7 +184,7 @@ export function usePartTimeRecords() {
       const next = await updateRecord(id, patch);
       setStaff((prev) => upsert(prev, next, true));
       setDirectory((prev) => upsert(prev, next, false));
-      await loadDirectory();
+      await loadDirectory(true);
       return next;
     } catch (err) {
       setError(messageOf(err));

@@ -138,7 +138,7 @@ export default function CashflowPage() {
                   <td className="px-4 py-3">
                     {e.receiptUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={e.receiptUrl} alt="receipt" onClick={() => setLightbox(e.receiptUrl)} className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
+                      <img src={e.receiptUrl} alt="receipt" loading="lazy" onClick={() => setLightbox(e.receiptUrl)} className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400" />
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3">

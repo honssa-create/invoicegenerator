@@ -10,7 +10,7 @@ import {
   orderTypeFromFields,
 } from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
-import { buildOrderDeliveryDateExpr } from './order-list-shipped-sql';
+import { buildOrderDeliveryDateExpr, orderTypeColumnExpr } from './order-list-shipped-sql';
 
 export const NESTIEE_PROCESSING_STATUS = 'processing' as const;
 export const NESTIEE_SHIPPED_STATUSES = ['shipped', 'completed'] as const;
@@ -631,11 +631,8 @@ export function buildNestieeDemandListFilterSql(
   },
   params: (string | number)[],
 ): string {
-  let where = ` AND (
-    COALESCE(o.order_type, '') = ?
-    OR COALESCE(j.fj->>'order_type', '') = ?
-  )`;
-  params.push(NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE);
+  let where = ` AND ${orderTypeColumnExpr()} = ?`;
+  params.push(NESTIEE_ORDER_TYPE);
 
   const statuses = nestieeStatusesForDemandScope(scope);
   const statusPh = statuses.map(() => '?').join(', ');

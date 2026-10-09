@@ -9,9 +9,10 @@ describe('order-list-dashboard SQL', () => {
     expect(sql).toContain('SENT');
   });
 
-  it('builds due date from json fields', () => {
+  it('builds due date from the column, then client delivery json', () => {
     const sql = buildOrderDueDateSql();
-    expect(sql).toContain("j.fj->>'due_date'");
+    expect(sql).toContain('o.due_date');
+    expect(sql).not.toContain("j.fj->>'due_date'");
     expect(sql).toContain("j.fj->>'client_delivery_date'");
   });
 });

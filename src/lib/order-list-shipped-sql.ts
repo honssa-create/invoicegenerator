@@ -9,29 +9,37 @@ function sqlQuote(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-/** Nestiee delivery window (client_delivery_date → due_date → column). */
+/** Trimmed denormalized `orders.order_type`. List filters use this column, not jsonb. */
+export function orderTypeColumnExpr(): string {
+  return `COALESCE(NULLIF(TRIM(o.order_type), ''), '')`;
+}
+
+/** Nestiee delivery window (client_delivery_date → due_date column → legacy delivery_date). */
 export function buildOrderDeliveryDateExpr(): string {
   return `COALESCE(
     NULLIF(TRIM(j.fj->>'client_delivery_date'), ''),
-    NULLIF(TRIM(j.fj->>'due_date'), ''),
+    NULLIF(TRIM(o.due_date), ''),
     NULLIF(TRIM(o.delivery_date), ''),
     ''
   )`;
 }
 
-/** Matches {@link orderDueDate} for field-backed dates (requires lateral `j`). */
+/**
+ * Matches {@link orderDueDate} for field-backed dates.
+ * `due_date` is the denormalized column; `client_delivery_date` still comes from jsonb.
+ */
 export function buildOrderDueDateSql(): string {
   return `COALESCE(
-    NULLIF(TRIM(LEFT(j.fj->>'due_date', 10)), ''),
+    NULLIF(TRIM(LEFT(o.due_date, 10)), ''),
     NULLIF(TRIM(LEFT(j.fj->>'client_delivery_date', 10)), ''),
     NULLIF(TRIM(LEFT(o.delivery_date, 10)), ''),
     ''
   )`;
 }
 
-/** Matches {@link isOrderShipped} for status + order_type (requires lateral `j`). */
+/** Matches {@link isOrderShipped} for status + denormalized order_type. */
 export function buildOrderIsShippedSql(): string {
-  const ot = `COALESCE(NULLIF(TRIM(j.fj->>'order_type'), ''), NULLIF(TRIM(o.order_type), ''), '')`;
+  const ot = orderTypeColumnExpr();
   const weddingList = WEDDING_GIFT_SHIPPED_STATUSES.map((s) => `'${sqlQuote(s)}'`).join(', ');
   const wedding = sqlQuote(WEDDING_GIFT_ORDER_TYPE);
   const nestiee = sqlQuote(NESTIEE_ORDER_TYPE);

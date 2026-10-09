@@ -699,6 +699,7 @@ export default function ExpensesPage() {
             key={r.id}
             src={expenseReceiptUrl(r, e.id)}
             alt="Receipt"
+            loading="lazy"
             onClick={() => openLightbox(e, i)}
             className="h-10 w-10 object-cover rounded border border-gray-200 cursor-zoom-in hover:ring-2 hover:ring-brand-400 transition"
             title="Click to enlarge"

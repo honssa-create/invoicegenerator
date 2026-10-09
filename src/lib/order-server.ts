@@ -181,8 +181,6 @@ export async function listOrders(userId: number): Promise<Order[]> {
 
 /** Field keys needed by board/table/accounting/cashflow — not honour_lines / nestiee blobs. */
 const LIST_FIELD_KEYS = [
-  'order_type',
-  'due_date',
   'client_delivery_date',
   'tracking_no',
   'payment_status_label',
@@ -226,8 +224,8 @@ interface LeanOrderRow {
   updated_at: string;
   source_platform: string | null;
   attended_at: string | null;
-  f_order_type: string | null;
-  f_due_date: string | null;
+  order_type: string | null;
+  due_date: string | null;
   f_client_delivery_date: string | null;
   f_tracking_no: string | null;
   f_payment_status_label: string | null;
@@ -261,7 +259,7 @@ interface LeanOrderRow {
 
 function leanRowToOrder(row: LeanOrderRow): Order {
   const fields: Record<string, string | boolean> = {};
-  const set = (key: ListFieldKey, raw: string | null) => {
+  const set = (key: ListFieldKey | 'order_type' | 'due_date', raw: string | null) => {
     if (raw == null || raw === '') return;
     if (key.endsWith('_verified')) {
       fields[key] = raw === 'true' || raw === '1';
@@ -269,8 +267,8 @@ function leanRowToOrder(row: LeanOrderRow): Order {
     }
     fields[key] = raw;
   };
-  set('order_type', row.f_order_type);
-  set('due_date', row.f_due_date);
+  set('order_type', row.order_type);
+  set('due_date', row.due_date);
   set('client_delivery_date', row.f_client_delivery_date);
   set('tracking_no', row.f_tracking_no);
   set('payment_status_label', row.f_payment_status_label);
@@ -391,55 +389,53 @@ async function attachOrderListFileMeta(orders: Order[]): Promise<Order[]> {
   const ids = orders.map((o) => o.id);
   const placeholders = ids.map(() => '?').join(',');
 
-  const countRows = (await db
-    .prepare(
-      `SELECT order_id, COUNT(*)::int AS cnt FROM order_files
-       WHERE order_id IN (${placeholders}) GROUP BY order_id`
-    )
-    .all(...ids)) as Array<{ order_id: number; cnt: number }>;
-  const countByOrder = new Map(countRows.map((r) => [r.order_id, r.cnt]));
-
   const thumbIdSet = new Set<number>();
   for (const o of orders) {
     const raw = o.fields?.thumbnail_file_id;
     const id = typeof raw === 'string' ? parseInt(raw, 10) : typeof raw === 'number' ? raw : 0;
     if (id > 0) thumbIdSet.add(id);
   }
+  const thumbIds = Array.from(thumbIdSet);
+  const thumbPlaceholders = thumbIds.map(() => '?').join(',');
 
-  const fileById = new Map<number, Order['files'][number]>();
-  if (thumbIdSet.size) {
-    const thumbIds = Array.from(thumbIdSet);
-    const thumbPlaceholders = thumbIds.map(() => '?').join(',');
-    const thumbRows = (await db
-      .prepare(
-        `SELECT id, order_id, path, original_name FROM order_files
-         WHERE id IN (${thumbPlaceholders})`
-      )
-      .all(...thumbIds)) as Array<{
-      id: number;
-      order_id: number;
-      path: string;
-      original_name: string | null;
-    }>;
-    for (const r of thumbRows) {
-      fileById.set(r.id, { id: r.id, path: r.path, original_name: r.original_name });
-    }
-  }
-
-  const firstByOrder = new Map<number, Order['files'][number]>();
-  const firstRows = (await db
-    .prepare(
-      `SELECT DISTINCT ON (order_id) id, order_id, path, original_name
-       FROM order_files
-       WHERE order_id IN (${placeholders})
-       ORDER BY order_id, id ASC`
-    )
-    .all(...ids)) as Array<{
+  type FileRow = {
     id: number;
     order_id: number;
     path: string;
     original_name: string | null;
-  }>;
+  };
+
+  const [countRows, thumbRows, firstRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT order_id, COUNT(*)::int AS cnt FROM order_files
+         WHERE order_id IN (${placeholders}) GROUP BY order_id`
+      )
+      .all(...ids) as Promise<Array<{ order_id: number; cnt: number }>>,
+    thumbIds.length
+      ? (db
+          .prepare(
+            `SELECT id, order_id, path, original_name FROM order_files
+             WHERE id IN (${thumbPlaceholders})`
+          )
+          .all(...thumbIds) as Promise<FileRow[]>)
+      : Promise.resolve([] as FileRow[]),
+    db
+      .prepare(
+        `SELECT DISTINCT ON (order_id) id, order_id, path, original_name
+         FROM order_files
+         WHERE order_id IN (${placeholders})
+         ORDER BY order_id, id ASC`
+      )
+      .all(...ids) as Promise<FileRow[]>,
+  ]);
+
+  const countByOrder = new Map(countRows.map((r) => [r.order_id, r.cnt]));
+  const fileById = new Map<number, Order['files'][number]>();
+  for (const r of thumbRows) {
+    fileById.set(r.id, { id: r.id, path: r.path, original_name: r.original_name });
+  }
+  const firstByOrder = new Map<number, Order['files'][number]>();
   for (const r of firstRows) {
     firstByOrder.set(r.order_id, { id: r.id, path: r.path, original_name: r.original_name });
   }
@@ -494,7 +490,7 @@ export async function listOrdersPage(
       `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
               o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
               o.quotation_id, o.total_amount, o.created_at, o.updated_at,
-              o.source_platform, o.attended_at,
+              o.source_platform, o.attended_at, o.order_type, o.due_date,
               ${LIST_FIELD_SQL}
        ${ORDER_LIST_FROM}
        WHERE o.user_id = ?${whereExtra}
@@ -575,7 +571,7 @@ export async function listOrdersSummary(
       `SELECT o.id, o.user_id, o.reference_number, o.po_number, o.name, o.description, o.status,
               o.delivery_date, o.customer_email, o.phone, o.shipping_address, o.notes, o.carton_count,
               o.quotation_id, o.total_amount, o.created_at, o.updated_at,
-              o.source_platform, o.attended_at,
+              o.source_platform, o.attended_at, o.order_type, o.due_date,
               ${LIST_FIELD_SQL}
        ${ORDER_LIST_FROM}
        WHERE o.user_id = ?${whereExtra}

@@ -9,7 +9,7 @@ import {
   type NestieeDateFilterType,
   type NestieeOrderStatusCounts,
 } from './nestiee-order-demand';
-import { buildOrderDeliveryDateExpr } from './order-list-shipped-sql';
+import { buildOrderDeliveryDateExpr, orderTypeColumnExpr } from './order-list-shipped-sql';
 
 const FROM = `FROM orders o
        LEFT JOIN LATERAL (
@@ -71,7 +71,7 @@ export async function countNestieeOrderStatusCounts(
   );
   const dueExpr = buildOrderDeliveryDateExpr();
 
-  const baseParams: (string | number)[] = [userId, NESTIEE_ORDER_TYPE, NESTIEE_ORDER_TYPE];
+  const baseParams: (string | number)[] = [userId, NESTIEE_ORDER_TYPE];
   const dateParams: (string | number)[] = [];
   const dateRange = appendNestieeDateRangeSql(opts, dateParams);
 
@@ -94,10 +94,7 @@ export async function countNestieeOrderStatusCounts(
          )::int AS ship_within_days
        ${FROM}
        WHERE o.user_id = ?
-         AND (
-           COALESCE(o.order_type, '') = ?
-           OR COALESCE(j.fj->>'order_type', '') = ?
-         )`
+         AND ${orderTypeColumnExpr()} = ?`
     )
     .get(...dateParams, ...dateParams, shipStart, shipEnd, ...baseParams)) as
     | { processing: number; completed: number; ship_within_days: number }

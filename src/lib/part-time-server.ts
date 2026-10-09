@@ -126,15 +126,20 @@ async function seedDefaultStaff(ownerId: number): Promise<void> {
 
 /** Active staff for the kiosk. Seeds 兼職 A/B/C once per org when the table is empty. */
 export async function listStaff(ownerId: number, includeInactive = false): Promise<PartTimeStaff[]> {
-  const active = await selectStaff(ownerId, false);
-  if (active.length > 0) {
-    if (!includeInactive) return active.map(toStaff);
-    const all = await selectStaff(ownerId, true);
-    return all.map(toStaff);
+  // History (`all=1`) reads the full directory in one query. The active-only
+  // kiosk path stays a single active query when anyone is clockable.
+  if (includeInactive) {
+    let rows = await selectStaff(ownerId, true);
+    if (!rows.length) {
+      await seedDefaultStaff(ownerId);
+      rows = await selectStaff(ownerId, true);
+    }
+    return rows.map(toStaff);
   }
-  const any = await db.prepare('SELECT 1 AS ok FROM part_time_staff WHERE user_id = ? LIMIT 1').get(ownerId);
-  if (!any) await seedDefaultStaff(ownerId);
-  const rows = await selectStaff(ownerId, includeInactive);
+  const active = await selectStaff(ownerId, false);
+  if (active.length > 0) return active.map(toStaff);
+  await seedDefaultStaff(ownerId);
+  const rows = await selectStaff(ownerId, false);
   return rows.map(toStaff);
 }
 

@@ -145,6 +145,7 @@ function OrderCard({
           <img
             src={orderFileUrl(thumb)}
             alt=""
+            loading="lazy"
             className="w-full h-full object-cover"
             draggable={false}
           />

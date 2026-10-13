@@ -1,4 +1,4 @@
-import type { AttendanceRecord, AttendanceSummary, PartTimeStaff, RecordQuery, UpdateStaffInput } from './part-time';
+import type { AttendanceRecord, AttendanceSummary, CreateStaffInput, PartTimeStaff, RecordQuery, UpdateStaffInput } from './part-time';
 
 /**
  * Browser calls for the part-time module.
@@ -52,7 +52,7 @@ export function fetchStaff(includeInactive = false): Promise<PartTimeStaff[]> {
   return request<{ staff: PartTimeStaff[] }>(`/api/part-time/staff${qs}`).then((data) => data.staff);
 }
 
-export function createStaff(input: { name: string; hourlyRate: number; scheduledHours: number }): Promise<PartTimeStaff> {
+export function createStaff(input: CreateStaffInput): Promise<PartTimeStaff> {
   return request<{ staff: PartTimeStaff }>('/api/part-time/staff', {
     method: 'POST',
     body: JSON.stringify(input),

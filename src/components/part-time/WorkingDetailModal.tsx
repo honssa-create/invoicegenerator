@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { formatElapsed, formatHours, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { formatDurationFromMinutes, formatElapsed, paidMinutesOf, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 
 type Props = {
   staff: PartTimeStaff;
@@ -28,8 +28,8 @@ export default function WorkingDetailModal({
   const working = Boolean(staff.isClockedIn && staff.currentClockInTime);
   const startIso = staff.currentClockInTime || '';
   const start = startIso ? splitHkIso(startIso) : { date: '—', time: '—' };
-  const todayHours = working ? staff.shiftHours : staff.scheduledHours;
-  const hoursReady = Number(todayHours) > 0;
+  const todayMinutes = paidMinutesOf(staff, working);
+  const hoursReady = todayMinutes > 0;
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -61,17 +61,17 @@ export default function WorkingDetailModal({
                 {startIso ? formatElapsed(startIso, now) : '—'}
               </dd>
             </div>
-            {Number(staff.shiftHours) > 0 && (
+            {todayMinutes > 0 && (
               <div className="rounded-xl bg-gray-50 px-4 py-3">
                 <dt className="text-gray-500">今日工時 / Paid hours</dt>
-                <dd className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{formatHours(Number(staff.shiftHours))} 小時</dd>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{formatDurationFromMinutes(todayMinutes)}</dd>
               </div>
             )}
           </dl>
         ) : hoursReady ? (
           <div className="mt-5 rounded-xl bg-gray-50 px-4 py-6 text-center">
             <p className="text-sm text-gray-500">今日返工時間</p>
-            <p className="mt-1 text-4xl font-semibold tabular-nums text-gray-900">{formatHours(Number(todayHours))} 小時</p>
+            <p className="mt-1 text-4xl font-semibold tabular-nums text-gray-900">{formatDurationFromMinutes(todayMinutes)}</p>
             <p className="mt-2 text-sm text-gray-500">確認就開始計時。Confirm to start.</p>
           </div>
         ) : (

@@ -15,6 +15,7 @@ import {
   EMPTY_ATTENDANCE_SUMMARY,
   type AttendanceRecord,
   type AttendanceSummary,
+  type CreateStaffInput,
   type PartTimeStaff,
   type RecordQuery,
   type UpdateStaffInput,
@@ -139,12 +140,12 @@ export function usePartTimeRecords() {
       await createRecord(staffId, signatureBase64, endedAt);
       setStaff((prev) => prev.map((row) => (
         row.id === staffId
-          ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftHours: undefined, shiftRate: undefined }
+          ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftMinutes: undefined, shiftHours: undefined, shiftRate: undefined }
           : row
       )));
       setDirectory((prev) => prev.map((row) => (
         row.id === staffId
-          ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftHours: undefined, shiftRate: undefined }
+          ? { ...row, isClockedIn: false, currentClockInTime: undefined, shiftMinutes: undefined, shiftHours: undefined, shiftRate: undefined }
           : row
       )));
       void reloadRecords();
@@ -158,7 +159,7 @@ export function usePartTimeRecords() {
     }
   }, [refreshStaff, reloadRecords]);
 
-  const createStaff = useCallback(async (input: { name: string; hourlyRate: number; scheduledHours: number }) => {
+  const createStaff = useCallback(async (input: CreateStaffInput) => {
     staffGen.current += 1;
     setStaffBusy(true);
     setError('');

@@ -5,12 +5,16 @@ export interface PartTimeStaff {
   id: string;
   name: string;
   hourlyRate: number;
-  /** Hours agreed before the shift. Pay uses this, not the clock. */
+  /** Agreed length in whole minutes. Pay uses this, not the clock. */
+  scheduledMinutes: number;
+  /** Same agreed length as hours (`scheduledMinutes / 60`). */
   scheduledHours: number;
   isClockedIn: boolean;
   /** ISO 8601 with +08:00. Set only while clocked in. */
   currentClockInTime?: string;
-  /** Hours confirmed when this shift started. */
+  /** Minutes confirmed when this shift started. */
+  shiftMinutes?: number;
+  /** Same confirmed length as hours. */
   shiftHours?: number;
   /** Rate confirmed when this shift started. */
   shiftRate?: number;
@@ -50,8 +54,21 @@ export interface RecordQuery {
 export interface UpdateStaffInput {
   name?: string;
   hourlyRate?: number;
+  /**
+   * Whole hours when `scheduledMinutes` is sent.
+   * Without `scheduledMinutes`, a legacy hour count (decimals such as 4.5 are allowed).
+   */
   scheduledHours?: number;
+  /** Minutes 0–59. When present, hours and minutes are separate fields. */
+  scheduledMinutes?: number;
   active?: boolean;
+}
+
+export interface CreateStaffInput {
+  name: string;
+  hourlyRate: number;
+  scheduledHours: number;
+  scheduledMinutes?: number;
 }
 
 export const DEFAULT_PART_TIME_STAFF = [
@@ -101,7 +118,25 @@ export function splitHkIso(iso: string): { date: string; time: string } {
   return { date: m[1], time: m[2] };
 }
 
-/** Pay for a shift whose hours were agreed in advance. Clock times are not used. */
+/** Longest agreed shift: 24 hours and 0 minutes. */
+export const MAX_SCHEDULED_MINUTES = 24 * 60;
+
+/** Pay from whole minutes. Clock times are not used. Salary is hours × rate, 1 decimal. */
+export function calcPayForMinutes(totalMinutes: number, hourlyRate: number): {
+  totalHours: number;
+  totalSalary: number;
+} {
+  if (!Number.isFinite(totalMinutes) || !Number.isFinite(hourlyRate) || totalMinutes <= 0 || hourlyRate <= 0) {
+    return { totalHours: 0, totalSalary: 0 };
+  }
+  const minutes = Math.round(totalMinutes);
+  const exactHours = minutes / 60;
+  const totalHours = Number(exactHours.toFixed(4));
+  const totalSalary = Number((exactHours * hourlyRate).toFixed(1));
+  return { totalHours, totalSalary };
+}
+
+/** Pay for a shift whose length was agreed in advance. `hours` may be fractional. */
 export function calcScheduledPay(hours: number, hourlyRate: number): {
   totalHours: number;
   totalSalary: number;
@@ -109,9 +144,42 @@ export function calcScheduledPay(hours: number, hourlyRate: number): {
   if (!Number.isFinite(hours) || !Number.isFinite(hourlyRate) || hours <= 0 || hourlyRate <= 0) {
     return { totalHours: 0, totalSalary: 0 };
   }
-  const totalHours = Number(hours.toFixed(2));
-  const totalSalary = Number((totalHours * hourlyRate).toFixed(1));
-  return { totalHours, totalSalary };
+  const minutes = Math.round(Number(hours.toFixed(2)) * 60);
+  return calcPayForMinutes(minutes, hourlyRate);
+}
+
+export function scheduledHoursFromMinutes(totalMinutes: number): number {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return 0;
+  return Number((Math.round(totalMinutes) / 60).toFixed(4));
+}
+
+export function splitScheduledMinutes(totalMinutes: number): { hours: number; minutes: number } {
+  const safe = Number.isFinite(totalMinutes) ? Math.max(0, Math.round(totalMinutes)) : 0;
+  return { hours: Math.floor(safe / 60), minutes: safe % 60 };
+}
+
+/** e.g. 270 → "4 小時 30 分鐘". */
+export function formatDurationFromMinutes(totalMinutes: number): string {
+  const { hours, minutes } = splitScheduledMinutes(totalMinutes);
+  return `${hours} 小時 ${minutes} 分鐘`;
+}
+
+/** Recover hours + minutes from a stored hour count (including legacy whole hours). */
+export function formatDurationFromHours(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return formatDurationFromMinutes(0);
+  return formatDurationFromMinutes(Math.round(hours * 60));
+}
+
+/** Minutes to pay. Prefers the integer field, then a legacy hour count. */
+export function paidMinutesOf(
+  staff: Pick<PartTimeStaff, 'scheduledMinutes' | 'scheduledHours' | 'shiftMinutes' | 'shiftHours'>,
+  preferShift: boolean,
+): number {
+  const minutes = preferShift ? staff.shiftMinutes : staff.scheduledMinutes;
+  if (minutes != null && Number.isFinite(minutes) && minutes > 0) return Math.round(minutes);
+  const hours = preferShift ? staff.shiftHours : staff.scheduledHours;
+  if (hours != null && Number.isFinite(hours) && hours > 0) return Math.round(hours * 60);
+  return 0;
 }
 
 const HK_ISO = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\+08:00$/;
@@ -194,6 +262,52 @@ export function parseScheduledHours(value: unknown): number | null {
   const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
   if (!Number.isFinite(n) || n <= 0 || n > 24) return null;
   return Number(n.toFixed(2));
+}
+
+function parseWholeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
+/**
+ * Hours 0–24 plus minutes 0–59. Total must be 1–1440 minutes.
+ * 24:00 is allowed. 24:01 and 0:00 are not.
+ */
+export function parseHourAndMinute(hours: unknown, minutes: unknown): number | null {
+  const h = parseWholeNumber(hours);
+  const m = parseWholeNumber(minutes);
+  if (h == null || m == null) return null;
+  if (h < 0 || h > 24 || m < 0 || m > 59) return null;
+  if (h === 24 && m !== 0) return null;
+  const total = h * 60 + m;
+  if (total <= 0 || total > MAX_SCHEDULED_MINUTES) return null;
+  return total;
+}
+
+/** Legacy decimal hours → whole minutes. 4 → 240, 4.5 → 270. */
+export function hoursToScheduledMinutes(hours: number): number | null {
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return null;
+  const minutes = Math.round(Number(hours.toFixed(2)) * 60);
+  if (minutes <= 0 || minutes > MAX_SCHEDULED_MINUTES) return null;
+  return minutes;
+}
+
+/**
+ * When `minutesProvided` is set, hours and minutes are separate fields.
+ * Otherwise `scheduledHours` is a legacy hour count.
+ */
+export function resolveScheduledMinutes(input: {
+  scheduledHours?: unknown;
+  scheduledMinutes?: unknown;
+  minutesProvided: boolean;
+}): number | null {
+  if (input.minutesProvided) {
+    return parseHourAndMinute(input.scheduledHours, input.scheduledMinutes);
+  }
+  const hours = parseScheduledHours(input.scheduledHours);
+  if (hours == null) return null;
+  return hoursToScheduledMinutes(hours);
 }
 
 export function parseHourlyRate(value: unknown): number | null {

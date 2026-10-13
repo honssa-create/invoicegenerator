@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { calcScheduledPay, formatHours, formatMoney, hkStamp, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
+import { calcPayForMinutes, formatDurationFromMinutes, formatMoney, hkStamp, paidMinutesOf, splitHkIso, type PartTimeStaff } from '@/lib/part-time';
 import { SignaturePad, type SignaturePadHandle } from './SignaturePad';
 
 type Props = {
@@ -20,9 +20,9 @@ export default function SignatureModal({ staff, endedAt, saving, error, onCancel
   const startIso = staff.currentClockInTime || '';
   const end = hkStamp(endedAt);
   const start = startIso ? splitHkIso(startIso) : { date: end.date, time: '—' };
-  const paidHours = staff.shiftHours ?? staff.scheduledHours;
+  const paidMinutes = paidMinutesOf(staff, true);
   const paidRate = staff.shiftRate ?? staff.hourlyRate;
-  const pay = calcScheduledPay(paidHours, paidRate);
+  const pay = calcPayForMinutes(paidMinutes, paidRate);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -67,11 +67,11 @@ export default function SignatureModal({ staff, endedAt, saving, error, onCancel
           </div>
           <div>
             <dt className="text-gray-500">計薪工時 / Paid hours</dt>
-            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatHours(pay.totalHours)} 小時</dd>
+            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatDurationFromMinutes(paidMinutes)}</dd>
           </div>
           <div>
             <dt className="text-gray-500">時薪 / Rate</dt>
-            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatMoney(staff.hourlyRate)}</dd>
+            <dd className="text-xl font-semibold tabular-nums text-gray-900">{formatMoney(paidRate)}</dd>
           </div>
           <div className="col-span-2 rounded-xl bg-brand-50 px-4 py-3">
             <dt className="text-gray-500">今日薪金 / Salary</dt>

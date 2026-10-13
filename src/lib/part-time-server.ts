@@ -5,12 +5,13 @@ import {
   DEFAULT_PART_TIME_STAFF,
   EMPTY_ATTENDANCE_SUMMARY,
   attendanceToCsv,
-  calcScheduledPay,
+  calcPayForMinutes,
   hkStamp,
   parseHourlyRate,
-  parseScheduledHours,
   parseStaffName,
   resolveClockOutEnd,
+  resolveScheduledMinutes,
+  scheduledHoursFromMinutes,
   splitHkIso,
   type AttendanceRecord,
   type AttendanceSummary,
@@ -24,7 +25,9 @@ type StaffRow = {
   name: string;
   hourly_rate: number;
   scheduled_hours: number;
+  scheduled_minutes: number | null;
   shift_hours: number | null;
+  shift_minutes: number | null;
   shift_rate: number | null;
   clocked_in_at: string | null;
   active: number | boolean;
@@ -54,21 +57,39 @@ type SummaryRow = {
 export type PartTimeFailure = { ok: false; error: string; status: number };
 export type PartTimeSuccess<T> = { ok: true; data: T };
 
-const STAFF_SQL = `SELECT id, name, hourly_rate, scheduled_hours, shift_hours, shift_rate, clocked_in_at, active
+const DURATION_ERROR = '預定工時要多過 0，最多 24 小時，分鐘只可以 0–59。Enter hours (0–24) and minutes (0–59); total must be more than 0 and at most 24 hours.';
+
+const STAFF_SQL = `SELECT id, name, hourly_rate, scheduled_hours, scheduled_minutes, shift_hours, shift_minutes, shift_rate, clocked_in_at, active
   FROM part_time_staff
   WHERE user_id = ?`;
 
+/** Prefer stored minutes. Fall back to legacy hours so a pre-migration row still pays the same. */
+function readStoredMinutes(minutes: number | null | undefined, hours: number | null | undefined): number {
+  if (minutes != null) {
+    const parsed = Number(minutes);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
+  }
+  if (hours != null) {
+    const parsed = Number(hours);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed * 60);
+  }
+  return 0;
+}
+
 function toStaff(row: StaffRow): PartTimeStaff {
   const clockedIn = Boolean(row.clocked_in_at);
-  const scheduledHours = Number(row.scheduled_hours);
+  const scheduledMinutes = readStoredMinutes(row.scheduled_minutes, row.scheduled_hours);
+  const shiftMinutes = clockedIn ? readStoredMinutes(row.shift_minutes, row.shift_hours) : 0;
   return {
     id: String(row.id),
     name: row.name,
     hourlyRate: Number(row.hourly_rate),
-    scheduledHours: Number.isFinite(scheduledHours) ? scheduledHours : 0,
+    scheduledMinutes,
+    scheduledHours: scheduledHoursFromMinutes(scheduledMinutes),
     isClockedIn: clockedIn,
     currentClockInTime: clockedIn && row.clocked_in_at ? row.clocked_in_at : undefined,
-    shiftHours: clockedIn && row.shift_hours != null ? Number(row.shift_hours) : undefined,
+    shiftMinutes: clockedIn && shiftMinutes > 0 ? shiftMinutes : undefined,
+    shiftHours: clockedIn && shiftMinutes > 0 ? scheduledHoursFromMinutes(shiftMinutes) : undefined,
     shiftRate: clockedIn && row.shift_rate != null ? Number(row.shift_rate) : undefined,
     active: row.active === true || Number(row.active) === 1,
   };
@@ -145,18 +166,23 @@ export async function listStaff(ownerId: number, includeInactive = false): Promi
 
 export async function createStaff(
   ownerId: number,
-  input: { name: unknown; hourlyRate: unknown; scheduledHours: unknown },
+  input: { name: unknown; hourlyRate: unknown; scheduledHours: unknown; scheduledMinutes?: unknown },
 ): Promise<PartTimeSuccess<PartTimeStaff> | PartTimeFailure> {
   const name = parseStaffName(input.name);
   if (!name) return { ok: false, error: 'Enter a staff name 請輸入姓名', status: 400 };
   const hourlyRate = parseHourlyRate(input.hourlyRate);
   if (hourlyRate == null) return { ok: false, error: 'Hourly rate must be greater than 0 時薪必須大於 0', status: 400 };
-  const scheduledHours = parseScheduledHours(input.scheduledHours);
-  if (scheduledHours == null) return { ok: false, error: 'Today’s hours must be greater than 0 and at most 24 今日工時要大於 0，最多 24 小時', status: 400 };
+  const scheduledMinutes = resolveScheduledMinutes({
+    scheduledHours: input.scheduledHours,
+    scheduledMinutes: input.scheduledMinutes,
+    minutesProvided: input.scheduledMinutes !== undefined,
+  });
+  if (scheduledMinutes == null) return { ok: false, error: DURATION_ERROR, status: 400 };
+  const scheduledHours = scheduledHoursFromMinutes(scheduledMinutes);
   try {
     const inserted = await db
-      .prepare('INSERT INTO part_time_staff (user_id, name, hourly_rate, scheduled_hours, active) VALUES (?, ?, ?, ?, 1)')
-      .run(ownerId, name, hourlyRate, scheduledHours);
+      .prepare('INSERT INTO part_time_staff (user_id, name, hourly_rate, scheduled_hours, scheduled_minutes, active) VALUES (?, ?, ?, ?, ?, 1)')
+      .run(ownerId, name, hourlyRate, scheduledHours, scheduledMinutes);
     const row = await db.prepare(`${STAFF_SQL} AND id = ?`).get(ownerId, inserted.lastInsertRowid) as StaffRow | undefined;
     if (!row) return { ok: false, error: 'Failed to add staff 未能新增員工', status: 500 };
     return { ok: true, data: toStaff(row) };
@@ -181,10 +207,18 @@ export async function updateStaff(
     if (!name) return { ok: false, error: 'Enter a staff name 請輸入姓名', status: 400 };
     const hourlyRate = patch.hourlyRate !== undefined ? parseHourlyRate(patch.hourlyRate) : Number(row.hourly_rate);
     if (hourlyRate == null) return { ok: false, error: 'Hourly rate must be greater than 0 時薪必須大於 0', status: 400 };
-    const scheduledHours = patch.scheduledHours !== undefined
-      ? parseScheduledHours(patch.scheduledHours)
-      : Number(row.scheduled_hours);
-    if (scheduledHours == null) return { ok: false, error: 'Today’s hours must be greater than 0 and at most 24 今日工時要大於 0，最多 24 小時', status: 400 };
+    const durationTouched = patch.scheduledHours !== undefined || patch.scheduledMinutes !== undefined;
+    let scheduledMinutes = readStoredMinutes(row.scheduled_minutes, row.scheduled_hours);
+    if (durationTouched) {
+      const parsed = resolveScheduledMinutes({
+        scheduledHours: patch.scheduledHours,
+        scheduledMinutes: patch.scheduledMinutes,
+        minutesProvided: patch.scheduledMinutes !== undefined,
+      });
+      if (parsed == null) return { ok: false, error: DURATION_ERROR, status: 400 };
+      scheduledMinutes = parsed;
+    }
+    const scheduledHours = scheduledHoursFromMinutes(scheduledMinutes);
 
     let active = row.active === true || Number(row.active) === 1 ? 1 : 0;
     if (patch.active !== undefined) {
@@ -196,8 +230,8 @@ export async function updateStaff(
 
     try {
       await db
-        .prepare('UPDATE part_time_staff SET name = ?, hourly_rate = ?, scheduled_hours = ?, active = ? WHERE id = ? AND user_id = ?')
-        .run(name, hourlyRate, scheduledHours, active, staffId, ownerId);
+        .prepare('UPDATE part_time_staff SET name = ?, hourly_rate = ?, scheduled_hours = ?, scheduled_minutes = ?, active = ? WHERE id = ? AND user_id = ?')
+        .run(name, hourlyRate, scheduledHours, scheduledMinutes, active, staffId, ownerId);
     } catch (err) {
       if (isUniqueViolation(err)) return { ok: false, error: 'That name is already in use 這個姓名已存在', status: 409 };
       throw err;
@@ -205,7 +239,14 @@ export async function updateStaff(
 
     return {
       ok: true,
-      data: toStaff({ ...row, name, hourly_rate: hourlyRate, scheduled_hours: scheduledHours, active }),
+      data: toStaff({
+        ...row,
+        name,
+        hourly_rate: hourlyRate,
+        scheduled_hours: scheduledHours,
+        scheduled_minutes: scheduledMinutes,
+        active,
+      }),
     };
   });
 }
@@ -227,18 +268,25 @@ export async function clockIn(
       return { ok: false, error: 'Staff not found 找不到員工', status: 404 };
     }
     if (row.clocked_in_at) return { ok: false, error: 'Already clocked in 已經返工', status: 409 };
-    const scheduledHours = Number(row.scheduled_hours);
-    if (!Number.isFinite(scheduledHours) || scheduledHours <= 0) {
+    const scheduledMinutes = readStoredMinutes(row.scheduled_minutes, row.scheduled_hours);
+    if (scheduledMinutes <= 0) {
       return { ok: false, error: 'Set today’s hours before clock-in 請先設定今日工時', status: 400 };
     }
+    const scheduledHours = scheduledHoursFromMinutes(scheduledMinutes);
     const rate = Number(row.hourly_rate);
     const stamp = hkStamp(now);
     await db.prepare(
-      'UPDATE part_time_staff SET clocked_in_at = ?, shift_hours = ?, shift_rate = ? WHERE id = ? AND user_id = ?',
-    ).run(stamp.iso, scheduledHours, rate, staffId, ownerId);
+      'UPDATE part_time_staff SET clocked_in_at = ?, shift_hours = ?, shift_minutes = ?, shift_rate = ? WHERE id = ? AND user_id = ?',
+    ).run(stamp.iso, scheduledHours, scheduledMinutes, rate, staffId, ownerId);
     return {
       ok: true,
-      data: toStaff({ ...row, clocked_in_at: stamp.iso, shift_hours: scheduledHours, shift_rate: rate }),
+      data: toStaff({
+        ...row,
+        clocked_in_at: stamp.iso,
+        shift_hours: scheduledHours,
+        shift_minutes: scheduledMinutes,
+        shift_rate: rate,
+      }),
     };
   });
 }
@@ -263,8 +311,10 @@ export async function clockOut(
     const end = resolveClockOutEnd(row.clocked_in_at, endedAt, now);
     const start = splitHkIso(row.clocked_in_at);
     const rate = row.shift_rate != null ? Number(row.shift_rate) : Number(row.hourly_rate);
-    const hours = row.shift_hours != null ? Number(row.shift_hours) : Number(row.scheduled_hours);
-    const pay = calcScheduledPay(hours, rate);
+    const minutes = row.shift_minutes != null || row.shift_hours != null
+      ? readStoredMinutes(row.shift_minutes, row.shift_hours)
+      : readStoredMinutes(row.scheduled_minutes, row.scheduled_hours);
+    const pay = calcPayForMinutes(minutes, rate);
     const inserted = await db.prepare(
       `INSERT INTO part_time_attendance (
          user_id, staff_id, staff_name, work_date, start_time, end_time,
@@ -286,7 +336,7 @@ export async function clockOut(
       end.iso,
     );
     await db.prepare(
-      'UPDATE part_time_staff SET clocked_in_at = NULL, shift_hours = NULL, shift_rate = NULL WHERE id = ? AND user_id = ?',
+      'UPDATE part_time_staff SET clocked_in_at = NULL, shift_hours = NULL, shift_minutes = NULL, shift_rate = NULL WHERE id = ? AND user_id = ?',
     ).run(staffId, ownerId);
 
     return {
@@ -358,7 +408,7 @@ export async function listRecords(
   const summary: AttendanceSummary = summaryRow
     ? {
         shiftCount: Number(summaryRow.shift_count) || 0,
-        totalHours: Number(Number(summaryRow.total_hours || 0).toFixed(2)),
+        totalHours: Number(Number(summaryRow.total_hours || 0).toFixed(4)),
         totalSalary: Number(Number(summaryRow.total_salary || 0).toFixed(1)),
       }
     : EMPTY_ATTENDANCE_SUMMARY;

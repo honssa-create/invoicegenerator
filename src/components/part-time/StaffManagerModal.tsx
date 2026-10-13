@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
-import { formatHours, formatMoney, type PartTimeStaff, type UpdateStaffInput } from '@/lib/part-time';
+import { formatDurationFromMinutes, formatMoney, paidMinutesOf, splitScheduledMinutes, type CreateStaffInput, type PartTimeStaff, type UpdateStaffInput } from '@/lib/part-time';
 
 type Props = {
   staff: PartTimeStaff[];
@@ -11,7 +11,7 @@ type Props = {
   busy: boolean;
   error: string;
   onClose: () => void;
-  onCreate: (input: { name: string; hourlyRate: number; scheduledHours: number }) => Promise<PartTimeStaff | null>;
+  onCreate: (input: CreateStaffInput) => Promise<PartTimeStaff | null>;
   onUpdate: (id: string, patch: UpdateStaffInput) => Promise<PartTimeStaff | null>;
 };
 
@@ -20,6 +20,7 @@ const inputCls = 'w-full rounded-lg border border-gray-300 px-3 py-3 text-base o
 export default function StaffManagerModal({ staff, loading, readOnly, busy, error, onClose, onCreate, onUpdate }: Props) {
   const [name, setName] = useState('');
   const [hours, setHours] = useState('');
+  const [minutes, setMinutes] = useState('');
   const [rate, setRate] = useState('70');
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -35,20 +36,23 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
     setEditingId(null);
     setName('');
     setHours('');
+    setMinutes('');
     setRate('70');
   };
 
   const submit = () => {
     if (readOnly || busy) return;
     const hourlyRate = Number(rate);
-    const scheduledHours = Number(hours);
+    const scheduledHours = hours.trim() === '' ? 0 : Number(hours);
+    const scheduledMinutes = minutes.trim() === '' ? 0 : Number(minutes);
+    const input = { name, hourlyRate, scheduledHours, scheduledMinutes };
     if (editingId) {
-      onUpdate(editingId, { name, hourlyRate, scheduledHours }).then((updated) => {
+      onUpdate(editingId, input).then((updated) => {
         if (updated) resetForm();
       });
       return;
     }
-    onCreate({ name, hourlyRate, scheduledHours }).then((created) => {
+    onCreate(input).then((created) => {
       if (created) resetForm();
     });
   };
@@ -81,36 +85,54 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
                 autoComplete="off"
                 onChange={(event) => setName(event.target.value)}
               />
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-500">預定工時 / Hours</span>
-                  <input
-                    className={inputCls}
-                    value={hours}
-                    inputMode="decimal"
-                    type="number"
-                    min="0.5"
-                    max="24"
-                    step="0.5"
-                    placeholder="4"
-                    aria-label="Scheduled hours"
-                    onChange={(event) => setHours(event.target.value)}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-500">時薪 / Rate</span>
-                  <input
-                    className={inputCls}
-                    value={rate}
-                    inputMode="decimal"
-                    type="number"
-                    min="0.5"
-                    step="0.5"
-                    aria-label="Hourly rate"
-                    onChange={(event) => setRate(event.target.value)}
-                  />
-                </label>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-gray-500">預定工時</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500">小時</span>
+                    <input
+                      className={inputCls}
+                      value={hours}
+                      inputMode="numeric"
+                      type="number"
+                      min="0"
+                      max="24"
+                      step="1"
+                      placeholder="4"
+                      aria-label="小時"
+                      onChange={(event) => setHours(event.target.value)}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500">分鐘</span>
+                    <input
+                      className={inputCls}
+                      value={minutes}
+                      inputMode="numeric"
+                      type="number"
+                      min="0"
+                      max="59"
+                      step="1"
+                      placeholder="0"
+                      aria-label="分鐘"
+                      onChange={(event) => setMinutes(event.target.value)}
+                    />
+                  </label>
+                </div>
               </div>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-500">時薪 / Rate</span>
+                <input
+                  className={inputCls}
+                  value={rate}
+                  inputMode="decimal"
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  aria-label="Hourly rate"
+                  onChange={(event) => setRate(event.target.value)}
+                />
+              </label>
               <button type="submit" disabled={busy} className="min-h-12 w-full rounded-xl bg-brand-600 px-4 font-semibold text-white disabled:opacity-40">
                 {busy ? '儲存中…' : editingId ? '更新 / Update' : '新增 / Add'}
               </button>
@@ -127,46 +149,51 @@ export default function StaffManagerModal({ staff, loading, readOnly, busy, erro
             <p className="text-sm text-gray-500">Loading…</p>
           ) : (
             <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200">
-              {staff.map((person) => (
-                <li key={person.id} className="flex items-center gap-3 px-3 py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className={`truncate font-medium ${person.active ? 'text-gray-900' : 'text-gray-400'}`}>{person.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {person.scheduledHours > 0 ? `${formatHours(person.scheduledHours)} 小時` : '未設定工時'}
-                      {' · '}
-                      {formatMoney(person.hourlyRate)} / hr
-                      {person.isClockedIn ? ' · 返緊工 / Working' : ''}
-                      {!person.active ? ' · 已停用' : ''}
-                    </p>
-                  </div>
-                  {!readOnly && (
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        type="button"
-                        className="min-h-10 rounded-lg px-2 text-sm font-medium text-gray-700"
-                        {...tapProps(() => {
-                          setEditingId(person.id);
-                          setName(person.name);
-                          setHours(person.scheduledHours > 0 ? String(person.scheduledHours) : '');
-                          setRate(String(person.hourlyRate));
-                        }, busy)}
-                      >
-                        編輯
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || (person.active && person.isClockedIn)}
-                        className="min-h-10 rounded-lg px-2 text-sm font-medium text-gray-700 disabled:opacity-40"
-                        {...tapProps(() => {
-                          onUpdate(person.id, { active: !person.active });
-                        }, busy || (person.active && person.isClockedIn))}
-                      >
-                        {person.active ? '停用' : '啟用'}
-                      </button>
+              {staff.map((person) => {
+                const scheduled = paidMinutesOf(person, false);
+                return (
+                  <li key={person.id} className="flex items-center gap-3 px-3 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate font-medium ${person.active ? 'text-gray-900' : 'text-gray-400'}`}>{person.name}</p>
+                      <p className="text-sm text-gray-500">
+                        {scheduled > 0 ? formatDurationFromMinutes(scheduled) : '未設定工時'}
+                        {' · '}
+                        {formatMoney(person.hourlyRate)} / hr
+                        {person.isClockedIn ? ' · 返緊工 / Working' : ''}
+                        {!person.active ? ' · 已停用' : ''}
+                      </p>
                     </div>
-                  )}
-                </li>
-              ))}
+                    {!readOnly && (
+                      <div className="flex shrink-0 gap-1">
+                        <button
+                          type="button"
+                          className="min-h-10 rounded-lg px-2 text-sm font-medium text-gray-700"
+                          {...tapProps(() => {
+                            const parts = splitScheduledMinutes(scheduled);
+                            setEditingId(person.id);
+                            setName(person.name);
+                            setHours(scheduled > 0 ? String(parts.hours) : '');
+                            setMinutes(scheduled > 0 ? String(parts.minutes) : '');
+                            setRate(String(person.hourlyRate));
+                          }, busy)}
+                        >
+                          編輯
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || (person.active && person.isClockedIn)}
+                          className="min-h-10 rounded-lg px-2 text-sm font-medium text-gray-700 disabled:opacity-40"
+                          {...tapProps(() => {
+                            onUpdate(person.id, { active: !person.active });
+                          }, busy || (person.active && person.isClockedIn))}
+                        >
+                          {person.active ? '停用' : '啟用'}
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

@@ -918,6 +918,31 @@ async function runBootDataFixes(): Promise<void> {
   await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS scheduled_hours DOUBLE PRECISION NOT NULL DEFAULT 0`);
   await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS shift_hours DOUBLE PRECISION`);
   await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS shift_rate DOUBLE PRECISION`);
+  await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS scheduled_minutes INTEGER NOT NULL DEFAULT 0`);
+  await client().query(`ALTER TABLE part_time_staff ADD COLUMN IF NOT EXISTS shift_minutes INTEGER`);
+  const migPartTimeMinutes = await client().query<{ key: string }>(
+    `SELECT key FROM app_migrations WHERE key = 'part_time_scheduled_minutes_v1'`
+  );
+  if (!migPartTimeMinutes.rows.length) {
+    // Whole hours already stored (4 → 240) stay the same length. Fractional hours
+    // such as 4.5 become 270 minutes. Rows already on minutes are left alone.
+    await client().query(`
+      UPDATE part_time_staff
+      SET scheduled_minutes = ROUND((scheduled_hours * 60)::numeric)::integer
+      WHERE scheduled_minutes = 0
+        AND scheduled_hours > 0
+    `);
+    await client().query(`
+      UPDATE part_time_staff
+      SET shift_minutes = ROUND((shift_hours * 60)::numeric)::integer
+      WHERE shift_minutes IS NULL
+        AND shift_hours IS NOT NULL
+        AND shift_hours > 0
+    `);
+    await client().query(
+      `INSERT INTO app_migrations (key) VALUES ('part_time_scheduled_minutes_v1') ON CONFLICT DO NOTHING`
+    );
+  }
   const migAttended = await client().query<{ key: string }>(
     `SELECT key FROM app_migrations WHERE key = 'orders_attended_at_backfill_v1'`
   );
@@ -956,7 +981,7 @@ async function runBootDataFixes(): Promise<void> {
  * permission / boot-helper modules is hashed too (see BOOT_FINGERPRINT_FILES), so most edits
  * already force one full boot on the next deploy.
  */
-const BOOT_FIXES_VERSION = '2026-10-09.1';
+const BOOT_FIXES_VERSION = '2026-10-13.1';
 const SCHEMA_BOOT_KEY_PREFIX = 'schema_boot:';
 /** Files (under src/lib) whose content affects what the full boot does. Missing files are skipped. */
 const BOOT_FINGERPRINT_FILES = [

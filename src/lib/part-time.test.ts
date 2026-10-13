@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   attendanceToCsv,
+  calcPayForMinutes,
   calcScheduledPay,
   calcShiftPay,
+  formatDurationFromHours,
+  formatDurationFromMinutes,
   formatElapsed,
   formatHours,
   formatMoney,
   hkMonthRange,
   hkStamp,
+  hoursToScheduledMinutes,
+  parseHourAndMinute,
   parseHourlyRate,
   parseScheduledHours,
   resolveClockOutEnd,
+  resolveScheduledMinutes,
+  scheduledHoursFromMinutes,
   parseRecordQuery,
   parseStaffName,
   splitHkIso,
@@ -49,6 +56,62 @@ describe('calcScheduledPay', () => {
 
   it('does not pay when hours were not set', () => {
     expect(calcScheduledPay(0, 70)).toEqual({ totalHours: 0, totalSalary: 0 });
+  });
+});
+
+describe('scheduled minutes', () => {
+  it('keeps a whole-hour shift at 0 minutes and the same pay', () => {
+    expect(parseHourAndMinute(4, 0)).toBe(240);
+    expect(hoursToScheduledMinutes(4)).toBe(240);
+    expect(resolveScheduledMinutes({ scheduledHours: 4, minutesProvided: false })).toBe(240);
+    expect(formatDurationFromMinutes(240)).toBe('4 小時 0 分鐘');
+    expect(formatDurationFromHours(4)).toBe('4 小時 0 分鐘');
+    expect(calcPayForMinutes(240, 70)).toEqual({ totalHours: 4, totalSalary: 280 });
+    expect(calcPayForMinutes(240, 70)).toEqual(calcScheduledPay(4, 70));
+  });
+
+  it('pays 30 minutes as half an hour', () => {
+    expect(parseHourAndMinute(4, 30)).toBe(270);
+    expect(parseHourAndMinute(3, 30)).toBe(210);
+    expect(resolveScheduledMinutes({ scheduledHours: 4, scheduledMinutes: 30, minutesProvided: true })).toBe(270);
+    expect(formatDurationFromMinutes(270)).toBe('4 小時 30 分鐘');
+    expect(calcPayForMinutes(270, 65)).toEqual({ totalHours: 4.5, totalSalary: 292.5 });
+    expect(calcPayForMinutes(210, 65)).toEqual({ totalHours: 3.5, totalSalary: 227.5 });
+    expect(calcPayForMinutes(30, 65)).toEqual({ totalHours: 0.5, totalSalary: 32.5 });
+  });
+
+  it('pays 59 minutes from the exact minute count', () => {
+    expect(parseHourAndMinute(0, 59)).toBe(59);
+    expect(parseHourAndMinute(3, 59)).toBe(239);
+    expect(formatDurationFromMinutes(239)).toBe('3 小時 59 分鐘');
+    const pay = calcPayForMinutes(239, 65);
+    expect(pay.totalSalary).toBe(Number(((239 / 60) * 65).toFixed(1)));
+    expect(pay.totalSalary).toBe(258.9);
+    expect(formatDurationFromHours(pay.totalHours)).toBe('3 小時 59 分鐘');
+    expect(calcPayForMinutes(59, 65).totalSalary).toBe(Number(((59 / 60) * 65).toFixed(1)));
+  });
+
+  it('rejects empty, 60 minutes, and more than 24 hours', () => {
+    expect(parseHourAndMinute(0, 0)).toBeNull();
+    expect(parseHourAndMinute(4, 60)).toBeNull();
+    expect(parseHourAndMinute(24, 1)).toBeNull();
+    expect(parseHourAndMinute(25, 0)).toBeNull();
+    expect(parseHourAndMinute(4.5, 0)).toBeNull();
+    expect(parseHourAndMinute(24, 0)).toBe(24 * 60);
+    expect(calcPayForMinutes(0, 65)).toEqual({ totalHours: 0, totalSalary: 0 });
+  });
+
+  it('round-trips every minute in a day through stored hours', () => {
+    for (let minutes = 1; minutes <= 24 * 60; minutes += 1) {
+      const stored = scheduledHoursFromMinutes(minutes);
+      expect(Math.round(stored * 60)).toBe(minutes);
+    }
+  });
+
+  it('converts a legacy half-hour setting to 30 minutes', () => {
+    expect(parseScheduledHours('4.5')).toBe(4.5);
+    expect(resolveScheduledMinutes({ scheduledHours: '4.5', minutesProvided: false })).toBe(270);
+    expect(formatDurationFromHours(4.5)).toBe('4 小時 30 分鐘');
   });
 });
 

@@ -48,6 +48,7 @@ export default function KioskClockInView({ staff, loading, readOnly, busyId, err
           ...(liveDetail || detail),
           isClockedIn: false,
           currentClockInTime: undefined,
+          shiftMinutes: undefined,
           shiftHours: undefined,
           shiftRate: undefined,
         };

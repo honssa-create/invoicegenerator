@@ -18,6 +18,7 @@ export async function POST(request: Request) {
     name: body?.name,
     hourlyRate: body?.hourlyRate,
     scheduledHours: body?.scheduledHours,
+    scheduledMinutes: body && 'scheduledMinutes' in body ? body.scheduledMinutes : undefined,
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ staff: result.data }, { status: 201 });

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { tapProps } from '@/lib/tap-action';
 import {
-  formatHours,
+  formatDurationFromHours,
   formatMoney,
   hkMonthRange,
   type AttendanceRecord,
@@ -114,7 +114,7 @@ export default function AdminHistoryView({
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Kpi label="總更次 / Shifts" value={String(summary.shiftCount)} />
-        <Kpi label="計薪工時 / Paid hours" value={formatHours(summary.totalHours)} />
+        <Kpi label="計薪工時 / Paid hours" value={formatDurationFromHours(summary.totalHours)} />
         <Kpi label="總薪水 / Salary" value={formatMoney(summary.totalSalary)} />
       </div>
 
@@ -152,7 +152,7 @@ export default function AdminHistoryView({
                   <td className="px-3 py-3 font-medium text-gray-900">{row.staffName}</td>
                   <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.startTime}</td>
                   <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.endTime}</td>
-                  <td className="px-3 py-3 tabular-nums">{formatHours(row.totalHours)}</td>
+                  <td className="px-3 py-3 tabular-nums">{formatDurationFromHours(row.totalHours)}</td>
                   <td className="px-3 py-3 tabular-nums">{formatMoney(row.hourlyRate)}</td>
                   <td className="px-3 py-3 tabular-nums">{formatMoney(row.totalSalary)}</td>
                   <td className="px-3 py-3">

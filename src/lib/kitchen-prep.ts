@@ -1157,7 +1157,7 @@ export function mergePrepCapacityLines(lines: PrepCapacityLine[]): PrepCapacityL
   return order.map((id) => map.get(id)!);
 }
 
-type PrepLineSource = {
+export type PrepLineSource = {
   capacity: PrepCapacity;
   qty_osmanthus: number;
   qty_red_date: number;
@@ -1531,6 +1531,302 @@ export function sumRawNeedLines(groups: { name: string; qty: number }[][]): { na
   return Object.keys(acc)
     .filter((name) => (acc[name] || 0) > 0)
     .map((name) => ({ name, qty: acc[name] }));
+}
+
+/**
+ * Customer-order key shared by split stew batches.
+ * `#12105-45g` and `#12105-02單` both belong to `#12105`.
+ */
+export function prepCustomerOrderKey(orderCode: string): string {
+  return String(orderCode || '')
+    .trim()
+    .replace(/-\d{2}單$/, '')
+    .replace(/-(25g|45g|75g|75g_big_belly)$/i, '');
+}
+
+export interface PrepBatchSibling {
+  id: number;
+  order_code: string;
+  stewing_date: string;
+  status: PrepStatus;
+  capacity: PrepCapacity;
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+  actual_qty_osmanthus?: number | null;
+  actual_qty_red_date?: number | null;
+  actual_qty_rock_sugar?: number | null;
+  bird_nest_osmanthus?: string | null;
+  bird_nest_red_date?: string | null;
+  bird_nest_rock_sugar?: string | null;
+  lines?: PrepCapacityLine[] | null;
+  lines_json?: string | null;
+  completion_splits?: PrepCompletionSplit[] | null;
+}
+
+export interface PrepBatchView {
+  /** `#12105-02單` when this order is one of several stew batches. Null for a single batch. */
+  label: string | null;
+  index: number;
+  count: number;
+  /** Bottles already stewed on earlier completed batches of the same customer order. */
+  priorLines: PrepCapacityLine[];
+}
+
+function stewedLinesFromBatch(order: PrepBatchSibling): PrepCapacityLine[] {
+  const source = prepOrderLines(order);
+  const splits = (order.completion_splits || []).filter(
+    (split) => Boolean(split.flavor) && Math.round(Number(split.qty) || 0) > 0
+  );
+  if (splits.length > 0) {
+    const grouped = new Map<string, PrepCapacityLine>();
+    for (const split of splits) {
+      const capacity = split.capacity || order.capacity;
+      const flavor = split.flavor as PrepFlavor;
+      let line = grouped.get(capacity);
+      if (!line) {
+        const match = source.find((row) => row.capacity === capacity);
+        line = {
+          capacity,
+          qty_osmanthus: 0,
+          qty_red_date: 0,
+          qty_rock_sugar: 0,
+          bird_nest_osmanthus: match?.bird_nest_osmanthus,
+          bird_nest_red_date: match?.bird_nest_red_date,
+          bird_nest_rock_sugar: match?.bird_nest_rock_sugar,
+        };
+        grouped.set(capacity, line);
+      }
+      const qty = Math.max(0, Math.round(Number(split.qty) || 0));
+      if (flavor === 'osmanthus') line.qty_osmanthus += qty;
+      else if (flavor === 'red_date') line.qty_red_date += qty;
+      else if (flavor === 'rock_sugar') line.qty_rock_sugar += qty;
+    }
+    return Array.from(grouped.values());
+  }
+  return source.map((line) => ({
+    capacity: line.capacity,
+    qty_osmanthus: Math.max(0, line.qty_osmanthus || 0),
+    qty_red_date: Math.max(0, line.qty_red_date || 0),
+    qty_rock_sugar: Math.max(0, line.qty_rock_sugar || 0),
+    bird_nest_osmanthus: line.bird_nest_osmanthus,
+    bird_nest_red_date: line.bird_nest_red_date,
+    bird_nest_rock_sugar: line.bird_nest_rock_sugar,
+  }));
+}
+
+/** Earlier completed batches of the same customer order become 上單已燉. A lone order has no -0N單 suffix. */
+export function resolvePrepBatch(currentId: number, siblings: PrepBatchSibling[]): PrepBatchView {
+  const unique = new Map<number, PrepBatchSibling>();
+  for (const row of siblings) unique.set(row.id, row);
+  const rows = Array.from(unique.values()).sort((a, b) => {
+    const date = String(a.stewing_date || '').localeCompare(String(b.stewing_date || ''));
+    if (date !== 0) return date;
+    return a.id - b.id;
+  });
+  let index = rows.findIndex((row) => row.id === currentId);
+  if (index < 0) index = rows.length;
+  const count = Math.max(rows.length, index + 1, 1);
+  const current = rows.find((row) => row.id === currentId);
+  const base = prepCustomerOrderKey(current?.order_code || '');
+  const label = count > 1 && base ? `${base}-${String(index + 1).padStart(2, '0')}單` : null;
+  const priorLines: PrepCapacityLine[] = [];
+  for (const row of rows) {
+    if (row.id === currentId) break;
+    if (row.status !== 'completed') continue;
+    priorLines.push(...stewedLinesFromBatch(row));
+  }
+  return { label, index, count, priorLines };
+}
+
+export interface PrepMaterialAmounts {
+  birdNest: number;
+  osmanthus: number;
+  rockSugar: number;
+  slabSugar: number;
+  bottles: number;
+}
+
+export interface PrepMaterialsFlavorRow {
+  flavor: PrepFlavor;
+  label: string;
+  prior: number;
+  now: number;
+  materials: PrepMaterialAmounts;
+}
+
+export type PrepMaterialsTone = 'warm' | 'cool' | 'slate';
+
+export interface PrepMaterialsBox {
+  capacity: PrepCapacity;
+  title: string;
+  flavorLabel: string;
+  tone: PrepMaterialsTone;
+  headerAside: string;
+  rows: PrepMaterialsFlavorRow[];
+  prior: number;
+  now: number;
+  materials: PrepMaterialAmounts;
+}
+
+export interface PrepMaterialsTable {
+  batchLabel: string | null;
+  boxes: PrepMaterialsBox[];
+  prior: number;
+  now: number;
+  materials: PrepMaterialAmounts;
+}
+
+const EMPTY_MATERIALS: PrepMaterialAmounts = {
+  birdNest: 0,
+  osmanthus: 0,
+  rockSugar: 0,
+  slabSugar: 0,
+  bottles: 0,
+};
+
+function addMaterials(into: PrepMaterialAmounts, extra: PrepMaterialAmounts): void {
+  into.birdNest = round2(into.birdNest + extra.birdNest);
+  into.osmanthus = round2(into.osmanthus + extra.osmanthus);
+  into.rockSugar = round2(into.rockSugar + extra.rockSugar);
+  into.slabSugar = round2(into.slabSugar + extra.slabSugar);
+  into.bottles += extra.bottles;
+}
+
+function materialsForNowQty(
+  capacity: PrepCapacity,
+  flavor: PrepFlavor,
+  qty: number,
+  formulas: StewFormulaMapLike,
+  birdNestType: BirdNestType
+): PrepMaterialAmounts {
+  if (qty <= 0) return { ...EMPTY_MATERIALS };
+  const row = calcRow(flavor, qty, qty, capacity, formulas, birdNestType);
+  const grams = row.ingredientGrams || {};
+  const birdNest = round2(totalBirdNestGrams(grams) + (grams['燕餅'] || 0));
+  return {
+    birdNest,
+    osmanthus: grams['桂花'] || 0,
+    rockSugar: grams['冰糖'] || 0,
+    slabSugar: grams['片糖'] || 0,
+    bottles: qty,
+  };
+}
+
+function materialsTone(capacity: PrepCapacity): PrepMaterialsTone {
+  if (capacity === '25g') return 'cool';
+  if (String(capacity).startsWith('75g')) return 'slate';
+  return 'warm';
+}
+
+function flavorQtyIndex(lines: PrepCapacityLine[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const line of lines) {
+    const qtys = prepOrderQtys(line);
+    for (const flavor of PREP_FLAVORS) {
+      const qty = qtys[flavor];
+      if (qty <= 0) continue;
+      const key = `${line.capacity}:${flavor}`;
+      map.set(key, (map.get(key) || 0) + qty);
+    }
+  }
+  return map;
+}
+
+/**
+ * Materials table for one stew batch.
+ * 今次要燉 is this order's ordered qty (not 實際 extras). Ingredient grams follow 今次 only.
+ * 上單已燉 is prior completed batches; missing prior is 0.
+ */
+export function buildPrepMaterialsTable(
+  order: PrepLineSource,
+  priorLines: PrepCapacityLine[] = [],
+  opts?: { batchLabel?: string | null; formulas?: StewFormulaMapLike }
+): PrepMaterialsTable {
+  const formulas = opts?.formulas ?? CAPACITY_FLAVOR_FORMULAS;
+  const currentLines = prepOrderLines(order);
+  const nowIndex = flavorQtyIndex(currentLines);
+  const priorIndex = flavorQtyIndex(priorLines);
+  const capacityOrder: PrepCapacity[] = [];
+  const seen = new Set<string>();
+  const pushCap = (capacity: PrepCapacity) => {
+    if (!capacity || seen.has(capacity)) return;
+    seen.add(capacity);
+    capacityOrder.push(capacity);
+  };
+  for (const line of priorLines) pushCap(line.capacity);
+  for (const line of currentLines) pushCap(line.capacity);
+
+  const boxes: PrepMaterialsBox[] = [];
+  const footerMaterials = { ...EMPTY_MATERIALS };
+  let footerPrior = 0;
+  let footerNow = 0;
+
+  for (const capacity of capacityOrder) {
+    const flavors = PREP_FLAVORS.filter((flavor) => {
+      const key = `${capacity}:${flavor}`;
+      return (nowIndex.get(key) || 0) > 0 || (priorIndex.get(key) || 0) > 0;
+    });
+    if (!flavors.length) continue;
+    const sourceLine = currentLines.find((line) => line.capacity === capacity);
+    const birdNest = sourceLine
+      ? birdNestForPrepLine(order, sourceLine)
+      : prepOrderBirdNestSelections(order);
+    const rows: PrepMaterialsFlavorRow[] = flavors.map((flavor) => {
+      const key = `${capacity}:${flavor}`;
+      const now = nowIndex.get(key) || 0;
+      const prior = priorIndex.get(key) || 0;
+      return {
+        flavor,
+        label: PREP_FLAVOR_SHORT[flavor],
+        prior,
+        now,
+        materials: materialsForNowQty(capacity, flavor, now, formulas, birdNest[flavor]),
+      };
+    });
+    const materials = { ...EMPTY_MATERIALS };
+    let prior = 0;
+    let now = 0;
+    for (const row of rows) {
+      prior += row.prior;
+      now += row.now;
+      addMaterials(materials, row.materials);
+    }
+    const headerAside =
+      prior > 0
+        ? `今次要燉 ${now} · 上單已燉 ${prior}`
+        : `今次要燉 ${now}`;
+    const flavorLabel = flavors.map((flavor) => PREP_FLAVOR_SHORT[flavor]).join('｜');
+    const title = `${capacityScheduleTag(capacity)} · ${flavorLabel}`;
+    boxes.push({
+      capacity,
+      title,
+      flavorLabel,
+      tone: materialsTone(capacity),
+      headerAside,
+      rows,
+      prior,
+      now,
+      materials,
+    });
+    footerPrior += prior;
+    footerNow += now;
+    addMaterials(footerMaterials, materials);
+  }
+
+  return {
+    batchLabel: opts?.batchLabel ?? null,
+    boxes,
+    prior: footerPrior,
+    now: footerNow,
+    materials: footerMaterials,
+  };
+}
+
+export function formatPrepMaterialAmount(qty: number): string {
+  if (!qty) return '—';
+  const rounded = round2(qty);
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
 /** Shared typography tokens for Kitchen Summary screen + print. */

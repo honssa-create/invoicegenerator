@@ -1,180 +1,172 @@
+import type { CSSProperties } from 'react';
 import {
-  PREP_SUMMARY_TYPO,
-  BIRD_NEST_TYPE_LABELS,
+  buildPrepMaterialsTable,
   capacityScheduleTag,
-  formatPrepIngredientQty,
-  STEW_GLASS_BOTTLE_STOCK_NAMES,
-  STEW_WATER_BOIL_SUGAR,
-  STEW_WATER_COLD_SOAK,
-  type FlavorCalcRow,
-  type PrepCalculation,
-  type PrepCapacity,
+  formatPrepMaterialAmount,
+  type PrepBatchView,
+  type PrepCapacityLine,
+  type PrepLineSource,
+  type PrepMaterialAmounts,
+  type PrepMaterialsTone,
+  type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
 
+type MaterialsOrder = PrepLineSource;
+
 interface PrepSummaryTableProps {
-  calc: PrepCalculation;
-  capacity: PrepCapacity;
+  order: MaterialsOrder;
+  priorLines?: PrepCapacityLine[];
+  batchLabel?: string | null;
+  formulas?: StewFormulaMapLike;
   variant?: 'screen' | 'print';
 }
 
-export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }: PrepSummaryTableProps) {
-  const activeRows = calc.rows.filter((r) => r.orderQty > 0 || r.actualQty > 0);
+const TONE: Record<PrepMaterialsTone, { box: string; head: string }> = {
+  warm: {
+    box: 'border-[#e0d0ae]',
+    head: 'bg-[#fbf6ec] border-l-[5px] border-l-[#c4a574]',
+  },
+  cool: {
+    box: 'border-[#c5d9ce]',
+    head: 'bg-[#f3f7f5] border-l-[5px] border-l-[#7a9a88]',
+  },
+  slate: {
+    box: 'border-[#c9d3df]',
+    head: 'bg-[#f4f7fb] border-l-[5px] border-l-[#7d92ab]',
+  },
+};
+
+function MaterialsCols() {
+  return (
+    <colgroup>
+      <col style={{ width: '18%' }} />
+      <col style={{ width: '12%' }} />
+      <col style={{ width: '12%' }} />
+      <col style={{ width: '9.5%' }} />
+      <col style={{ width: '9.5%' }} />
+      <col style={{ width: '9.5%' }} />
+      <col style={{ width: '9.5%' }} />
+      <col style={{ width: '10%' }} />
+    </colgroup>
+  );
+}
+
+function amountCell(qty: number, className: string) {
+  return <td className={className}>{formatPrepMaterialAmount(qty)}</td>;
+}
+
+function materialCells(materials: PrepMaterialAmounts, className: string) {
+  return (
+    <>
+      {amountCell(materials.birdNest, className)}
+      {amountCell(materials.osmanthus, className)}
+      {amountCell(materials.rockSugar, className)}
+      {amountCell(materials.slabSugar, className)}
+      {amountCell(materials.bottles, className)}
+    </>
+  );
+}
+
+export default function PrepSummaryTable({
+  order,
+  priorLines,
+  batchLabel,
+  formulas,
+  variant = 'screen',
+}: PrepSummaryTableProps) {
+  const table = buildPrepMaterialsTable(order, priorLines, { batchLabel, formulas });
   const isPrint = variant === 'print';
+  const text = isPrint ? 'text-[11px]' : 'text-[13px]';
+  const pad = isPrint ? 'px-2 py-1.5' : 'px-2.5 py-2';
+  const headPad = isPrint ? 'px-2 py-1' : 'px-2.5 py-2';
+  const nowClass = `text-right font-bold tabular-nums text-[#8b6914] ${isPrint ? 'text-[13px]' : 'text-base'}`;
+  const numClass = `${pad} text-right tabular-nums text-[#1f1a14]`;
+  const prevClass = `${pad} text-right tabular-nums text-[#6b6358]`;
+  const footerStyle: CSSProperties = {
+    background: '#f7f3eb',
+    borderTop: '1.5px solid #5a6b66',
+    borderBottom: '1px dotted #c8c2b6',
+  };
 
-  const theadClass = isPrint
-    ? 'bg-gray-900 text-white'
-    : 'text-gray-500 border-b border-gray-200';
-  const thClass = isPrint
-    ? 'px-2 py-2 text-[10px] font-semibold leading-tight'
-    : `${PREP_SUMMARY_TYPO.th}`;
-  const thColor = isPrint ? 'text-white' : '';
-  const rowClass = isPrint ? 'border-b border-gray-200' : 'hover:bg-gray-50 divide-y divide-gray-100';
-  const cellPad = isPrint ? 'px-2 py-2' : 'px-6 py-4';
-  const tfootClass = isPrint ? 'bg-gray-100 font-bold' : 'bg-brand-50 border-t-2 border-brand-200';
-  const flavorClass = isPrint ? 'text-sm font-bold leading-snug' : PREP_SUMMARY_TYPO.flavorCell;
-  const qtyClass = isPrint ? 'text-sm font-semibold tabular-nums' : PREP_SUMMARY_TYPO.qtyCell;
-  const actualQtyClass = isPrint ? 'text-base font-bold tabular-nums' : PREP_SUMMARY_TYPO.actualQtyCell;
-  const gramClass = isPrint ? 'text-xs font-bold tabular-nums' : PREP_SUMMARY_TYPO.gramCell;
-  const totalLabelClass = isPrint ? 'text-xs font-bold' : PREP_SUMMARY_TYPO.totalLabel;
-  const totalQtyClass = isPrint ? 'text-sm font-bold tabular-nums' : PREP_SUMMARY_TYPO.totalQty;
-  const totalGramClass = isPrint ? 'text-xs font-bold tabular-nums' : PREP_SUMMARY_TYPO.totalGram;
-  const capacityClass = isPrint ? 'text-xs font-semibold' : PREP_SUMMARY_TYPO.capacityBadge;
-
-  const ingredientCols = (() => {
-    const names = new Set<string>();
-    for (const r of activeRows) {
-      for (const name of Object.keys(r.ingredientGrams || {})) names.add(name);
-    }
-    for (const name of Object.keys(calc.totals.ingredientGrams || {})) names.add(name);
-    const preferred = [
-      '大燕餅',
-      '細燕餅',
-      '桂花',
-      '紅棗',
-      '冰糖',
-      '片糖',
-      STEW_WATER_BOIL_SUGAR,
-      STEW_WATER_COLD_SOAK,
-      ...Object.values(STEW_GLASS_BOTTLE_STOCK_NAMES),
-    ];
-    const rest = Array.from(names).filter((n) => !preferred.includes(n)).sort();
-    return [...preferred.filter((n) => names.has(n)), ...rest];
-  })();
-
-  const colSpanEmpty = 4 + Math.max(ingredientCols.length, 1);
-  const groups: { capacity: string; rows: FlavorCalcRow[] }[] = [];
-  for (const row of activeRows) {
-    const cap = row.capacity || capacity;
-    const existing = groups.find((group) => group.capacity === cap);
-    if (existing) existing.rows.push(row);
-    else groups.push({ capacity: cap, rows: [row] });
+  if (!table.boxes.length) {
+    return <p className="px-4 py-6 text-center text-sm text-gray-400">Enter order quantities to see calculations.</p>;
   }
-  const showCapacitySubtotals = groups.length > 1;
 
   return (
-    <div className={isPrint ? 'prep-print-table-wrap -mx-1' : 'overflow-x-auto'}>
-    <table className={`${PREP_SUMMARY_TYPO.table} ${isPrint ? 'prep-summary-table--print text-xs leading-tight' : 'min-w-[960px]'}`}>
-      <thead>
-        <tr className={`${isPrint ? 'text-[10px] uppercase tracking-wide' : PREP_SUMMARY_TYPO.thead} ${theadClass}`}>
-          <th className={`${thClass} ${thColor} text-left`}>容量 Capacity</th>
-          <th className={`${thClass} ${thColor} text-left`}>Flavor 口味</th>
-          <th className={`${thClass} ${thColor} text-right`}>Order Qty</th>
-          <th className={`${thClass} ${thColor} text-right`}>Actual Qty 實際生產樽數</th>
-          {ingredientCols.map((name) => (
-            <th key={name} className={`${thClass} ${thColor} text-right`}>
-              {name}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody className={isPrint ? '' : 'divide-y divide-gray-100'}>
-        {groups.flatMap((group) => {
-          const groupBottles = group.rows.reduce((sum, row) => sum + row.actualQty, 0);
-          const groupGrams: Record<string, number> = {};
-          for (const row of group.rows) {
-            for (const [name, qty] of Object.entries(row.ingredientGrams || {})) {
-              groupGrams[name] = (groupGrams[name] || 0) + qty;
-            }
-          }
-          const body = group.rows.map((r) => {
-            const rowCapacity = r.capacity || group.capacity;
-            return (
-              <tr key={`${rowCapacity}-${r.flavor}`} className={rowClass}>
-                <td className={`${cellPad} ${capacityClass} text-gray-700`}>
-                  {capacityScheduleTag(rowCapacity)}
-                </td>
-                <td className={`${cellPad} ${flavorClass} text-gray-900`}>
-                  {r.label}
-                  {r.birdNestType && (
-                    <span className="block text-[10px] font-normal text-gray-500 mt-0.5">
-                      {BIRD_NEST_TYPE_LABELS[r.birdNestType]}
-                    </span>
-                  )}
-                </td>
-                <td className={`${cellPad} text-right ${qtyClass} text-gray-700`}>{r.orderQty}</td>
-                <td className={`${cellPad} text-right`}>
-                  <span className={`${actualQtyClass} text-brand-700`}>{r.actualQty}</span>
-                  {r.extraQty > 0 && (
-                    <p className="text-[10px] text-gray-500 mt-0.5">{r.orderQty} + {r.extraQty}</p>
-                  )}
-                </td>
-                {ingredientCols.map((name) => {
-                  const qty = r.ingredientGrams?.[name] || 0;
-                  return (
-                    <td key={name} className={`${cellPad} text-right ${gramClass} text-gray-900`}>
-                      {qty > 0 ? formatPrepIngredientQty(name, qty) : '—'}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          });
-          if (!showCapacitySubtotals) return body;
-          body.push(
-            <tr key={`${group.capacity}-subtotal`} className="bg-gray-50">
-              <td className={`${cellPad} ${totalLabelClass} text-gray-800`} colSpan={2}>
-                {capacityScheduleTag(group.capacity)} 合計
+    <div className={isPrint ? 'prep-materials-table text-[#1f1a14]' : 'prep-materials-table px-2 py-3 text-[#1f1a14]'}>
+      {table.batchLabel ? (
+        <p className={`mb-3 font-mono font-semibold ${isPrint ? 'text-sm' : 'text-[15px]'}`}>{table.batchLabel}</p>
+      ) : null}
+      {table.boxes.map((box) => {
+        const tone = TONE[box.tone];
+        return (
+          <section key={box.capacity} className={`mb-4 overflow-hidden rounded-xl border bg-white ${tone.box}`}>
+            <div className={`flex items-baseline justify-between gap-3 border-b border-[#ddd6c8] px-3.5 py-3 ${tone.head}`}>
+              <h3 className={`font-bold ${isPrint ? 'text-sm' : 'text-[15px]'}`}>
+                {capacityScheduleTag(box.capacity)}
+                <span className="font-medium text-[#6b6358]"> · {box.flavorLabel}</span>
+              </h3>
+              <p className="text-[13px] font-medium text-[#6b6358] whitespace-nowrap">{box.headerAside}</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 720 }}>
+                <MaterialsCols />
+                <thead>
+                  <tr className="bg-[#f3f0ea] text-[11px] font-semibold text-[#6b6358]">
+                    <th className={`${headPad} text-left`}>口味</th>
+                    <th className={`${headPad} text-right`}>上單已燉</th>
+                    <th className={`${headPad} text-right`}>今次要燉</th>
+                    <th className={`${headPad} text-right`}>燕餅 g</th>
+                    <th className={`${headPad} text-right`}>桂花 g</th>
+                    <th className={`${headPad} text-right`}>冰糖 g</th>
+                    <th className={`${headPad} text-right`}>片糖 g</th>
+                    <th className={`${headPad} text-right`}>玻璃瓶</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {box.rows.map((row) => (
+                    <tr key={row.flavor} className="border-b border-[#ddd6c8]">
+                      <td className={`${pad} text-left`}>{row.label}</td>
+                      <td className={prevClass}>{row.prior}</td>
+                      <td className={`${pad} ${nowClass}`}>{row.now}</td>
+                      {materialCells(row.materials, numClass)}
+                    </tr>
+                  ))}
+                  <tr className="bg-[#faf8f5] font-semibold">
+                    <td className={`${pad} text-left whitespace-nowrap`}>{capacityScheduleTag(box.capacity)} 合計（今次）</td>
+                    <td className={prevClass}>{box.prior}</td>
+                    <td className={`${pad} text-right tabular-nums`}>{box.now}</td>
+                    {materialCells(box.materials, numClass)}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
+      <div className="overflow-x-auto">
+        <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 720 }}>
+          <MaterialsCols />
+          <tbody>
+            <tr>
+              <td className={`${pad} text-left font-bold`} style={footerStyle}>
+                各容量合計
               </td>
-              <td className={cellPad} />
-              <td className={`${cellPad} text-right ${totalQtyClass} text-gray-800`}>
-                {groupBottles} 樽
+              <td className={`${pad} text-right tabular-nums font-semibold`} style={footerStyle}>
+                {table.prior}
               </td>
-              {ingredientCols.map((name) => (
-                <td key={name} className={`${cellPad} text-right ${totalGramClass} text-gray-800`}>
-                  {formatPrepIngredientQty(name, groupGrams[name] || 0)}
+              <td className={`${pad} ${nowClass}`} style={footerStyle}>
+                {table.now}
+              </td>
+              {(['birdNest', 'osmanthus', 'rockSugar', 'slabSugar', 'bottles'] as const).map((key) => (
+                <td key={key} className={`${pad} text-right tabular-nums font-semibold`} style={footerStyle}>
+                  {formatPrepMaterialAmount(table.materials[key])}
                 </td>
               ))}
             </tr>
-          );
-          return body;
-        })}
-        {activeRows.length === 0 && (
-          <tr>
-            <td colSpan={colSpanEmpty} className={`${cellPad} text-center text-gray-400`}>
-              Enter order quantities to see calculations.
-            </td>
-          </tr>
-        )}
-      </tbody>
-      {activeRows.length > 0 && calc.formulaReady && (
-        <tfoot className={tfootClass}>
-          <tr>
-            <td className={`${cellPad} ${totalLabelClass} text-brand-900`} colSpan={2}>
-              {showCapacitySubtotals ? 'ALL CAPACITIES 各容量合計' : 'TOTAL 合計'}
-            </td>
-            <td className={cellPad} />
-            <td className={`${cellPad} text-right ${totalQtyClass} text-brand-800`}>
-              {calc.totals.bottles} 樽
-            </td>
-            {ingredientCols.map((name) => (
-              <td key={name} className={`${cellPad} text-right ${totalGramClass} text-brand-800`}>
-                {formatPrepIngredientQty(name, calc.totals.ingredientGrams?.[name] || 0)}
-              </td>
-            ))}
-          </tr>
-        </tfoot>
-      )}
-    </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -29,9 +29,11 @@ import {
   summarizePrepOrderLines,
   computePrepCalculationForOrder,
   type BirdNestType,
+  type PrepBatchView,
   type PrepCalculation,
   type PrepCapacityLine,
   type PrepOrder,
+  type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 import {
@@ -47,6 +49,8 @@ export default function KitchenPrepDetailPage() {
 
   const [order, setOrder] = useState<PrepOrder | null>(null);
   const [calc, setCalc] = useState<PrepCalculation | null>(null);
+  const [batch, setBatch] = useState<PrepBatchView | null>(null);
+  const [stewFormulas, setStewFormulas] = useState<StewFormulaMapLike | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -71,6 +75,8 @@ export default function KitchenPrepDetailPage() {
         })),
       );
     }
+    if (d.batch) setBatch(d.batch);
+    if (d.stewFormulas) setStewFormulas(d.stewFormulas);
     setKitchenPrepDetailCache(id, d);
   };
 
@@ -610,7 +616,7 @@ export default function KitchenPrepDetailPage() {
             ))}
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          實際生產樽數 is used for the kitchen summary. Defaults to the ordered qty; set it higher for extra bottles (e.g. 回禮).
+          出份量跟今次要燉。上單已燉＝同一訂單較早已完成的批次（沒有則 0）。
           {multi ? ' Lines under this order code are packed together.' : ''}
         </p>
         {!multi && !isRedDateAllowed(order.capacity) && (
@@ -632,7 +638,13 @@ export default function KitchenPrepDetailPage() {
           <PrepSessionSummary lines={summaryLines} />
         </div>
         <div className="overflow-x-auto p-2">
-          <PrepSummaryTable calc={calc} capacity={order.capacity} variant="screen" />
+          <PrepSummaryTable
+            order={order}
+            priorLines={batch?.priorLines}
+            batchLabel={batch?.label}
+            formulas={stewFormulas}
+            variant="screen"
+          />
         </div>
       </div>
 

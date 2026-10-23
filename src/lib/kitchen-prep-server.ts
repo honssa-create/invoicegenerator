@@ -13,6 +13,8 @@ import {
   PREP_FLAVORS,
   buildKitchenCompletionActivityBody,
   computePrepCalculationForOrder,
+  prepCustomerOrderKey,
+  resolvePrepBatch,
   computeStewingRawNeeds,
   defaultCompletionSplits,
   defaultPrepStatusForCreate,
@@ -31,7 +33,9 @@ import {
   hkNowDateTime,
   nextStewingStartedAt,
   type BirdNestType,
+  type PrepBatchView,
   type PrepCapacityLineDraft,
+  type StewFormulaMapLike,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
@@ -373,7 +377,41 @@ export type PrepOrderDetailPayload = {
   order: PrepOrder;
   calculation: PrepCalculation;
   capacities: Array<{ id: string; label: string }>;
+  batch: PrepBatchView;
+  stewFormulas: StewFormulaMapLike;
 };
+
+function prepCodeLikePrefix(base: string): string {
+  return `${base.replace(/[\\%_]/g, (ch) => `\\${ch}`)}-%`;
+}
+
+/** Sibling stew batches for 上單已燉 / -0N單. Same linked sales order, or the same order-code key. */
+export async function loadPrepBatchView(order: PrepOrder): Promise<PrepBatchView> {
+  const base = prepCustomerOrderKey(order.order_code);
+  const linked = order.linked_order_id;
+  const rows = (await db
+    .prepare(
+      `SELECT * FROM kitchen_prep_orders
+       WHERE user_id = ?
+         AND (
+           (?::int IS NOT NULL AND linked_order_id = ?::int)
+           OR order_code = ?
+           OR order_code = ?
+           OR order_code LIKE ? ESCAPE '\\'
+         )`
+    )
+    .all(
+      order.user_id,
+      linked,
+      linked,
+      order.order_code,
+      base,
+      base ? prepCodeLikePrefix(base) : '!none!',
+    )) as PrepRow[];
+  const siblings = rows.map(hydrate);
+  if (!siblings.some((row) => row.id === order.id)) siblings.push(order);
+  return resolvePrepBatch(order.id, siblings);
+}
 
 /** Kitchen prep detail API — minimal DB round-trips (order + one settings read). */
 export async function loadPrepOrderDetail(
@@ -385,12 +423,17 @@ export async function loadPrepOrderDetail(
   ]);
   if (!order || order.user_id !== ownerId) return null;
 
-  const { formulas, capacities } = await readKitchenPrepDetailContext(ownerId);
+  const [{ formulas, capacities }, batch] = await Promise.all([
+    readKitchenPrepDetailContext(ownerId),
+    loadPrepBatchView(order),
+  ]);
   const calculation = computePrepCalculationForOrder(order, formulas.stewFormulas);
   return {
     order,
     calculation,
     capacities: capacities.map((c) => ({ id: c.id, label: c.label })),
+    batch,
+    stewFormulas: formulas.stewFormulas,
   };
 }
 

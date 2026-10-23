@@ -12,8 +12,10 @@ import {
   formulaSummaryForCapacity,
   prepOrderLines,
   summarizePrepOrderLines,
+  type PrepBatchView,
   type PrepCalculation,
   type PrepOrder,
+  type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
@@ -21,6 +23,8 @@ export default function KitchenPrepPrintPage() {
   const { id } = useParams();
   const [order, setOrder] = useState<PrepOrder | null>(null);
   const [calc, setCalc] = useState<PrepCalculation | null>(null);
+  const [batch, setBatch] = useState<PrepBatchView | null>(null);
+  const [stewFormulas, setStewFormulas] = useState<StewFormulaMapLike | undefined>(undefined);
   const [loggingPrint, setLoggingPrint] = useState(false);
 
   useEffect(() => {
@@ -30,6 +34,8 @@ export default function KitchenPrepPrintPage() {
         if (!d?.order) return;
         setOrder(d.order);
         setCalc(d.calculation ?? null);
+        setBatch(d.batch ?? null);
+        setStewFormulas(d.stewFormulas);
       });
   }, [id]);
 
@@ -111,7 +117,13 @@ export default function KitchenPrepPrintPage() {
               Formula for {capacityLabel} is not configured yet.
             </p>
           ) : (
-            <PrepSummaryTable calc={calc} capacity={order.capacity} variant="print" />
+            <PrepSummaryTable
+              order={order}
+              priorLines={batch?.priorLines}
+              batchLabel={batch?.label}
+              formulas={stewFormulas}
+              variant="print"
+            />
           )}
 
           {order.notes && (

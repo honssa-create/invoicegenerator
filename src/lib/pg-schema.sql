@@ -353,7 +353,9 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   completed_at TEXT,
   completed_by TEXT,
   stewing_started_at TEXT,
-  completion_splits_json TEXT
+  completion_splits_json TEXT,
+  -- Capacity lines for one prep order. Null = single capacity stored on the parent columns.
+  lines_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kitchen_settings (
@@ -382,6 +384,9 @@ ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS icon_path TEXT;
 ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_json TEXT;
 ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS formulas_json TEXT;
 ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT;
+
+-- Multi-capacity kitchen prep: one order_code, many capacity lines. Existing rows stay single-capacity (NULL).
+ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS lines_json TEXT;
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS due_date TEXT;

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import CompletionModal from '@/components/kitchen-prep/CompletionModal';
+import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import {
   PREP_CAPACITIES,
   PREP_CAPACITY_LABELS,
@@ -14,8 +15,13 @@ import {
   PREP_STATUSES,
   PREP_STATUSES_BULK_EDIT,
   PREP_STATUS_LABELS,
+  formatPrepOrderScheduleLines,
   getPrepStatusAction,
+  isMultiCapacityPrep,
   isRedDateAllowed,
+  prepOrderLines,
+  summarizePrepOrderLines,
+  summarizePrepSessions,
   type PrepCapacity,
   type PrepOrder,
   type PrepOrderType,
@@ -356,6 +362,9 @@ function KitchenPrepListContent() {
         PREP_ORDER_TYPE_LABELS[o.order_type],
         PREP_CAPACITY_LABELS[o.capacity],
         PREP_STATUS_LABELS[o.status],
+        ...prepOrderLines(o).map((line) => line.capacity),
+        ...formatPrepOrderScheduleLines(o),
+        ...summarizePrepOrderLines(o).map((line) => `${line.label} ${line.text}`),
       ]
         .join(' ')
         .toLowerCase();
@@ -369,12 +378,21 @@ function KitchenPrepListContent() {
       let cmp = 0;
       if (sortKey === 'stewing_date') cmp = a.stewing_date.localeCompare(b.stewing_date);
       else if (sortKey === 'order_code') cmp = a.order_code.localeCompare(b.order_code);
-      else if (sortKey === 'capacity') cmp = a.capacity.localeCompare(b.capacity);
+      else if (sortKey === 'capacity') {
+        cmp = prepOrderLines(a).map((line) => line.capacity).join(',').localeCompare(
+          prepOrderLines(b).map((line) => line.capacity).join(',')
+        );
+      }
       else if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
   }, [filteredOrders, sortKey, sortDir]);
+
+  const sessionSummaries = useMemo(
+    () => summarizePrepSessions(sortedOrders),
+    [sortedOrders]
+  );
 
   const applyDateRange = (start: string, end: string) => {
     setDateStart(start);
@@ -487,11 +505,11 @@ function KitchenPrepListContent() {
     clearKitchenPrepListCache();
     setShowForm(false);
     setForm(EMPTY);
-    if (d.orders?.length > 1) {
-      void load();
-    } else if (d.order) {
+    if (d.order?.id) {
       prefetchKitchenPrepDetail(d.order.id);
       router.push(`/kitchen-prep/${d.order.id}`);
+    } else {
+      void load();
     }
   };
 
@@ -524,7 +542,7 @@ function KitchenPrepListContent() {
       onClick={() => router.push(`/kitchen-prep/${o.id}`)}
       onMouseEnter={() => prefetchKitchenPrepDetail(o.id)}
       onFocus={() => prefetchKitchenPrepDetail(o.id)}
-      className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''}`}
+      className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''} ${isMultiCapacityPrep(o) ? 'border-l-4 border-l-brand-500' : ''}`}
     >
       <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
         <input
@@ -544,9 +562,29 @@ function KitchenPrepListContent() {
         ) : (
           o.order_code
         )}
+        {isMultiCapacityPrep(o) && (
+          <ul className="mt-1 space-y-0.5 font-sans">
+            {formatPrepOrderScheduleLines(o).map((text) => (
+              <li key={text} className="text-xs text-gray-600">{text}</li>
+            ))}
+          </ul>
+        )}
       </td>
       <td className="px-4 py-3 text-gray-700">{PREP_ORDER_TYPE_LABELS[o.order_type]}</td>
-      <td className="px-4 py-3 font-semibold text-gray-800">{PREP_CAPACITY_LABELS[o.capacity]}</td>
+      <td className="px-4 py-3 text-gray-800">
+        {isMultiCapacityPrep(o) ? (
+          <div className="space-y-1">
+            {summarizePrepOrderLines(o).map((line) => (
+              <div key={line.capacity} className="leading-snug">
+                <span className="font-semibold">{line.label}</span>
+                <span className="text-gray-600"> · {line.text}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="font-semibold">{PREP_CAPACITY_LABELS[o.capacity] || o.capacity}</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>
           {PREP_STATUS_LABELS[o.status]}
@@ -862,6 +900,19 @@ function KitchenPrepListContent() {
         ))}
       </div>
 
+      {sessionSummaries.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {sessionSummaries.map((session) => (
+            <PrepSessionSummary
+              key={session.sessionKey}
+              title={`${session.sessionKey} session`}
+              lines={session.lines}
+              buckets={session.potBuckets}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
           <h2 className="font-semibold text-gray-900">Scheduled Orders 排程列表</h2>
@@ -953,6 +1004,9 @@ function KitchenPrepListContent() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-2">容量 Capacities (multi-select)</label>
+                <p className="text-xs text-gray-500 mb-2">
+                  Several capacities stay on one order code. Each capacity keeps its own pot (25g/45g 150, 75g 100). A 75g+45g mix uses 120.
+                </p>
                 <div className="flex flex-wrap gap-2 mb-3">
                   {capacityOptions.map((c) => {
                     const selected = form.lines.some((l) => l.capacity === c.id);
@@ -1005,7 +1059,7 @@ function KitchenPrepListContent() {
 
               <div className="flex gap-3 pt-2">
                 <button onClick={save} disabled={saving} className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium min-h-[48px]">
-                  {saving ? BTN.creating : form.lines.length > 1 ? bi(`Create ${form.lines.length} Orders`, `建立 ${form.lines.length} 張訂單`) : bi('Create & Open Calculator', '建立並開啟計算器')}
+                  {saving ? BTN.creating : form.lines.length > 1 ? bi(`Create 1 order · ${form.lines.length} capacities`, `建立 1 張訂單 · ${form.lines.length} 個容量`) : bi('Create & Open Calculator', '建立並開啟計算器')}
                 </button>
                 <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium min-h-[48px]">{BTN.cancel}</button>
               </div>

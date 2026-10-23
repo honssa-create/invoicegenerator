@@ -14,17 +14,24 @@ import {
   buildKitchenCompletionActivityBody,
   computePrepCalculationForOrder,
   computeStewingRawNeeds,
+  defaultCompletionSplits,
   defaultPrepStatusForCreate,
   hkTodayIso,
   isRedDateAllowed,
   nextActualQty,
   parseBirdNestType,
+  parsePrepLinesJson,
+  planPrepBatchOrderCode,
+  planPrepCapacityLines,
   prepOrderBirdNestSelections,
+  prepOrderLines,
+  sumRawNeedLines,
   validatePrepFlavorQtys,
   weddingPrepStatusFromDate,
   hkNowDateTime,
   nextStewingStartedAt,
   type BirdNestType,
+  type PrepCapacityLineDraft,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
 import { addCalendarDays } from './wedding-gift-confirmation';
@@ -52,21 +59,16 @@ function normalizeCompletionSplits(
         s.flavor && (PREP_FLAVORS as readonly string[]).includes(s.flavor)
           ? s.flavor
           : null;
+      const capacity = typeof s.capacity === 'string' && s.capacity.trim() ? s.capacity.trim() : undefined;
       return {
         label: s.label?.trim() || `Sub-order ${i + 1}`,
         qty: Math.max(0, Math.round(s.qty)),
         flavor: flavor || undefined,
+        capacity,
       };
     });
   }
-  const calc = computePrepCalculationForOrder(existing);
-  return calc.rows
-    .filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled)
-    .map((r) => ({
-      label: r.label,
-      qty: r.actualQty,
-      flavor: r.flavor,
-    }));
+  return defaultCompletionSplits(computePrepCalculationForOrder(existing), existing.capacity);
 }
 
 interface PrepRow {
@@ -95,6 +97,8 @@ interface PrepRow {
   completed_by: string | null;
   stewing_started_at: string | null;
   completion_splits_json: string | null;
+  /** JSON array of capacity lines. Null on single-capacity rows (parent columns are the line). */
+  lines_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -110,7 +114,7 @@ function parseSplits(raw: string | null): PrepCompletionSplit[] | null {
 }
 
 function hydrate(row: PrepRow): PrepOrder {
-  return {
+  const base: PrepOrder = {
     id: row.id,
     user_id: row.user_id,
     order_code: row.order_code,
@@ -139,6 +143,11 @@ function hydrate(row: PrepRow): PrepOrder {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+  const stored = parsePrepLinesJson(row.lines_json);
+  return {
+    ...base,
+    lines: stored && stored.length ? stored : prepOrderLines(base),
+  };
 }
 
 async function nextPrepSerialStart(): Promise<number> {
@@ -162,12 +171,6 @@ async function nextOrderCode(_userId?: number): Promise<string> {
   return `PREP-${String(n).padStart(4, '0')}`;
 }
 
-async function allocatePrepOrderCodes(count: number): Promise<string[]> {
-  if (count <= 0) return [];
-  const start = await nextPrepSerialStart();
-  return Array.from({ length: count }, (_, i) => `PREP-${String(start + i).padStart(4, '0')}`);
-}
-
 type InsertPrepInput = {
   stewing_date: string;
   order_type: PrepOrderType;
@@ -185,6 +188,7 @@ type InsertPrepInput = {
   bird_nest_osmanthus: BirdNestType;
   bird_nest_red_date: BirdNestType;
   bird_nest_rock_sugar: BirdNestType;
+  lines_json: string | null;
 };
 
 async function insertPrepOrderRow(userId: number, row: InsertPrepInput): Promise<number> {
@@ -195,8 +199,8 @@ async function insertPrepOrderRow(userId: number, row: InsertPrepInput): Promise
           qty_osmanthus, qty_red_date, qty_rock_sugar,
           actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
           bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
-          notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+          lines_json, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
@@ -215,6 +219,7 @@ async function insertPrepOrderRow(userId: number, row: InsertPrepInput): Promise
       row.bird_nest_osmanthus,
       row.bird_nest_red_date,
       row.bird_nest_rock_sugar,
+      row.lines_json,
       row.notes,
     );
   return Number(res.lastInsertRowid);
@@ -239,6 +244,19 @@ function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): 
     bird_nest_osmanthus: row.bird_nest_osmanthus,
     bird_nest_red_date: row.bird_nest_red_date,
     bird_nest_rock_sugar: row.bird_nest_rock_sugar,
+    lines: prepOrderLines({
+      capacity: row.capacity,
+      qty_osmanthus: row.qty_osmanthus,
+      qty_red_date: row.qty_red_date,
+      qty_rock_sugar: row.qty_rock_sugar,
+      actual_qty_osmanthus: row.actual_qty_osmanthus,
+      actual_qty_red_date: row.actual_qty_red_date,
+      actual_qty_rock_sugar: row.actual_qty_rock_sugar,
+      bird_nest_osmanthus: row.bird_nest_osmanthus,
+      bird_nest_red_date: row.bird_nest_red_date,
+      bird_nest_rock_sugar: row.bird_nest_rock_sugar,
+      lines_json: row.lines_json,
+    }),
     notes: row.notes,
     expected_yield: null,
     actual_yield: null,
@@ -255,7 +273,7 @@ function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): 
 /** List table + completion modal from list — omits notes / completion meta / timestamps. */
 const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
   qty_osmanthus, qty_red_date, qty_rock_sugar, actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
-  bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
+  bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar, lines_json,
   expected_yield, actual_yield, stewing_started_at`;
 
 type ListPrepRow = Omit<
@@ -451,6 +469,7 @@ export async function createPrepOrder(
     bird_nest_osmanthus: input.bird_nest_osmanthus ?? 'large',
     bird_nest_red_date: input.bird_nest_red_date ?? 'large',
     bird_nest_rock_sugar: input.bird_nest_rock_sugar ?? 'large',
+    lines_json: null,
   };
 
   const id = await insertPrepOrderRow(userId, insertRow);
@@ -481,65 +500,42 @@ export async function createPrepOrdersBatch(
   opts?: { stewFormulas?: StewFormulas },
 ): Promise<PrepOrder[]> {
   const stew = opts?.stewFormulas ?? (await readKitchenStewFormulas(userId)).stewFormulas;
-  const baseCode = input.order_code?.trim();
   const defaultStatus =
     input.status ??
     defaultPrepStatusForCreate(input.order_type, input.stewing_date, {
       hasProductionDate: true,
     });
 
-  const prepared = input.lines.map((line) => {
-    const capacity = line.capacity;
-    const qtyOsmanthus = Math.max(0, line.qty_osmanthus ?? 0);
-    const qtyRed = isRedDateAllowed(capacity, stew) ? Math.max(0, line.qty_red_date ?? 0) : 0;
-    const qtyRock = Math.max(0, line.qty_rock_sugar ?? 0);
-    const qtys = {
-      osmanthus: qtyOsmanthus,
-      red_date: qtyRed,
-      rock_sugar: qtyRock,
-    };
-    const validationErr = validatePrepFlavorQtys(line.capacity, qtys, { formulas: stew });
-    if (validationErr) throw new Error(validationErr);
-    return { line, qtys, capacity };
-  });
+  const drafted = planPrepCapacityLines(input.lines, { formulas: stew });
+  if (!drafted.ok) throw new Error(drafted.error);
 
   return await db.transaction(async () => {
-    const autoCodes = baseCode ? [] : await allocatePrepOrderCodes(prepared.length);
-    let autoIdx = 0;
-    const created: PrepOrder[] = [];
+    const orderCode = planPrepBatchOrderCode(input.order_code, await nextOrderCode(userId));
+    const planned = planPrepCapacityLines(input.lines, { formulas: stew });
+    if (!planned.ok) throw new Error(planned.error);
+    const { parent, linesJson } = planned.plan;
 
-    for (const { line, qtys, capacity } of prepared) {
-      let orderCode: string;
-      if (baseCode) {
-        orderCode = input.lines.length > 1 ? `${baseCode}-${line.capacity}` : baseCode;
-      } else if (input.lines.length > 1) {
-        orderCode = `${autoCodes[autoIdx++]}-${line.capacity}`;
-      } else {
-        orderCode = autoCodes[autoIdx++] ?? (await nextOrderCode(userId));
-      }
-
-      const insertRow: InsertPrepInput = {
-        stewing_date: input.stewing_date,
-        order_type: input.order_type,
-        capacity,
-        qty_osmanthus: qtys.osmanthus,
-        qty_red_date: qtys.red_date,
-        qty_rock_sugar: qtys.rock_sugar,
-        actual_qty_osmanthus: qtys.osmanthus,
-        actual_qty_red_date: qtys.red_date,
-        actual_qty_rock_sugar: qtys.rock_sugar,
-        linked_order_id: input.linked_order_id ?? null,
-        order_code: orderCode,
-        notes: input.notes?.trim() || null,
-        status: defaultStatus,
-        bird_nest_osmanthus: 'large',
-        bird_nest_red_date: 'large',
-        bird_nest_rock_sugar: 'large',
-      };
-      const id = await insertPrepOrderRow(userId, insertRow);
-      created.push(prepOrderFromInsert(userId, id, insertRow));
-    }
-    return created;
+    const insertRow: InsertPrepInput = {
+      stewing_date: input.stewing_date,
+      order_type: input.order_type,
+      capacity: parent.capacity,
+      qty_osmanthus: parent.qty_osmanthus,
+      qty_red_date: parent.qty_red_date,
+      qty_rock_sugar: parent.qty_rock_sugar,
+      actual_qty_osmanthus: parent.actual_qty_osmanthus,
+      actual_qty_red_date: parent.actual_qty_red_date,
+      actual_qty_rock_sugar: parent.actual_qty_rock_sugar,
+      linked_order_id: input.linked_order_id ?? null,
+      order_code: orderCode,
+      notes: input.notes?.trim() || null,
+      status: defaultStatus,
+      bird_nest_osmanthus: parent.bird_nest_osmanthus,
+      bird_nest_red_date: parent.bird_nest_red_date,
+      bird_nest_rock_sugar: parent.bird_nest_rock_sugar,
+      lines_json: linesJson,
+    };
+    const id = await insertPrepOrderRow(userId, insertRow);
+    return [prepOrderFromInsert(userId, id, insertRow)];
   });
 }
 
@@ -644,6 +640,7 @@ export async function updatePrepOrder(
     bird_nest_rock_sugar?: BirdNestType;
     notes: string | null;
     allowEmptyQtys: boolean;
+    lines: PrepCapacityLineDraft[];
   }>,
   opts?: {
     existing?: PrepOrder;
@@ -657,19 +654,23 @@ export async function updatePrepOrder(
   const stew =
     opts?.stewFormulas ??
     (await readKitchenStewFormulas(await resolveKitchenOwnerUserId())).stewFormulas;
-  const capacity = input.capacity ?? existing.capacity;
-  const qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
-  const qtyRed = isRedDateAllowed(capacity, stew)
+
+  const hasLinesPayload = Array.isArray(input.lines);
+  const keepMultiLines = !hasLinesPayload && prepOrderLines(existing).length > 1;
+
+  let capacity = input.capacity ?? existing.capacity;
+  let qtyOsmanthus = Math.max(0, input.qty_osmanthus ?? existing.qty_osmanthus);
+  let qtyRed = isRedDateAllowed(capacity, stew)
     ? Math.max(0, input.qty_red_date ?? existing.qty_red_date)
     : 0;
-  const qtyRock = Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar);
-  const actualOsmanthus = nextActualQty(
+  let qtyRock = Math.max(0, input.qty_rock_sugar ?? existing.qty_rock_sugar);
+  let actualOsmanthus = nextActualQty(
     existing.qty_osmanthus,
     existing.actual_qty_osmanthus,
     qtyOsmanthus,
     input.actual_qty_osmanthus
   );
-  const actualRed = isRedDateAllowed(capacity, stew)
+  let actualRed = isRedDateAllowed(capacity, stew)
     ? nextActualQty(
         existing.qty_red_date,
         existing.actual_qty_red_date,
@@ -677,23 +678,98 @@ export async function updatePrepOrder(
         input.actual_qty_red_date
       )
     : 0;
-  const actualRock = nextActualQty(
+  let actualRock = nextActualQty(
     existing.qty_rock_sugar,
     existing.actual_qty_rock_sugar,
     qtyRock,
     input.actual_qty_rock_sugar
   );
+  let birdOsmanthus = input.bird_nest_osmanthus ?? existing.bird_nest_osmanthus;
+  let birdRed = input.bird_nest_red_date ?? existing.bird_nest_red_date;
+  let birdRock = input.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar;
+  let linesForOrder = prepOrderLines(existing);
+  let linesJson: string | null = null;
 
-  const validationErr = validatePrepFlavorQtys(
-    capacity,
-    {
-      osmanthus: qtyOsmanthus,
-      red_date: qtyRed,
-      rock_sugar: qtyRock,
-    },
-    { allowEmpty: Boolean(input.allowEmptyQtys), formulas: stew }
-  );
-  if (validationErr) throw new Error(validationErr);
+  if (hasLinesPayload) {
+    const planned = planPrepCapacityLines(input.lines || [], {
+      formulas: stew,
+      allowEmpty: Boolean(input.allowEmptyQtys),
+    });
+    if (!planned.ok) throw new Error(planned.error);
+    const previous = prepOrderLines(existing);
+    const filled = planned.plan.lines.map((line) => {
+      const match = previous.find((row) => row.capacity === line.capacity);
+      return {
+        ...line,
+        bird_nest_osmanthus: line.bird_nest_osmanthus ?? match?.bird_nest_osmanthus ?? existing.bird_nest_osmanthus,
+        bird_nest_red_date: line.bird_nest_red_date ?? match?.bird_nest_red_date ?? existing.bird_nest_red_date,
+        bird_nest_rock_sugar: line.bird_nest_rock_sugar ?? match?.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
+      };
+    });
+    const parent = filled.length > 1 || filled.length === 1
+      ? {
+          capacity: filled[0].capacity,
+          qty_osmanthus: filled[0].qty_osmanthus,
+          qty_red_date: filled[0].qty_red_date,
+          qty_rock_sugar: filled[0].qty_rock_sugar,
+          actual_qty_osmanthus: filled[0].actual_qty_osmanthus ?? filled[0].qty_osmanthus,
+          actual_qty_red_date: filled[0].actual_qty_red_date ?? filled[0].qty_red_date,
+          actual_qty_rock_sugar: filled[0].actual_qty_rock_sugar ?? filled[0].qty_rock_sugar,
+          bird_nest_osmanthus: filled[0].bird_nest_osmanthus ?? 'large',
+          bird_nest_red_date: filled[0].bird_nest_red_date ?? 'large',
+          bird_nest_rock_sugar: filled[0].bird_nest_rock_sugar ?? 'large',
+        }
+      : planned.plan.parent;
+    capacity = parent.capacity;
+    qtyOsmanthus = parent.qty_osmanthus;
+    qtyRed = parent.qty_red_date;
+    qtyRock = parent.qty_rock_sugar;
+    actualOsmanthus = parent.actual_qty_osmanthus;
+    actualRed = parent.actual_qty_red_date;
+    actualRock = parent.actual_qty_rock_sugar;
+    birdOsmanthus = parent.bird_nest_osmanthus;
+    birdRed = parent.bird_nest_red_date;
+    birdRock = parent.bird_nest_rock_sugar;
+    linesForOrder = filled;
+    linesJson = filled.length > 1 ? JSON.stringify(filled) : null;
+  } else if (keepMultiLines) {
+    capacity = existing.capacity;
+    qtyOsmanthus = existing.qty_osmanthus;
+    qtyRed = existing.qty_red_date;
+    qtyRock = existing.qty_rock_sugar;
+    actualOsmanthus = existing.actual_qty_osmanthus ?? existing.qty_osmanthus;
+    actualRed = existing.actual_qty_red_date ?? existing.qty_red_date;
+    actualRock = existing.actual_qty_rock_sugar ?? existing.qty_rock_sugar;
+    birdOsmanthus = existing.bird_nest_osmanthus;
+    birdRed = existing.bird_nest_red_date;
+    birdRock = existing.bird_nest_rock_sugar;
+    linesForOrder = prepOrderLines(existing);
+    linesJson = JSON.stringify(linesForOrder);
+  } else {
+    const validationErr = validatePrepFlavorQtys(
+      capacity,
+      {
+        osmanthus: qtyOsmanthus,
+        red_date: qtyRed,
+        rock_sugar: qtyRock,
+      },
+      { allowEmpty: Boolean(input.allowEmptyQtys), formulas: stew }
+    );
+    if (validationErr) throw new Error(validationErr);
+    linesForOrder = prepOrderLines({
+      capacity,
+      qty_osmanthus: qtyOsmanthus,
+      qty_red_date: qtyRed,
+      qty_rock_sugar: qtyRock,
+      actual_qty_osmanthus: actualOsmanthus,
+      actual_qty_red_date: actualRed,
+      actual_qty_rock_sugar: actualRock,
+      bird_nest_osmanthus: birdOsmanthus,
+      bird_nest_red_date: birdRed,
+      bird_nest_rock_sugar: birdRock,
+    });
+    linesJson = null;
+  }
 
   const nextStatus = input.status ?? existing.status;
   let stewingStartedAt = existing.stewing_started_at;
@@ -703,6 +779,10 @@ export async function updatePrepOrder(
     stewingStartedAt = null;
   }
 
+  const stewingDate = input.stewing_date ?? existing.stewing_date;
+  const orderType = input.order_type ?? existing.order_type;
+  const notes = input.notes !== undefined ? input.notes : existing.notes;
+
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET
@@ -710,13 +790,13 @@ export async function updatePrepOrder(
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?,
        actual_qty_osmanthus = ?, actual_qty_red_date = ?, actual_qty_rock_sugar = ?,
        bird_nest_osmanthus = ?, bird_nest_red_date = ?, bird_nest_rock_sugar = ?,
-       notes = ?, stewing_started_at = ?,
+       lines_json = ?, notes = ?, stewing_started_at = ?,
        updated_at = datetime('now')
      WHERE id = ?`
     )
     .run(
-      input.stewing_date ?? existing.stewing_date,
-      input.order_type ?? existing.order_type,
+      stewingDate,
+      orderType,
       capacity,
       nextStatus,
       qtyOsmanthus,
@@ -725,10 +805,11 @@ export async function updatePrepOrder(
       actualOsmanthus,
       actualRed,
       actualRock,
-      input.bird_nest_osmanthus ?? existing.bird_nest_osmanthus,
-      input.bird_nest_red_date ?? existing.bird_nest_red_date,
-      input.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
-      input.notes !== undefined ? input.notes : existing.notes,
+      birdOsmanthus,
+      birdRed,
+      birdRock,
+      linesJson,
+      notes,
       stewingStartedAt,
       id
     );
@@ -736,8 +817,8 @@ export async function updatePrepOrder(
   if (opts?.skipRefetch) {
     return {
       ...existing,
-      stewing_date: input.stewing_date ?? existing.stewing_date,
-      order_type: input.order_type ?? existing.order_type,
+      stewing_date: stewingDate,
+      order_type: orderType,
       capacity,
       status: nextStatus,
       qty_osmanthus: qtyOsmanthus,
@@ -746,10 +827,11 @@ export async function updatePrepOrder(
       actual_qty_osmanthus: actualOsmanthus,
       actual_qty_red_date: actualRed,
       actual_qty_rock_sugar: actualRock,
-      bird_nest_osmanthus: input.bird_nest_osmanthus ?? existing.bird_nest_osmanthus,
-      bird_nest_red_date: input.bird_nest_red_date ?? existing.bird_nest_red_date,
-      bird_nest_rock_sugar: input.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
-      notes: input.notes !== undefined ? input.notes : existing.notes,
+      bird_nest_osmanthus: birdOsmanthus,
+      bird_nest_red_date: birdRed,
+      bird_nest_rock_sugar: birdRock,
+      lines: linesForOrder,
+      notes,
       stewing_started_at: stewingStartedAt,
     };
   }
@@ -794,29 +876,43 @@ export async function completePrepProduction(
     }
   }
 
-  const finishedDeltas = splits
-    .filter((s): s is PrepCompletionSplit & { flavor: PrepFlavor } => Boolean(s.flavor) && s.qty > 0)
-    .map((s) => ({
-      sku: finishedSku(existing.capacity, s.flavor),
-      qty: s.qty,
-    }));
+  const flavoredSplits = splits.filter(
+    (s): s is PrepCompletionSplit & { flavor: PrepFlavor } => Boolean(s.flavor) && s.qty > 0
+  );
+  const orderLines = prepOrderLines(existing);
+  const finishedDeltas = flavoredSplits.map((s) => ({
+    sku: finishedSku(s.capacity || existing.capacity, s.flavor),
+    qty: s.qty,
+  }));
 
-  // Deduplicate SKUs (shouldn't happen, but keep stock math correct).
+  // Same capacity + flavor can appear once; merge so stock math stays exact.
   const merged = new Map<string, number>();
   for (const d of finishedDeltas) {
     merged.set(d.sku, (merged.get(d.sku) || 0) + d.qty);
   }
   const stockLines = Array.from(merged.entries()).map(([sku, qty]) => ({ sku, qty }));
 
-  const flavoredSplits = splits.filter(
-    (s): s is PrepCompletionSplit & { flavor: PrepFlavor } => Boolean(s.flavor) && s.qty > 0
-  );
-  const rawConsume = computeStewingRawNeeds(
-    existing.capacity,
-    flavoredSplits.map((s) => ({ flavor: s.flavor, qty: s.qty })),
-    stew,
-    prepOrderBirdNestSelections(existing)
-  );
+  const splitsByCapacity = new Map<string, Array<{ flavor: PrepFlavor; qty: number }>>();
+  for (const split of flavoredSplits) {
+    const capacity = split.capacity || existing.capacity;
+    const group = splitsByCapacity.get(capacity) || [];
+    group.push({ flavor: split.flavor, qty: split.qty });
+    splitsByCapacity.set(capacity, group);
+  }
+  const rawGroups = Array.from(splitsByCapacity.entries()).map(([capacity, group]) => {
+    const line = orderLines.find((row) => row.capacity === capacity);
+    return computeStewingRawNeeds(
+      capacity,
+      group,
+      stew,
+      prepOrderBirdNestSelections({
+        bird_nest_osmanthus: line?.bird_nest_osmanthus ?? existing.bird_nest_osmanthus,
+        bird_nest_red_date: line?.bird_nest_red_date ?? existing.bird_nest_red_date,
+        bird_nest_rock_sugar: line?.bird_nest_rock_sugar ?? existing.bird_nest_rock_sugar,
+      })
+    );
+  });
+  const rawConsume = sumRawNeedLines(rawGroups);
 
   const splitsJson = splits.length > 0 ? JSON.stringify(splits) : null;
 

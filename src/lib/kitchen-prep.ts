@@ -20,6 +20,23 @@ export const PREP_FLAVOR_LABELS: Record<PrepFlavor, string> = {
   rock_sugar: '冰糖 Rock Sugar',
 };
 
+/** Short flavor names used on schedule-style lines (`桂花 x40`). */
+export const PREP_FLAVOR_SHORT: Record<PrepFlavor, string> = {
+  osmanthus: '桂花',
+  red_date: '紅棗',
+  rock_sugar: '冰糖',
+};
+
+/**
+ * Stew pot limits in bottles. Each capacity is its own bucket:
+ * smaller jars (25g / 45g) use 150, 75g jars use 100.
+ * A 75g + 45g mix has a separate combined cap of 120.
+ * 25g is never added into the 45g 150, and 45g is never added into the 75g 100.
+ */
+export const STEW_POT_LIMIT_SMALL = 150;
+export const STEW_POT_LIMIT_LARGE = 100;
+export const STEW_POT_LIMIT_MIXED_75_45 = 120;
+
 /** Per-flavor bird's-nest cake type for stewing (maps to raw stock name). */
 export const BIRD_NEST_TYPES = ['large', 'small'] as const;
 export type BirdNestType = (typeof BIRD_NEST_TYPES)[number];
@@ -450,21 +467,26 @@ export interface PrepCompletionSplit {
   label: string;
   qty: number;
   flavor?: PrepFlavor;
+  /** Capacity for this split. Stock and raw formulas use this, not a single order capacity. */
+  capacity?: PrepCapacity;
 }
 
-/** One split row per active flavor: label = 口味 + 容量, qty = 實際生產樽數. */
+/** One split row per active flavor × capacity. Label = 口味 + 容量, qty = 實際生產樽數. */
 export function defaultCompletionSplits(
   calc: PrepCalculation,
   capacity: PrepCapacity
 ): PrepCompletionSplit[] {
-  const capLabel = PREP_CAPACITY_LABELS[capacity];
   return calc.rows
     .filter((r) => (r.orderQty > 0 || r.actualQty > 0) && !r.disabled)
-    .map((r) => ({
-      label: `${r.label} ${capLabel}`,
-      qty: r.actualQty,
-      flavor: r.flavor,
-    }));
+    .map((r) => {
+      const rowCapacity = r.capacity || capacity;
+      return {
+        label: `${r.label} ${capacityScheduleTag(rowCapacity)}`,
+        qty: r.actualQty,
+        flavor: r.flavor,
+        capacity: rowCapacity,
+      };
+    });
 }
 
 export function completionSplitsTotal(splits: PrepCompletionSplit[]): number {
@@ -496,6 +518,20 @@ export interface PrepFlavorQty {
   rock_sugar: number;
 }
 
+/** One capacity inside a prep order. Several lines share one order_code. */
+export interface PrepCapacityLine {
+  capacity: PrepCapacity;
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+  actual_qty_osmanthus?: number | null;
+  actual_qty_red_date?: number | null;
+  actual_qty_rock_sugar?: number | null;
+  bird_nest_osmanthus?: BirdNestType;
+  bird_nest_red_date?: BirdNestType;
+  bird_nest_rock_sugar?: BirdNestType;
+}
+
 export interface PrepOrder {
   id: number;
   user_id: number;
@@ -503,6 +539,7 @@ export interface PrepOrder {
   linked_order_id: number | null;
   stewing_date: string;
   order_type: PrepOrderType;
+  /** First capacity. Legacy single-capacity rows use this column as the only line. */
   capacity: PrepCapacity;
   status: PrepStatus;
   qty_osmanthus: number;
@@ -514,6 +551,12 @@ export interface PrepOrder {
   bird_nest_osmanthus: BirdNestType;
   bird_nest_red_date: BirdNestType;
   bird_nest_rock_sugar: BirdNestType;
+  /**
+   * Capacity lines for this order. Hydration always fills at least one entry.
+   * Single-capacity orders mirror the parent columns; multi-capacity orders
+   * store the full set and keep the parent columns equal to the first line.
+   */
+  lines?: PrepCapacityLine[] | null;
   notes: string | null;
   expected_yield: number | null;
   actual_yield: number | null;
@@ -528,6 +571,7 @@ export interface PrepOrder {
 
 export interface FlavorCalcRow {
   flavor: PrepFlavor;
+  capacity?: PrepCapacity;
   label: string;
   orderQty: number;
   actualQty: number;
@@ -549,6 +593,8 @@ export interface FlavorCalcRow {
 
 export interface PrepCalculation {
   capacity: PrepCapacity;
+  /** Set when the order spans more than one capacity line. */
+  capacities?: PrepCapacity[];
   orderType: PrepOrderType;
   formulaReady: boolean;
   rows: FlavorCalcRow[];
@@ -674,6 +720,7 @@ function calcRow(
   if (!formula || (safeOrderQty <= 0 && actualQty <= 0)) {
     return {
       flavor,
+      capacity,
       label: PREP_FLAVOR_LABELS[flavor],
       orderQty: safeOrderQty,
       actualQty,
@@ -697,6 +744,7 @@ function calcRow(
 
   return {
     flavor,
+    capacity,
     label: PREP_FLAVOR_LABELS[flavor],
     orderQty: safeOrderQty,
     actualQty,
@@ -826,22 +874,30 @@ export function computePrepCalculationForOrder(
     bird_nest_osmanthus?: string | null;
     bird_nest_red_date?: string | null;
     bird_nest_rock_sugar?: string | null;
+    lines?: PrepCapacityLine[] | null;
+    lines_json?: string | null;
   },
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): PrepCalculation {
-  const birdNest = prepOrderBirdNestSelections(order);
-  return computePrepCalculation(
-    order.capacity,
-    order.order_type,
-    prepOrderQtys(order),
-    formulas,
-    {
-      osmanthus: order.actual_qty_osmanthus,
-      red_date: order.actual_qty_red_date,
-      rock_sugar: order.actual_qty_rock_sugar,
-    },
-    birdNest
+  const lines = prepOrderLines(order);
+  const parts = lines.map((line) =>
+    computePrepCalculation(
+      line.capacity,
+      order.order_type,
+      prepOrderQtys(line),
+      formulas,
+      {
+        osmanthus: line.actual_qty_osmanthus,
+        red_date: line.actual_qty_red_date,
+        rock_sugar: line.actual_qty_rock_sugar,
+      },
+      birdNestForPrepLine(order, line)
+    )
   );
+  if (parts.length <= 1) {
+    return parts[0] ?? computePrepCalculation(order.capacity, order.order_type, prepOrderQtys(order), formulas);
+  }
+  return mergePrepCalculations(order.order_type, parts);
 }
 
 /** Raw grams needed for one prep order (uses stored actual production qty). */
@@ -882,31 +938,31 @@ export function aggregateRawNeedsFromPrepOrders(
     bird_nest_osmanthus?: string | null;
     bird_nest_red_date?: string | null;
     bird_nest_rock_sugar?: string | null;
+    lines?: PrepCapacityLine[] | null;
+    lines_json?: string | null;
   }>,
   formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS
 ): Record<string, number> {
   const raw: Record<string, number> = {};
   for (const o of orders) {
     if (o.status === 'completed') continue;
-    const birdNest = prepOrderBirdNestSelections(o);
-    const lines = computePrepOrderRawNeeds(
-      o.capacity,
-      o.order_type,
-      {
-        osmanthus: o.qty_osmanthus,
-        red_date: o.qty_red_date,
-        rock_sugar: o.qty_rock_sugar,
-      },
-      formulas,
-      {
-        osmanthus: o.actual_qty_osmanthus,
-        red_date: o.actual_qty_red_date,
-        rock_sugar: o.actual_qty_rock_sugar,
-      },
-      birdNest
-    );
-    for (const line of lines) {
-      raw[line.name] = round2((raw[line.name] || 0) + line.qty);
+    for (const line of prepOrderLines(o)) {
+      const birdNest = birdNestForPrepLine(o, line);
+      const needs = computePrepOrderRawNeeds(
+        line.capacity,
+        o.order_type,
+        prepOrderQtys(line),
+        formulas,
+        {
+          osmanthus: line.actual_qty_osmanthus,
+          red_date: line.actual_qty_red_date,
+          rock_sugar: line.actual_qty_rock_sugar,
+        },
+        birdNest
+      );
+      for (const need of needs) {
+        raw[need.name] = round2((raw[need.name] || 0) + need.qty);
+      }
     }
   }
   return raw;
@@ -1009,6 +1065,472 @@ export function validatePrepFlavorQtys(
     return 'At least one flavor quantity is required';
   }
   return null;
+}
+
+export type PrepCapacityLineDraft = {
+  capacity?: string;
+  qty_osmanthus?: number;
+  qty_red_date?: number;
+  qty_rock_sugar?: number;
+  actual_qty_osmanthus?: number | null;
+  actual_qty_red_date?: number | null;
+  actual_qty_rock_sugar?: number | null;
+  bird_nest_osmanthus?: string | null;
+  bird_nest_red_date?: string | null;
+  bird_nest_rock_sugar?: string | null;
+};
+
+function nonNegInt(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.round(n));
+}
+
+function optionalNonNegInt(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  return nonNegInt(value);
+}
+
+function optionalBirdNest(value: unknown): BirdNestType | undefined {
+  if (value === 'small' || value === 'large') return value;
+  return undefined;
+}
+
+export function normalizePrepCapacityLine(raw: PrepCapacityLineDraft): PrepCapacityLine | null {
+  const capacity = String(raw.capacity || '').trim();
+  if (!capacity) return null;
+  return {
+    capacity,
+    qty_osmanthus: nonNegInt(raw.qty_osmanthus),
+    qty_red_date: nonNegInt(raw.qty_red_date),
+    qty_rock_sugar: nonNegInt(raw.qty_rock_sugar),
+    actual_qty_osmanthus: optionalNonNegInt(raw.actual_qty_osmanthus),
+    actual_qty_red_date: optionalNonNegInt(raw.actual_qty_red_date),
+    actual_qty_rock_sugar: optionalNonNegInt(raw.actual_qty_rock_sugar),
+    bird_nest_osmanthus: optionalBirdNest(raw.bird_nest_osmanthus),
+    bird_nest_red_date: optionalBirdNest(raw.bird_nest_red_date),
+    bird_nest_rock_sugar: optionalBirdNest(raw.bird_nest_rock_sugar),
+  };
+}
+
+export function parsePrepLinesJson(raw: string | null | undefined): PrepCapacityLine[] | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const lines = parsed
+      .map((row) => normalizePrepCapacityLine((row || {}) as PrepCapacityLineDraft))
+      .filter((line): line is PrepCapacityLine => line != null);
+    return lines.length ? mergePrepCapacityLines(lines) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Sum duplicate capacities into one line. Order of first appearance is kept. */
+export function mergePrepCapacityLines(lines: PrepCapacityLine[]): PrepCapacityLine[] {
+  const order: string[] = [];
+  const map = new Map<string, PrepCapacityLine>();
+  for (const line of lines) {
+    const prev = map.get(line.capacity);
+    if (!prev) {
+      order.push(line.capacity);
+      map.set(line.capacity, { ...line });
+      continue;
+    }
+    const actualOsmanthus =
+      resolveActualQty(prev.qty_osmanthus, prev.actual_qty_osmanthus) +
+      resolveActualQty(line.qty_osmanthus, line.actual_qty_osmanthus);
+    const actualRed =
+      resolveActualQty(prev.qty_red_date, prev.actual_qty_red_date) +
+      resolveActualQty(line.qty_red_date, line.actual_qty_red_date);
+    const actualRock =
+      resolveActualQty(prev.qty_rock_sugar, prev.actual_qty_rock_sugar) +
+      resolveActualQty(line.qty_rock_sugar, line.actual_qty_rock_sugar);
+    prev.qty_osmanthus += line.qty_osmanthus;
+    prev.qty_red_date += line.qty_red_date;
+    prev.qty_rock_sugar += line.qty_rock_sugar;
+    prev.actual_qty_osmanthus = actualOsmanthus;
+    prev.actual_qty_red_date = actualRed;
+    prev.actual_qty_rock_sugar = actualRock;
+  }
+  return order.map((id) => map.get(id)!);
+}
+
+type PrepLineSource = {
+  capacity: PrepCapacity;
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+  actual_qty_osmanthus?: number | null;
+  actual_qty_red_date?: number | null;
+  actual_qty_rock_sugar?: number | null;
+  bird_nest_osmanthus?: string | null;
+  bird_nest_red_date?: string | null;
+  bird_nest_rock_sugar?: string | null;
+  lines?: PrepCapacityLine[] | null;
+  lines_json?: string | null;
+};
+
+function lineFromParent(order: PrepLineSource): PrepCapacityLine {
+  return {
+    capacity: order.capacity,
+    qty_osmanthus: Math.max(0, order.qty_osmanthus || 0),
+    qty_red_date: Math.max(0, order.qty_red_date || 0),
+    qty_rock_sugar: Math.max(0, order.qty_rock_sugar || 0),
+    actual_qty_osmanthus: order.actual_qty_osmanthus ?? null,
+    actual_qty_red_date: order.actual_qty_red_date ?? null,
+    actual_qty_rock_sugar: order.actual_qty_rock_sugar ?? null,
+    bird_nest_osmanthus: parseBirdNestType(order.bird_nest_osmanthus),
+    bird_nest_red_date: parseBirdNestType(order.bird_nest_red_date),
+    bird_nest_rock_sugar: parseBirdNestType(order.bird_nest_rock_sugar),
+  };
+}
+
+/** Capacity lines for an order. Legacy rows with no JSON become a single line from the parent columns. */
+export function prepOrderLines(order: PrepLineSource): PrepCapacityLine[] {
+  if (order.lines && order.lines.length > 0) {
+    const lines = order.lines
+      .map((line) => normalizePrepCapacityLine(line))
+      .filter((line): line is PrepCapacityLine => line != null);
+    if (lines.length) return lines;
+  }
+  const parsed = parsePrepLinesJson(order.lines_json);
+  if (parsed && parsed.length) return parsed;
+  return [lineFromParent(order)];
+}
+
+export function isMultiCapacityPrep(order: PrepLineSource): boolean {
+  return prepOrderLines(order).length > 1;
+}
+
+function birdNestForPrepLine(
+  order: {
+    bird_nest_osmanthus?: string | null;
+    bird_nest_red_date?: string | null;
+    bird_nest_rock_sugar?: string | null;
+  },
+  line: PrepCapacityLine
+): PrepBirdNestSelections {
+  return prepOrderBirdNestSelections({
+    bird_nest_osmanthus: line.bird_nest_osmanthus ?? order.bird_nest_osmanthus,
+    bird_nest_red_date: line.bird_nest_red_date ?? order.bird_nest_red_date,
+    bird_nest_rock_sugar: line.bird_nest_rock_sugar ?? order.bird_nest_rock_sugar,
+  });
+}
+
+export interface PrepLineParentMirror {
+  capacity: PrepCapacity;
+  qty_osmanthus: number;
+  qty_red_date: number;
+  qty_rock_sugar: number;
+  actual_qty_osmanthus: number;
+  actual_qty_red_date: number;
+  actual_qty_rock_sugar: number;
+  bird_nest_osmanthus: BirdNestType;
+  bird_nest_red_date: BirdNestType;
+  bird_nest_rock_sugar: BirdNestType;
+}
+
+/** Parent columns mirror the first line so older single-capacity readers stay coherent. */
+export function parentMirrorFromLines(lines: PrepCapacityLine[]): PrepLineParentMirror {
+  const first = lines[0];
+  return {
+    capacity: first.capacity,
+    qty_osmanthus: first.qty_osmanthus,
+    qty_red_date: first.qty_red_date,
+    qty_rock_sugar: first.qty_rock_sugar,
+    actual_qty_osmanthus: resolveActualQty(first.qty_osmanthus, first.actual_qty_osmanthus),
+    actual_qty_red_date: resolveActualQty(first.qty_red_date, first.actual_qty_red_date),
+    actual_qty_rock_sugar: resolveActualQty(first.qty_rock_sugar, first.actual_qty_rock_sugar),
+    bird_nest_osmanthus: first.bird_nest_osmanthus ?? 'large',
+    bird_nest_red_date: first.bird_nest_red_date ?? 'large',
+    bird_nest_rock_sugar: first.bird_nest_rock_sugar ?? 'large',
+  };
+}
+
+export function orderWithPrepLines<T extends PrepLineSource>(order: T, lines: PrepCapacityLine[]): T & { lines: PrepCapacityLine[] } {
+  const parent = parentMirrorFromLines(lines);
+  return { ...order, ...parent, lines };
+}
+
+export interface PlannedPrepLines {
+  lines: PrepCapacityLine[];
+  /** Null when a single capacity is stored on the parent columns only. */
+  linesJson: string | null;
+  parent: PrepLineParentMirror;
+}
+
+/**
+ * Normalize a create/update payload into capacity lines.
+ * One line → linesJson null (legacy shape). Two or more → JSON on the same prep order.
+ */
+export function planPrepCapacityLines(
+  rawLines: PrepCapacityLineDraft[],
+  opts?: { formulas?: StewFormulaMapLike; allowEmpty?: boolean }
+): { ok: true; plan: PlannedPrepLines } | { ok: false; error: string } {
+  const formulas = opts?.formulas ?? CAPACITY_FLAVOR_FORMULAS;
+  const normalized: PrepCapacityLine[] = [];
+  for (const raw of rawLines) {
+    const line = normalizePrepCapacityLine(raw);
+    if (!line) continue;
+    if (!isRedDateAllowed(line.capacity, formulas)) {
+      line.qty_red_date = 0;
+      if (line.actual_qty_red_date != null) line.actual_qty_red_date = 0;
+    }
+    normalized.push(line);
+  }
+  const lines = mergePrepCapacityLines(normalized);
+  if (lines.length === 0) {
+    return { ok: false, error: 'At least one capacity line is required' };
+  }
+  for (const line of lines) {
+    const err = validatePrepFlavorQtys(line.capacity, prepOrderQtys(line), {
+      allowEmpty: Boolean(opts?.allowEmpty),
+      formulas,
+    });
+    if (err) return { ok: false, error: err };
+  }
+  return {
+    ok: true,
+    plan: {
+      lines,
+      linesJson: lines.length > 1 ? JSON.stringify(lines) : null,
+      parent: parentMirrorFromLines(lines),
+    },
+  };
+}
+
+/**
+ * One order code for a whole batch. Capacity is never appended (`#12345`, not `#12345-45g`).
+ */
+export function planPrepBatchOrderCode(requestedCode: string | null | undefined, autoCode: string): string {
+  const requested = requestedCode?.trim();
+  if (requested) return requested;
+  return autoCode.trim();
+}
+
+/** Grams label. Millilitre text is shown in grams. 75g jar shapes stay distinct. */
+export function capacityGramsLabel(capacity: PrepCapacity): string {
+  const labeled = (PREP_CAPACITY_LABELS[capacity] || String(capacity || '')).trim();
+  const grams = labeled.match(/(\d+(?:\.\d+)?)\s*g\b/i);
+  if (grams) return `${grams[1]}g`;
+  const ml = labeled.match(/(\d+(?:\.\d+)?)\s*ml\b/i);
+  if (ml) return `${ml[1]}g`;
+  return labeled.replace(/ml/gi, 'g');
+}
+
+/** Tag used in `#12104 - 桂花 x40 (45g)`. */
+export function capacityScheduleTag(capacity: PrepCapacity): string {
+  if (capacity === '75g_big_belly') return '75g 大肚樽';
+  if (capacity === '75g') return '75g';
+  return capacityGramsLabel(capacity);
+}
+
+export function formatPrepScheduleLine(
+  orderCode: string,
+  capacity: PrepCapacity,
+  flavor: PrepFlavor,
+  qty: number
+): string {
+  return `${orderCode.trim()} - ${PREP_FLAVOR_SHORT[flavor]} x${qty} (${capacityScheduleTag(capacity)})`;
+}
+
+export function formatPrepOrderScheduleLines(order: PrepLineSource & { order_code: string }): string[] {
+  const out: string[] = [];
+  for (const line of prepOrderLines(order)) {
+    const pairs: Array<[PrepFlavor, number]> = [
+      ['osmanthus', line.qty_osmanthus],
+      ['red_date', line.qty_red_date],
+      ['rock_sugar', line.qty_rock_sugar],
+    ];
+    for (const [flavor, qty] of pairs) {
+      if (qty > 0) out.push(formatPrepScheduleLine(order.order_code, line.capacity, flavor, qty));
+    }
+  }
+  return out;
+}
+
+export interface PrepCapacitySummaryLine {
+  capacity: PrepCapacity;
+  label: string;
+  /** Flavors in one capacity, joined with `｜`. */
+  text: string;
+  bottles: number;
+}
+
+/** Group bottle counts by capacity. Flavors inside one capacity join with `｜`. */
+export function summarizePrepCapacityLines(lines: PrepCapacityLine[]): PrepCapacitySummaryLine[] {
+  const order: PrepCapacity[] = [];
+  const grouped = new Map<PrepCapacity, Record<PrepFlavor, number>>();
+  for (const line of lines) {
+    if (!grouped.has(line.capacity)) {
+      order.push(line.capacity);
+      grouped.set(line.capacity, { osmanthus: 0, red_date: 0, rock_sugar: 0 });
+    }
+    const g = grouped.get(line.capacity)!;
+    g.osmanthus += Math.max(0, line.qty_osmanthus || 0);
+    g.red_date += Math.max(0, line.qty_red_date || 0);
+    g.rock_sugar += Math.max(0, line.qty_rock_sugar || 0);
+  }
+  return order
+    .map((capacity) => {
+      const g = grouped.get(capacity)!;
+      const parts = PREP_FLAVORS.filter((flavor) => g[flavor] > 0).map(
+        (flavor) => `${PREP_FLAVOR_SHORT[flavor]} x${g[flavor]}`
+      );
+      const bottles = PREP_FLAVORS.reduce((sum, flavor) => sum + g[flavor], 0);
+      return {
+        capacity,
+        label: capacityScheduleTag(capacity),
+        text: parts.join('｜'),
+        bottles,
+      };
+    })
+    .filter((line) => line.bottles > 0);
+}
+
+export function summarizePrepOrderLines(order: PrepLineSource): PrepCapacitySummaryLine[] {
+  return summarizePrepCapacityLines(prepOrderLines(order));
+}
+
+const LARGE_POT_CAPACITIES = new Set(['75g', '75g_big_belly']);
+
+export function stewPotLimitForCapacity(capacity: PrepCapacity): number {
+  if (LARGE_POT_CAPACITIES.has(capacity) || capacity.startsWith('75g')) return STEW_POT_LIMIT_LARGE;
+  return STEW_POT_LIMIT_SMALL;
+}
+
+export interface SessionPotBucket {
+  id: string;
+  label: string;
+  limit: number;
+  bottles: number;
+  /** True only for the dedicated 75g+45g mixed pot. */
+  mixed: boolean;
+}
+
+/**
+ * Pot check for one stewing session.
+ * Each capacity is checked against its own 150 or 100 limit.
+ * When both a 75g jar and 45g are in the session, a separate mixed bucket uses 120.
+ * That mixed total is not written back onto the 150 or 100 buckets.
+ */
+export function sessionPotBuckets(
+  entries: Array<{ capacity: PrepCapacity; bottles: number }>
+): SessionPotBucket[] {
+  const byCap = new Map<string, number>();
+  for (const entry of entries) {
+    const bottles = Math.max(0, Math.round(entry.bottles || 0));
+    if (!entry.capacity || bottles <= 0) continue;
+    byCap.set(entry.capacity, (byCap.get(entry.capacity) || 0) + bottles);
+  }
+  const buckets: SessionPotBucket[] = [];
+  for (const [capacity, bottles] of Array.from(byCap.entries())) {
+    buckets.push({
+      id: capacity,
+      label: capacityScheduleTag(capacity),
+      limit: stewPotLimitForCapacity(capacity),
+      bottles,
+      mixed: false,
+    });
+  }
+  let large = 0;
+  let g45 = 0;
+  for (const [capacity, bottles] of Array.from(byCap.entries())) {
+    if (capacity === '45g') g45 += bottles;
+    else if (LARGE_POT_CAPACITIES.has(capacity) || capacity.startsWith('75g')) large += bottles;
+  }
+  if (large > 0 && g45 > 0) {
+    buckets.push({
+      id: 'mixed-75g-45g',
+      label: '75g+45g',
+      limit: STEW_POT_LIMIT_MIXED_75_45,
+      bottles: large + g45,
+      mixed: true,
+    });
+  }
+  return buckets;
+}
+
+export interface PrepSessionSummary {
+  /** Stewing date. Each date is its own session (AM and PM stay separate when modeled as different groups). */
+  sessionKey: string;
+  lines: PrepCapacitySummaryLine[];
+  potBuckets: SessionPotBucket[];
+}
+
+/**
+ * Session totals: one group per stewing date. Bottle counts are summed inside a capacity,
+ * and each capacity keeps its own pot bucket.
+ */
+export function summarizePrepSessions(
+  orders: Array<PrepLineSource & { stewing_date: string }>
+): PrepSessionSummary[] {
+  const byDate = new Map<string, PrepCapacityLine[]>();
+  const dateOrder: string[] = [];
+  for (const order of orders) {
+    const key = order.stewing_date || '';
+    if (!byDate.has(key)) {
+      dateOrder.push(key);
+      byDate.set(key, []);
+    }
+    byDate.get(key)!.push(...prepOrderLines(order));
+  }
+  return dateOrder.map((sessionKey) => {
+    const lines = summarizePrepCapacityLines(byDate.get(sessionKey) || []);
+    return {
+      sessionKey,
+      lines,
+      potBuckets: sessionPotBuckets(lines.map((line) => ({ capacity: line.capacity, bottles: line.bottles }))),
+    };
+  });
+}
+
+function mergePrepCalculations(orderType: PrepOrderType, parts: PrepCalculation[]): PrepCalculation {
+  const rows = parts.flatMap((part) =>
+    part.rows.map((row) => ({ ...row, capacity: row.capacity || part.capacity }))
+  );
+  const ingredientGrams: Record<string, number> = {};
+  for (const part of parts) {
+    for (const [name, qty] of Object.entries(part.totals.ingredientGrams || {})) {
+      ingredientGrams[name] = round2((ingredientGrams[name] || 0) + qty);
+    }
+  }
+  const bottles = parts.reduce((sum, part) => sum + part.totals.bottles, 0);
+  return {
+    capacity: parts[0]?.capacity ?? '45g',
+    capacities: parts.map((part) => part.capacity),
+    orderType,
+    formulaReady: parts.every((part) => part.formulaReady),
+    rows,
+    totals: {
+      bottles,
+      ingredientGrams,
+      birdNestGrams: totalBirdNestGrams(ingredientGrams),
+      flavorGrams: round2((ingredientGrams['桂花'] || 0) + (ingredientGrams['紅棗'] || 0)),
+      rockSugarGrams: ingredientGrams['冰糖'] || 0,
+      slabSugarGrams: ingredientGrams['片糖'] || 0,
+    },
+  };
+}
+
+export function prepOrderTotalOrderQty(order: PrepLineSource): number {
+  return prepOrderLines(order).reduce((sum, line) => sum + originalOrderQuantity(prepOrderQtys(line)), 0);
+}
+
+export function sumRawNeedLines(groups: { name: string; qty: number }[][]): { name: string; qty: number }[] {
+  const acc: Record<string, number> = {};
+  for (const group of groups) {
+    for (const line of group) {
+      const name = (line.name || '').trim();
+      if (!name || !(line.qty > 0)) continue;
+      acc[name] = round2((acc[name] || 0) + line.qty);
+    }
+  }
+  return Object.keys(acc)
+    .filter((name) => (acc[name] || 0) > 0)
+    .map((name) => ({ name, qty: acc[name] }));
 }
 
 /** Shared typography tokens for Kitchen Summary screen + print. */

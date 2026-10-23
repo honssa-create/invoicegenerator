@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   COMPLETION_EXCEPTION_TAGS,
-  PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
+  capacityScheduleTag,
   completionSplitsTotal,
   computePrepCalculationForOrder,
   defaultCompletionSplits,
-  originalOrderQuantity,
+  isMultiCapacityPrep,
+  prepOrderLines,
+  prepOrderTotalOrderQty,
   type PrepCompletionSplit,
   type PrepOrder,
 } from '@/lib/kitchen-prep';
@@ -26,11 +28,10 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
     [order]
   );
   const expectedQty = calc.totals.bottles;
-  const orderQty = originalOrderQuantity({
-    osmanthus: order.qty_osmanthus,
-    red_date: order.qty_red_date,
-    rock_sugar: order.qty_rock_sugar,
-  });
+  const orderQty = prepOrderTotalOrderQty(order);
+  const capacityLabel = isMultiCapacityPrep(order)
+    ? prepOrderLines(order).map((line) => capacityScheduleTag(line.capacity)).join(' · ')
+    : capacityScheduleTag(order.capacity);
 
   const [splits, setSplits] = useState<PrepCompletionSplit[]>(() =>
     defaultCompletionSplits(calc, order.capacity)
@@ -105,7 +106,7 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
           <h2 className="text-2xl font-bold text-gray-900 mt-1">完成炖製</h2>
           <p className="text-base text-gray-600 mt-2 font-mono">{order.order_code}</p>
           <p className="text-sm text-gray-500 mt-1">
-            {order.stewing_date} · {PREP_ORDER_TYPE_LABELS[order.order_type]} · {PREP_CAPACITY_LABELS[order.capacity]}
+            {order.stewing_date} · {PREP_ORDER_TYPE_LABELS[order.order_type]} · {capacityLabel}
           </p>
         </div>
 
@@ -157,10 +158,12 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
             </p>
             <div className="space-y-3">
               {splits.map((row, index) => {
-                const calcRow = calc.rows.find((r) => r.flavor === row.flavor);
+                const calcRow = calc.rows.find(
+                  (r) => r.flavor === row.flavor && (r.capacity || order.capacity) === (row.capacity || order.capacity)
+                );
                 return (
                   <div
-                    key={row.flavor ?? index}
+                    key={`${row.capacity || order.capacity}-${row.flavor ?? index}`}
                     className="flex flex-wrap items-center gap-3 p-4 rounded-xl border-2 border-gray-200 bg-gray-50"
                   >
                     <div className="flex-1 min-w-[180px]">

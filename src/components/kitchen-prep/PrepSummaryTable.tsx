@@ -1,11 +1,12 @@
 import {
-  PREP_CAPACITY_LABELS,
   PREP_SUMMARY_TYPO,
   BIRD_NEST_TYPE_LABELS,
+  capacityScheduleTag,
   formatPrepIngredientQty,
   STEW_GLASS_BOTTLE_STOCK_NAMES,
   STEW_WATER_BOIL_SUGAR,
   STEW_WATER_COLD_SOAK,
+  type FlavorCalcRow,
   type PrepCalculation,
   type PrepCapacity,
 } from '@/lib/kitchen-prep';
@@ -45,7 +46,6 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
       for (const name of Object.keys(r.ingredientGrams || {})) names.add(name);
     }
     for (const name of Object.keys(calc.totals.ingredientGrams || {})) names.add(name);
-    // Stable preferred order, then any extras
     const preferred = [
       '大燕餅',
       '細燕餅',
@@ -62,6 +62,14 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
   })();
 
   const colSpanEmpty = 4 + Math.max(ingredientCols.length, 1);
+  const groups: { capacity: string; rows: FlavorCalcRow[] }[] = [];
+  for (const row of activeRows) {
+    const cap = row.capacity || capacity;
+    const existing = groups.find((group) => group.capacity === cap);
+    if (existing) existing.rows.push(row);
+    else groups.push({ capacity: cap, rows: [row] });
+  }
+  const showCapacitySubtotals = groups.length > 1;
 
   return (
     <div className={isPrint ? 'prep-print-table-wrap -mx-1' : 'overflow-x-auto'}>
@@ -80,36 +88,66 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
         </tr>
       </thead>
       <tbody className={isPrint ? '' : 'divide-y divide-gray-100'}>
-        {activeRows.map((r) => (
-          <tr key={r.flavor} className={rowClass}>
-            <td className={`${cellPad} ${capacityClass} text-gray-700`}>
-              {PREP_CAPACITY_LABELS[capacity] || capacity}
-            </td>
-            <td className={`${cellPad} ${flavorClass} text-gray-900`}>
-              {r.label}
-              {r.birdNestType && (
-                <span className="block text-[10px] font-normal text-gray-500 mt-0.5">
-                  {BIRD_NEST_TYPE_LABELS[r.birdNestType]}
-                </span>
-              )}
-            </td>
-            <td className={`${cellPad} text-right ${qtyClass} text-gray-700`}>{r.orderQty}</td>
-            <td className={`${cellPad} text-right`}>
-              <span className={`${actualQtyClass} text-brand-700`}>{r.actualQty}</span>
-              {r.extraQty > 0 && (
-                <p className="text-[10px] text-gray-500 mt-0.5">{r.orderQty} + {r.extraQty}</p>
-              )}
-            </td>
-            {ingredientCols.map((name) => {
-              const qty = r.ingredientGrams?.[name] || 0;
-              return (
-                <td key={name} className={`${cellPad} text-right ${gramClass} text-gray-900`}>
-                  {qty > 0 ? formatPrepIngredientQty(name, qty) : '—'}
+        {groups.flatMap((group) => {
+          const groupBottles = group.rows.reduce((sum, row) => sum + row.actualQty, 0);
+          const groupGrams: Record<string, number> = {};
+          for (const row of group.rows) {
+            for (const [name, qty] of Object.entries(row.ingredientGrams || {})) {
+              groupGrams[name] = (groupGrams[name] || 0) + qty;
+            }
+          }
+          const body = group.rows.map((r) => {
+            const rowCapacity = r.capacity || group.capacity;
+            return (
+              <tr key={`${rowCapacity}-${r.flavor}`} className={rowClass}>
+                <td className={`${cellPad} ${capacityClass} text-gray-700`}>
+                  {capacityScheduleTag(rowCapacity)}
                 </td>
-              );
-            })}
-          </tr>
-        ))}
+                <td className={`${cellPad} ${flavorClass} text-gray-900`}>
+                  {r.label}
+                  {r.birdNestType && (
+                    <span className="block text-[10px] font-normal text-gray-500 mt-0.5">
+                      {BIRD_NEST_TYPE_LABELS[r.birdNestType]}
+                    </span>
+                  )}
+                </td>
+                <td className={`${cellPad} text-right ${qtyClass} text-gray-700`}>{r.orderQty}</td>
+                <td className={`${cellPad} text-right`}>
+                  <span className={`${actualQtyClass} text-brand-700`}>{r.actualQty}</span>
+                  {r.extraQty > 0 && (
+                    <p className="text-[10px] text-gray-500 mt-0.5">{r.orderQty} + {r.extraQty}</p>
+                  )}
+                </td>
+                {ingredientCols.map((name) => {
+                  const qty = r.ingredientGrams?.[name] || 0;
+                  return (
+                    <td key={name} className={`${cellPad} text-right ${gramClass} text-gray-900`}>
+                      {qty > 0 ? formatPrepIngredientQty(name, qty) : '—'}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          });
+          if (!showCapacitySubtotals) return body;
+          body.push(
+            <tr key={`${group.capacity}-subtotal`} className="bg-gray-50">
+              <td className={`${cellPad} ${totalLabelClass} text-gray-800`} colSpan={2}>
+                {capacityScheduleTag(group.capacity)} 合計
+              </td>
+              <td className={cellPad} />
+              <td className={`${cellPad} text-right ${totalQtyClass} text-gray-800`}>
+                {groupBottles} 樽
+              </td>
+              {ingredientCols.map((name) => (
+                <td key={name} className={`${cellPad} text-right ${totalGramClass} text-gray-800`}>
+                  {formatPrepIngredientQty(name, groupGrams[name] || 0)}
+                </td>
+              ))}
+            </tr>
+          );
+          return body;
+        })}
         {activeRows.length === 0 && (
           <tr>
             <td colSpan={colSpanEmpty} className={`${cellPad} text-center text-gray-400`}>
@@ -122,7 +160,7 @@ export default function PrepSummaryTable({ calc, capacity, variant = 'screen' }:
         <tfoot className={tfootClass}>
           <tr>
             <td className={`${cellPad} ${totalLabelClass} text-brand-900`} colSpan={2}>
-              TOTAL 合計
+              {showCapacitySubtotals ? 'ALL CAPACITIES 各容量合計' : 'TOTAL 合計'}
             </td>
             <td className={cellPad} />
             <td className={`${cellPad} text-right ${totalQtyClass} text-brand-800`}>

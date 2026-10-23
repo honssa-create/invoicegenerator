@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import PrepSummaryTable from '@/components/kitchen-prep/PrepSummaryTable';
+import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import CompletionModal from '@/components/kitchen-prep/CompletionModal';
 import {
   PREP_CAPACITIES,
@@ -16,13 +17,23 @@ import {
   getPrepStatusAction,
   BIRD_NEST_TYPES,
   BIRD_NEST_TYPE_LABELS,
+  capacityScheduleTag,
   formulaSummaryForCapacity,
+  isMultiCapacityPrep,
   isRedDateAllowed,
+  orderWithPrepLines,
+  originalOrderQuantity,
+  prepOrderLines,
+  prepOrderQtys,
   resolveActualQty,
+  summarizePrepOrderLines,
   computePrepCalculationForOrder,
   type BirdNestType,
+  type PrepBatchView,
   type PrepCalculation,
+  type PrepCapacityLine,
   type PrepOrder,
+  type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
 import { BTN, MSG, bi } from '@/lib/ui-labels';
 import {
@@ -38,6 +49,8 @@ export default function KitchenPrepDetailPage() {
 
   const [order, setOrder] = useState<PrepOrder | null>(null);
   const [calc, setCalc] = useState<PrepCalculation | null>(null);
+  const [batch, setBatch] = useState<PrepBatchView | null>(null);
+  const [stewFormulas, setStewFormulas] = useState<StewFormulaMapLike | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -49,6 +62,7 @@ export default function KitchenPrepDetailPage() {
   );
   const patchQueueRef = useRef(Promise.resolve());
   const patchSeqRef = useRef(0);
+  const draftCapsRef = useRef<Set<string>>(new Set());
 
   const applyDetail = (d: KitchenPrepDetailPayload) => {
     setOrder(d.order);
@@ -61,6 +75,8 @@ export default function KitchenPrepDetailPage() {
         })),
       );
     }
+    if (d.batch) setBatch(d.batch);
+    if (d.stewFormulas) setStewFormulas(d.stewFormulas);
     setKitchenPrepDetailCache(id, d);
   };
 
@@ -89,6 +105,18 @@ export default function KitchenPrepDetailPage() {
     void load(false);
   }, [id]);
 
+  const mergeDraftLines = (saved: PrepOrder, prev: PrepOrder | null): PrepOrder => {
+    if (!prev) return saved;
+    const savedLines = prepOrderLines(saved);
+    const drafts = prepOrderLines(prev).filter(
+      (line) =>
+        draftCapsRef.current.has(line.capacity) &&
+        !savedLines.some((row) => row.capacity === line.capacity)
+    );
+    if (!drafts.length) return saved;
+    return { ...saved, lines: [...savedLines, ...drafts] };
+  };
+
   const patch = (body: Record<string, unknown>) => {
     const seq = ++patchSeqRef.current;
     setSaving(true);
@@ -106,7 +134,8 @@ export default function KitchenPrepDetailPage() {
           return;
         }
         if (seq === patchSeqRef.current && d.order) {
-          setOrder(d.order);
+          const saved = d.order as PrepOrder;
+          setOrder((prev) => mergeDraftLines(saved, prev));
           setCalc(d.calculation);
         }
       } catch {
@@ -176,8 +205,47 @@ export default function KitchenPrepDetailPage() {
       setError(d.error || MSG.saveFailed);
       return;
     }
-    setOrder(d.order);
+    setOrder((prev) => mergeDraftLines(d.order as PrepOrder, prev));
     if (d.calculation) setCalc(d.calculation);
+  };
+
+  const commitLines = (next: PrepCapacityLine[]) => {
+    const meaningful = next.filter((line) => originalOrderQuantity(prepOrderQtys(line)) > 0);
+    for (const line of meaningful) draftCapsRef.current.delete(line.capacity);
+    setOrder((o) => {
+      if (!o) return o;
+      const mirrored = meaningful.length ? orderWithPrepLines(o, meaningful) : o;
+      return { ...mirrored, lines: next };
+    });
+    if (!meaningful.length) {
+      setError('At least one flavor quantity is required');
+      return;
+    }
+    patch({ lines: meaningful });
+  };
+
+  const addCapacity = (cap: string) => {
+    setOrder((o) => {
+      if (!o) return o;
+      const lines = prepOrderLines(o);
+      if (lines.some((line) => line.capacity === cap)) return o;
+      draftCapsRef.current.add(cap);
+      return {
+        ...o,
+        lines: [
+          ...lines,
+          {
+            capacity: cap,
+            qty_osmanthus: 0,
+            qty_red_date: 0,
+            qty_rock_sugar: 0,
+            actual_qty_osmanthus: null,
+            actual_qty_red_date: null,
+            actual_qty_rock_sugar: null,
+          },
+        ],
+      };
+    });
   };
 
   const input = 'w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/40 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none';
@@ -263,6 +331,50 @@ export default function KitchenPrepDetailPage() {
       </div>
     </div>
   );
+
+  const lines = prepOrderLines(order);
+  const multi = isMultiCapacityPrep(order) || lines.length > 1;
+  const summaryLines = summarizePrepOrderLines(order);
+  const formulaText = Array.from(new Set(lines.map((line) => line.capacity)))
+    .map((cap) => formulaSummaryForCapacity(cap))
+    .join(' · ');
+
+  const setLineLocal = (index: number, partial: Partial<PrepCapacityLine>) => {
+    setOrder((o) => {
+      if (!o) return o;
+      const next = prepOrderLines(o).map((line, i) => (i === index ? { ...line, ...partial } : line));
+      return { ...o, lines: next };
+    });
+  };
+
+  const blurLine = (index: number, partial: Partial<PrepCapacityLine>) => {
+    const next = prepOrderLines(order).map((line, i) => (i === index ? { ...line, ...partial } : line));
+    commitLines(next);
+  };
+
+  const removeLine = (capacity: string) => {
+    const current = prepOrderLines(order);
+    const next = current.filter((line) => line.capacity !== capacity);
+    const remainingQty = next.reduce((sum, line) => sum + originalOrderQuantity(prepOrderQtys(line)), 0);
+    const removedQty = originalOrderQuantity(
+      prepOrderQtys(current.find((line) => line.capacity === capacity) || {
+        qty_osmanthus: 0,
+        qty_red_date: 0,
+        qty_rock_sugar: 0,
+      })
+    );
+    if (removedQty > 0 && remainingQty <= 0) {
+      setError('Keep at least one capacity with a quantity');
+      return;
+    }
+    draftCapsRef.current.delete(capacity);
+    if (!next.length) return;
+    if (remainingQty <= 0) {
+      setOrder((o) => (o ? { ...o, lines: next } : o));
+      return;
+    }
+    commitLines(next);
+  };
 
   return (
     <AppLayout>
@@ -352,6 +464,7 @@ export default function KitchenPrepDetailPage() {
               {PREP_ORDER_TYPES.map((t) => <option key={t} value={t}>{PREP_ORDER_TYPE_LABELS[t]}</option>)}
             </select>
           </div>
+          {!multi && (
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Capacity 容量</label>
             <select
@@ -360,7 +473,7 @@ export default function KitchenPrepDetailPage() {
                 const v = e.target.value as PrepOrder['capacity'];
                 const clearRed = !isRedDateAllowed(v);
                 setOrder((o) =>
-                  o ? { ...o, capacity: v, ...(clearRed ? { qty_red_date: 0 } : {}) } : o
+                  o ? { ...o, capacity: v, lines: prepOrderLines(o).map((line, i) => i === 0 ? { ...line, capacity: v, ...(clearRed ? { qty_red_date: 0 } : {}) } : line), ...(clearRed ? { qty_red_date: 0 } : {}) } : o
                 );
                 patch({ capacity: v, ...(clearRed ? { qty_red_date: 0 } : {}) });
               }}
@@ -373,6 +486,7 @@ export default function KitchenPrepDetailPage() {
               ))}
             </select>
           </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Status</label>
             <select
@@ -390,33 +504,147 @@ export default function KitchenPrepDetailPage() {
         </div>
 
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Order Quantities 訂購樽數</h3>
-        <div className="grid md:grid-cols-3 gap-5 mb-4">
-          {flavorPair('qty_osmanthus', 'actual_qty_osmanthus', 'bird_nest_osmanthus', '桂花 Osmanthus')}
-          {flavorPair('qty_red_date', 'actual_qty_red_date', 'bird_nest_red_date', '紅棗 Red Date', !isRedDateAllowed(order.capacity))}
-          {flavorPair('qty_rock_sugar', 'actual_qty_rock_sugar', 'bird_nest_rock_sugar', '冰糖 Rock Sugar')}
+        {multi ? (
+          <div className="space-y-4 mb-4">
+            {lines.map((line, index) => {
+              const redDisabled = !isRedDateAllowed(line.capacity);
+              const lineQty = originalOrderQuantity(prepOrderQtys(line));
+              const otherQty = lines.reduce(
+                (sum, row, rowIndex) =>
+                  rowIndex === index ? sum : sum + originalOrderQuantity(prepOrderQtys(row)),
+                0
+              );
+              const canRemove = lineQty === 0 || otherQty > 0;
+              const flavorFields: Array<{
+                key: 'osmanthus' | 'red_date' | 'rock_sugar';
+                qtyKey: 'qty_osmanthus' | 'qty_red_date' | 'qty_rock_sugar';
+                actualKey: 'actual_qty_osmanthus' | 'actual_qty_red_date' | 'actual_qty_rock_sugar';
+                birdKey: 'bird_nest_osmanthus' | 'bird_nest_red_date' | 'bird_nest_rock_sugar';
+                label: string;
+                disabled?: boolean;
+              }> = [
+                { key: 'osmanthus', qtyKey: 'qty_osmanthus', actualKey: 'actual_qty_osmanthus', birdKey: 'bird_nest_osmanthus', label: '桂花 Osmanthus' },
+                { key: 'red_date', qtyKey: 'qty_red_date', actualKey: 'actual_qty_red_date', birdKey: 'bird_nest_red_date', label: '紅棗 Red Date', disabled: redDisabled },
+                { key: 'rock_sugar', qtyKey: 'qty_rock_sugar', actualKey: 'actual_qty_rock_sugar', birdKey: 'bird_nest_rock_sugar', label: '冰糖 Rock Sugar' },
+              ];
+              return (
+                <div key={`${line.capacity}-${index}`} className="rounded-xl border border-brand-100 bg-brand-50/30 p-4">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <p className="text-sm font-bold text-brand-800">{capacityScheduleTag(line.capacity)} · {PREP_CAPACITY_LABELS[line.capacity] || line.capacity}</p>
+                    {canRemove && (
+                      <button
+                        type="button"
+                        onClick={() => removeLine(line.capacity)}
+                        className="text-xs font-medium text-red-600 hover:text-red-700"
+                      >
+                        Remove capacity
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-4">
+                    {flavorFields.map((field) => (
+                      <div key={field.key} className="space-y-3 rounded-xl border border-gray-100 bg-white p-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1.5">{field.label} · 客人訂</label>
+                            <input
+                              type="number"
+                              min="0"
+                              disabled={field.disabled}
+                              value={field.disabled ? 0 : line[field.qtyKey]}
+                              onChange={(e) => setLineLocal(index, { [field.qtyKey]: Number(e.target.value) || 0 })}
+                              onBlur={(e) => blurLine(index, { [field.qtyKey]: Number(e.target.value) || 0 })}
+                              className={`${input} text-lg font-semibold ${field.disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1.5">實際生產</label>
+                            <input
+                              type="number"
+                              min="0"
+                              disabled={field.disabled}
+                              value={field.disabled ? 0 : resolveActualQty(line[field.qtyKey], line[field.actualKey])}
+                              onChange={(e) => setLineLocal(index, { [field.actualKey]: Number(e.target.value) || 0 })}
+                              onBlur={(e) => blurLine(index, { [field.actualKey]: Number(e.target.value) || 0 })}
+                              className={`${input} text-lg font-semibold text-brand-800 ${field.disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1.5">燕餅類型</label>
+                          <select
+                            disabled={field.disabled}
+                            value={line[field.birdKey] || order[field.birdKey]}
+                            onChange={(e) => {
+                              const v = e.target.value as BirdNestType;
+                              setLineLocal(index, { [field.birdKey]: v });
+                              blurLine(index, { [field.birdKey]: v });
+                            }}
+                            className={`${input} ${field.disabled ? 'bg-gray-100 text-gray-400' : ''}`}
+                          >
+                            {BIRD_NEST_TYPES.map((t) => (
+                              <option key={t} value={t}>{BIRD_NEST_TYPE_LABELS[t]}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-3 gap-5 mb-4">
+            {flavorPair('qty_osmanthus', 'actual_qty_osmanthus', 'bird_nest_osmanthus', '桂花 Osmanthus')}
+            {flavorPair('qty_red_date', 'actual_qty_red_date', 'bird_nest_red_date', '紅棗 Red Date', !isRedDateAllowed(order.capacity))}
+            {flavorPair('qty_rock_sugar', 'actual_qty_rock_sugar', 'bird_nest_rock_sugar', '冰糖 Rock Sugar')}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {capacityOptions
+            .filter((option) => !lines.some((line) => line.capacity === option.id))
+            .map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => addCapacity(option.id)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-300 text-gray-700 hover:border-brand-400 hover:text-brand-700"
+              >
+                + {option.label}
+              </button>
+            ))}
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          實際生產樽數 is used for the kitchen summary. Defaults to the ordered qty; set it higher for extra bottles (e.g. 回禮).
+          出份量跟今次要燉。上單已燉＝同一訂單較早已完成的批次（沒有則 0）。
+          {multi ? ' Lines under this order code are packed together.' : ''}
         </p>
-        {!isRedDateAllowed(order.capacity) && (
+        {!multi && !isRedDateAllowed(order.capacity) && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
             ⚠ Red Date (紅棗) is disabled for {PREP_CAPACITY_LABELS[order.capacity]}.
           </p>
         )}
         {!calc.formulaReady && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
-            Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet.
+            Formula for {multi ? 'one of these capacities' : (PREP_CAPACITY_LABELS[order.capacity] || order.capacity)} is not configured yet.
           </p>
         )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 space-y-3">
           <h2 className="text-lg font-bold text-gray-900">Kitchen Summary 廚房總結</h2>
-          <p className="text-sm text-gray-500 mt-1">{formulaSummaryForCapacity(order.capacity)}</p>
+          <p className="text-sm text-gray-500">{formulaText}</p>
+          <PrepSessionSummary lines={summaryLines} />
         </div>
         <div className="overflow-x-auto p-2">
-          <PrepSummaryTable calc={calc} capacity={order.capacity} variant="screen" />
+          <PrepSummaryTable
+            order={order}
+            priorLines={batch?.priorLines}
+            batchLabel={batch?.label}
+            formulas={stewFormulas}
+            variant="screen"
+          />
         </div>
       </div>
 

@@ -4,13 +4,18 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import PrepSummaryTable from '@/components/kitchen-prep/PrepSummaryTable';
+import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import {
-  PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPE_LABELS,
   PREP_STATUS_LABELS,
+  capacityScheduleTag,
   formulaSummaryForCapacity,
+  prepOrderLines,
+  summarizePrepOrderLines,
+  type PrepBatchView,
   type PrepCalculation,
   type PrepOrder,
+  type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
@@ -18,6 +23,8 @@ export default function KitchenPrepPrintPage() {
   const { id } = useParams();
   const [order, setOrder] = useState<PrepOrder | null>(null);
   const [calc, setCalc] = useState<PrepCalculation | null>(null);
+  const [batch, setBatch] = useState<PrepBatchView | null>(null);
+  const [stewFormulas, setStewFormulas] = useState<StewFormulaMapLike | undefined>(undefined);
   const [loggingPrint, setLoggingPrint] = useState(false);
 
   useEffect(() => {
@@ -27,6 +34,8 @@ export default function KitchenPrepPrintPage() {
         if (!d?.order) return;
         setOrder(d.order);
         setCalc(d.calculation ?? null);
+        setBatch(d.batch ?? null);
+        setStewFormulas(d.stewFormulas);
       });
   }, [id]);
 
@@ -46,6 +55,13 @@ export default function KitchenPrepPrintPage() {
   if (!order || !calc) {
     return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>;
   }
+
+  const lines = prepOrderLines(order);
+  const capacityLabel = lines.map((line) => capacityScheduleTag(line.capacity)).join(' · ');
+  const formulaText = Array.from(new Set(lines.map((line) => line.capacity)))
+    .map((cap) => formulaSummaryForCapacity(cap))
+    .join(' · ');
+  const summaryLines = summarizePrepOrderLines(order);
 
   return (
     <div className="prep-print-root min-h-screen bg-gray-100 print:bg-white">
@@ -86,18 +102,28 @@ export default function KitchenPrepPrintPage() {
           <div className="grid grid-cols-2 gap-3 mb-6 print:mb-4 print:gap-2 text-[15px] print:text-xs leading-snug">
             <div><span className="text-gray-500">Stewing Date 燉製日期：</span><strong>{order.stewing_date}</strong></div>
             <div><span className="text-gray-500">Order Type：</span><strong>{PREP_ORDER_TYPE_LABELS[order.order_type]}</strong></div>
-            <div><span className="text-gray-500">容量 Capacity：</span><strong>{PREP_CAPACITY_LABELS[order.capacity]}</strong></div>
+            <div><span className="text-gray-500">容量 Capacity：</span><strong>{capacityLabel}</strong></div>
             <div><span className="text-gray-500">Status：</span><strong>{PREP_STATUS_LABELS[order.status]}</strong></div>
           </div>
 
-          <p className="mb-4 print:mb-3 text-sm print:text-xs text-gray-600">{formulaSummaryForCapacity(order.capacity)}</p>
+          <div className="mb-4 print:mb-3">
+            <PrepSessionSummary lines={summaryLines} />
+          </div>
+
+          <p className="mb-4 print:mb-3 text-sm print:text-xs text-gray-600">{formulaText}</p>
 
           {!calc.formulaReady ? (
             <p className="text-amber-800 bg-amber-50 p-4 rounded text-[15px]">
-              Formula for {PREP_CAPACITY_LABELS[order.capacity]} is not configured yet.
+              Formula for {capacityLabel} is not configured yet.
             </p>
           ) : (
-            <PrepSummaryTable calc={calc} capacity={order.capacity} variant="print" />
+            <PrepSummaryTable
+              order={order}
+              priorLines={batch?.priorLines}
+              batchLabel={batch?.label}
+              formulas={stewFormulas}
+              variant="print"
+            />
           )}
 
           {order.notes && (

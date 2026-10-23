@@ -16,6 +16,7 @@ import {
   validatePrepFlavorQtys,
   type BirdNestType,
   type PrepCapacity,
+  type PrepCapacityLineDraft,
   type PrepStatus,
 } from '@/lib/kitchen-prep';
 import { readKitchenPrepDetailContext } from '@/lib/kitchen-catalog-server';
@@ -50,6 +51,61 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const { capacities: capacityOptions, formulas } =
       await readKitchenPrepDetailContext(kitchenOwnerId);
     const allowedCaps = new Set(capacityOptions.map((c) => c.id));
+
+    const parseBirdNestField = (v: unknown, fallback: BirdNestType): BirdNestType =>
+      v === 'small' || v === 'large' ? v : fallback;
+
+    if (Array.isArray(body.lines)) {
+      const lines = (body.lines as PrepCapacityLineDraft[])
+        .filter((line) => line && typeof line.capacity === 'string' && allowedCaps.has(line.capacity))
+        .map((line) => ({
+          capacity: line.capacity,
+          qty_osmanthus: Number(line.qty_osmanthus) || 0,
+          qty_red_date: Number(line.qty_red_date) || 0,
+          qty_rock_sugar: Number(line.qty_rock_sugar) || 0,
+          actual_qty_osmanthus:
+            line.actual_qty_osmanthus == null ? null : Number(line.actual_qty_osmanthus) || 0,
+          actual_qty_red_date:
+            line.actual_qty_red_date == null ? null : Number(line.actual_qty_red_date) || 0,
+          actual_qty_rock_sugar:
+            line.actual_qty_rock_sugar == null ? null : Number(line.actual_qty_rock_sugar) || 0,
+          bird_nest_osmanthus:
+            line.bird_nest_osmanthus === 'small' || line.bird_nest_osmanthus === 'large'
+              ? line.bird_nest_osmanthus
+              : undefined,
+          bird_nest_red_date:
+            line.bird_nest_red_date === 'small' || line.bird_nest_red_date === 'large'
+              ? line.bird_nest_red_date
+              : undefined,
+          bird_nest_rock_sugar:
+            line.bird_nest_rock_sugar === 'small' || line.bird_nest_rock_sugar === 'large'
+              ? line.bird_nest_rock_sugar
+              : undefined,
+        }));
+      if (lines.length === 0) {
+        return NextResponse.json({ error: 'At least one valid capacity line is required' }, { status: 400 });
+      }
+      const order = await updatePrepOrder(
+        params.id,
+        {
+          stewing_date: body.stewing_date as string | undefined,
+          order_type:
+            typeof body.order_type === 'string' &&
+            (PREP_ORDER_TYPES as readonly string[]).includes(body.order_type)
+              ? (body.order_type as (typeof PREP_ORDER_TYPES)[number])
+              : undefined,
+          status: PREP_STATUSES.includes(body.status as PrepStatus)
+            ? (body.status as PrepStatus)
+            : undefined,
+          notes: body.notes as string | null | undefined,
+          lines,
+        },
+        { existing, stewFormulas: formulas.stewFormulas, skipRefetch: true },
+      );
+      const calculation = computePrepCalculationForOrder(order!, formulas.stewFormulas);
+      return NextResponse.json({ order, calculation });
+    }
+
     const capacityInput =
       typeof body.capacity === 'string' ? body.capacity : '';
     const capacity = (
@@ -66,9 +122,6 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (validationErr) {
       return NextResponse.json({ error: validationErr }, { status: 400 });
     }
-
-    const parseBirdNestField = (v: unknown, fallback: BirdNestType): BirdNestType =>
-      v === 'small' || v === 'large' ? v : fallback;
 
     const order = await updatePrepOrder(
       params.id,

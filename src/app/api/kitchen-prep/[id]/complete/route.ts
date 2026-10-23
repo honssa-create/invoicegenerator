@@ -24,10 +24,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     const splits: PrepCompletionSplit[] | undefined = Array.isArray(body.splits)
-      ? body.splits.map((s: { label?: string; qty?: number; flavor?: string }, i: number) => ({
+      ? body.splits.map((s: { label?: string; qty?: number; flavor?: string; capacity?: string }, i: number) => ({
           label: s.label || `Sub-order ${i + 1}`,
           qty: Number(s.qty) || 0,
           flavor: s.flavor as PrepCompletionSplit['flavor'] | undefined,
+          capacity: typeof s.capacity === 'string' && s.capacity.trim() ? s.capacity.trim() : undefined,
         }))
       : undefined;
 

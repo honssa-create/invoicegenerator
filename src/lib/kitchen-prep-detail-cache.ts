@@ -1,9 +1,11 @@
-import type { PrepCalculation, PrepOrder } from '@/lib/kitchen-prep';
+import type { PrepBatchView, PrepCalculation, PrepOrder, StewFormulaMapLike } from '@/lib/kitchen-prep';
 
 export type KitchenPrepDetailPayload = {
   order: PrepOrder;
   calculation: PrepCalculation;
   capacities: { id: string; label: string }[];
+  batch?: PrepBatchView;
+  stewFormulas?: StewFormulaMapLike;
 };
 
 const cache = new Map<string, KitchenPrepDetailPayload>();
@@ -29,6 +31,8 @@ export function prefetchKitchenPrepDetail(id: number | string): void {
         order: d.order as PrepOrder,
         calculation: d.calculation as PrepCalculation,
         capacities: (d.capacities as { id: string; label: string }[]) || [],
+        batch: d.batch as KitchenPrepDetailPayload['batch'],
+        stewFormulas: d.stewFormulas as KitchenPrepDetailPayload['stewFormulas'],
       };
       cache.set(key, payload);
       return payload;

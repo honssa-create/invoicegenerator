@@ -518,7 +518,8 @@ async function loadUnfinishedPrepRawDemand(
     .prepare(
       `SELECT capacity, order_type, status, qty_osmanthus, qty_red_date, qty_rock_sugar,
               actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
-              bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar
+              bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
+              lines_json
        FROM kitchen_prep_orders
        WHERE user_id = ? AND status != 'completed'`
     )
@@ -535,6 +536,7 @@ async function loadUnfinishedPrepRawDemand(
     bird_nest_osmanthus: string | null;
     bird_nest_red_date: string | null;
     bird_nest_rock_sugar: string | null;
+    lines_json: string | null;
   }[];
   return aggregateRawNeedsFromPrepOrders(rows, formulas.stewFormulas);
 }

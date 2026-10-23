@@ -418,6 +418,14 @@
     font-size: 15px !important;
     line-height: 1.35 !important;
   }
+  .prep-materials-table .prep-materials-num {
+    font-size: 15pt !important;
+    line-height: 1.15 !important;
+  }
+  .prep-materials-table .prep-materials-now {
+    font-size: 18pt !important;
+    line-height: 1.1 !important;
+  }
   .prep-summary-table th,
   .prep-summary-table td {
     padding: 0.65rem 0.85rem !important;

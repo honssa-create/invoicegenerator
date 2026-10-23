@@ -554,20 +554,13 @@ function KitchenPrepListContent() {
         />
       </td>
       <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{o.stewing_date}</td>
-      <td className="px-4 py-3 font-mono text-brand-600">
+      <td className="px-4 py-3 font-mono text-brand-600 whitespace-nowrap">
         {o.linked_order_id ? (
           <Link href={`/orders/${o.linked_order_id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
             {o.order_code}
           </Link>
         ) : (
           o.order_code
-        )}
-        {isMultiCapacityPrep(o) && (
-          <ul className="mt-1 space-y-0.5 font-sans">
-            {formatPrepOrderScheduleLines(o).map((text) => (
-              <li key={text} className="text-xs text-gray-600">{text}</li>
-            ))}
-          </ul>
         )}
       </td>
       <td className="px-4 py-3 text-gray-700">{PREP_ORDER_TYPE_LABELS[o.order_type]}</td>

@@ -76,12 +76,15 @@ export default function PrepSummaryTable({
 }: PrepSummaryTableProps) {
   const table = buildPrepMaterialsTable(order, priorLines, { batchLabel, formulas });
   const isPrint = variant === 'print';
-  const text = isPrint ? 'text-[11px]' : 'text-[13px]';
-  const pad = isPrint ? 'px-2 py-1.5' : 'px-2.5 py-2';
-  const headPad = isPrint ? 'px-2 py-1' : 'px-2.5 py-2';
-  const nowClass = `text-right font-bold tabular-nums text-[#8b6914] ${isPrint ? 'text-[13px]' : 'text-base'}`;
-  const numClass = `${pad} text-right tabular-nums text-[#1f1a14]`;
-  const prevClass = `${pad} text-right tabular-nums text-[#6b6358]`;
+  const text = isPrint ? 'text-sm' : 'text-sm';
+  const pad = isPrint ? 'px-2 py-2' : 'px-2.5 py-3';
+  const headPad = isPrint ? 'px-2 py-1.5' : 'px-2.5 py-2';
+  const numberSize = isPrint ? 'text-lg' : 'text-xl';
+  const nowSize = isPrint ? 'text-xl' : 'text-2xl';
+  const nowClass = `prep-materials-now text-right font-bold tabular-nums leading-none text-[#8b6914] ${nowSize}`;
+  const numClass = `prep-materials-num ${pad} text-right font-semibold tabular-nums leading-none text-[#1f1a14] ${numberSize}`;
+  const prevClass = `prep-materials-num ${pad} text-right font-semibold tabular-nums leading-none text-[#6b6358] ${numberSize}`;
+  const subtotalNumClass = `prep-materials-num ${pad} text-right font-bold tabular-nums leading-none text-[#1f1a14] ${numberSize}`;
   const footerStyle: CSSProperties = {
     background: '#f7f3eb',
     borderTop: '1.5px solid #5a6b66',
@@ -106,7 +109,7 @@ export default function PrepSummaryTable({
                 {capacityScheduleTag(box.capacity)}
                 <span className="font-medium text-[#6b6358]"> · {box.flavorLabel}</span>
               </h3>
-              <p className="text-[13px] font-medium text-[#6b6358] whitespace-nowrap">{box.headerAside}</p>
+              <p className={`font-semibold tabular-nums text-[#6b6358] whitespace-nowrap ${isPrint ? 'text-base' : 'text-lg'}`}>{box.headerAside}</p>
             </div>
             <div className="overflow-x-auto">
               <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 720 }}>
@@ -135,8 +138,8 @@ export default function PrepSummaryTable({
                   <tr className="bg-[#faf8f5] font-semibold">
                     <td className={`${pad} text-left whitespace-nowrap`}>{capacityScheduleTag(box.capacity)} 合計（今次）</td>
                     <td className={prevClass}>{box.prior}</td>
-                    <td className={`${pad} text-right tabular-nums`}>{box.now}</td>
-                    {materialCells(box.materials, numClass)}
+                    <td className={`${pad} ${nowClass}`}>{box.now}</td>
+                    {materialCells(box.materials, subtotalNumClass)}
                   </tr>
                 </tbody>
               </table>
@@ -152,14 +155,14 @@ export default function PrepSummaryTable({
               <td className={`${pad} text-left font-bold`} style={footerStyle}>
                 各容量合計
               </td>
-              <td className={`${pad} text-right tabular-nums font-semibold`} style={footerStyle}>
+              <td className={prevClass} style={footerStyle}>
                 {table.prior}
               </td>
               <td className={`${pad} ${nowClass}`} style={footerStyle}>
                 {table.now}
               </td>
               {(['birdNest', 'osmanthus', 'rockSugar', 'slabSugar', 'bottles'] as const).map((key) => (
-                <td key={key} className={`${pad} text-right tabular-nums font-semibold`} style={footerStyle}>
+                <td key={key} className={subtotalNumClass} style={footerStyle}>
                   {formatPrepMaterialAmount(table.materials[key])}
                 </td>
               ))}

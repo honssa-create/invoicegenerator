@@ -208,6 +208,38 @@ export function prepSessionTitle(
   return `${date} 未設定 Unset`;
 }
 
+const PREP_WEEKDAY_LABELS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'] as const;
+
+/** Weekday for a calendar YYYY-MM-DD. Uses the date itself, not the viewer timezone. */
+export function prepWeekdayLabel(isoDate: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return '';
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return PREP_WEEKDAY_LABELS[weekday] || '';
+}
+
+function prepDateWithWeekday(stewingDate: string): string {
+  const date = stewingDate || '—';
+  const weekday = prepWeekdayLabel(stewingDate);
+  return weekday ? `${date} ${weekday}` : date;
+}
+
+/** Day card heading: `2026-10-27 星期二 · 全日`. */
+export function prepDayCardTitle(stewingDate: string): string {
+  return `${prepDateWithWeekday(stewingDate)} · 全日`;
+}
+
+/** Session card heading beside the AM / PM badge. */
+export function prepSessionCardTitle(
+  stewingDate: string,
+  slot: PrepScheduleSlot | null | undefined,
+): string {
+  const head = prepDateWithWeekday(stewingDate);
+  if (slot === 'AM') return `${head} · 上午批次`;
+  if (slot === 'PM') return `${head} · 下午批次`;
+  return `${head} · 未設定`;
+}
+
 /** One print job for every prep sheet in a session group. Ids stay in board order. */
 export function prepGroupPrintPath(ids: number[]): string {
   const clean = ids.filter((id) => Number.isInteger(id) && id > 0);

@@ -231,6 +231,9 @@ function FooterCell({ label, value, valueClass }: { label: string; value: string
 
 function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
   const combo = group.id === 'combo';
+  const detailBoxes = combo
+    ? group.boxes
+    : group.boxes.filter((box) => box.key !== 'boilSugar' && box.key !== 'coldSoak');
   const nowClass =
     'prep-day-now whitespace-nowrap px-2 py-2.5 text-right text-xl font-extrabold tabular-nums leading-none text-[#8b6914] print:px-1.5 print:py-2 print:text-lg';
   const numClass =
@@ -336,25 +339,48 @@ function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
       <div
         className={`border-t border-dashed border-[#c5d9ce] bg-[#f8faf9] p-3.5 print:p-2.5 ${combo ? 'prep-day-boxes prep-day-boxes-combo' : 'prep-day-boxes'}`}
       >
-        {group.boxes.map((box) => (
+        {!combo && <OsmanthusWaterPair group={group} />}
+        {detailBoxes.map((box) => (
           <div
             key={box.key}
             className={`min-w-0 rounded-[10px] px-3 py-2.5 text-[13px] text-gray-600 print:px-2 print:py-2 print:text-[11px] ${
               combo ? 'border border-[#93c5fd] bg-[#eff6ff]' : 'border border-[#fcd34d] bg-[#fffbeb]'
             }`}
           >
-            {box.label}
-            <b
-              className={`mt-1 block font-extrabold tabular-nums leading-none ${box.highlight ? 'text-[22px] print:text-lg' : 'text-xl print:text-base'} ${
-                combo ? 'text-[#1d4ed8]' : 'text-[#b45309]'
-              }`}
-            >
-              {formatDayMaterialGrams(box.amount)}
-            </b>
+            <SugarBoxFigure box={box} combo={combo} />
           </div>
         ))}
       </div>
     </section>
+  );
+}
+
+function OsmanthusWaterPair({ group }: { group: DaySugarWaterGroup }) {
+  const boxes = group.boxes.filter((box) => box.key === 'boilSugar' || box.key === 'coldSoak');
+  if (!boxes.length) return null;
+  return (
+    <div className="prep-day-water-pair min-w-0 max-w-full overflow-hidden rounded-[10px] border border-[#fcd34d] bg-[#fffbeb] text-[13px] text-gray-600 print:text-[11px]">
+      {boxes.map((box) => (
+        <div key={box.key} className="min-w-0 px-3 py-2.5 print:px-2 print:py-2">
+          <SugarBoxFigure box={box} combo={false} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SugarBoxFigure({ box, combo }: { box: DaySugarWaterGroup['boxes'][number]; combo: boolean }) {
+  return (
+    <>
+      {box.label}
+      <b
+        className={`mt-1 block font-extrabold tabular-nums leading-none [overflow-wrap:anywhere] ${box.highlight ? 'text-[22px] print:text-lg' : 'text-xl print:text-base'} ${
+          combo ? 'text-[#1d4ed8]' : 'text-[#b45309]'
+        }`}
+      >
+        {formatDayMaterialGrams(box.amount)}
+      </b>
+    </>
   );
 }
 

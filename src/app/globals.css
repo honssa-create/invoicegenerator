@@ -139,12 +139,25 @@
 
   .prep-day-boxes {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px 12px;
   }
 
   .prep-day-boxes-combo {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* 桂花 boil + cold-soak stay in one yellow total, side by side. */
+  .prep-day-water-pair {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .prep-day-water-pair > * + * {
+    border-left: 1px solid #fcd34d;
   }
 }
 
@@ -152,6 +165,17 @@
   .prep-day-boxes,
   .prep-day-boxes-combo {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .prep-day-water-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .prep-day-water-pair > * + * {
+    border-left: 0;
+    border-top: 1px solid #fcd34d;
   }
 }
 
@@ -261,7 +285,15 @@
   }
 
   .prep-day-print-root .prep-day-boxes {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .prep-day-print-root .prep-day-water-pair {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 100%;
+    min-width: 0;
   }
 
   .prep-day-print-root .prep-day-boxes-combo {

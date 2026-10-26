@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
-import CompletionModal from '@/components/kitchen-prep/CompletionModal';
 import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import {
   PREP_CAPACITIES,
@@ -18,7 +17,6 @@ import {
   PREP_STATUSES_BULK_EDIT,
   PREP_STATUS_LABELS,
   formatPrepOrderScheduleLines,
-  getPrepStatusAction,
   groupPrepDaysForBoard,
   isRedDateAllowed,
   parsePrepScheduleSlot,
@@ -262,9 +260,6 @@ function KitchenPrepListContent() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [completeOrder, setCompleteOrder] = useState<PrepOrder | null>(null);
-  const [advancingId, setAdvancingId] = useState<number | null>(null);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkStatusUpdating, setBulkStatusUpdating] = useState(false);
@@ -443,51 +438,6 @@ function KitchenPrepListContent() {
 
   const sortIndicator = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
 
-  const handleStatusAction = async (order: PrepOrder, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const action = getPrepStatusAction(order.status);
-    if (!action) return;
-    if (action.type === 'complete') {
-      setCompleteOrder(order);
-      return;
-    }
-    const previousStatus = order.status;
-    const previousStewingStarted = order.stewing_started_at;
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === order.id
-          ? {
-              ...o,
-              status: action.nextStatus,
-              stewing_started_at:
-                action.nextStatus === 'stewing' ? o.stewing_started_at || '…' : o.stewing_started_at,
-            }
-          : o,
-      ),
-    );
-    setAdvancingId(order.id);
-    const res = await fetch(`/api/kitchen-prep/${order.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: action.nextStatus }),
-    });
-    const data = await res.json();
-    setAdvancingId(null);
-    if (!res.ok) {
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.id === order.id
-            ? { ...o, status: previousStatus, stewing_started_at: previousStewingStarted }
-            : o,
-        ),
-      );
-      setError(data.error || bi('Failed to update status', '更新狀態失敗'));
-      return;
-    }
-    clearKitchenPrepListCache();
-    setOrders((prev) => prev.map((o) => (o.id === order.id ? data.order : o)));
-  };
-
   const toggleCapacity = (capacity: PrepCapacity) => {
     setForm((prev) => {
       const exists = prev.lines.some((l) => l.capacity === capacity);
@@ -649,62 +599,8 @@ function KitchenPrepListContent() {
         <td className="border-b border-gray-200 px-3.5 py-[11px] whitespace-nowrap tabular-nums text-gray-600">
           {o.stewing_started_at || '—'}
         </td>
-        <td className="border-b border-gray-200 px-3.5 py-[11px] text-right" onClick={(e) => e.stopPropagation()}>
-          <div className="inline-flex items-center justify-end gap-2">
-            {(() => {
-              const action = getPrepStatusAction(o.status);
-              if (!action) return null;
-              return (
-                <button
-                  type="button"
-                  disabled={advancingId === o.id}
-                  onClick={(e) => { void handleStatusAction(o, e); }}
-                  className="inline-flex min-h-10 items-center justify-center whitespace-nowrap rounded-xl bg-green-600 px-3 py-2 text-sm font-bold text-white shadow-sm hover:bg-green-700 active:bg-green-800 disabled:opacity-50"
-                >
-                  {advancingId === o.id ? '更新中…' : action.label}
-                </button>
-              );
-            })()}
-            <button
-              type="button"
-              disabled={deletingId === o.id || bulkDeleting}
-              onClick={(e) => { e.stopPropagation(); remove(o.id); }}
-              className="inline-flex min-h-10 items-center justify-center whitespace-nowrap rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-            >
-              {deletingId === o.id ? BTN.deleting : BTN.delete}
-            </button>
-          </div>
-        </td>
       </tr>
     );
-  };
-
-  const remove = async (id: number) => {
-    if (
-      !confirm(
-        bi(
-          'Move this prep order to Deleted Records? You can restore it within 60 days.',
-          '將此備料單移至已刪除紀錄？可於 60 天內還原。'
-        )
-      )
-    ) {
-      return;
-    }
-    setDeletingId(id);
-    setError('');
-    const res = await fetch(`/api/kitchen-prep/${id}`, { method: 'DELETE' });
-    const d = await res.json().catch(() => ({}));
-    setDeletingId(null);
-    if (!res.ok) {
-      setError(d.error || bi('Failed to delete', '刪除失敗'));
-      return;
-    }
-    setOrders((prev) => prev.filter((o) => o.id !== id));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
   };
 
   const applySessionAction = async (
@@ -1098,7 +994,7 @@ function KitchenPrepListContent() {
                         buckets={group.summary.potBuckets}
                       />
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[880px] border-collapse text-sm">
+                        <table className="w-full min-w-[720px] border-collapse text-sm">
                           <thead>
                             <tr className="text-left text-xs font-bold text-gray-500">
                               <th className="w-10 border-b border-gray-200 px-3.5 py-[11px]">
@@ -1132,7 +1028,6 @@ function KitchenPrepListContent() {
                                 狀態{sortIndicator('status')}
                               </th>
                               <th className="whitespace-nowrap border-b border-gray-200 px-3.5 py-[11px]">開始炖製時間</th>
-                              <th className="border-b border-gray-200 px-3.5 py-[11px] text-right">Action</th>
                             </tr>
                           </thead>
                           <tbody className="[&_tr:last-child_td]:border-b-0">
@@ -1147,18 +1042,6 @@ function KitchenPrepListContent() {
             </section>
           ))}
         </div>
-      )}
-
-      {completeOrder && (
-        <CompletionModal
-          order={completeOrder}
-          onClose={() => setCompleteOrder(null)}
-          onCompleted={(updated) => {
-            setCompleteOrder(null);
-            clearKitchenPrepListCache();
-            setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
-          }}
-        />
       )}
 
       {showForm && (

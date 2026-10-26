@@ -161,17 +161,21 @@ export default function KitchenPrepDayPrint() {
           </div>
 
           {summary.orders.length > 0 && (
-            <div className="prep-day-orders mb-4 rounded-[10px] border border-[#d7e3de] bg-[#f8faf9] px-3 py-2.5 text-[13px] leading-relaxed text-slate-700 print:text-[11px]">
-              <strong className="text-[#0f766e]">包入呢日：</strong>{' '}
+            <div className="prep-day-orders mb-4 flex min-w-0 max-w-full flex-wrap items-baseline rounded-[10px] border border-[#d7e3de] bg-[#f8faf9] px-3 py-2.5 text-[13px] leading-relaxed text-slate-700 print:text-[11px]">
+              <strong className="mr-1 shrink-0 text-[#0f766e]">包入呢日：</strong>
               {summary.orders.map((order, index) => {
                 const badge = slotBadge(order.scheduleSlot);
                 return (
-                  <span key={`${order.id}-${order.orderCode}-${index}`} className="whitespace-nowrap">
-                    {index > 0 ? ' · ' : ''}
-                    <span className={`mr-1 inline-block rounded-full px-1.5 py-0.5 text-[11px] font-bold ${badge.className}`}>
+                  <span key={`${order.id}-${order.orderCode}-${index}`} className="prep-day-order-chip">
+                    {index > 0 ? (
+                      <span className="shrink-0 px-1" aria-hidden="true">
+                        ·
+                      </span>
+                    ) : null}
+                    <span className={`mr-1 inline-block shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] font-bold ${badge.className}`}>
                       {badge.text}
                     </span>
-                    {orderChipLabel(order)}
+                    <span className="prep-day-order-chip-label">{orderChipLabel(order)}</span>
                   </span>
                 );
               })}

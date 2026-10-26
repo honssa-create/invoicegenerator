@@ -133,6 +133,17 @@
     padding: 10mm 8mm !important;
     overflow: hidden;
   }
+
+  /* Group print: one landscape sheet per prep order. */
+  .prep-print-root .prep-print-page {
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .prep-print-root .prep-print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
   @page prep-landscape {
     size: A4 landscape;
     margin: 0;

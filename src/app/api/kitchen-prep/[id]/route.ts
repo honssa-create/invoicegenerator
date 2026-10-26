@@ -13,6 +13,7 @@ import {
   PREP_ORDER_TYPES,
   PREP_STATUSES,
   computePrepCalculationForOrder,
+  parsePrepScheduleSlot,
   validatePrepFlavorQtys,
   type BirdNestType,
   type PrepCapacity,
@@ -46,6 +47,19 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     const existing = await getPrepOrder(params.id);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    let schedule_slot: 'AM' | 'PM' | null | undefined;
+    if (Object.prototype.hasOwnProperty.call(body, 'schedule_slot')) {
+      if (body.schedule_slot == null || body.schedule_slot === '') {
+        schedule_slot = null;
+      } else {
+        const parsed = parsePrepScheduleSlot(body.schedule_slot);
+        if (!parsed) {
+          return NextResponse.json({ error: 'schedule_slot must be AM or PM' }, { status: 400 });
+        }
+        schedule_slot = parsed;
+      }
+    }
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
     const { capacities: capacityOptions, formulas } =
@@ -89,6 +103,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         params.id,
         {
           stewing_date: body.stewing_date as string | undefined,
+          schedule_slot,
           order_type:
             typeof body.order_type === 'string' &&
             (PREP_ORDER_TYPES as readonly string[]).includes(body.order_type)
@@ -127,6 +142,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       params.id,
       {
         stewing_date: body.stewing_date as string | undefined,
+        schedule_slot,
         order_type:
           typeof body.order_type === 'string' &&
           (PREP_ORDER_TYPES as readonly string[]).includes(body.order_type)

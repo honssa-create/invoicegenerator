@@ -23,6 +23,7 @@ import {
   nextActualQty,
   parseBirdNestType,
   parsePrepLinesJson,
+  parsePrepScheduleSlot,
   planPrepBatchOrderCode,
   planPrepCapacityLines,
   prepOrderBirdNestSelections,
@@ -35,6 +36,7 @@ import {
   type BirdNestType,
   type PrepBatchView,
   type PrepCapacityLineDraft,
+  type PrepScheduleSlot,
   type StewFormulaMapLike,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
@@ -81,6 +83,7 @@ interface PrepRow {
   order_code: string;
   linked_order_id: number | null;
   stewing_date: string;
+  schedule_slot: string | null;
   order_type: string;
   capacity: string;
   status: string;
@@ -124,6 +127,7 @@ function hydrate(row: PrepRow): PrepOrder {
     order_code: row.order_code,
     linked_order_id: row.linked_order_id,
     stewing_date: row.stewing_date,
+    schedule_slot: parsePrepScheduleSlot(row.schedule_slot),
     order_type: row.order_type as PrepOrder['order_type'],
     capacity: row.capacity as PrepCapacity,
     status: row.status as PrepStatus,
@@ -177,6 +181,7 @@ async function nextOrderCode(_userId?: number): Promise<string> {
 
 type InsertPrepInput = {
   stewing_date: string;
+  schedule_slot: PrepScheduleSlot | null;
   order_type: PrepOrderType;
   capacity: PrepCapacity;
   qty_osmanthus: number;
@@ -199,18 +204,19 @@ async function insertPrepOrderRow(userId: number, row: InsertPrepInput): Promise
   const res = await db
     .prepare(
       `INSERT INTO kitchen_prep_orders
-         (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
+         (user_id, order_code, linked_order_id, stewing_date, schedule_slot, order_type, capacity, status,
           qty_osmanthus, qty_red_date, qty_rock_sugar,
           actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
           bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
           lines_json, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
       row.order_code,
       row.linked_order_id,
       row.stewing_date,
+      row.schedule_slot,
       row.order_type,
       row.capacity,
       row.status,
@@ -236,6 +242,7 @@ function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): 
     order_code: row.order_code,
     linked_order_id: row.linked_order_id,
     stewing_date: row.stewing_date,
+    schedule_slot: row.schedule_slot,
     order_type: row.order_type,
     capacity: row.capacity,
     status: row.status,
@@ -275,7 +282,7 @@ function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): 
 }
 
 /** List table + completion modal from list — omits notes / completion meta / timestamps. */
-const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
+const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, schedule_slot, order_type, capacity, status,
   qty_osmanthus, qty_red_date, qty_rock_sugar, actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
   bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar, lines_json,
   expected_yield, actual_yield, stewing_started_at`;
@@ -335,7 +342,9 @@ export async function listPrepOrders(
     .prepare(
       `SELECT ${PREP_LIST_COLUMNS} FROM kitchen_prep_orders
        ${where}
-       ORDER BY stewing_date ASC, id ASC`
+       ORDER BY stewing_date ASC,
+         CASE schedule_slot WHEN 'AM' THEN 0 WHEN 'PM' THEN 1 ELSE 2 END ASC,
+         id ASC`
     )
     .all(...params)) as ListPrepRow[];
   return rows.map(hydrateListRow);
@@ -441,6 +450,8 @@ export async function createPrepOrder(
   userId: number,
   input: {
     stewing_date: string;
+    /** Omitted on wedding auto-create so the row stays unset. */
+    schedule_slot?: PrepScheduleSlot | null;
     order_type: PrepOrderType;
     capacity: PrepCapacity;
     qty_osmanthus?: number;
@@ -497,6 +508,7 @@ export async function createPrepOrder(
 
   const insertRow: InsertPrepInput = {
     stewing_date: input.stewing_date,
+    schedule_slot: input.schedule_slot ?? null,
     order_type: input.order_type,
     capacity,
     qty_osmanthus: qtyOsmanthus,
@@ -533,6 +545,7 @@ export async function createPrepOrdersBatch(
   userId: number,
   input: {
     stewing_date: string;
+    schedule_slot?: PrepScheduleSlot | null;
     order_type: PrepOrderType;
     linked_order_id?: number | null;
     order_code?: string;
@@ -560,6 +573,7 @@ export async function createPrepOrdersBatch(
 
     const insertRow: InsertPrepInput = {
       stewing_date: input.stewing_date,
+      schedule_slot: input.schedule_slot ?? null,
       order_type: input.order_type,
       capacity: parent.capacity,
       qty_osmanthus: parent.qty_osmanthus,
@@ -669,6 +683,7 @@ export async function updatePrepOrder(
   id: number | string,
   input: Partial<{
     stewing_date: string;
+    schedule_slot: PrepScheduleSlot | null;
     order_type: PrepOrderType;
     capacity: PrepCapacity;
     status: PrepStatus;
@@ -823,13 +838,15 @@ export async function updatePrepOrder(
   }
 
   const stewingDate = input.stewing_date ?? existing.stewing_date;
+  const scheduleSlot =
+    input.schedule_slot !== undefined ? input.schedule_slot : (existing.schedule_slot ?? null);
   const orderType = input.order_type ?? existing.order_type;
   const notes = input.notes !== undefined ? input.notes : existing.notes;
 
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET
-       stewing_date = ?, order_type = ?, capacity = ?, status = ?,
+       stewing_date = ?, schedule_slot = ?, order_type = ?, capacity = ?, status = ?,
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?,
        actual_qty_osmanthus = ?, actual_qty_red_date = ?, actual_qty_rock_sugar = ?,
        bird_nest_osmanthus = ?, bird_nest_red_date = ?, bird_nest_rock_sugar = ?,
@@ -839,6 +856,7 @@ export async function updatePrepOrder(
     )
     .run(
       stewingDate,
+      scheduleSlot,
       orderType,
       capacity,
       nextStatus,
@@ -861,6 +879,7 @@ export async function updatePrepOrder(
     return {
       ...existing,
       stewing_date: stewingDate,
+      schedule_slot: scheduleSlot,
       order_type: orderType,
       capacity,
       status: nextStatus,

@@ -6,7 +6,14 @@ import {
   listPrepOrdersWithCapacities,
   resolveKitchenOwnerUserId,
 } from '@/lib/kitchen-prep-server';
-import { PREP_ORDER_TYPES, PREP_STATUSES, validatePrepFlavorQtys, type PrepCapacity, type PrepStatus } from '@/lib/kitchen-prep';
+import {
+  PREP_ORDER_TYPES,
+  PREP_STATUSES,
+  parsePrepScheduleSlot,
+  validatePrepFlavorQtys,
+  type PrepCapacity,
+  type PrepStatus,
+} from '@/lib/kitchen-prep';
 import { readKitchenPrepDetailContext } from '@/lib/kitchen-catalog-server';
 
 function parseYmd(raw: string | null): string {
@@ -49,6 +56,10 @@ export async function POST(request: Request) {
     if (!body.stewing_date) {
       return NextResponse.json({ error: 'Stewing date is required' }, { status: 400 });
     }
+    const schedule_slot = parsePrepScheduleSlot(body.schedule_slot);
+    if (!schedule_slot) {
+      return NextResponse.json({ error: 'Choose AM or PM (schedule_slot)' }, { status: 400 });
+    }
 
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
     const { capacities, formulas } = await readKitchenPrepDetailContext(kitchenOwnerId);
@@ -78,6 +89,7 @@ export async function POST(request: Request) {
         kitchenOwnerId,
         {
           stewing_date: body.stewing_date,
+          schedule_slot,
           order_type,
           linked_order_id: body.linked_order_id ?? null,
           order_code: body.order_code,
@@ -107,6 +119,7 @@ export async function POST(request: Request) {
       kitchenOwnerId,
       {
         stewing_date: body.stewing_date,
+        schedule_slot,
         order_type,
         capacity,
         qty_osmanthus: qtys.osmanthus,

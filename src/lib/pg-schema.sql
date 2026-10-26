@@ -332,6 +332,8 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   order_code TEXT NOT NULL,
   linked_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
   stewing_date TEXT NOT NULL,
+  -- AM/PM stewing session. NULL means unset; existing rows are not backfilled.
+  schedule_slot TEXT,
   order_type TEXT NOT NULL DEFAULT 'daily' CHECK (order_type IN ('daily', 'wedding', 'restock')),
   capacity TEXT NOT NULL DEFAULT '45g',
   status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('not_started', 'scheduled', 'prepped', 'stewing', 'completed')),
@@ -355,7 +357,9 @@ CREATE TABLE IF NOT EXISTS kitchen_prep_orders (
   stewing_started_at TEXT,
   completion_splits_json TEXT,
   -- Capacity lines for one prep order. Null = single capacity stored on the parent columns.
-  lines_json TEXT
+  lines_json TEXT,
+  CONSTRAINT kitchen_prep_orders_schedule_slot_check
+    CHECK (schedule_slot IS NULL OR schedule_slot IN ('AM', 'PM'))
 );
 
 CREATE TABLE IF NOT EXISTS kitchen_settings (
@@ -387,6 +391,13 @@ ALTER TABLE kitchen_settings ADD COLUMN IF NOT EXISTS catalog_merge_version TEXT
 
 -- Multi-capacity kitchen prep: one order_code, many capacity lines. Existing rows stay single-capacity (NULL).
 ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS lines_json TEXT;
+
+-- AM/PM stewing session. Existing rows stay NULL (unset) until an operator chooses.
+ALTER TABLE kitchen_prep_orders ADD COLUMN IF NOT EXISTS schedule_slot TEXT;
+ALTER TABLE kitchen_prep_orders DROP CONSTRAINT IF EXISTS kitchen_prep_orders_schedule_slot_check;
+ALTER TABLE kitchen_prep_orders
+  ADD CONSTRAINT kitchen_prep_orders_schedule_slot_check
+  CHECK (schedule_slot IS NULL OR schedule_slot IN ('AM', 'PM'));
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS due_date TEXT;

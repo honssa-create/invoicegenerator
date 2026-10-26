@@ -4,9 +4,12 @@ import {
   computePrepCalculationForOrder,
   defaultCompletionSplits,
   formatPrepOrderScheduleLines,
+  groupPrepOrdersForBoard,
   planPrepBatchOrderCode,
   planPrepCapacityLines,
+  prepGroupPrintPath,
   sessionPotBuckets,
+  sortPrepOrdersForBoard,
   summarizePrepCapacityLines,
   summarizePrepSessions,
   STEW_POT_LIMIT_LARGE,
@@ -152,10 +155,98 @@ describe('session pot limits', () => {
         qty_rock_sugar: 0,
       },
     ]);
-    expect(sessions.map((session) => session.sessionKey)).toEqual(['2026-10-23', '2026-10-24']);
+    expect(sessions.map((session) => session.sessionKey)).toEqual([
+      '2026-10-23|unset',
+      '2026-10-24|unset',
+    ]);
+    expect(sessions[0].scheduleSlot).toBeNull();
     expect(sessions[0].lines[0].bottles).toBe(10);
     expect(sessions[1].lines[0].bottles).toBe(20);
     expect(sessions[0].potBuckets[0].bottles).toBe(10);
+  });
+
+  it('keeps AM and PM pots separate and leaves unset orders out of both', () => {
+    const orders = [
+      {
+        id: 2,
+        stewing_date: '2026-10-27',
+        schedule_slot: 'PM' as const,
+        order_code: 'B',
+        status: 'scheduled',
+        capacity: '45g',
+        qty_osmanthus: 100,
+        qty_red_date: 0,
+        qty_rock_sugar: 0,
+      },
+      {
+        id: 1,
+        stewing_date: '2026-10-27',
+        schedule_slot: 'AM' as const,
+        order_code: 'A',
+        status: 'scheduled',
+        capacity: '45g',
+        qty_osmanthus: 80,
+        qty_red_date: 0,
+        qty_rock_sugar: 0,
+      },
+      {
+        id: 3,
+        stewing_date: '2026-10-27',
+        schedule_slot: null,
+        order_code: 'C',
+        status: 'scheduled',
+        capacity: '75g',
+        qty_osmanthus: 90,
+        qty_red_date: 0,
+        qty_rock_sugar: 0,
+      },
+    ];
+    const sessions = summarizePrepSessions(orders);
+    expect(sessions.map((session) => session.sessionKey)).toEqual([
+      '2026-10-27|PM',
+      '2026-10-27|AM',
+      '2026-10-27|unset',
+    ]);
+    expect(sessions.map((session) => session.lines[0].bottles)).toEqual([100, 80, 90]);
+    expect(sessions[0].potBuckets.find((bucket) => bucket.id === '45g')).toMatchObject({
+      bottles: 100,
+      limit: STEW_POT_LIMIT_SMALL,
+    });
+    expect(sessions[0].potBuckets.some((bucket) => bucket.bottles === 180)).toBe(false);
+
+    const sorted = sortPrepOrdersForBoard(orders, 'stewing_date', 'asc');
+    expect(sorted.map((order) => order.schedule_slot)).toEqual(['AM', 'PM', null]);
+    const desc = sortPrepOrdersForBoard(
+      [
+        ...orders,
+        {
+          id: 4,
+          stewing_date: '2026-10-28',
+          schedule_slot: 'PM' as const,
+          order_code: 'D',
+          status: 'scheduled',
+          capacity: '45g',
+        },
+      ],
+      'stewing_date',
+      'desc',
+    );
+    expect(desc.map((order) => `${order.stewing_date}|${order.schedule_slot ?? 'unset'}`)).toEqual([
+      '2026-10-28|PM',
+      '2026-10-27|AM',
+      '2026-10-27|PM',
+      '2026-10-27|unset',
+    ]);
+
+    const groups = groupPrepOrdersForBoard(sorted);
+    expect(groups.map((group) => group.sessionKey)).toEqual([
+      '2026-10-27|AM',
+      '2026-10-27|PM',
+      '2026-10-27|unset',
+    ]);
+    expect(groups[0].orders.map((order) => order.id)).toEqual([1]);
+    expect(prepGroupPrintPath(groups[0].orders.map((order) => order.id))).toBe('/kitchen-prep/print?ids=1');
+    expect(prepGroupPrintPath([2, 1, 0, 1.5])).toBe('/kitchen-prep/print?ids=2,1');
   });
 });
 

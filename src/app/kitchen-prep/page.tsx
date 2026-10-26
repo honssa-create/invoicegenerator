@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -12,19 +12,26 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
+  PREP_SCHEDULE_SLOT_LABELS,
+  PREP_SCHEDULE_SLOTS,
   PREP_STATUSES,
   PREP_STATUSES_BULK_EDIT,
   PREP_STATUS_LABELS,
   formatPrepOrderScheduleLines,
   getPrepStatusAction,
+  groupPrepOrdersForBoard,
   isMultiCapacityPrep,
   isRedDateAllowed,
+  parsePrepScheduleSlot,
+  prepGroupPrintPath,
   prepOrderLines,
+  prepSessionTitle,
+  sortPrepOrdersForBoard,
   summarizePrepOrderLines,
-  summarizePrepSessions,
   type PrepCapacity,
   type PrepOrder,
   type PrepOrderType,
+  type PrepScheduleSlot,
   type PrepStatus,
 } from '@/lib/kitchen-prep';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
@@ -60,6 +67,7 @@ interface CapacityLine {
 
 interface FormState {
   stewing_date: string;
+  schedule_slot: '' | PrepScheduleSlot;
   order_type: PrepOrderType;
   order_code: string;
   lines: CapacityLine[];
@@ -74,6 +82,7 @@ const emptyLine = (capacity: PrepCapacity = '45g'): CapacityLine => ({
 
 const EMPTY: FormState = {
   stewing_date: new Date().toISOString().slice(0, 10),
+  schedule_slot: '',
   order_type: 'daily',
   order_code: '',
   lines: [emptyLine()],
@@ -123,6 +132,7 @@ function parsePrefillForm(searchParams: URLSearchParams): FormState | null {
 
   return {
     stewing_date: new Date().toISOString().slice(0, 10),
+    schedule_slot: parsePrepScheduleSlot(searchParams.get('schedule_slot')) ?? '',
     order_type,
     order_code: '',
     lines,
@@ -356,6 +366,8 @@ function KitchenPrepListContent() {
       if (!q) return true;
       const haystack = [
         o.stewing_date,
+        o.schedule_slot || '',
+        o.schedule_slot ? PREP_SCHEDULE_SLOT_LABELS[o.schedule_slot] : '未設定',
         o.order_code,
         o.capacity,
         o.status,
@@ -372,27 +384,15 @@ function KitchenPrepListContent() {
     });
   }, [orders, dateStart, dateEnd, search, status]);
 
-  const sortedOrders = useMemo(() => {
-    const list = [...filteredOrders];
-    list.sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === 'stewing_date') cmp = a.stewing_date.localeCompare(b.stewing_date);
-      else if (sortKey === 'order_code') cmp = a.order_code.localeCompare(b.order_code);
-      else if (sortKey === 'capacity') {
-        cmp = prepOrderLines(a).map((line) => line.capacity).join(',').localeCompare(
-          prepOrderLines(b).map((line) => line.capacity).join(',')
-        );
-      }
-      else if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return list;
-  }, [filteredOrders, sortKey, sortDir]);
-
-  const sessionSummaries = useMemo(
-    () => summarizePrepSessions(sortedOrders),
-    [sortedOrders]
+  const sortedOrders = useMemo(
+    () =>
+      sortPrepOrdersForBoard(filteredOrders, sortKey, sortDir, (order) =>
+        prepOrderLines(order).map((line) => line.capacity).join(','),
+      ),
+    [filteredOrders, sortKey, sortDir],
   );
+
+  const sessionGroups = useMemo(() => groupPrepOrdersForBoard(sortedOrders), [sortedOrders]);
 
   const applyDateRange = (start: string, end: string) => {
     setDateStart(start);
@@ -483,12 +483,17 @@ function KitchenPrepListContent() {
       setError('Select at least one capacity 容量');
       return;
     }
+    if (form.schedule_slot !== 'AM' && form.schedule_slot !== 'PM') {
+      setError(bi('Choose a session: 上午 AM or 下午 PM', '請選擇時段：上午 AM 或下午 PM'));
+      return;
+    }
     setSaving(true);
     const res = await fetch('/api/kitchen-prep', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         stewing_date: form.stewing_date,
+        schedule_slot: form.schedule_slot,
         order_type: form.order_type,
         order_code: form.order_code || undefined,
         lines: form.lines.map((line) => ({
@@ -554,6 +559,19 @@ function KitchenPrepListContent() {
         />
       </td>
       <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{o.stewing_date}</td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        {o.schedule_slot ? (
+          <span
+            className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
+              o.schedule_slot === 'AM' ? 'bg-sky-100 text-sky-800' : 'bg-violet-100 text-violet-800'
+            }`}
+          >
+            {PREP_SCHEDULE_SLOT_LABELS[o.schedule_slot]}
+          </span>
+        ) : (
+          <span className="text-gray-400">—</span>
+        )}
+      </td>
       <td className="px-4 py-3 font-mono text-brand-600 whitespace-nowrap">
         {o.linked_order_id ? (
           <Link href={`/orders/${o.linked_order_id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
@@ -816,7 +834,7 @@ function KitchenPrepListContent() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder={bi('Order ID, capacity, status, type…', '訂單編號、容量、狀態、類型…')}
+        searchPlaceholder={bi('Order ID, capacity, status, type, AM/PM…', '訂單編號、容量、狀態、類型、時段…')}
         onClear={clearFilters}
       >
         <div className="flex flex-col min-w-[140px]">
@@ -893,19 +911,6 @@ function KitchenPrepListContent() {
         ))}
       </div>
 
-      {sessionSummaries.length > 0 && (
-        <div className="mb-4 space-y-2">
-          {sessionSummaries.map((session) => (
-            <PrepSessionSummary
-              key={session.sessionKey}
-              title={`${session.sessionKey} session`}
-              lines={session.lines}
-              buckets={session.potBuckets}
-            />
-          ))}
-        </div>
-      )}
-
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
           <h2 className="font-semibold text-gray-900">Scheduled Orders 排程列表</h2>
@@ -924,7 +929,7 @@ function KitchenPrepListContent() {
         ) : sortedOrders.length === 0 ? (
           <div className="p-12 text-center text-gray-500">{bi('No prep orders match these filters.', '沒有符合篩選條件的備料單。')}</div>
         ) : (
-          <table className="w-full min-w-[800px] text-sm">
+          <table className="w-full min-w-[960px] text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
                 <th className="px-4 py-3 w-12">
@@ -938,6 +943,9 @@ function KitchenPrepListContent() {
                 </th>
                 <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('stewing_date')}>
                   Target Stewing Date 燉製日期{sortIndicator('stewing_date')}
+                </th>
+                <th className="px-4 py-3 whitespace-nowrap" title="Within a date: AM, then PM, then unset">
+                  時段 AM/PM
                 </th>
                 <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('order_code')}>
                   Order ID{sortIndicator('order_code')}
@@ -954,7 +962,32 @@ function KitchenPrepListContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sortedOrders.map((o) => renderOrderRow(o))}
+              {sessionGroups.map((group) => (
+                <Fragment key={group.sessionKey}>
+                  <tr className="bg-brand-50/70">
+                    <td colSpan={9} className="px-4 py-3">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-900 mb-2">
+                            {prepSessionTitle(group.stewingDate, group.scheduleSlot)}
+                          </p>
+                          <PrepSessionSummary lines={group.summary.lines} buckets={group.summary.potBuckets} />
+                        </div>
+                        <Link
+                          href={prepGroupPrintPath(group.orders.map((order) => order.id))}
+                          className="inline-flex items-center justify-center shrink-0 min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-brand-600 text-white hover:bg-brand-700"
+                        >
+                          {bi(
+                            `Print ${group.orders.length} prep sheet(s)`,
+                            `列印 ${group.orders.length} 張備料單`,
+                          )}
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                  {group.orders.map((order) => renderOrderRow(order))}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         )}
@@ -986,6 +1019,30 @@ function KitchenPrepListContent() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Order ID (optional)</label>
                   <input value={form.order_code} onChange={(e) => setForm({ ...form, order_code: e.target.value })} className={input} placeholder="Auto PREP-0001" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">時段 Session</label>
+                <p className="text-xs text-gray-500 mb-2">Required. AM and PM are separate pots. 必選。上午與下午分開計鍋。</p>
+                <div className="flex flex-wrap gap-2">
+                  {PREP_SCHEDULE_SLOTS.map((slot) => {
+                    const selected = form.schedule_slot === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setForm({ ...form, schedule_slot: slot })}
+                        className={`px-4 py-2 rounded-lg text-sm font-semibold border-2 min-h-[44px] ${
+                          selected
+                            ? 'bg-brand-600 text-white border-brand-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:border-brand-300'
+                        }`}
+                      >
+                        {PREP_SCHEDULE_SLOT_LABELS[slot]}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div>

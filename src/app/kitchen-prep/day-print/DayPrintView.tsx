@@ -19,6 +19,11 @@ import {
   type PrepOrder,
   type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
+import { OsmanthusSpareToggle, usePrepDayOsmanthusSpare } from '@/components/kitchen-prep/OsmanthusSpareToggle';
+import {
+  OSMANTHUS_DAY_PRINT_TABLE_COLUMNS,
+  OSMANTHUS_DAY_PRINT_TABLE_TOTAL_LABEL,
+} from '@/app/kitchen-prep/day-print/osmanthus-table-columns';
 import { BTN, bi } from '@/lib/ui-labels';
 
 function orderChipLabel(order: DayMaterialsOrderChip): string {
@@ -43,6 +48,7 @@ export default function KitchenPrepDayPrint() {
   const [summary, setSummary] = useState<DayMaterialsSummary | null>(null);
   const [error, setError] = useState('');
   const [printedAt] = useState(() => new Date().toLocaleString('en-HK'));
+  const { enabled: osmanthusSpare, setSpareEnabled: setOsmanthusSpare } = usePrepDayOsmanthusSpare();
 
   useEffect(() => {
     if (!validDate) {
@@ -77,7 +83,7 @@ export default function KitchenPrepDayPrint() {
     };
   }, [date, validDate]);
 
-  const sheet = summary ? buildDaySugarWaterSheet(summary) : null;
+  const sheet = summary ? buildDaySugarWaterSheet(summary, { osmanthusSpare }) : null;
   const hasLines = Boolean(summary?.lines.length);
 
   const handlePrint = () => {
@@ -95,7 +101,7 @@ export default function KitchenPrepDayPrint() {
           }
         }
       `}</style>
-      <div className="no-print border-b border-gray-200 bg-white px-6 py-3 flex items-center justify-between gap-3">
+      <div className="no-print border-b border-gray-200 bg-white px-6 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link href="/kitchen-prep" className="text-sm font-semibold text-[#0f766e] hover:text-[#115e59]">
             ← {bi('Back to schedule', '返回排程')}
@@ -106,14 +112,17 @@ export default function KitchenPrepDayPrint() {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handlePrint}
-          disabled={!hasLines}
-          className="rounded-lg bg-[#0f766e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
-        >
-          {BTN.printPdf}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <OsmanthusSpareToggle enabled={osmanthusSpare} onChange={setOsmanthusSpare} compact />
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={!hasLines}
+            className="rounded-lg bg-[#0f766e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
+          >
+            {BTN.printPdf}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -293,13 +302,14 @@ function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
                 </tr>
               ) : (
                 <tr className="bg-[#f3f0ea] text-[11px] font-bold text-[#6b6358]">
-                  <th className="px-2 py-2 text-left print:px-1.5">容量</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">今次要燉</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">燕餅 g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">桂花 g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">片糖 g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">水(煮糖) g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">水(冷泡) g</th>
+                  {OSMANTHUS_DAY_PRINT_TABLE_COLUMNS.map((col) => (
+                    <th
+                      key={col.label}
+                      className={`px-2 py-2 print:px-1.5 ${col.align === 'left' ? 'text-left' : 'text-right'}`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               )}
             </thead>
@@ -399,7 +409,7 @@ function GroupTotal({
   return (
     <tr className={rowClass}>
       <td className={labelClass} style={cellStyle} colSpan={combo ? 2 : 1}>
-        {combo ? '紅棗＋冰糖 合計' : '桂花合計'}
+        {combo ? '紅棗＋冰糖 合計' : OSMANTHUS_DAY_PRINT_TABLE_TOTAL_LABEL}
       </td>
       <td className={nowClass} style={cellStyle}>
         {group.bottles}

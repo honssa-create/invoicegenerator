@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   aggregateRawNeedsFromPrepOrders,
   buildDaySugarWaterSheet,
+  PREP_DAY_OSMANTHUS_SPARE_FACTOR,
   CAPACITY_FLAVOR_FORMULAS,
   computePrepCalculationForOrder,
   dayMaterialsCapacityLabel,
@@ -437,10 +438,37 @@ describe('day materials and session workflow', () => {
       '合計（水煮糖＋冷泡水）',
     ]);
     expect(osmanthus.boxes[4].amount).toBeCloseTo(osmanthus.boxes[0].amount + osmanthus.boxes[1].amount, 5);
+
+    const sheetSpare = buildDaySugarWaterSheet(summary, { osmanthusSpare: true });
+    const osSpare = sheetSpare.groups[0];
+    const factor = PREP_DAY_OSMANTHUS_SPARE_FACTOR;
+    expect(osSpare.boxes[0].amount).toBeCloseTo(osmanthus.boxes[0].amount * factor, 5);
+    expect(osSpare.boxes[1].amount).toBeCloseTo(osmanthus.boxes[1].amount * factor, 5);
+    expect(osSpare.boxes[4].amount).toBeCloseTo(osSpare.boxes[0].amount + osSpare.boxes[1].amount, 5);
+    expect(osSpare.boxes.map((box) => box.label)).toEqual([
+      '水(煮糖) ×1.3',
+      '冷泡水 ×1.3',
+      '片糖 ×1.3',
+      '桂花乾 ×1.3',
+      '合計（水煮糖＋冷泡水） ×1.3',
+    ]);
+    expect(osSpare.boilSugar).toBeCloseTo(osmanthus.boilSugar, 5);
+    expect(osSpare.rows[0]?.boilSugar).toBeCloseTo(osmanthus.rows[0]?.boilSugar ?? 0, 5);
+    expect(sheetSpare.groups[1].boxes.map((box) => box.key)).toEqual([
+      'rockSugar',
+      'boilSugar',
+      'comboSugarWaterTotal',
+    ]);
+    expect(sheetSpare.groups[1].boxes[2].amount).toBeCloseTo(combo.boilSugar, 5);
     expect(osmanthus.bottles).toBe(135);
     expect(osmanthus.boilSugar).toBeCloseTo(1200 + 300 + 120, 5);
     expect(osmanthus.coldSoak).toBeCloseTo(812.5 + 203.1 + 81.3, 5);
-    expect(combo.boxes.map((box) => box.key)).toEqual(['boilSugar', 'rockSugar', 'redDate']);
+    expect(combo.boxes.map((box) => box.key)).toEqual(['rockSugar', 'boilSugar', 'comboSugarWaterTotal']);
+    expect(combo.boxes.map((box) => box.label)).toEqual(['冰糖', '水(煮糖)', '糖水量合計']);
+    expect(combo.boxes[0].amount).toBeCloseTo(combo.rockSugar, 5);
+    expect(combo.boxes[1].amount).toBeCloseTo(combo.boilSugar, 5);
+    expect(combo.boxes[2].amount).toBeCloseTo(combo.boilSugar, 5);
+    expect(combo.boxes.some((box) => box.key === 'redDate')).toBe(false);
     expect(combo.boxes.some((box) => box.key === 'coldSoak')).toBe(false);
     expect(combo.coldSoak).toBe(0);
     expect(combo.bottleNote).toBe('紅130 + 冰25');

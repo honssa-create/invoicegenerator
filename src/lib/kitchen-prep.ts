@@ -2062,6 +2062,69 @@ export interface DaySugarWaterSheet {
   footer: DaySugarWaterFooter;
 }
 
+/** Osmanthus yellow-box spare buffer on the day materials sheet (桂花水). */
+export const PREP_DAY_OSMANTHUS_SPARE_FACTOR = 1.3;
+
+export const PREP_DAY_OSMANTHUS_SPARE_STORAGE_KEY = 'kitchen-prep-day-osmanthus-spare';
+
+export interface BuildDaySugarWaterSheetOptions {
+  /** When true, scale 桂花組 yellow-box amounts by {@link PREP_DAY_OSMANTHUS_SPARE_FACTOR}. */
+  osmanthusSpare?: boolean;
+}
+
+export function readPrepDayOsmanthusSpareEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = localStorage.getItem(PREP_DAY_OSMANTHUS_SPARE_STORAGE_KEY);
+    if (raw === '0' || raw === 'false') return false;
+    if (raw === '1' || raw === 'true') return true;
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+export function writePrepDayOsmanthusSpareEnabled(enabled: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(PREP_DAY_OSMANTHUS_SPARE_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Scale 桂花組 yellow boxes; 合計 = scaled 水(煮糖) + scaled 冷泡水. */
+export function applyOsmanthusSpareToBoxes(
+  boxes: DaySugarWaterBox[],
+  factor: number,
+): DaySugarWaterBox[] {
+  if (factor === 1) return boxes;
+  const scaled = boxes.map((box) =>
+    box.key === 'boilColdSoakTotal' ? box : { ...box, amount: round2(box.amount * factor) },
+  );
+  const boil = scaled.find((box) => box.key === 'boilSugar')?.amount ?? 0;
+  const cold = scaled.find((box) => box.key === 'coldSoak')?.amount ?? 0;
+  return scaled.map((box) =>
+    box.key === 'boilColdSoakTotal' ? { ...box, amount: round2(boil + cold) } : box,
+  );
+}
+
+function buildOsmanthusSugarBoxes(osmanthus: ReturnType<typeof sumDayMaterialLines>, spare: boolean): DaySugarWaterBox[] {
+  const boxes: DaySugarWaterBox[] = [
+    { key: 'boilSugar', label: '水(煮糖)', amount: osmanthus.boilSugar, highlight: true },
+    { key: 'coldSoak', label: '冷泡水', amount: osmanthus.coldSoak, highlight: true },
+    { key: 'slabSugar', label: '片糖', amount: osmanthus.slabSugar, highlight: false },
+    { key: 'osmanthus', label: '桂花乾', amount: osmanthus.osmanthus, highlight: false },
+    {
+      key: 'boilColdSoakTotal',
+      label: '合計（水煮糖＋冷泡水）',
+      amount: round2(osmanthus.boilSugar + osmanthus.coldSoak),
+      highlight: true,
+    },
+  ];
+  return spare ? applyOsmanthusSpareToBoxes(boxes, PREP_DAY_OSMANTHUS_SPARE_FACTOR) : boxes;
+}
+
 function sumDayMaterialLines(lines: DayMaterialLine[]) {
   const totals = {
     bottles: 0,
@@ -2092,7 +2155,11 @@ function sumDayMaterialLines(lines: DayMaterialLine[]) {
  * ② 紅棗 and 冰糖 share one pot: boil sugar only, no cold soak.
  * Both groups are always returned so an empty flavor still shows its boxes.
  */
-export function buildDaySugarWaterSheet(summary: DayMaterialsSummary): DaySugarWaterSheet {
+export function buildDaySugarWaterSheet(
+  summary: DayMaterialsSummary,
+  options?: BuildDaySugarWaterSheetOptions,
+): DaySugarWaterSheet {
+  const osmanthusSpare = options?.osmanthusSpare ?? false;
   const osmanthusRows = summary.lines
     .filter((line) => line.flavor === 'osmanthus' && line.bottles > 0)
     .sort((a, b) => prepCapacityRank(a.capacity) - prepCapacityRank(b.capacity));
@@ -2124,18 +2191,7 @@ export function buildDaySugarWaterSheet(summary: DayMaterialsSummary): DaySugarW
       bottleNote: '',
       rows: osmanthusRows,
       ...osmanthus,
-      boxes: [
-        { key: 'boilSugar', label: '水(煮糖)', amount: osmanthus.boilSugar, highlight: true },
-        { key: 'coldSoak', label: '冷泡水', amount: osmanthus.coldSoak, highlight: true },
-        { key: 'slabSugar', label: '片糖', amount: osmanthus.slabSugar, highlight: false },
-        { key: 'osmanthus', label: '桂花乾', amount: osmanthus.osmanthus, highlight: false },
-        {
-          key: 'boilColdSoakTotal',
-          label: '合計（水煮糖＋冷泡水）',
-          amount: round2(osmanthus.boilSugar + osmanthus.coldSoak),
-          highlight: true,
-        },
-      ],
+      boxes: buildOsmanthusSugarBoxes(osmanthus, osmanthusSpare),
     },
     {
       id: 'combo',
@@ -2146,14 +2202,14 @@ export function buildDaySugarWaterSheet(summary: DayMaterialsSummary): DaySugarW
       ...combo,
       coldSoak: 0,
       boxes: [
+        { key: 'rockSugar', label: '冰糖（入糖水）合計', amount: combo.rockSugar, highlight: false },
+        { key: 'redDate', label: '紅棗', amount: combo.redDate, highlight: false },
         {
           key: 'boilSugar',
           label: '要準備糖水量（煮糖）· 合組總計',
           amount: combo.boilSugar,
           highlight: true,
         },
-        { key: 'rockSugar', label: '冰糖（入糖水）合計', amount: combo.rockSugar, highlight: false },
-        { key: 'redDate', label: '紅棗', amount: combo.redDate, highlight: false },
       ],
     },
   ];

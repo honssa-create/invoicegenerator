@@ -166,7 +166,7 @@ export default function KitchenPrepDayPrint() {
               {summary.orders.map((order, index) => {
                 const badge = slotBadge(order.scheduleSlot);
                 return (
-                  <span key={`${order.id}-${order.orderCode}-${index}`}>
+                  <span key={`${order.id}-${order.orderCode}-${index}`} className="whitespace-nowrap">
                     {index > 0 ? ' · ' : ''}
                     <span className={`mr-1 inline-block rounded-full px-1.5 py-0.5 text-[11px] font-bold ${badge.className}`}>
                       {badge.text}

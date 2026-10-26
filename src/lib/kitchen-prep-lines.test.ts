@@ -454,12 +454,21 @@ describe('day materials and session workflow', () => {
     ]);
     expect(osSpare.boilSugar).toBeCloseTo(osmanthus.boilSugar, 5);
     expect(osSpare.rows[0]?.boilSugar).toBeCloseTo(osmanthus.rows[0]?.boilSugar ?? 0, 5);
-    expect(sheetSpare.groups[1].boxes.map((box) => box.key)).toEqual(['rockSugar', 'redDate', 'boilSugar']);
-    expect(sheetSpare.groups[1].boxes[2].amount).toBeCloseTo(combo.boxes[2].amount, 5);
+    expect(sheetSpare.groups[1].boxes.map((box) => box.key)).toEqual([
+      'rockSugar',
+      'boilSugar',
+      'comboSugarWaterTotal',
+    ]);
+    expect(sheetSpare.groups[1].boxes[2].amount).toBeCloseTo(combo.boilSugar, 5);
     expect(osmanthus.bottles).toBe(135);
     expect(osmanthus.boilSugar).toBeCloseTo(1200 + 300 + 120, 5);
     expect(osmanthus.coldSoak).toBeCloseTo(812.5 + 203.1 + 81.3, 5);
-    expect(combo.boxes.map((box) => box.key)).toEqual(['rockSugar', 'redDate', 'boilSugar']);
+    expect(combo.boxes.map((box) => box.key)).toEqual(['rockSugar', 'boilSugar', 'comboSugarWaterTotal']);
+    expect(combo.boxes.map((box) => box.label)).toEqual(['冰糖', '水(煮糖)', '糖水量合計']);
+    expect(combo.boxes[0].amount).toBeCloseTo(combo.rockSugar, 5);
+    expect(combo.boxes[1].amount).toBeCloseTo(combo.boilSugar, 5);
+    expect(combo.boxes[2].amount).toBeCloseTo(combo.boilSugar, 5);
+    expect(combo.boxes.some((box) => box.key === 'redDate')).toBe(false);
     expect(combo.boxes.some((box) => box.key === 'coldSoak')).toBe(false);
     expect(combo.coldSoak).toBe(0);
     expect(combo.bottleNote).toBe('紅130 + 冰25');

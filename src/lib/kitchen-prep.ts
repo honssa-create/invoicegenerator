@@ -2017,7 +2017,8 @@ export type DaySugarWaterBoxKey =
   | 'slabSugar'
   | 'osmanthus'
   | 'rockSugar'
-  | 'redDate';
+  | 'redDate'
+  | 'comboSugarWaterTotal';
 
 export interface DaySugarWaterBox {
   key: DaySugarWaterBoxKey;
@@ -2210,11 +2211,11 @@ export function buildDaySugarWaterSheet(
       ...combo,
       coldSoak: 0,
       boxes: [
-        { key: 'rockSugar', label: '冰糖（入糖水）合計', amount: combo.rockSugar, highlight: false },
-        { key: 'redDate', label: '紅棗', amount: combo.redDate, highlight: false },
+        { key: 'rockSugar', label: '冰糖', amount: combo.rockSugar, highlight: false },
+        { key: 'boilSugar', label: '水(煮糖)', amount: combo.boilSugar, highlight: true },
         {
-          key: 'boilSugar',
-          label: '要準備糖水量（煮糖）· 合組總計',
+          key: 'comboSugarWaterTotal',
+          label: '糖水量合計',
           amount: combo.boilSugar,
           highlight: true,
         },

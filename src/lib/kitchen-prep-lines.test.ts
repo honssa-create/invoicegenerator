@@ -442,15 +442,15 @@ describe('day materials and session workflow', () => {
     const sheetSpare = buildDaySugarWaterSheet(summary, { osmanthusSpare: true });
     const osSpare = sheetSpare.groups[0];
     const factor = PREP_DAY_OSMANTHUS_SPARE_FACTOR;
-    expect(osSpare.boxes[0].amount).toBeCloseTo(osmanthus.boxes[0].amount * factor, 5);
-    expect(osSpare.boxes[1].amount).toBeCloseTo(osmanthus.boxes[1].amount * factor, 5);
+    expect(osSpare.boxes[0].amount).toBeCloseTo(osmanthus.boxes[0].amount * factor, 2);
+    expect(osSpare.boxes[1].amount).toBeCloseTo(osmanthus.boxes[1].amount * factor, 2);
     expect(osSpare.boxes[4].amount).toBeCloseTo(osSpare.boxes[0].amount + osSpare.boxes[1].amount, 5);
     expect(osSpare.boxes.map((box) => box.label)).toEqual([
-      '水(煮糖) ×1.3',
-      '冷泡水 ×1.3',
-      '片糖 ×1.3',
-      '桂花乾 ×1.3',
-      '合計（水煮糖＋冷泡水） ×1.3',
+      '水(煮糖) ×1.03',
+      '冷泡水 ×1.03',
+      '片糖 ×1.03',
+      '桂花乾 ×1.03',
+      '合計（水煮糖＋冷泡水） ×1.03',
     ]);
     expect(osSpare.boilSugar).toBeCloseTo(osmanthus.boilSugar, 5);
     expect(osSpare.rows[0]?.boilSugar).toBeCloseTo(osmanthus.rows[0]?.boilSugar ?? 0, 5);

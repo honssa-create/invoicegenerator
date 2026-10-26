@@ -2064,7 +2064,7 @@ export interface DaySugarWaterSheet {
 }
 
 /** Osmanthus yellow-box spare buffer on the day materials sheet (桂花水). */
-export const PREP_DAY_OSMANTHUS_SPARE_FACTOR = 1.3;
+export const PREP_DAY_OSMANTHUS_SPARE_FACTOR = 1.03;
 
 export const PREP_DAY_OSMANTHUS_SPARE_STORAGE_KEY = 'kitchen-prep-day-osmanthus-spare';
 
@@ -2098,7 +2098,7 @@ function osmanthusSpareLabelSuffix(factor: number): string {
   return factor === 1 ? '' : ` ×${factor}`;
 }
 
-/** Scale 桂花組 yellow boxes; 合計 = scaled 水(煮糖) + scaled 冷泡水. Labels gain ×1.3 when scaled. */
+/** Scale 桂花組 yellow boxes; 合計 = scaled 水(煮糖) + scaled 冷泡水. Labels gain ×1.03 when scaled. */
 export function applyOsmanthusSpareToBoxes(
   boxes: DaySugarWaterBox[],
   factor: number,

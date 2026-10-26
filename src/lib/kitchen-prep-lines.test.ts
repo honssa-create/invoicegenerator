@@ -4,10 +4,14 @@ import {
   computePrepCalculationForOrder,
   defaultCompletionSplits,
   formatPrepOrderScheduleLines,
+  groupPrepDaysForBoard,
   groupPrepOrdersForBoard,
   planPrepBatchOrderCode,
   planPrepCapacityLines,
+  prepDayMaterialsPrintPath,
   prepGroupPrintPath,
+  prepSessionWorkflow,
+  summarizeDayMaterials,
   sessionPotBuckets,
   sortPrepOrdersForBoard,
   summarizePrepCapacityLines,
@@ -247,6 +251,72 @@ describe('session pot limits', () => {
     expect(groups[0].orders.map((order) => order.id)).toEqual([1]);
     expect(prepGroupPrintPath(groups[0].orders.map((order) => order.id))).toBe('/kitchen-prep/print?ids=1');
     expect(prepGroupPrintPath([2, 1, 0, 1.5])).toBe('/kitchen-prep/print?ids=2,1');
+
+    const days = groupPrepDaysForBoard(sorted);
+    expect(days).toHaveLength(1);
+    expect(days[0].stewingDate).toBe('2026-10-27');
+    expect(days[0].sessions.map((session) => session.sessionKey)).toEqual([
+      '2026-10-27|AM',
+      '2026-10-27|PM',
+      '2026-10-27|unset',
+    ]);
+    expect(prepDayMaterialsPrintPath('2026-10-27')).toBe('/kitchen-prep/day-print?date=2026-10-27');
+  });
+});
+
+describe('day materials and session workflow', () => {
+  it('sums 今次 grams across AM, PM, and unset and ignores actual extras', () => {
+    const summary = summarizeDayMaterials([
+      {
+        id: 1,
+        order_code: 'AM-A',
+        order_type: 'daily',
+        stewing_date: '2026-10-27',
+        schedule_slot: 'AM',
+        capacity: '45g',
+        qty_osmanthus: 80,
+        qty_red_date: 0,
+        qty_rock_sugar: 0,
+        actual_qty_osmanthus: 90,
+      },
+      {
+        id: 2,
+        order_code: 'PM-A',
+        order_type: 'daily',
+        stewing_date: '2026-10-27',
+        schedule_slot: 'PM',
+        capacity: '45g',
+        qty_osmanthus: 100,
+        qty_red_date: 0,
+        qty_rock_sugar: 0,
+      },
+      {
+        id: 3,
+        order_code: 'UNSET',
+        order_type: 'daily',
+        stewing_date: '2026-10-27',
+        schedule_slot: null,
+        capacity: '45g',
+        qty_osmanthus: 0,
+        qty_red_date: 0,
+        qty_rock_sugar: 12,
+      },
+    ]);
+    const osmanthus = summary.lines.find((line) => line.flavor === 'osmanthus');
+    const rock = summary.lines.find((line) => line.flavor === 'rock_sugar');
+    expect(osmanthus?.bottles).toBe(180);
+    expect(osmanthus?.slabSugar).toBeCloseTo(180 * 5.03, 5);
+    expect(rock?.bottles).toBe(12);
+    expect(summary.totals.bottles).toBe(192);
+    expect(summary.slotBottles).toEqual({ AM: 80, PM: 100, unset: 12 });
+    expect(summary.orders.map((order) => order.orderCode)).toEqual(['AM-A', 'PM-A', 'UNSET']);
+  });
+
+  it('shows start until every open order is stewing, then complete', () => {
+    expect(prepSessionWorkflow(['scheduled', 'prepped'])).toBe('start');
+    expect(prepSessionWorkflow(['stewing', 'scheduled'])).toBe('start');
+    expect(prepSessionWorkflow(['stewing', 'completed'])).toBe('complete');
+    expect(prepSessionWorkflow(['completed', 'completed'])).toBe('done');
   });
 });
 

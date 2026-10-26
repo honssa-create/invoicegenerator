@@ -19,13 +19,15 @@ import {
   PREP_STATUS_LABELS,
   formatPrepOrderScheduleLines,
   getPrepStatusAction,
-  groupPrepOrdersForBoard,
+  groupPrepDaysForBoard,
   isMultiCapacityPrep,
   isRedDateAllowed,
   parsePrepScheduleSlot,
+  prepDayMaterialsPrintPath,
   prepGroupPrintPath,
   prepOrderLines,
   prepSessionTitle,
+  prepSessionWorkflow,
   sortPrepOrdersForBoard,
   summarizePrepOrderLines,
   type PrepCapacity,
@@ -240,6 +242,7 @@ function KitchenPrepListContent() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkStatusUpdating, setBulkStatusUpdating] = useState(false);
+  const [sessionBusy, setSessionBusy] = useState<string | null>(null);
   const [bulkStatusTarget, setBulkStatusTarget] = useState<PrepStatus>('prepped');
   const [sortKey, setSortKey] = useState<SortKey>(() => {
     const key = savedUi?.sortKey;
@@ -392,7 +395,7 @@ function KitchenPrepListContent() {
     [filteredOrders, sortKey, sortDir],
   );
 
-  const sessionGroups = useMemo(() => groupPrepOrdersForBoard(sortedOrders), [sortedOrders]);
+  const dayGroups = useMemo(() => groupPrepDaysForBoard(sortedOrders), [sortedOrders]);
 
   const applyDateRange = (start: string, end: string) => {
     setDateStart(start);
@@ -667,6 +670,46 @@ function KitchenPrepListContent() {
       next.delete(id);
       return next;
     });
+  };
+
+  const applySessionAction = async (
+    sessionKey: string,
+    ids: number[],
+    action: 'start' | 'complete',
+  ) => {
+    if (sessionBusy || ids.length === 0) return;
+    if (action === 'complete') {
+      const ok = confirm(
+        bi(
+          'Mark every open order in this session complete at the expected yield? They share one completion time.',
+          '將此時段所有未完成訂單按預期樽數標記燉製完成？完成時間相同。',
+        ),
+      );
+      if (!ok) return;
+    }
+    setSessionBusy(sessionKey);
+    setError('');
+    try {
+      const res = await fetch('/api/kitchen-prep/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const updated = Array.isArray(data.updated) ? (data.updated as PrepOrder[]) : [];
+      if (updated.length > 0) {
+        const byId = new Map(updated.map((order) => [order.id, order]));
+        setOrders((prev) => prev.map((order) => byId.get(order.id) ?? order));
+        clearKitchenPrepListCache();
+      }
+      if (!res.ok || data.error) {
+        setError(data.error || bi('Failed to update this session', '更新此時段失敗'));
+      }
+    } catch {
+      setError(bi('Failed to update this session', '更新此時段失敗'));
+    } finally {
+      setSessionBusy(null);
+    }
   };
 
   const applyBulkStatus = async (targetStatus: PrepStatus) => {
@@ -962,30 +1005,90 @@ function KitchenPrepListContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sessionGroups.map((group) => (
-                <Fragment key={group.sessionKey}>
-                  <tr className="bg-brand-50/70">
+              {dayGroups.map((day) => (
+                <Fragment key={day.stewingDate || 'undated'}>
+                  <tr className="bg-stone-800 text-white">
                     <td colSpan={9} className="px-4 py-3">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-gray-900 mb-2">
-                            {prepSessionTitle(group.stewingDate, group.scheduleSlot)}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">{day.stewingDate || '—'}</p>
+                          <p className="text-xs text-stone-300 mt-0.5">
+                            {bi('Day materials', '全日材料')} · AM + PM + {bi('unset', '未設定')}
                           </p>
-                          <PrepSessionSummary lines={group.summary.lines} buckets={group.summary.potBuckets} />
                         </div>
                         <Link
-                          href={prepGroupPrintPath(group.orders.map((order) => order.id))}
-                          className="inline-flex items-center justify-center shrink-0 min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-brand-600 text-white hover:bg-brand-700"
+                          href={prepDayMaterialsPrintPath(day.stewingDate)}
+                          className="inline-flex items-center justify-center shrink-0 min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-white text-stone-900 hover:bg-stone-100"
                         >
-                          {bi(
-                            `Print ${group.orders.length} prep sheet(s)`,
-                            `列印 ${group.orders.length} 張備料單`,
-                          )}
+                          {bi('Print day materials', '列印全日材料')}
                         </Link>
                       </div>
                     </td>
                   </tr>
-                  {group.orders.map((order) => renderOrderRow(order))}
+                  {day.sessions.map((group) => {
+                    const workflow = prepSessionWorkflow(group.orders.map((order) => order.status));
+                    const busy = sessionBusy === group.sessionKey;
+                    return (
+                      <Fragment key={group.sessionKey}>
+                        <tr className="bg-brand-50/70">
+                          <td colSpan={9} className="px-4 py-3">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-gray-900 mb-2">
+                                  {prepSessionTitle(group.stewingDate, group.scheduleSlot)}
+                                </p>
+                                <PrepSessionSummary lines={group.summary.lines} buckets={group.summary.potBuckets} />
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                {workflow === 'start' && (
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(sessionBusy)}
+                                    onClick={() => {
+                                      void applySessionAction(
+                                        group.sessionKey,
+                                        group.orders.map((order) => order.id),
+                                        'start',
+                                      );
+                                    }}
+                                    className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
+                                  >
+                                    {busy ? '更新中…' : bi('Start stewing', '開始燉製')}
+                                  </button>
+                                )}
+                                {workflow === 'complete' && (
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(sessionBusy)}
+                                    onClick={() => {
+                                      void applySessionAction(
+                                        group.sessionKey,
+                                        group.orders.map((order) => order.id),
+                                        'complete',
+                                      );
+                                    }}
+                                    className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-green-700 text-white hover:bg-green-800 disabled:opacity-50"
+                                  >
+                                    {busy ? '更新中…' : bi('Complete stewing', '燉製完成')}
+                                  </button>
+                                )}
+                                <Link
+                                  href={prepGroupPrintPath(group.orders.map((order) => order.id))}
+                                  className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-brand-600 text-white hover:bg-brand-700"
+                                >
+                                  {bi(
+                                    `Print ${group.orders.length} prep sheet(s)`,
+                                    `列印 ${group.orders.length} 張備料單`,
+                                  )}
+                                </Link>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                        {group.orders.map((order) => renderOrderRow(order))}
+                      </Fragment>
+                    );
+                  })}
                 </Fragment>
               ))}
             </tbody>

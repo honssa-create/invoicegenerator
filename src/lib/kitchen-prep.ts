@@ -214,6 +214,26 @@ export function prepGroupPrintPath(ids: number[]): string {
   return `/kitchen-prep/print?ids=${clean.join(',')}`;
 }
 
+/** One combined materials sheet for every order on a stewing date (AM + PM + unset). */
+export function prepDayMaterialsPrintPath(stewingDate: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(stewingDate) ? stewingDate : '';
+  return `/kitchen-prep/day-print?date=${encodeURIComponent(date)}`;
+}
+
+/**
+ * Session-group workflow. One button at a time:
+ * start until every open order is stewing, then complete, then nothing.
+ * Completed orders do not keep the group on the start button.
+ */
+export type PrepSessionWorkflow = 'start' | 'complete' | 'done';
+
+export function prepSessionWorkflow(statuses: Array<PrepStatus | string>): PrepSessionWorkflow {
+  const open = statuses.filter((status) => status !== 'completed');
+  if (open.length === 0) return 'done';
+  if (open.every((status) => status === 'stewing')) return 'complete';
+  return 'start';
+}
+
 export const PREP_STATUSES = ['not_started', 'scheduled', 'prepped', 'stewing', 'completed'] as const;
 export type PrepStatus = (typeof PREP_STATUSES)[number];
 
@@ -1641,6 +1661,178 @@ export function groupPrepOrdersForBoard<
     if (summary) group.summary = summary;
   }
   return groups;
+}
+
+export interface PrepBoardDay<T> {
+  stewingDate: string;
+  sessions: PrepBoardGroup<T>[];
+  orders: T[];
+}
+
+/** Calendar days wrapping the AM / PM / unset session groups. Input order is kept. */
+export function groupPrepDaysForBoard<
+  T extends PrepLineSource & { stewing_date: string; schedule_slot?: string | null },
+>(orders: T[]): PrepBoardDay<T>[] {
+  const days: PrepBoardDay<T>[] = [];
+  const index = new Map<string, PrepBoardDay<T>>();
+  for (const session of groupPrepOrdersForBoard(orders)) {
+    let day = index.get(session.stewingDate);
+    if (!day) {
+      day = { stewingDate: session.stewingDate, sessions: [], orders: [] };
+      index.set(session.stewingDate, day);
+      days.push(day);
+    }
+    day.sessions.push(session);
+    day.orders.push(...session.orders);
+  }
+  return days;
+}
+
+export interface DayMaterialLine {
+  capacity: PrepCapacity;
+  flavor: PrepFlavor;
+  label: string;
+  bottles: number;
+  birdNest: number;
+  osmanthus: number;
+  redDate: number;
+  rockSugar: number;
+  slabSugar: number;
+}
+
+export interface DayMaterialsOrderChip {
+  id: number;
+  orderCode: string;
+  scheduleSlot: PrepScheduleSlot | null;
+  bottles: number;
+}
+
+export interface DayMaterialsSummary {
+  stewingDate: string;
+  lines: DayMaterialLine[];
+  totals: {
+    bottles: number;
+    birdNest: number;
+    osmanthus: number;
+    redDate: number;
+    rockSugar: number;
+    slabSugar: number;
+  };
+  orders: DayMaterialsOrderChip[];
+  slotBottles: { AM: number; PM: number; unset: number };
+}
+
+type DayMaterialsOrder = PrepLineSource & {
+  id?: number;
+  order_code?: string;
+  order_type: PrepOrderType;
+  stewing_date: string;
+  schedule_slot?: string | null;
+};
+
+/** Drop actual-production extras so grams follow 今次 order qty, same as a prep sheet. */
+function prepOrderAtOrderQty<T extends PrepLineSource>(order: T): T {
+  const lines = prepOrderLines(order).map((line) => ({
+    ...line,
+    actual_qty_osmanthus: null,
+    actual_qty_red_date: null,
+    actual_qty_rock_sugar: null,
+  }));
+  return {
+    ...order,
+    actual_qty_osmanthus: null,
+    actual_qty_red_date: null,
+    actual_qty_rock_sugar: null,
+    lines,
+  };
+}
+
+/**
+ * Combined materials for one stewing date.
+ * Sums 今次 order quantities across AM, PM, and unset. Completed orders count,
+ * because morning prep still needs the whole day's plan. Actual extras do not.
+ */
+export function summarizeDayMaterials(
+  orders: DayMaterialsOrder[],
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
+): DayMaterialsSummary {
+  const byKey = new Map<string, DayMaterialLine>();
+  const ordersOut: DayMaterialsOrderChip[] = [];
+  const slotBottles = { AM: 0, PM: 0, unset: 0 };
+  const totals = {
+    bottles: 0,
+    birdNest: 0,
+    osmanthus: 0,
+    redDate: 0,
+    rockSugar: 0,
+    slabSugar: 0,
+  };
+
+  for (const order of orders) {
+    const calc = computePrepCalculationForOrder(prepOrderAtOrderQty(order), formulas);
+    let orderBottles = 0;
+    for (const row of calc.rows) {
+      if (row.disabled || row.orderQty <= 0) continue;
+      const capacity = row.capacity || order.capacity;
+      const grams = row.ingredientGrams || {};
+      const piece: DayMaterialLine = {
+        capacity,
+        flavor: row.flavor,
+        label: PREP_FLAVOR_SHORT[row.flavor],
+        bottles: row.orderQty,
+        birdNest: row.birdNestGrams || 0,
+        osmanthus: grams['桂花'] || 0,
+        redDate: grams['紅棗'] || 0,
+        rockSugar: grams['冰糖'] || 0,
+        slabSugar: grams['片糖'] || 0,
+      };
+      const key = `${capacity}:${row.flavor}`;
+      const prev = byKey.get(key);
+      if (!prev) byKey.set(key, piece);
+      else {
+        prev.bottles += piece.bottles;
+        prev.birdNest = round2(prev.birdNest + piece.birdNest);
+        prev.osmanthus = round2(prev.osmanthus + piece.osmanthus);
+        prev.redDate = round2(prev.redDate + piece.redDate);
+        prev.rockSugar = round2(prev.rockSugar + piece.rockSugar);
+        prev.slabSugar = round2(prev.slabSugar + piece.slabSugar);
+      }
+      orderBottles += piece.bottles;
+      totals.bottles += piece.bottles;
+      totals.birdNest = round2(totals.birdNest + piece.birdNest);
+      totals.osmanthus = round2(totals.osmanthus + piece.osmanthus);
+      totals.redDate = round2(totals.redDate + piece.redDate);
+      totals.rockSugar = round2(totals.rockSugar + piece.rockSugar);
+      totals.slabSugar = round2(totals.slabSugar + piece.slabSugar);
+    }
+    const slot = parsePrepScheduleSlot(order.schedule_slot);
+    if (slot === 'AM' || slot === 'PM') slotBottles[slot] += orderBottles;
+    else slotBottles.unset += orderBottles;
+    ordersOut.push({
+      id: order.id ?? 0,
+      orderCode: order.order_code || '',
+      scheduleSlot: slot,
+      bottles: orderBottles,
+    });
+  }
+
+  const capacityRank = (capacity: string) => {
+    const index = PREP_CAPACITIES.indexOf(capacity as (typeof PREP_CAPACITIES)[number]);
+    return index < 0 ? PREP_CAPACITIES.length : index;
+  };
+  const lines = Array.from(byKey.values()).sort((a, b) => {
+    const cap = capacityRank(a.capacity) - capacityRank(b.capacity);
+    if (cap !== 0) return cap;
+    return PREP_FLAVORS.indexOf(a.flavor) - PREP_FLAVORS.indexOf(b.flavor);
+  });
+
+  return {
+    stewingDate: orders[0]?.stewing_date || '',
+    lines,
+    totals,
+    orders: ordersOut,
+    slotBottles,
+  };
 }
 
 function mergePrepCalculations(orderType: PrepOrderType, parts: PrepCalculation[]): PrepCalculation {

@@ -679,6 +679,130 @@ export async function bulkSetPrepOrderStatus(
   return { updated, not_found, skipped };
 }
 
+const SESSION_GROUP_LIMIT = 100;
+
+function uniquePrepIds(ids: number[]): number[] {
+  return Array.from(
+    new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)),
+  );
+}
+
+/**
+ * Mark every open order in a session as stewing with one shared start time.
+ * Already-stewing rows are rewritten so the batch clock matches.
+ */
+export async function startPrepSession(
+  ownerId: number,
+  ids: number[],
+): Promise<{ updated: PrepOrder[]; skipped: number[]; not_found: number[] }> {
+  const uniqueIds = uniquePrepIds(ids);
+  if (uniqueIds.length > SESSION_GROUP_LIMIT) {
+    throw new Error(`Too many orders in one session (max ${SESSION_GROUP_LIMIT})`);
+  }
+  const byId = await getPrepOrdersByIds(uniqueIds);
+  const startedAt = hkNowDateTime();
+  const updated: PrepOrder[] = [];
+  const skipped: number[] = [];
+  const not_found: number[] = [];
+  const toUpdate: PrepOrder[] = [];
+
+  for (const id of uniqueIds) {
+    const existing = byId.get(id);
+    if (!existing || existing.user_id !== ownerId) {
+      not_found.push(id);
+      continue;
+    }
+    if (existing.status === 'completed') {
+      skipped.push(id);
+      continue;
+    }
+    toUpdate.push(existing);
+  }
+
+  if (toUpdate.length > 0) {
+    await db.transaction(async () => {
+      for (const existing of toUpdate) {
+        await db
+          .prepare(
+            `UPDATE kitchen_prep_orders
+             SET status = 'stewing', stewing_started_at = ?, updated_at = datetime('now')
+             WHERE id = ?`,
+          )
+          .run(startedAt, existing.id);
+        updated.push({
+          ...existing,
+          status: 'stewing',
+          stewing_started_at: startedAt,
+        });
+      }
+    });
+  }
+
+  return { updated, skipped, not_found };
+}
+
+/**
+ * Complete every open order in a session at the expected yield, one completion time.
+ * Refuses before any write when an open order is not already stewing.
+ */
+export async function completePrepSession(
+  ownerId: number,
+  actorUserId: number,
+  operatorName: string,
+  ids: number[],
+): Promise<{ updated: PrepOrder[]; skipped: number[]; not_found: number[]; error?: string }> {
+  const uniqueIds = uniquePrepIds(ids);
+  if (uniqueIds.length > SESSION_GROUP_LIMIT) {
+    throw new Error(`Too many orders in one session (max ${SESSION_GROUP_LIMIT})`);
+  }
+  const byId = await getPrepOrdersByIds(uniqueIds);
+  const skipped: number[] = [];
+  const not_found: number[] = [];
+  const open: PrepOrder[] = [];
+
+  for (const id of uniqueIds) {
+    const existing = byId.get(id);
+    if (!existing || existing.user_id !== ownerId) {
+      not_found.push(id);
+      continue;
+    }
+    if (existing.status === 'completed') {
+      skipped.push(id);
+      continue;
+    }
+    open.push(existing);
+  }
+
+  if (open.some((order) => order.status !== 'stewing')) {
+    throw new Error('Start stewing for this session before marking it complete');
+  }
+
+  const completedAt = hkNowDateTime();
+  const updated: PrepOrder[] = [];
+  let error: string | undefined;
+  for (const existing of open) {
+    try {
+      const result = await completePrepProduction(
+        existing.id,
+        actorUserId,
+        operatorName,
+        {
+          actual_yield: 0,
+          completion_remarks: 'Session group 時段完成',
+        },
+        { existing, matchExpected: true, completedAt },
+      );
+      if (result) updated.push(result.order);
+      else skipped.push(existing.id);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to complete session';
+      break;
+    }
+  }
+
+  return { updated, skipped, not_found, ...(error ? { error } : {}) };
+}
+
 export async function updatePrepOrder(
   id: number | string,
   input: Partial<{
@@ -915,7 +1039,7 @@ export async function completePrepProduction(
     completion_remarks?: string | null;
     splits?: PrepCompletionSplit[];
   },
-  opts?: { existing?: PrepOrder },
+  opts?: { existing?: PrepOrder; matchExpected?: boolean; completedAt?: string },
 ): Promise<{ order: PrepOrder; calculation: PrepCalculation } | null> {
   const existing = opts?.existing ?? (await getPrepOrder(id));
   if (!existing) return null;
@@ -927,9 +1051,13 @@ export async function completePrepProduction(
 
   const calculation = computePrepCalculationForOrder(existing, stew);
   const expectedYield = calculation.totals.bottles;
-  const actualYield = Math.max(0, Math.round(input.actual_yield));
   const remarks = input.completion_remarks?.trim() || null;
-  const splits = normalizeCompletionSplits(input.splits, existing);
+  const splits = opts?.matchExpected
+    ? defaultCompletionSplits(calculation, existing.capacity)
+    : normalizeCompletionSplits(input.splits, existing);
+  const actualYield = opts?.matchExpected
+    ? splits.reduce((sum, split) => sum + Math.max(0, Math.round(split.qty)), 0)
+    : Math.max(0, Math.round(input.actual_yield));
 
   if (splits.length > 0) {
     const splitSum = splits.reduce((sum, s) => sum + s.qty, 0);
@@ -989,7 +1117,7 @@ export async function completePrepProduction(
     if (stockResult.error) throw new Error(stockResult.error);
   }
 
-  const completedAt = hkNowDateTime();
+  const completedAt = opts?.completedAt?.trim() || hkNowDateTime();
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET

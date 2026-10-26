@@ -1730,6 +1730,10 @@ export interface DayMaterialLine {
   redDate: number;
   rockSugar: number;
   slabSugar: number;
+  /** Grams of 水(煮糖) from the catalog formula. 0 when that per-bottle amount is 0. */
+  boilSugar: number;
+  /** Grams of 水(冷泡). Default catalog sets this on 桂花 only. */
+  coldSoak: number;
 }
 
 export interface DayMaterialsOrderChip {
@@ -1737,6 +1741,9 @@ export interface DayMaterialsOrderChip {
   orderCode: string;
   scheduleSlot: PrepScheduleSlot | null;
   bottles: number;
+  orderType: PrepOrderType;
+  /** Compact 今次 qty, e.g. `45g 桂60+紅60`. */
+  detail: string;
 }
 
 export interface DayMaterialsSummary {
@@ -1749,6 +1756,8 @@ export interface DayMaterialsSummary {
     redDate: number;
     rockSugar: number;
     slabSugar: number;
+    boilSugar: number;
+    coldSoak: number;
   };
   orders: DayMaterialsOrderChip[];
   slotBottles: { AM: number; PM: number; unset: number };
@@ -1761,6 +1770,81 @@ type DayMaterialsOrder = PrepLineSource & {
   stewing_date: string;
   schedule_slot?: string | null;
 };
+
+function prepCapacityRank(capacity: string): number {
+  const index = PREP_CAPACITIES.indexOf(capacity as (typeof PREP_CAPACITIES)[number]);
+  return index < 0 ? PREP_CAPACITIES.length : index;
+}
+
+const DAY_FLAVOR_MARK: Record<PrepFlavor, string> = {
+  osmanthus: '桂',
+  red_date: '紅',
+  rock_sugar: '冰',
+};
+
+/** Jar shape on the day sheet. 75g 高身 and 大肚 stay distinct. */
+export function dayMaterialsCapacityLabel(capacity: PrepCapacity): string {
+  if (capacity === '75g') return '75g（高身）';
+  if (capacity === '75g_big_belly') return '75g（大肚）';
+  return capacityScheduleTag(capacity);
+}
+
+/** Compact 今次 line for the day sheet order list, e.g. `45g 桂60+紅60 · 25g 冰25`. */
+export function formatDayMaterialsOrderDetail(order: PrepLineSource): string {
+  const parts: string[] = [];
+  for (const line of prepOrderLines(order)) {
+    const bits: string[] = [];
+    const qtys: Record<PrepFlavor, number> = {
+      osmanthus: line.qty_osmanthus,
+      red_date: line.qty_red_date,
+      rock_sugar: line.qty_rock_sugar,
+    };
+    for (const flavor of PREP_FLAVORS) {
+      const qty = Math.max(0, Math.round(Number(qtys[flavor]) || 0));
+      if (qty > 0) bits.push(`${DAY_FLAVOR_MARK[flavor]}${qty}`);
+    }
+    if (bits.length) parts.push(`${dayMaterialsCapacityLabel(line.capacity)} ${bits.join('+')}`);
+  }
+  return parts.join(' · ');
+}
+
+const PREP_WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'] as const;
+
+/** `2026-10-27 星期二 · 全日`. Parses the date as a calendar day, not UTC midnight. */
+export function formatPrepDayHeading(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!match) return iso || '—';
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime())) return iso;
+  return `${iso} ${PREP_WEEKDAYS[date.getDay()]} · 全日`;
+}
+
+/** Slots that actually appear, in AM → PM → unset order. */
+export function formatPrepDaySlotCoverage(slots: Array<PrepScheduleSlot | null | undefined>): string {
+  let am = false;
+  let pm = false;
+  let unset = false;
+  for (const slot of slots) {
+    if (slot === 'AM') am = true;
+    else if (slot === 'PM') pm = true;
+    else unset = true;
+  }
+  const parts: string[] = [];
+  if (am) parts.push('AM');
+  if (pm) parts.push('PM');
+  if (unset) parts.push('未設定');
+  return parts.join(' + ') || '—';
+}
+
+export function formatPrepDayOrderTypes(types: Array<PrepOrderType | null | undefined>): string {
+  const unique: PrepOrderType[] = [];
+  for (const type of types) {
+    if (!type || unique.includes(type)) continue;
+    unique.push(type);
+  }
+  if (!unique.length) return '—';
+  return unique.map((type) => PREP_ORDER_TYPE_LABELS[type]).join(' · ');
+}
 
 /** Drop actual-production extras so grams follow 今次 order qty, same as a prep sheet. */
 function prepOrderAtOrderQty<T extends PrepLineSource>(order: T): T {
@@ -1798,6 +1882,8 @@ export function summarizeDayMaterials(
     redDate: 0,
     rockSugar: 0,
     slabSugar: 0,
+    boilSugar: 0,
+    coldSoak: 0,
   };
 
   for (const order of orders) {
@@ -1817,6 +1903,8 @@ export function summarizeDayMaterials(
         redDate: grams['紅棗'] || 0,
         rockSugar: grams['冰糖'] || 0,
         slabSugar: grams['片糖'] || 0,
+        boilSugar: grams[STEW_WATER_BOIL_SUGAR] || 0,
+        coldSoak: grams[STEW_WATER_COLD_SOAK] || 0,
       };
       const key = `${capacity}:${row.flavor}`;
       const prev = byKey.get(key);
@@ -1828,6 +1916,8 @@ export function summarizeDayMaterials(
         prev.redDate = round2(prev.redDate + piece.redDate);
         prev.rockSugar = round2(prev.rockSugar + piece.rockSugar);
         prev.slabSugar = round2(prev.slabSugar + piece.slabSugar);
+        prev.boilSugar = round2(prev.boilSugar + piece.boilSugar);
+        prev.coldSoak = round2(prev.coldSoak + piece.coldSoak);
       }
       orderBottles += piece.bottles;
       totals.bottles += piece.bottles;
@@ -1836,6 +1926,8 @@ export function summarizeDayMaterials(
       totals.redDate = round2(totals.redDate + piece.redDate);
       totals.rockSugar = round2(totals.rockSugar + piece.rockSugar);
       totals.slabSugar = round2(totals.slabSugar + piece.slabSugar);
+      totals.boilSugar = round2(totals.boilSugar + piece.boilSugar);
+      totals.coldSoak = round2(totals.coldSoak + piece.coldSoak);
     }
     const slot = parsePrepScheduleSlot(order.schedule_slot);
     if (slot === 'AM' || slot === 'PM') slotBottles[slot] += orderBottles;
@@ -1845,15 +1937,13 @@ export function summarizeDayMaterials(
       orderCode: order.order_code || '',
       scheduleSlot: slot,
       bottles: orderBottles,
+      orderType: order.order_type,
+      detail: formatDayMaterialsOrderDetail(order),
     });
   }
 
-  const capacityRank = (capacity: string) => {
-    const index = PREP_CAPACITIES.indexOf(capacity as (typeof PREP_CAPACITIES)[number]);
-    return index < 0 ? PREP_CAPACITIES.length : index;
-  };
   const lines = Array.from(byKey.values()).sort((a, b) => {
-    const cap = capacityRank(a.capacity) - capacityRank(b.capacity);
+    const cap = prepCapacityRank(a.capacity) - prepCapacityRank(b.capacity);
     if (cap !== 0) return cap;
     return PREP_FLAVORS.indexOf(a.flavor) - PREP_FLAVORS.indexOf(b.flavor);
   });
@@ -1864,6 +1954,160 @@ export function summarizeDayMaterials(
     totals,
     orders: ordersOut,
     slotBottles,
+  };
+}
+
+export type DaySugarWaterBoxKey =
+  | 'boilSugar'
+  | 'coldSoak'
+  | 'slabSugar'
+  | 'osmanthus'
+  | 'rockSugar'
+  | 'redDate';
+
+export interface DaySugarWaterBox {
+  key: DaySugarWaterBoxKey;
+  label: string;
+  amount: number;
+  highlight: boolean;
+}
+
+export interface DaySugarWaterGroup {
+  id: 'osmanthus' | 'combo';
+  title: string;
+  subtitle: string;
+  bottles: number;
+  /** e.g. `紅130 + 冰25`. Empty for the osmanthus group. */
+  bottleNote: string;
+  rows: DayMaterialLine[];
+  birdNest: number;
+  osmanthus: number;
+  redDate: number;
+  rockSugar: number;
+  slabSugar: number;
+  boilSugar: number;
+  /**
+   * Cold-soak grams. The combined 紅棗＋冰糖 group always leaves this at 0
+   * and does not render a cold-soak column or box.
+   */
+  coldSoak: number;
+  boxes: DaySugarWaterBox[];
+}
+
+export interface DaySugarWaterFooter {
+  bottles: number;
+  birdNest: number;
+  osmanthusBoil: number;
+  comboBoil: number;
+  boilSugar: number;
+  osmanthusColdSoak: number;
+}
+
+export interface DaySugarWaterSheet {
+  groups: DaySugarWaterGroup[];
+  footer: DaySugarWaterFooter;
+}
+
+function sumDayMaterialLines(lines: DayMaterialLine[]) {
+  const totals = {
+    bottles: 0,
+    birdNest: 0,
+    osmanthus: 0,
+    redDate: 0,
+    rockSugar: 0,
+    slabSugar: 0,
+    boilSugar: 0,
+    coldSoak: 0,
+  };
+  for (const line of lines) {
+    totals.bottles += line.bottles;
+    totals.birdNest = round2(totals.birdNest + line.birdNest);
+    totals.osmanthus = round2(totals.osmanthus + line.osmanthus);
+    totals.redDate = round2(totals.redDate + line.redDate);
+    totals.rockSugar = round2(totals.rockSugar + line.rockSugar);
+    totals.slabSugar = round2(totals.slabSugar + line.slabSugar);
+    totals.boilSugar = round2(totals.boilSugar + line.boilSugar);
+    totals.coldSoak = round2(totals.coldSoak + line.coldSoak);
+  }
+  return totals;
+}
+
+/**
+ * Day sheet sugar-water groups.
+ * ① 桂花 is its own pot (boil + cold soak).
+ * ② 紅棗 and 冰糖 share one pot: boil sugar only, no cold soak.
+ * Both groups are always returned so an empty flavor still shows its boxes.
+ */
+export function buildDaySugarWaterSheet(summary: DayMaterialsSummary): DaySugarWaterSheet {
+  const osmanthusRows = summary.lines
+    .filter((line) => line.flavor === 'osmanthus' && line.bottles > 0)
+    .sort((a, b) => prepCapacityRank(a.capacity) - prepCapacityRank(b.capacity));
+  const comboRows = summary.lines
+    .filter((line) => (line.flavor === 'red_date' || line.flavor === 'rock_sugar') && line.bottles > 0)
+    .sort((a, b) => {
+      const flavor = PREP_FLAVORS.indexOf(a.flavor) - PREP_FLAVORS.indexOf(b.flavor);
+      if (flavor !== 0) return flavor;
+      return prepCapacityRank(a.capacity) - prepCapacityRank(b.capacity);
+    });
+
+  const osmanthus = sumDayMaterialLines(osmanthusRows);
+  const combo = sumDayMaterialLines(comboRows);
+  const redBottles = comboRows
+    .filter((line) => line.flavor === 'red_date')
+    .reduce((sum, line) => sum + line.bottles, 0);
+  const rockBottles = comboRows
+    .filter((line) => line.flavor === 'rock_sugar')
+    .reduce((sum, line) => sum + line.bottles, 0);
+  const bottleBits: string[] = [];
+  if (redBottles > 0) bottleBits.push(`紅${redBottles}`);
+  if (rockBottles > 0) bottleBits.push(`冰${rockBottles}`);
+
+  const groups: DaySugarWaterGroup[] = [
+    {
+      id: 'osmanthus',
+      title: '① 桂花 Osmanthus',
+      subtitle: '糖水組（獨立）',
+      bottleNote: '',
+      rows: osmanthusRows,
+      ...osmanthus,
+      boxes: [
+        { key: 'boilSugar', label: '要準備糖水量（煮糖）', amount: osmanthus.boilSugar, highlight: true },
+        { key: 'coldSoak', label: '冷泡水', amount: osmanthus.coldSoak, highlight: true },
+        { key: 'slabSugar', label: '片糖', amount: osmanthus.slabSugar, highlight: false },
+        { key: 'osmanthus', label: '桂花乾', amount: osmanthus.osmanthus, highlight: false },
+      ],
+    },
+    {
+      id: 'combo',
+      title: '② 紅棗 + 冰糖',
+      subtitle: '合埋一組糖水',
+      bottleNote: bottleBits.join(' + '),
+      rows: comboRows,
+      ...combo,
+      coldSoak: 0,
+      boxes: [
+        {
+          key: 'boilSugar',
+          label: '要準備糖水量（煮糖）· 合組總計',
+          amount: combo.boilSugar,
+          highlight: true,
+        },
+        { key: 'rockSugar', label: '冰糖（入糖水）合計', amount: combo.rockSugar, highlight: false },
+        { key: 'redDate', label: '紅棗', amount: combo.redDate, highlight: false },
+      ],
+    },
+  ];
+
+  return {
+    groups,
+    footer: {
+      bottles: summary.totals.bottles,
+      birdNest: summary.totals.birdNest,
+      osmanthusBoil: osmanthus.boilSugar,
+      comboBoil: combo.boilSugar,
+      boilSugar: round2(osmanthus.boilSugar + combo.boilSugar),
+      osmanthusColdSoak: osmanthus.coldSoak,
+    },
   };
 }
 
@@ -2218,6 +2462,25 @@ export function formatPrepMaterialAmount(qty: number): string {
   if (!qty) return '—';
   const rounded = round2(qty);
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+/** Day-sheet amount. Zero (including a 0 catalog water line) is an em dash, same as prep sheets. */
+export function formatDayMaterialAmount(qty: number): string {
+  if (!qty) return '—';
+  const rounded = round2(qty);
+  if (!rounded) return '—';
+  const negative = rounded < 0;
+  const fixed = Math.abs(rounded).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+  const [whole, frac] = fixed.split('.');
+  const withCommas = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const text = frac ? `${withCommas}.${frac}` : withCommas;
+  return negative ? `-${text}` : text;
+}
+
+/** Gram label for summary boxes. A zero amount stays `—` with no unit. */
+export function formatDayMaterialGrams(qty: number): string {
+  const text = formatDayMaterialAmount(qty);
+  return text === '—' ? text : `${text} g`;
 }
 
 /** Shared typography tokens for Kitchen Summary screen + print. */

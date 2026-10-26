@@ -114,6 +114,23 @@
     max-width: 100%;
     overflow-x: auto;
   }
+
+  .prep-day-boxes {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px 12px;
+  }
+
+  .prep-day-boxes-combo {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .prep-day-boxes,
+  .prep-day-boxes-combo {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media print {
@@ -178,6 +195,54 @@
 
   .prep-print-root .prep-summary-table--print tr {
     page-break-inside: avoid;
+  }
+
+  /* Day materials sheet — portrait A4, one flavor group kept together. */
+  @page prep-day {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  .prep-day-print-root {
+    background: #fff !important;
+    min-height: 0 !important;
+  }
+
+  .prep-day-print-root .prep-day-sheet {
+    page: prep-day;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 8mm 7mm !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+  }
+
+  .prep-day-print-root .prep-day-group,
+  .prep-day-print-root .prep-day-footer,
+  .prep-day-print-root .prep-day-orders,
+  .prep-day-print-root .prep-day-head {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .prep-day-print-root .prep-day-scroll {
+    overflow: visible !important;
+  }
+
+  .prep-day-print-root .prep-day-boxes {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .prep-day-print-root .prep-day-boxes-combo {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .prep-day-print-root table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed;
   }
 
   .no-print {

@@ -1,4 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import PrepSummaryTable from '@/components/kitchen-prep/PrepSummaryTable';
 import {
   buildPrepMaterialsTable,
   CAPACITY_FLAVOR_FORMULAS,
@@ -11,6 +14,16 @@ import {
   type PrepBatchSibling,
   type PrepCapacityLine,
 } from './kitchen-prep';
+
+const MATERIAL_HEADERS = ['燕餅 g', '桂花 g', '冰糖 g', '片糖 g', '水(煮糖) g', '水(冷泡) g'];
+
+function tableRows(html: string): string[][] {
+  return [...html.matchAll(/<tr[\s\S]*?<\/tr>/g)].map((match) =>
+    [...match[0].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((cell) =>
+      cell[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+    )
+  );
+}
 
 function sibling(partial: Partial<PrepBatchSibling> & Pick<PrepBatchSibling, 'id' | 'order_code'>): PrepBatchSibling {
   return {
@@ -200,5 +213,47 @@ describe('prep materials table', () => {
     expect(table.boxes.map((box) => box.capacity)).toEqual(['25g']);
     expect(table.prior).toBe(0);
     expect(table.now).toBe(25);
+  });
+
+  it('renders screen and print without 上單已燉 or 玻璃瓶 columns, including the footer', () => {
+    const prior = sibling({
+      id: 1,
+      order_code: '#12105',
+      stewing_date: '2026-10-22',
+      status: 'completed',
+      lines: [line({ capacity: '45g', qty_osmanthus: 40 })],
+      completion_splits: [{ label: '桂花 45g', qty: 40, flavor: 'osmanthus', capacity: '45g' }],
+    });
+    const current = sibling({
+      id: 3,
+      order_code: '#12105',
+      stewing_date: '2026-10-23',
+      status: 'scheduled',
+      lines: [line({ capacity: '25g', qty_rock_sugar: 25 })],
+    });
+    const batch = resolvePrepBatch(current.id, [prior, current]);
+
+    for (const variant of ['screen', 'print'] as const) {
+      const html = renderToStaticMarkup(
+        createElement(PrepSummaryTable, {
+          order: current,
+          priorLines: batch.priorLines,
+          batchLabel: batch.label,
+          variant,
+        })
+      );
+      const rows = tableRows(html);
+      const header = rows.find((row) => row[0] === '口味');
+      expect(header).toEqual(['口味', '今次要燉', ...MATERIAL_HEADERS]);
+      expect(html).not.toContain('玻璃瓶');
+      expect(rows.some((row) => row.includes('上單已燉') || row.includes('玻璃瓶'))).toBe(false);
+
+      const osmanthus = rows.find((row) => row[0] === '桂花');
+      expect(osmanthus).toEqual(['桂花', '0', '—', '—', '—', '—', '—', '—']);
+
+      const footer = rows.find((row) => row[0] === '各容量合計');
+      expect(footer).toEqual(['各容量合計', '25', '10', '—', '49.5', '—', '—', '—']);
+      expect(footer).not.toContain('40');
+    }
   });
 });

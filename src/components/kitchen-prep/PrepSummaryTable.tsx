@@ -37,21 +37,19 @@ const TONE: Record<PrepMaterialsTone, { box: string; head: string }> = {
 };
 
 const MATERIAL_COLUMNS: { key: keyof PrepMaterialAmounts; label: string; width: string }[] = [
-  { key: 'birdNest', label: '燕餅 g', width: '8%' },
-  { key: 'osmanthus', label: '桂花 g', width: '8%' },
-  { key: 'rockSugar', label: '冰糖 g', width: '8%' },
-  { key: 'slabSugar', label: '片糖 g', width: '8%' },
-  { key: 'boilSugarWater', label: '水(煮糖) g', width: '11%' },
-  { key: 'coldSoakWater', label: '水(冷泡) g', width: '11%' },
-  { key: 'bottles', label: '玻璃瓶', width: '9%' },
+  { key: 'birdNest', label: '燕餅 g', width: '9%' },
+  { key: 'osmanthus', label: '桂花 g', width: '9%' },
+  { key: 'rockSugar', label: '冰糖 g', width: '9%' },
+  { key: 'slabSugar', label: '片糖 g', width: '9%' },
+  { key: 'boilSugarWater', label: '水(煮糖) g', width: '13%' },
+  { key: 'coldSoakWater', label: '水(冷泡) g', width: '13%' },
 ];
 
 function MaterialsCols() {
   return (
     <colgroup>
-      <col style={{ width: '13%' }} />
-      <col style={{ width: '12%' }} />
-      <col style={{ width: '12%' }} />
+      <col style={{ width: '22%' }} />
+      <col style={{ width: '16%' }} />
       {MATERIAL_COLUMNS.map((col) => (
         <col key={col.key} style={{ width: col.width }} />
       ))}
@@ -83,7 +81,6 @@ export default function PrepSummaryTable({
   const nowSize = isPrint ? 'text-xl' : 'text-2xl';
   const nowClass = `prep-materials-now text-right font-bold tabular-nums leading-none text-[#8b6914] ${nowSize}`;
   const numClass = `prep-materials-num ${pad} text-right font-semibold tabular-nums leading-none text-[#1f1a14] ${numberSize}`;
-  const prevClass = `prep-materials-num ${pad} text-right font-semibold tabular-nums leading-none text-[#6b6358] ${numberSize}`;
   const subtotalNumClass = `prep-materials-num ${pad} text-right font-bold tabular-nums leading-none text-[#1f1a14] ${numberSize}`;
   const footerStyle: CSSProperties = {
     background: '#f7f3eb',
@@ -112,12 +109,11 @@ export default function PrepSummaryTable({
               <p className={`font-semibold tabular-nums text-[#6b6358] whitespace-nowrap ${isPrint ? 'text-base' : 'text-lg'}`}>{box.headerAside}</p>
             </div>
             <div className="overflow-x-auto">
-              <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 960 }}>
+              <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 800 }}>
                 <MaterialsCols />
                 <thead>
                   <tr className="bg-[#f3f0ea] text-[11px] font-semibold text-[#6b6358]">
                     <th className={`${headPad} text-left whitespace-nowrap`}>口味</th>
-                    <th className={`${headPad} text-right whitespace-nowrap`}>上單已燉</th>
                     <th className={`${headPad} text-right whitespace-nowrap`}>今次要燉</th>
                     {MATERIAL_COLUMNS.map((col) => (
                       <th key={col.key} className={`${headPad} text-right whitespace-nowrap`}>
@@ -130,14 +126,12 @@ export default function PrepSummaryTable({
                   {box.rows.map((row) => (
                     <tr key={row.flavor} className="border-b border-[#ddd6c8]">
                       <td className={`${pad} text-left`}>{row.label}</td>
-                      <td className={prevClass}>{row.prior}</td>
                       <td className={`${pad} ${nowClass}`}>{row.now}</td>
                       {materialCells(row.materials, numClass)}
                     </tr>
                   ))}
                   <tr className="bg-[#faf8f5] font-semibold">
                     <td className={`${pad} text-left whitespace-nowrap`}>{capacityScheduleTag(box.capacity)} 合計（今次）</td>
-                    <td className={prevClass}>{box.prior}</td>
                     <td className={`${pad} ${nowClass}`}>{box.now}</td>
                     {materialCells(box.materials, subtotalNumClass)}
                   </tr>
@@ -148,15 +142,12 @@ export default function PrepSummaryTable({
         );
       })}
       <div className="overflow-x-auto">
-        <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 960 }}>
+        <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 800 }}>
           <MaterialsCols />
           <tbody>
             <tr>
               <td className={`${pad} text-left font-bold whitespace-nowrap`} style={footerStyle}>
                 各容量合計
-              </td>
-              <td className={prevClass} style={footerStyle}>
-                {table.prior}
               </td>
               <td className={`${pad} ${nowClass}`} style={footerStyle}>
                 {table.now}

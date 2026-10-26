@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
+import { OsmanthusSpareToggle, usePrepDayOsmanthusSpare } from '@/components/kitchen-prep/OsmanthusSpareToggle';
 import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import {
   PREP_CAPACITIES,
@@ -287,6 +288,7 @@ function KitchenPrepListContent() {
       label: PREP_CAPACITY_LABELS[id] || id,
     }))
   );
+  const { enabled: osmanthusSpare, setSpareEnabled: setOsmanthusSpare } = usePrepDayOsmanthusSpare();
 
   useModalUnsavedWarning(showForm, form);
 
@@ -834,6 +836,10 @@ function KitchenPrepListContent() {
           </select>
         </div>
       </FilterBar>
+
+      <div className="mb-4 -mt-2 flex flex-wrap items-center gap-3">
+        <OsmanthusSpareToggle enabled={osmanthusSpare} onChange={setOsmanthusSpare} />
+      </div>
 
       <div className="text-sm text-gray-600 -mt-4 mb-6 flex flex-wrap items-center gap-x-1 gap-y-2">
         <span className="font-medium text-gray-700">{bi('Quick filters:', '快速篩選：')}</span>

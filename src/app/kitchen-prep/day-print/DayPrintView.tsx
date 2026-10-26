@@ -19,6 +19,7 @@ import {
   type PrepOrder,
   type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
+import { OsmanthusSpareToggle, usePrepDayOsmanthusSpare } from '@/components/kitchen-prep/OsmanthusSpareToggle';
 import { BTN, bi } from '@/lib/ui-labels';
 
 function orderChipLabel(order: DayMaterialsOrderChip): string {
@@ -43,6 +44,7 @@ export default function KitchenPrepDayPrint() {
   const [summary, setSummary] = useState<DayMaterialsSummary | null>(null);
   const [error, setError] = useState('');
   const [printedAt] = useState(() => new Date().toLocaleString('en-HK'));
+  const { enabled: osmanthusSpare, setSpareEnabled: setOsmanthusSpare } = usePrepDayOsmanthusSpare();
 
   useEffect(() => {
     if (!validDate) {
@@ -77,7 +79,7 @@ export default function KitchenPrepDayPrint() {
     };
   }, [date, validDate]);
 
-  const sheet = summary ? buildDaySugarWaterSheet(summary) : null;
+  const sheet = summary ? buildDaySugarWaterSheet(summary, { osmanthusSpare }) : null;
   const hasLines = Boolean(summary?.lines.length);
 
   const handlePrint = () => {
@@ -95,7 +97,7 @@ export default function KitchenPrepDayPrint() {
           }
         }
       `}</style>
-      <div className="no-print border-b border-gray-200 bg-white px-6 py-3 flex items-center justify-between gap-3">
+      <div className="no-print border-b border-gray-200 bg-white px-6 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link href="/kitchen-prep" className="text-sm font-semibold text-[#0f766e] hover:text-[#115e59]">
             ← {bi('Back to schedule', '返回排程')}
@@ -106,14 +108,17 @@ export default function KitchenPrepDayPrint() {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handlePrint}
-          disabled={!hasLines}
-          className="rounded-lg bg-[#0f766e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
-        >
-          {BTN.printPdf}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <OsmanthusSpareToggle enabled={osmanthusSpare} onChange={setOsmanthusSpare} compact />
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={!hasLines}
+            className="rounded-lg bg-[#0f766e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#115e59] disabled:opacity-50"
+          >
+            {BTN.printPdf}
+          </button>
+        </div>
       </div>
 
       {error && (

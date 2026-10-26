@@ -231,9 +231,6 @@ function FooterCell({ label, value, valueClass }: { label: string; value: string
 
 function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
   const combo = group.id === 'combo';
-  const detailBoxes = combo
-    ? group.boxes
-    : group.boxes.filter((box) => box.key !== 'boilSugar' && box.key !== 'coldSoak');
   const nowClass =
     'prep-day-now whitespace-nowrap px-2 py-2.5 text-right text-xl font-extrabold tabular-nums leading-none text-[#8b6914] print:px-1.5 print:py-2 print:text-lg';
   const numClass =
@@ -339,8 +336,7 @@ function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
       <div
         className={`border-t border-dashed border-[#c5d9ce] bg-[#f8faf9] p-3.5 print:p-2.5 ${combo ? 'prep-day-boxes prep-day-boxes-combo' : 'prep-day-boxes'}`}
       >
-        {!combo && <OsmanthusWaterPair group={group} />}
-        {detailBoxes.map((box) => (
+        {group.boxes.map((box) => (
           <div
             key={box.key}
             className={`min-w-0 rounded-[10px] px-3 py-2.5 text-[13px] text-gray-600 print:px-2 print:py-2 print:text-[11px] ${
@@ -352,20 +348,6 @@ function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
         ))}
       </div>
     </section>
-  );
-}
-
-function OsmanthusWaterPair({ group }: { group: DaySugarWaterGroup }) {
-  const boxes = group.boxes.filter((box) => box.key === 'boilSugar' || box.key === 'coldSoak');
-  if (!boxes.length) return null;
-  return (
-    <div className="prep-day-water-pair min-w-0 max-w-full overflow-hidden rounded-[10px] border border-[#fcd34d] bg-[#fffbeb] text-[13px] text-gray-600 print:text-[11px]">
-      {boxes.map((box) => (
-        <div key={box.key} className="min-w-0 px-3 py-2.5 print:px-2 print:py-2">
-          <SugarBoxFigure box={box} combo={false} />
-        </div>
-      ))}
-    </div>
   );
 }
 

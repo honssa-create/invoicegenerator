@@ -424,7 +424,7 @@ describe('day materials and session workflow', () => {
     const combo = sheet.groups[1];
     expect(osmanthus.boxes.map((box) => box.key)).toEqual(['boilSugar', 'coldSoak', 'slabSugar', 'osmanthus']);
     expect(osmanthus.boxes.map((box) => box.label)).toEqual([
-      '要準備糖水量（煮糖）',
+      '水(煮糖)',
       '冷泡水',
       '片糖',
       '桂花乾',

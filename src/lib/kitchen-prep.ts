@@ -2024,6 +2024,10 @@ export interface PrepMaterialAmounts {
   osmanthus: number;
   rockSugar: number;
   slabSugar: number;
+  /** Grams of 水(煮糖) for 今次要燉. */
+  boilSugarWater: number;
+  /** Grams of 水(冷泡) for 今次要燉. */
+  coldSoakWater: number;
   bottles: number;
 }
 
@@ -2062,6 +2066,8 @@ const EMPTY_MATERIALS: PrepMaterialAmounts = {
   osmanthus: 0,
   rockSugar: 0,
   slabSugar: 0,
+  boilSugarWater: 0,
+  coldSoakWater: 0,
   bottles: 0,
 };
 
@@ -2070,6 +2076,8 @@ function addMaterials(into: PrepMaterialAmounts, extra: PrepMaterialAmounts): vo
   into.osmanthus = round2(into.osmanthus + extra.osmanthus);
   into.rockSugar = round2(into.rockSugar + extra.rockSugar);
   into.slabSugar = round2(into.slabSugar + extra.slabSugar);
+  into.boilSugarWater = round2(into.boilSugarWater + extra.boilSugarWater);
+  into.coldSoakWater = round2(into.coldSoakWater + extra.coldSoakWater);
   into.bottles += extra.bottles;
 }
 
@@ -2089,6 +2097,9 @@ function materialsForNowQty(
     osmanthus: grams['桂花'] || 0,
     rockSugar: grams['冰糖'] || 0,
     slabSugar: grams['片糖'] || 0,
+    // Water stays on the prep sheet. Raw-stock deduction still skips these lines.
+    boilSugarWater: grams[STEW_WATER_BOIL_SUGAR] || 0,
+    coldSoakWater: grams[STEW_WATER_COLD_SOAK] || 0,
     bottles: qty,
   };
 }

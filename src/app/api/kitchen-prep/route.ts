@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
     const { capacities, formulas } = await readKitchenPrepDetailContext(kitchenOwnerId);
     const stew = formulas.stewFormulas;
-    const allowedCaps = new Set(capacities.map((c) => c.id));
+    const allowedCaps = new Set(capacities.filter((c) => c.active !== false).map((c) => c.id));
 
     if (Array.isArray(body.lines) && body.lines.length > 0) {
       const lines = body.lines

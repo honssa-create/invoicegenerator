@@ -2,7 +2,7 @@
 
 import {
   WEDDING_GIFT_ACTUAL_FLAVORS,
-  WEDDING_GIFT_BOTTLE_CAPACITIES,
+  weddingGiftBottleCapacityOptions,
   WEDDING_GIFT_CLIENT_FLAVORS,
   WEDDING_GIFT_MATERIAL_FIELDS,
   WEDDING_GIFT_PACK_BAG_FIELDS,
@@ -183,7 +183,7 @@ export default function WeddingGiftOrderDetail({
                         className={softInput}
                       >
                         <option value="">—</option>
-                        {WEDDING_GIFT_BOTTLE_CAPACITIES.map((c) => (
+                        {weddingGiftBottleCapacityOptions(fVal('bottle_capacity')).map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>

@@ -14,6 +14,7 @@ import {
   CAPACITY_FLAVOR_FORMULAS,
   PREP_CAPACITY_LABELS,
   PREP_CAPACITIES,
+  defaultPrepCapacityActive,
   getFormulaLines,
   formulaFromLines,
   withStewWaterLines,
@@ -49,6 +50,8 @@ export interface CatalogCapacity {
   id: string;
   label: string;
   sortOrder: number;
+  /** False: kept on the admin stew sheet, omitted from new prep and order capacity choices. */
+  active: boolean;
 }
 
 export interface KitchenCatalog {
@@ -161,6 +164,91 @@ export function mergeStewWaterFormulaLines(formulas: KitchenFormulas): KitchenFo
 
   if (!changed) return formulas;
   return { ...formulas, stewFormulas: nextStew };
+}
+
+/** Labels replaced once when applying the 26/10/2026 sheet. Already-renamed labels are left alone. */
+const STEW_SHEET_THICK_LABELS = new Set([
+  '75g',
+  '75g (高身樽)',
+  '75g(高身樽)',
+  '75g (燕身樽)',
+  '75g(燕身樽)',
+  '75g 高身樽',
+  '75g 燕身樽',
+]);
+
+const STEW_SHEET_THIN_LABELS = new Set([
+  '75g (大肚樽)',
+  '75g(大肚樽)',
+  '75g 大肚樽',
+]);
+
+const STEW_SHEET_FINISHED_LABEL_RENAMES: Record<string, string> = {
+  '75g 桂花 (高身樽)': '75g 桂花 (厚)',
+  '75g 紅棗 (高身樽)': '75g 紅棗 (厚)',
+  '75g 冰糖 (高身樽)': '75g 冰糖 (厚)',
+  '75g 桂花 (燕身樽)': '75g 桂花 (厚)',
+  '75g 紅棗 (燕身樽)': '75g 紅棗 (厚)',
+  '75g 冰糖 (燕身樽)': '75g 冰糖 (厚)',
+  '75g 桂花 (大肚樽)': '75g 桂花 (薄)',
+  '75g 紅棗 (大肚樽)': '75g 紅棗 (薄)',
+  '75g 冰糖 (大肚樽)': '75g 冰糖 (薄)',
+};
+
+/**
+ * Write the 26/10/2026 per-bottle sheet onto 25g / 45g / 75g 厚 / 75g 薄.
+ * Gift-box BOMs and other capacities are unchanged. Jar stock names stay 高身 / 大肚.
+ * Call once per saved catalog — a later run would reset grams Vanessa edited after deploy.
+ */
+export function mergeStewFormulaSheet20261026(bundle: KitchenCatalogBundle): KitchenCatalogBundle {
+  const defaults = defaultKitchenFormulas();
+  const capacities = bundle.catalog.capacities.map((c) => {
+    const label = String(c.label || '').trim();
+    if (c.id === '75g' && STEW_SHEET_THICK_LABELS.has(label)) {
+      return { ...c, label: '75g 厚', active: false };
+    }
+    if (c.id === '75g_big_belly' && STEW_SHEET_THIN_LABELS.has(label)) {
+      return { ...c, label: '75g 薄', active: true };
+    }
+    return { ...c, active: c.active !== false };
+  });
+
+  if (!capacities.some((c) => c.id === '75g')) {
+    capacities.push({
+      id: '75g',
+      label: '75g 厚',
+      sortOrder: capacities.length,
+      active: false,
+    });
+  }
+  if (!capacities.some((c) => c.id === '75g_big_belly')) {
+    capacities.push({
+      id: '75g_big_belly',
+      label: '75g 薄',
+      sortOrder: capacities.length,
+      active: true,
+    });
+  }
+
+  const finishedLabels = { ...bundle.catalog.finishedLabels };
+  for (const [sku, label] of Object.entries(finishedLabels)) {
+    const next = STEW_SHEET_FINISHED_LABEL_RENAMES[label];
+    if (next) finishedLabels[sku] = next;
+  }
+  for (const [sku, label] of Object.entries(FINISHED_SKU_LABELS)) {
+    if (!finishedLabels[sku]) finishedLabels[sku] = label;
+  }
+
+  const stewFormulas: StewFormulaMap = { ...bundle.formulas.stewFormulas };
+  for (const id of ['25g', '45g', '75g', '75g_big_belly']) {
+    const block = defaults.stewFormulas[id];
+    if (block) stewFormulas[id] = structuredClone(block);
+  }
+
+  return {
+    catalog: { ...bundle.catalog, capacities, finishedLabels },
+    formulas: { ...bundle.formulas, stewFormulas },
+  };
 }
 
 /** Replace legacy 玻璃燉瓶 with capacity-specific jar rows. */
@@ -384,6 +472,7 @@ export function defaultKitchenCatalog(): KitchenCatalog {
       id,
       label: PREP_CAPACITY_LABELS[id] || id,
       sortOrder: i,
+      active: defaultPrepCapacityActive(id),
     })),
     finishedLabels: { ...FINISHED_SKU_LABELS },
   };
@@ -570,6 +659,7 @@ export function normalizeCatalogBundle(
           id: String(c.id || '').trim(),
           label: String(c.label || c.id || '').trim(),
           sortOrder: Number.isFinite(c.sortOrder) ? Number(c.sortOrder) : i,
+          active: c.active !== false,
         }))
       : base.catalog.capacities,
     finishedLabels:

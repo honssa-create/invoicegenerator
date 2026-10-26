@@ -103,7 +103,10 @@ function mapCapacityLabel(label: string): string {
   const t = label.trim();
   if (/45\s*ml/i.test(t) || t.includes('(45ml)')) return '45g';
   if (/25\s*ml/i.test(t) || t.includes('25ml')) return '25g';
-  if (/75\s*ml/i.test(t) || t.includes('75ml')) return normalizeWeddingGiftBottleCapacity('75g');
+  if (/厚|高身|燕身/.test(t)) return '75g 厚';
+  if (/薄|大肚/.test(t)) return '75g 薄';
+  // Plain 75ml is the active thin recipe. 厚 is paused for new orders.
+  if (/75\s*ml/i.test(t) || t.includes('75ml') || t === '75g') return '75g 薄';
   return normalizeWeddingGiftBottleCapacity(t) || t;
 }
 

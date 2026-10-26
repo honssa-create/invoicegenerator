@@ -7,9 +7,16 @@ export type PrepCapacity = string;
 export const PREP_CAPACITY_LABELS: Record<string, string> = {
   '25g': '25g',
   '45g': '45g',
-  '75g': '75g (高身樽)',
-  '75g_big_belly': '75g (大肚樽)',
+  /** Former 高身樽 / 燕身樽. 桂花對照材料表 26/10/2026 75ml 厚. Paused for new prep. */
+  '75g': '75g 厚',
+  /** Former 大肚樽. Same sheet, 75ml 薄 (larger water fill). Active 75g choice. */
+  '75g_big_belly': '75g 薄',
 };
+
+/** Default pause: 75g 厚 stays in the catalog but is not offered for new prep or orders. */
+export function defaultPrepCapacityActive(id: string): boolean {
+  return id !== '75g';
+}
 
 export const PREP_FLAVORS = ['osmanthus', 'red_date', 'rock_sugar'] as const;
 export type PrepFlavor = (typeof PREP_FLAVORS)[number];
@@ -503,7 +510,9 @@ function stewFormula(flavor: PrepFlavor, ...ingredients: StewIngredientLine[]): 
 }
 
 /**
- * Configuration dictionary: capacity → flavor → per-bottle formula (variable ingredient lines).
+ * Per-bottle grams from 桂花對照材料表 update 26/10/2026.
+ * 45ml 桂花 燕窩 is 0.8 — same as 冰糖 and 紅棗 at 45ml. The 桂花 cell beside it is 0.099.
+ * 75g = 厚 (paused). 75g_big_belly = 薄 (active). Jar stock names stay 高身 / 大肚.
  */
 export const CAPACITY_FLAVOR_FORMULAS: Partial<
   Record<PrepCapacity, Partial<Record<PrepFlavor, FlavorFormulaPerBottle | null>>>
@@ -512,51 +521,87 @@ export const CAPACITY_FLAVOR_FORMULAS: Partial<
     osmanthus: stewFormula(
       'osmanthus',
       line('燕餅', 0.4),
-      line('桂花', 0.072),
-      line('片糖', 2.79)
+      line('桂花', 0.056),
+      line('片糖', 2.25),
+      line(STEW_WATER_BOIL_SUGAR, 11.56),
+      line(STEW_WATER_COLD_SOAK, 8.55)
     ),
     red_date: null,
-    rock_sugar: stewFormula('rock_sugar', line('燕餅', 0.4), line('冰糖', 1.98)),
+    rock_sugar: stewFormula(
+      'rock_sugar',
+      line('燕餅', 0.4),
+      line('冰糖', 1.587),
+      line(STEW_WATER_BOIL_SUGAR, 20)
+    ),
   },
   '45g': {
     osmanthus: stewFormula(
       'osmanthus',
       line('燕餅', 0.8),
-      line('桂花', 0.13),
-      line('片糖', 5.03)
+      line('桂花', 0.099),
+      line('片糖', 3.94),
+      line(STEW_WATER_BOIL_SUGAR, 20.05),
+      line(STEW_WATER_COLD_SOAK, 14.95)
     ),
     red_date: stewFormula(
       'red_date',
       line('燕餅', 0.8),
-      line('紅棗', 1.8),
-      line('冰糖', 3.57)
+      line('紅棗', 1.5),
+      line('冰糖', 2.776),
+      line(STEW_WATER_BOIL_SUGAR, 35)
     ),
-    rock_sugar: stewFormula('rock_sugar', line('燕餅', 0.8), line('冰糖', 3.57)),
+    rock_sugar: stewFormula(
+      'rock_sugar',
+      line('燕餅', 0.8),
+      line('冰糖', 2.776),
+      line(STEW_WATER_BOIL_SUGAR, 35)
+    ),
   },
   '75g': {
     osmanthus: stewFormula(
       'osmanthus',
       line('燕餅', 1.7),
-      line('桂花', 0.191),
-      line('片糖', 7.64)
+      line('桂花', 0.166),
+      line('片糖', 6.64),
+      line(STEW_WATER_BOIL_SUGAR, 33.79),
+      line(STEW_WATER_COLD_SOAK, 25.21)
     ),
     red_date: stewFormula(
       'red_date',
       line('燕餅', 1.7),
-      line('紅棗', 0.191),
-      line('冰糖', 5.41)
+      line('紅棗', 2.4),
+      line('冰糖', 4.68),
+      line(STEW_WATER_BOIL_SUGAR, 59)
     ),
-    rock_sugar: stewFormula('rock_sugar', line('燕餅', 1.75), line('冰糖', 54.1)),
+    rock_sugar: stewFormula(
+      'rock_sugar',
+      line('燕餅', 1.75),
+      line('冰糖', 4.68),
+      line(STEW_WATER_BOIL_SUGAR, 59)
+    ),
   },
   '75g_big_belly': {
     osmanthus: stewFormula(
       'osmanthus',
-      line('燕餅', 2.1),
-      line('桂花', 0.191),
-      line('片糖', 7.64)
+      line('燕餅', 1.7),
+      line('桂花', 0.18),
+      line('片糖', 7.21),
+      line(STEW_WATER_BOIL_SUGAR, 36.65),
+      line(STEW_WATER_COLD_SOAK, 27.35)
     ),
-    red_date: null,
-    rock_sugar: stewFormula('rock_sugar', line('燕餅', 2.1), line('冰糖', 54.1)),
+    red_date: stewFormula(
+      'red_date',
+      line('燕餅', 1.7),
+      line('紅棗', 2.4),
+      line('冰糖', 5.077),
+      line(STEW_WATER_BOIL_SUGAR, 64)
+    ),
+    rock_sugar: stewFormula(
+      'rock_sugar',
+      line('燕餅', 1.75),
+      line('冰糖', 5.077),
+      line(STEW_WATER_BOIL_SUGAR, 64)
+    ),
   },
 };
 
@@ -1087,20 +1132,28 @@ export function formatPrepIngredientQty(name: string, qty: number): string {
   return formatGrams(qty);
 }
 
+function formatFormulaQty(n: number): string {
+  const rounded = Math.round(n * 1000) / 1000;
+  return String(rounded);
+}
+
+/** Short per-bottle summary derived from {@link CAPACITY_FLAVOR_FORMULAS}. */
 export function formulaSummaryForCapacity(capacity: PrepCapacity): string {
-  if (capacity === '25g') {
-    return '25g: 桂花 → 燕餅 0.4g · 桂花 0.072g · 片糖 2.79g | 冰糖 → 燕餅 0.4g · 冰糖 1.98g';
+  const block = CAPACITY_FLAVOR_FORMULAS[capacity];
+  const label = PREP_CAPACITY_LABELS[capacity] || capacity;
+  if (!block || !PREP_FLAVORS.some((flavor) => block[flavor] != null)) {
+    return `${label} formula pending configuration`;
   }
-  if (capacity === '45g') {
-    return '45g: 桂花 → 片糖 5.03g | 紅棗/冰糖 → 冰糖 3.57g (no 片糖 in 紅棗 & 冰糖; no 冰糖 in 桂花)';
-  }
-  if (capacity === '75g') {
-    return '75g 高身樽: 冰糖 → 燕餅 1.75g · 冰糖 54.1g | 桂花 → 燕餅 1.7g · 片糖 7.64g · 桂花 0.191g | 紅棗 → 燕餅 1.7g · 冰糖 5.41g · 紅棗 0.191g';
-  }
-  if (capacity === '75g_big_belly') {
-    return '75g 大肚樽: 冰糖 → 燕餅 2.1g · 冰糖 54.1g | 桂花 → 燕餅 2.1g · 片糖 7.64g · 桂花 0.191g (紅棗 disabled)';
-  }
-  return `${PREP_CAPACITY_LABELS[capacity]} formula pending configuration`;
+  const parts = PREP_FLAVORS.map((flavor) => {
+    const cell = block[flavor];
+    if (cell == null) return flavor === 'red_date' ? '紅棗 disabled' : null;
+    const bits = getFormulaLines(cell, flavor)
+      .filter((l) => l.qty > 0)
+      .map((l) => `${l.name} ${formatFormulaQty(l.qty)}g`)
+      .join(' · ');
+    return `${PREP_FLAVOR_SHORT[flavor]} → ${bits}`;
+  }).filter((part): part is string => Boolean(part));
+  return `${label}: ${parts.join(' | ')}`;
 }
 
 /** Sum of flavor order quantities (客人訂). */
@@ -1430,8 +1483,8 @@ export function capacityGramsLabel(capacity: PrepCapacity): string {
 
 /** Tag used in `#12104 - 桂花 x40 (45g)`. */
 export function capacityScheduleTag(capacity: PrepCapacity): string {
-  if (capacity === '75g_big_belly') return '75g 大肚樽';
-  if (capacity === '75g') return '75g';
+  if (capacity === '75g_big_belly') return '75g 薄';
+  if (capacity === '75g') return '75g 厚';
   return capacityGramsLabel(capacity);
 }
 

@@ -3,7 +3,7 @@ import type { PrepBatchView, PrepCalculation, PrepOrder, StewFormulaMapLike } fr
 export type KitchenPrepDetailPayload = {
   order: PrepOrder;
   calculation: PrepCalculation;
-  capacities: { id: string; label: string }[];
+  capacities: { id: string; label: string; active?: boolean }[];
   batch?: PrepBatchView;
   stewFormulas?: StewFormulaMapLike;
 };
@@ -30,7 +30,7 @@ export function prefetchKitchenPrepDetail(id: number | string): void {
       const payload: KitchenPrepDetailPayload = {
         order: d.order as PrepOrder,
         calculation: d.calculation as PrepCalculation,
-        capacities: (d.capacities as { id: string; label: string }[]) || [],
+        capacities: (d.capacities as { id: string; label: string; active?: boolean }[]) || [],
         batch: d.batch as KitchenPrepDetailPayload['batch'],
         stewFormulas: d.stewFormulas as KitchenPrepDetailPayload['stewFormulas'],
       };

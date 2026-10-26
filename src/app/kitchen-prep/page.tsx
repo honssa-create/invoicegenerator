@@ -8,6 +8,7 @@ import FilterBar from '@/components/FilterBar';
 import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import {
   PREP_CAPACITIES,
+  defaultPrepCapacityActive,
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
@@ -281,7 +282,10 @@ function KitchenPrepListContent() {
   );
   const [search, setSearch] = useState(savedUi?.search ?? '');
   const [capacityOptions, setCapacityOptions] = useState<CapacityOption[]>(
-    PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
+    PREP_CAPACITIES.filter((id) => defaultPrepCapacityActive(id)).map((id) => ({
+      id,
+      label: PREP_CAPACITY_LABELS[id] || id,
+    }))
   );
 
   useModalUnsavedWarning(showForm, form);

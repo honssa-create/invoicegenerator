@@ -354,13 +354,14 @@ describe('day materials and session workflow', () => {
     const osmanthus = summary.lines.find((line) => line.flavor === 'osmanthus');
     const rock = summary.lines.find((line) => line.flavor === 'rock_sugar');
     expect(osmanthus?.bottles).toBe(180);
-    expect(osmanthus?.slabSugar).toBeCloseTo(180 * 5.03, 5);
-    expect(osmanthus?.boilSugar).toBe(0);
-    expect(osmanthus?.coldSoak).toBe(0);
-    expect(formatDayMaterialAmount(osmanthus?.boilSugar || 0)).toBe('—');
+    expect(osmanthus?.slabSugar).toBeCloseTo(180 * 3.94, 5);
+    expect(osmanthus?.boilSugar).toBeCloseTo(180 * 20.05, 5);
+    expect(osmanthus?.coldSoak).toBeCloseTo(180 * 14.95, 5);
+    expect(formatDayMaterialAmount(0)).toBe('—');
     expect(rock?.bottles).toBe(12);
     expect(summary.totals.bottles).toBe(192);
-    expect(summary.totals.boilSugar).toBe(0);
+    expect(summary.totals.boilSugar).toBeCloseTo(180 * 20.05 + 12 * 35, 5);
+    expect(summary.totals.coldSoak).toBeCloseTo(180 * 14.95, 5);
     expect(summary.slotBottles).toEqual({ AM: 80, PM: 100, unset: 12 });
     expect(summary.orders.map((order) => order.orderCode)).toEqual(['AM-A', 'PM-A', 'UNSET']);
     expect(summary.orders[0].detail).toBe('45g 桂80');
@@ -409,8 +410,8 @@ describe('day materials and session workflow', () => {
 
     const os45 = summary.lines.find((line) => line.flavor === 'osmanthus' && line.capacity === '45g');
     expect(os45?.bottles).toBe(100);
-    expect(os45?.osmanthus).toBeCloseTo(13, 5);
-    expect(os45?.slabSugar).toBeCloseTo(503, 5);
+    expect(os45?.osmanthus).toBeCloseTo(9.9, 5);
+    expect(os45?.slabSugar).toBeCloseTo(394, 5);
     expect(os45?.boilSugar).toBeCloseTo(1200, 5);
     expect(os45?.coldSoak).toBeCloseTo(812.5, 5);
     const red = summary.lines.find((line) => line.flavor === 'red_date');
@@ -486,8 +487,8 @@ describe('multi-capacity calculations', () => {
     };
     const calc = computePrepCalculationForOrder(order);
     expect(calc.totals.bottles).toBe(65);
-    expect(calc.totals.ingredientGrams['片糖']).toBeCloseTo(40 * 5.03, 5);
-    expect(calc.totals.ingredientGrams['冰糖']).toBeCloseTo(25 * 1.98, 5);
+    expect(calc.totals.ingredientGrams['片糖']).toBeCloseTo(157.6, 2);
+    expect(calc.totals.ingredientGrams['冰糖']).toBeCloseTo(39.67, 2);
     expect(calc.totals.ingredientGrams['45g玻璃燉瓶']).toBe(40);
     expect(calc.totals.ingredientGrams['25g玻璃燉瓶']).toBe(25);
     expect(calc.capacities).toEqual(['45g', '25g']);
@@ -510,7 +511,7 @@ describe('multi-capacity calculations', () => {
     expect(calc.capacities).toBeUndefined();
     expect(calc.totals.bottles).toBe(10);
     expect(calc.totals.ingredientGrams['25g玻璃燉瓶']).toBe(10);
-    expect(calc.totals.ingredientGrams['冰糖']).toBeCloseTo(10 * 1.98, 5);
+    expect(calc.totals.ingredientGrams['冰糖']).toBeCloseTo(15.87, 2);
   });
 
   it('includes every capacity line when aggregating unfinished prep demand', () => {
@@ -530,7 +531,7 @@ describe('multi-capacity calculations', () => {
     ]);
     expect(raw['45g玻璃燉瓶']).toBe(40);
     expect(raw['25g玻璃燉瓶']).toBe(10);
-    expect(raw['片糖']).toBeCloseTo(40 * 5.03, 5);
-    expect(raw['冰糖']).toBeCloseTo(10 * 1.98, 5);
+    expect(raw['片糖']).toBeCloseTo(157.6, 2);
+    expect(raw['冰糖']).toBeCloseTo(15.87, 2);
   });
 });

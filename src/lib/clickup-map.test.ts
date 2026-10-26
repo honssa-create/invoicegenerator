@@ -106,6 +106,14 @@ describe('parseClickUpTaskName', () => {
 });
 
 describe('parseClickUpCustomFields', () => {
+  it('maps plain 75ml to the active thin bottle and 高身 to 厚', () => {
+    expect(parseClickUpTaskName('Jane 9123 4567 01012026 75ml').fields.bottle_capacity).toBe('75g 薄');
+    const bag = parseClickUpCustomFields([
+      { id: 'cap', name: '即食燕窩容量', type: 'short_text', value: '75ml 高身樽' },
+    ]);
+    expect(bag.fields.bottle_capacity).toBe('75g 厚');
+  });
+
   it('maps payment and contact custom fields', () => {
     const bag = parseClickUpCustomFields(task.custom_fields);
     expect(bag.fields.contact_method).toBe('5xxx 5xxx');

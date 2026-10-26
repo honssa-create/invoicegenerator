@@ -9,6 +9,7 @@ import PrepSessionSummary from '@/components/kitchen-prep/PrepSessionSummary';
 import CompletionModal from '@/components/kitchen-prep/CompletionModal';
 import {
   PREP_CAPACITIES,
+  defaultPrepCapacityActive,
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
@@ -60,8 +61,12 @@ export default function KitchenPrepDetailPage() {
   const [error, setError] = useState('');
   const [showComplete, setShowComplete] = useState(false);
   const [advancingStatus, setAdvancingStatus] = useState(false);
-  const [capacityOptions, setCapacityOptions] = useState<{ id: string; label: string }[]>(
-    PREP_CAPACITIES.map((id) => ({ id, label: PREP_CAPACITY_LABELS[id] || id }))
+  const [capacityOptions, setCapacityOptions] = useState<{ id: string; label: string; active?: boolean }[]>(
+    PREP_CAPACITIES.map((id) => ({
+      id,
+      label: PREP_CAPACITY_LABELS[id] || id,
+      active: defaultPrepCapacityActive(id),
+    }))
   );
   const patchQueueRef = useRef(Promise.resolve());
   const patchSeqRef = useRef(0);
@@ -75,6 +80,7 @@ export default function KitchenPrepDetailPage() {
         d.capacities.map((c) => ({
           id: c.id,
           label: c.label || PREP_CAPACITY_LABELS[c.id] || c.id,
+          active: c.active !== false,
         })),
       );
     }
@@ -499,7 +505,9 @@ export default function KitchenPrepDetailPage() {
               }}
               className={input}
             >
-              {capacityOptions.map((c) => (
+              {capacityOptions
+                .filter((c) => c.active !== false || c.id === order.capacity)
+                .map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.label}
                 </option>
@@ -623,7 +631,7 @@ export default function KitchenPrepDetailPage() {
         )}
         <div className="flex flex-wrap gap-2 mb-4">
           {capacityOptions
-            .filter((option) => !lines.some((line) => line.capacity === option.id))
+            .filter((option) => option.active !== false && !lines.some((line) => line.capacity === option.id))
             .map((option) => (
               <button
                 key={option.id}

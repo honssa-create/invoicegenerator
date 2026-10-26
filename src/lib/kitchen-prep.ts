@@ -160,6 +160,80 @@ export const PREP_ORDER_TYPE_LABELS: Record<PrepOrderType, string> = {
   restock: '補充存貨 Restock',
 };
 
+/** Morning / afternoon stewing session. Null in the database means unset. */
+export const PREP_SCHEDULE_SLOTS = ['AM', 'PM'] as const;
+export type PrepScheduleSlot = (typeof PREP_SCHEDULE_SLOTS)[number];
+
+export const PREP_SCHEDULE_SLOT_LABELS: Record<PrepScheduleSlot, string> = {
+  AM: '上午 AM',
+  PM: '下午 PM',
+};
+
+/** Accepts AM/PM in any case. Anything else, including blank, is unset. */
+export function parsePrepScheduleSlot(raw: unknown): PrepScheduleSlot | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim().toUpperCase();
+  if (v === 'AM' || v === 'PM') return v;
+  return null;
+}
+
+/**
+ * Board order inside one stewing date: AM, then PM, then unset.
+ * Date descending does not reverse this.
+ */
+export function prepScheduleSlotRank(slot: PrepScheduleSlot | null | undefined): number {
+  if (slot === 'AM') return 0;
+  if (slot === 'PM') return 1;
+  return 2;
+}
+
+/** `${date}|AM`, `${date}|PM`, or `${date}|unset`. */
+export function prepSessionGroupKey(
+  stewingDate: string,
+  slot: PrepScheduleSlot | null | undefined,
+): string {
+  const date = stewingDate || '';
+  if (slot === 'AM' || slot === 'PM') return `${date}|${slot}`;
+  return `${date}|unset`;
+}
+
+/** Visible group title. Unset is its own bucket and is not labeled AM or PM. */
+export function prepSessionTitle(
+  stewingDate: string,
+  slot: PrepScheduleSlot | null | undefined,
+): string {
+  const date = stewingDate || '—';
+  if (slot === 'AM') return `${date} 上午 AM session`;
+  if (slot === 'PM') return `${date} 下午 PM session`;
+  return `${date} 未設定 Unset`;
+}
+
+/** One print job for every prep sheet in a session group. Ids stay in board order. */
+export function prepGroupPrintPath(ids: number[]): string {
+  const clean = ids.filter((id) => Number.isInteger(id) && id > 0);
+  return `/kitchen-prep/print?ids=${clean.join(',')}`;
+}
+
+/** One combined materials sheet for every order on a stewing date (AM + PM + unset). */
+export function prepDayMaterialsPrintPath(stewingDate: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(stewingDate) ? stewingDate : '';
+  return `/kitchen-prep/day-print?date=${encodeURIComponent(date)}`;
+}
+
+/**
+ * Session-group workflow. One button at a time:
+ * start until every open order is stewing, then complete, then nothing.
+ * Completed orders do not keep the group on the start button.
+ */
+export type PrepSessionWorkflow = 'start' | 'complete' | 'done';
+
+export function prepSessionWorkflow(statuses: Array<PrepStatus | string>): PrepSessionWorkflow {
+  const open = statuses.filter((status) => status !== 'completed');
+  if (open.length === 0) return 'done';
+  if (open.every((status) => status === 'stewing')) return 'complete';
+  return 'start';
+}
+
 export const PREP_STATUSES = ['not_started', 'scheduled', 'prepped', 'stewing', 'completed'] as const;
 export type PrepStatus = (typeof PREP_STATUSES)[number];
 
@@ -538,6 +612,8 @@ export interface PrepOrder {
   order_code: string;
   linked_order_id: number | null;
   stewing_date: string;
+  /** AM/PM stewing session. Null when the row was never assigned a session. */
+  schedule_slot: PrepScheduleSlot | null;
   order_type: PrepOrderType;
   /** First capacity. Legacy single-capacity rows use this column as the only line. */
   capacity: PrepCapacity;
@@ -1454,37 +1530,309 @@ export function sessionPotBuckets(
 }
 
 export interface PrepSessionSummary {
-  /** Stewing date. Each date is its own session (AM and PM stay separate when modeled as different groups). */
+  /** `${stewingDate}|AM`, `|PM`, or `|unset`. */
   sessionKey: string;
+  stewingDate: string;
+  /** Null for the unset bucket. Those orders are not mixed into AM or PM pot totals. */
+  scheduleSlot: PrepScheduleSlot | null;
   lines: PrepCapacitySummaryLine[];
   potBuckets: SessionPotBucket[];
 }
 
+export type PrepBoardSortKey = 'stewing_date' | 'order_code' | 'capacity' | 'status';
+
 /**
- * Session totals: one group per stewing date. Bottle counts are summed inside a capacity,
- * and each capacity keeps its own pot bucket.
+ * List order for the prep board.
+ * Days follow the stewing-date sort (other column sorts keep days ascending).
+ * Inside a day the session order is always AM, then PM, then unset.
+ * The chosen column sort applies only inside a session. Ties break on id
+ * so the order stays stable. Date descending does not swap AM and PM.
+ */
+export function sortPrepOrdersForBoard<
+  T extends {
+    id: number;
+    stewing_date: string;
+    schedule_slot?: string | null;
+    order_code: string;
+    status: string;
+    capacity: string;
+  },
+>(
+  orders: T[],
+  sortKey: PrepBoardSortKey,
+  sortDir: 'asc' | 'desc',
+  capacitySortKey: (order: T) => string = (order) => order.capacity,
+): T[] {
+  const list = [...orders];
+  list.sort((a, b) => {
+    const dateCmp = a.stewing_date.localeCompare(b.stewing_date);
+    const dateOrdered = sortKey === 'stewing_date' && sortDir === 'desc' ? -dateCmp : dateCmp;
+    if (dateOrdered !== 0) return dateOrdered;
+    const slotCmp =
+      prepScheduleSlotRank(parsePrepScheduleSlot(a.schedule_slot)) -
+      prepScheduleSlotRank(parsePrepScheduleSlot(b.schedule_slot));
+    if (slotCmp !== 0) return slotCmp;
+    let cmp = a.id - b.id;
+    if (sortKey === 'order_code') cmp = a.order_code.localeCompare(b.order_code);
+    else if (sortKey === 'capacity') cmp = capacitySortKey(a).localeCompare(capacitySortKey(b));
+    else if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
+    if (cmp === 0) cmp = a.id - b.id;
+    if (sortKey === 'stewing_date') return cmp;
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+  return list;
+}
+
+/**
+ * Pot totals for the prep board.
+ * One card per stewing date + AM/PM. Orders with no session stay in a separate
+ * unset bucket for that date, so they are not counted against the AM or PM
+ * pot limits. Pot math is unchanged (25g/45g 150, 75g 100, mixed 75g+45g 120);
+ * only the grouping key changed. Group order follows the input order.
  */
 export function summarizePrepSessions(
-  orders: Array<PrepLineSource & { stewing_date: string }>
+  orders: Array<PrepLineSource & { stewing_date: string; schedule_slot?: string | null }>
 ): PrepSessionSummary[] {
-  const byDate = new Map<string, PrepCapacityLine[]>();
-  const dateOrder: string[] = [];
+  const byKey = new Map<string, PrepCapacityLine[]>();
+  const meta = new Map<string, { stewingDate: string; scheduleSlot: PrepScheduleSlot | null }>();
+  const keyOrder: string[] = [];
   for (const order of orders) {
-    const key = order.stewing_date || '';
-    if (!byDate.has(key)) {
-      dateOrder.push(key);
-      byDate.set(key, []);
+    const scheduleSlot = parsePrepScheduleSlot(order.schedule_slot);
+    const key = prepSessionGroupKey(order.stewing_date || '', scheduleSlot);
+    if (!byKey.has(key)) {
+      keyOrder.push(key);
+      byKey.set(key, []);
+      meta.set(key, { stewingDate: order.stewing_date || '', scheduleSlot });
     }
-    byDate.get(key)!.push(...prepOrderLines(order));
+    byKey.get(key)!.push(...prepOrderLines(order));
   }
-  return dateOrder.map((sessionKey) => {
-    const lines = summarizePrepCapacityLines(byDate.get(sessionKey) || []);
+  return keyOrder.map((sessionKey) => {
+    const info = meta.get(sessionKey)!;
+    const lines = summarizePrepCapacityLines(byKey.get(sessionKey) || []);
     return {
       sessionKey,
+      stewingDate: info.stewingDate,
+      scheduleSlot: info.scheduleSlot,
       lines,
       potBuckets: sessionPotBuckets(lines.map((line) => ({ capacity: line.capacity, bottles: line.bottles }))),
     };
   });
+}
+
+export interface PrepBoardGroup<T> {
+  sessionKey: string;
+  stewingDate: string;
+  scheduleSlot: PrepScheduleSlot | null;
+  orders: T[];
+  summary: PrepSessionSummary;
+}
+
+/** Date → AM / PM / unset groups. Input order is the group order and the row order. */
+export function groupPrepOrdersForBoard<
+  T extends PrepLineSource & { stewing_date: string; schedule_slot?: string | null },
+>(orders: T[]): PrepBoardGroup<T>[] {
+  const groups: PrepBoardGroup<T>[] = [];
+  const index = new Map<string, PrepBoardGroup<T>>();
+  for (const order of orders) {
+    const scheduleSlot = parsePrepScheduleSlot(order.schedule_slot);
+    const sessionKey = prepSessionGroupKey(order.stewing_date || '', scheduleSlot);
+    let group = index.get(sessionKey);
+    if (!group) {
+      group = {
+        sessionKey,
+        stewingDate: order.stewing_date || '',
+        scheduleSlot,
+        orders: [],
+        summary: {
+          sessionKey,
+          stewingDate: order.stewing_date || '',
+          scheduleSlot,
+          lines: [],
+          potBuckets: [],
+        },
+      };
+      index.set(sessionKey, group);
+      groups.push(group);
+    }
+    group.orders.push(order);
+  }
+  for (const group of groups) {
+    const [summary] = summarizePrepSessions(group.orders);
+    if (summary) group.summary = summary;
+  }
+  return groups;
+}
+
+export interface PrepBoardDay<T> {
+  stewingDate: string;
+  sessions: PrepBoardGroup<T>[];
+  orders: T[];
+}
+
+/** Calendar days wrapping the AM / PM / unset session groups. Input order is kept. */
+export function groupPrepDaysForBoard<
+  T extends PrepLineSource & { stewing_date: string; schedule_slot?: string | null },
+>(orders: T[]): PrepBoardDay<T>[] {
+  const days: PrepBoardDay<T>[] = [];
+  const index = new Map<string, PrepBoardDay<T>>();
+  for (const session of groupPrepOrdersForBoard(orders)) {
+    let day = index.get(session.stewingDate);
+    if (!day) {
+      day = { stewingDate: session.stewingDate, sessions: [], orders: [] };
+      index.set(session.stewingDate, day);
+      days.push(day);
+    }
+    day.sessions.push(session);
+    day.orders.push(...session.orders);
+  }
+  return days;
+}
+
+export interface DayMaterialLine {
+  capacity: PrepCapacity;
+  flavor: PrepFlavor;
+  label: string;
+  bottles: number;
+  birdNest: number;
+  osmanthus: number;
+  redDate: number;
+  rockSugar: number;
+  slabSugar: number;
+}
+
+export interface DayMaterialsOrderChip {
+  id: number;
+  orderCode: string;
+  scheduleSlot: PrepScheduleSlot | null;
+  bottles: number;
+}
+
+export interface DayMaterialsSummary {
+  stewingDate: string;
+  lines: DayMaterialLine[];
+  totals: {
+    bottles: number;
+    birdNest: number;
+    osmanthus: number;
+    redDate: number;
+    rockSugar: number;
+    slabSugar: number;
+  };
+  orders: DayMaterialsOrderChip[];
+  slotBottles: { AM: number; PM: number; unset: number };
+}
+
+type DayMaterialsOrder = PrepLineSource & {
+  id?: number;
+  order_code?: string;
+  order_type: PrepOrderType;
+  stewing_date: string;
+  schedule_slot?: string | null;
+};
+
+/** Drop actual-production extras so grams follow 今次 order qty, same as a prep sheet. */
+function prepOrderAtOrderQty<T extends PrepLineSource>(order: T): T {
+  const lines = prepOrderLines(order).map((line) => ({
+    ...line,
+    actual_qty_osmanthus: null,
+    actual_qty_red_date: null,
+    actual_qty_rock_sugar: null,
+  }));
+  return {
+    ...order,
+    actual_qty_osmanthus: null,
+    actual_qty_red_date: null,
+    actual_qty_rock_sugar: null,
+    lines,
+  };
+}
+
+/**
+ * Combined materials for one stewing date.
+ * Sums 今次 order quantities across AM, PM, and unset. Completed orders count,
+ * because morning prep still needs the whole day's plan. Actual extras do not.
+ */
+export function summarizeDayMaterials(
+  orders: DayMaterialsOrder[],
+  formulas: StewFormulaMapLike = CAPACITY_FLAVOR_FORMULAS,
+): DayMaterialsSummary {
+  const byKey = new Map<string, DayMaterialLine>();
+  const ordersOut: DayMaterialsOrderChip[] = [];
+  const slotBottles = { AM: 0, PM: 0, unset: 0 };
+  const totals = {
+    bottles: 0,
+    birdNest: 0,
+    osmanthus: 0,
+    redDate: 0,
+    rockSugar: 0,
+    slabSugar: 0,
+  };
+
+  for (const order of orders) {
+    const calc = computePrepCalculationForOrder(prepOrderAtOrderQty(order), formulas);
+    let orderBottles = 0;
+    for (const row of calc.rows) {
+      if (row.disabled || row.orderQty <= 0) continue;
+      const capacity = row.capacity || order.capacity;
+      const grams = row.ingredientGrams || {};
+      const piece: DayMaterialLine = {
+        capacity,
+        flavor: row.flavor,
+        label: PREP_FLAVOR_SHORT[row.flavor],
+        bottles: row.orderQty,
+        birdNest: row.birdNestGrams || 0,
+        osmanthus: grams['桂花'] || 0,
+        redDate: grams['紅棗'] || 0,
+        rockSugar: grams['冰糖'] || 0,
+        slabSugar: grams['片糖'] || 0,
+      };
+      const key = `${capacity}:${row.flavor}`;
+      const prev = byKey.get(key);
+      if (!prev) byKey.set(key, piece);
+      else {
+        prev.bottles += piece.bottles;
+        prev.birdNest = round2(prev.birdNest + piece.birdNest);
+        prev.osmanthus = round2(prev.osmanthus + piece.osmanthus);
+        prev.redDate = round2(prev.redDate + piece.redDate);
+        prev.rockSugar = round2(prev.rockSugar + piece.rockSugar);
+        prev.slabSugar = round2(prev.slabSugar + piece.slabSugar);
+      }
+      orderBottles += piece.bottles;
+      totals.bottles += piece.bottles;
+      totals.birdNest = round2(totals.birdNest + piece.birdNest);
+      totals.osmanthus = round2(totals.osmanthus + piece.osmanthus);
+      totals.redDate = round2(totals.redDate + piece.redDate);
+      totals.rockSugar = round2(totals.rockSugar + piece.rockSugar);
+      totals.slabSugar = round2(totals.slabSugar + piece.slabSugar);
+    }
+    const slot = parsePrepScheduleSlot(order.schedule_slot);
+    if (slot === 'AM' || slot === 'PM') slotBottles[slot] += orderBottles;
+    else slotBottles.unset += orderBottles;
+    ordersOut.push({
+      id: order.id ?? 0,
+      orderCode: order.order_code || '',
+      scheduleSlot: slot,
+      bottles: orderBottles,
+    });
+  }
+
+  const capacityRank = (capacity: string) => {
+    const index = PREP_CAPACITIES.indexOf(capacity as (typeof PREP_CAPACITIES)[number]);
+    return index < 0 ? PREP_CAPACITIES.length : index;
+  };
+  const lines = Array.from(byKey.values()).sort((a, b) => {
+    const cap = capacityRank(a.capacity) - capacityRank(b.capacity);
+    if (cap !== 0) return cap;
+    return PREP_FLAVORS.indexOf(a.flavor) - PREP_FLAVORS.indexOf(b.flavor);
+  });
+
+  return {
+    stewingDate: orders[0]?.stewing_date || '',
+    lines,
+    totals,
+    orders: ordersOut,
+    slotBottles,
+  };
 }
 
 function mergePrepCalculations(orderType: PrepOrderType, parts: PrepCalculation[]): PrepCalculation {

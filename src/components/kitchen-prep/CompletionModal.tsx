@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   COMPLETION_EXCEPTION_TAGS,
   PREP_ORDER_TYPE_LABELS,
+  PREP_SCHEDULE_SLOT_LABELS,
   capacityScheduleTag,
   completionSplitsTotal,
   computePrepCalculationForOrder,
@@ -106,7 +107,10 @@ export default function CompletionModal({ order, onClose, onCompleted }: Complet
           <h2 className="text-2xl font-bold text-gray-900 mt-1">完成炖製</h2>
           <p className="text-base text-gray-600 mt-2 font-mono">{order.order_code}</p>
           <p className="text-sm text-gray-500 mt-1">
-            {order.stewing_date} · {PREP_ORDER_TYPE_LABELS[order.order_type]} · {capacityLabel}
+            {order.stewing_date}
+            {order.schedule_slot ? ` · ${PREP_SCHEDULE_SLOT_LABELS[order.schedule_slot]}` : ' · 未設定'}
+            {' · '}
+            {PREP_ORDER_TYPE_LABELS[order.order_type]} · {capacityLabel}
           </p>
         </div>
 

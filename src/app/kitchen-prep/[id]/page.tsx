@@ -12,6 +12,8 @@ import {
   PREP_CAPACITY_LABELS,
   PREP_ORDER_TYPES,
   PREP_ORDER_TYPE_LABELS,
+  PREP_SCHEDULE_SLOT_LABELS,
+  PREP_SCHEDULE_SLOTS,
   PREP_STATUSES,
   PREP_STATUS_LABELS,
   getPrepStatusAction,
@@ -21,6 +23,7 @@ import {
   formulaSummaryForCapacity,
   isMultiCapacityPrep,
   isRedDateAllowed,
+  parsePrepScheduleSlot,
   orderWithPrepLines,
   originalOrderQuantity,
   prepOrderLines,
@@ -449,6 +452,23 @@ export default function KitchenPrepDetailPage() {
               onBlur={(e) => patch({ stewing_date: e.target.value })}
               className={input}
             />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">時段 Session</label>
+            <select
+              value={order.schedule_slot ?? ''}
+              onChange={(e) => {
+                const v = parsePrepScheduleSlot(e.target.value);
+                setOrder((o) => (o ? { ...o, schedule_slot: v } : o));
+                patch({ schedule_slot: v });
+              }}
+              className={input}
+            >
+              <option value="">未設定</option>
+              {PREP_SCHEDULE_SLOTS.map((slot) => (
+                <option key={slot} value={slot}>{PREP_SCHEDULE_SLOT_LABELS[slot]}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Order Type 訂單類型</label>

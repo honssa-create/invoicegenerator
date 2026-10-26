@@ -23,6 +23,7 @@ import {
   nextActualQty,
   parseBirdNestType,
   parsePrepLinesJson,
+  parsePrepScheduleSlot,
   planPrepBatchOrderCode,
   planPrepCapacityLines,
   prepOrderBirdNestSelections,
@@ -35,6 +36,7 @@ import {
   type BirdNestType,
   type PrepBatchView,
   type PrepCapacityLineDraft,
+  type PrepScheduleSlot,
   type StewFormulaMapLike,
 } from './kitchen-prep';
 import { isWeddingGiftOrderType, mapWeddingCapacityToPrep } from './orders';
@@ -81,6 +83,7 @@ interface PrepRow {
   order_code: string;
   linked_order_id: number | null;
   stewing_date: string;
+  schedule_slot: string | null;
   order_type: string;
   capacity: string;
   status: string;
@@ -124,6 +127,7 @@ function hydrate(row: PrepRow): PrepOrder {
     order_code: row.order_code,
     linked_order_id: row.linked_order_id,
     stewing_date: row.stewing_date,
+    schedule_slot: parsePrepScheduleSlot(row.schedule_slot),
     order_type: row.order_type as PrepOrder['order_type'],
     capacity: row.capacity as PrepCapacity,
     status: row.status as PrepStatus,
@@ -177,6 +181,7 @@ async function nextOrderCode(_userId?: number): Promise<string> {
 
 type InsertPrepInput = {
   stewing_date: string;
+  schedule_slot: PrepScheduleSlot | null;
   order_type: PrepOrderType;
   capacity: PrepCapacity;
   qty_osmanthus: number;
@@ -199,18 +204,19 @@ async function insertPrepOrderRow(userId: number, row: InsertPrepInput): Promise
   const res = await db
     .prepare(
       `INSERT INTO kitchen_prep_orders
-         (user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
+         (user_id, order_code, linked_order_id, stewing_date, schedule_slot, order_type, capacity, status,
           qty_osmanthus, qty_red_date, qty_rock_sugar,
           actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
           bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar,
           lines_json, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
     .run(
       userId,
       row.order_code,
       row.linked_order_id,
       row.stewing_date,
+      row.schedule_slot,
       row.order_type,
       row.capacity,
       row.status,
@@ -236,6 +242,7 @@ function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): 
     order_code: row.order_code,
     linked_order_id: row.linked_order_id,
     stewing_date: row.stewing_date,
+    schedule_slot: row.schedule_slot,
     order_type: row.order_type,
     capacity: row.capacity,
     status: row.status,
@@ -275,7 +282,7 @@ function prepOrderFromInsert(userId: number, id: number, row: InsertPrepInput): 
 }
 
 /** List table + completion modal from list — omits notes / completion meta / timestamps. */
-const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, order_type, capacity, status,
+const PREP_LIST_COLUMNS = `id, user_id, order_code, linked_order_id, stewing_date, schedule_slot, order_type, capacity, status,
   qty_osmanthus, qty_red_date, qty_rock_sugar, actual_qty_osmanthus, actual_qty_red_date, actual_qty_rock_sugar,
   bird_nest_osmanthus, bird_nest_red_date, bird_nest_rock_sugar, lines_json,
   expected_yield, actual_yield, stewing_started_at`;
@@ -335,7 +342,9 @@ export async function listPrepOrders(
     .prepare(
       `SELECT ${PREP_LIST_COLUMNS} FROM kitchen_prep_orders
        ${where}
-       ORDER BY stewing_date ASC, id ASC`
+       ORDER BY stewing_date ASC,
+         CASE schedule_slot WHEN 'AM' THEN 0 WHEN 'PM' THEN 1 ELSE 2 END ASC,
+         id ASC`
     )
     .all(...params)) as ListPrepRow[];
   return rows.map(hydrateListRow);
@@ -441,6 +450,8 @@ export async function createPrepOrder(
   userId: number,
   input: {
     stewing_date: string;
+    /** Omitted on wedding auto-create so the row stays unset. */
+    schedule_slot?: PrepScheduleSlot | null;
     order_type: PrepOrderType;
     capacity: PrepCapacity;
     qty_osmanthus?: number;
@@ -497,6 +508,7 @@ export async function createPrepOrder(
 
   const insertRow: InsertPrepInput = {
     stewing_date: input.stewing_date,
+    schedule_slot: input.schedule_slot ?? null,
     order_type: input.order_type,
     capacity,
     qty_osmanthus: qtyOsmanthus,
@@ -533,6 +545,7 @@ export async function createPrepOrdersBatch(
   userId: number,
   input: {
     stewing_date: string;
+    schedule_slot?: PrepScheduleSlot | null;
     order_type: PrepOrderType;
     linked_order_id?: number | null;
     order_code?: string;
@@ -560,6 +573,7 @@ export async function createPrepOrdersBatch(
 
     const insertRow: InsertPrepInput = {
       stewing_date: input.stewing_date,
+      schedule_slot: input.schedule_slot ?? null,
       order_type: input.order_type,
       capacity: parent.capacity,
       qty_osmanthus: parent.qty_osmanthus,
@@ -665,10 +679,135 @@ export async function bulkSetPrepOrderStatus(
   return { updated, not_found, skipped };
 }
 
+const SESSION_GROUP_LIMIT = 100;
+
+function uniquePrepIds(ids: number[]): number[] {
+  return Array.from(
+    new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)),
+  );
+}
+
+/**
+ * Mark every open order in a session as stewing with one shared start time.
+ * Already-stewing rows are rewritten so the batch clock matches.
+ */
+export async function startPrepSession(
+  ownerId: number,
+  ids: number[],
+): Promise<{ updated: PrepOrder[]; skipped: number[]; not_found: number[] }> {
+  const uniqueIds = uniquePrepIds(ids);
+  if (uniqueIds.length > SESSION_GROUP_LIMIT) {
+    throw new Error(`Too many orders in one session (max ${SESSION_GROUP_LIMIT})`);
+  }
+  const byId = await getPrepOrdersByIds(uniqueIds);
+  const startedAt = hkNowDateTime();
+  const updated: PrepOrder[] = [];
+  const skipped: number[] = [];
+  const not_found: number[] = [];
+  const toUpdate: PrepOrder[] = [];
+
+  for (const id of uniqueIds) {
+    const existing = byId.get(id);
+    if (!existing || existing.user_id !== ownerId) {
+      not_found.push(id);
+      continue;
+    }
+    if (existing.status === 'completed') {
+      skipped.push(id);
+      continue;
+    }
+    toUpdate.push(existing);
+  }
+
+  if (toUpdate.length > 0) {
+    await db.transaction(async () => {
+      for (const existing of toUpdate) {
+        await db
+          .prepare(
+            `UPDATE kitchen_prep_orders
+             SET status = 'stewing', stewing_started_at = ?, updated_at = datetime('now')
+             WHERE id = ?`,
+          )
+          .run(startedAt, existing.id);
+        updated.push({
+          ...existing,
+          status: 'stewing',
+          stewing_started_at: startedAt,
+        });
+      }
+    });
+  }
+
+  return { updated, skipped, not_found };
+}
+
+/**
+ * Complete every open order in a session at the expected yield, one completion time.
+ * Refuses before any write when an open order is not already stewing.
+ */
+export async function completePrepSession(
+  ownerId: number,
+  actorUserId: number,
+  operatorName: string,
+  ids: number[],
+): Promise<{ updated: PrepOrder[]; skipped: number[]; not_found: number[]; error?: string }> {
+  const uniqueIds = uniquePrepIds(ids);
+  if (uniqueIds.length > SESSION_GROUP_LIMIT) {
+    throw new Error(`Too many orders in one session (max ${SESSION_GROUP_LIMIT})`);
+  }
+  const byId = await getPrepOrdersByIds(uniqueIds);
+  const skipped: number[] = [];
+  const not_found: number[] = [];
+  const open: PrepOrder[] = [];
+
+  for (const id of uniqueIds) {
+    const existing = byId.get(id);
+    if (!existing || existing.user_id !== ownerId) {
+      not_found.push(id);
+      continue;
+    }
+    if (existing.status === 'completed') {
+      skipped.push(id);
+      continue;
+    }
+    open.push(existing);
+  }
+
+  if (open.some((order) => order.status !== 'stewing')) {
+    throw new Error('Start stewing for this session before marking it complete');
+  }
+
+  const completedAt = hkNowDateTime();
+  const updated: PrepOrder[] = [];
+  let error: string | undefined;
+  for (const existing of open) {
+    try {
+      const result = await completePrepProduction(
+        existing.id,
+        actorUserId,
+        operatorName,
+        {
+          actual_yield: 0,
+          completion_remarks: 'Session group 時段完成',
+        },
+        { existing, matchExpected: true, completedAt },
+      );
+      if (result) updated.push(result.order);
+      else skipped.push(existing.id);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to complete session';
+      break;
+    }
+  }
+
+  return { updated, skipped, not_found, ...(error ? { error } : {}) };
+}
+
 export async function updatePrepOrder(
   id: number | string,
   input: Partial<{
     stewing_date: string;
+    schedule_slot: PrepScheduleSlot | null;
     order_type: PrepOrderType;
     capacity: PrepCapacity;
     status: PrepStatus;
@@ -823,13 +962,15 @@ export async function updatePrepOrder(
   }
 
   const stewingDate = input.stewing_date ?? existing.stewing_date;
+  const scheduleSlot =
+    input.schedule_slot !== undefined ? input.schedule_slot : (existing.schedule_slot ?? null);
   const orderType = input.order_type ?? existing.order_type;
   const notes = input.notes !== undefined ? input.notes : existing.notes;
 
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET
-       stewing_date = ?, order_type = ?, capacity = ?, status = ?,
+       stewing_date = ?, schedule_slot = ?, order_type = ?, capacity = ?, status = ?,
        qty_osmanthus = ?, qty_red_date = ?, qty_rock_sugar = ?,
        actual_qty_osmanthus = ?, actual_qty_red_date = ?, actual_qty_rock_sugar = ?,
        bird_nest_osmanthus = ?, bird_nest_red_date = ?, bird_nest_rock_sugar = ?,
@@ -839,6 +980,7 @@ export async function updatePrepOrder(
     )
     .run(
       stewingDate,
+      scheduleSlot,
       orderType,
       capacity,
       nextStatus,
@@ -861,6 +1003,7 @@ export async function updatePrepOrder(
     return {
       ...existing,
       stewing_date: stewingDate,
+      schedule_slot: scheduleSlot,
       order_type: orderType,
       capacity,
       status: nextStatus,
@@ -896,7 +1039,7 @@ export async function completePrepProduction(
     completion_remarks?: string | null;
     splits?: PrepCompletionSplit[];
   },
-  opts?: { existing?: PrepOrder },
+  opts?: { existing?: PrepOrder; matchExpected?: boolean; completedAt?: string },
 ): Promise<{ order: PrepOrder; calculation: PrepCalculation } | null> {
   const existing = opts?.existing ?? (await getPrepOrder(id));
   if (!existing) return null;
@@ -908,9 +1051,13 @@ export async function completePrepProduction(
 
   const calculation = computePrepCalculationForOrder(existing, stew);
   const expectedYield = calculation.totals.bottles;
-  const actualYield = Math.max(0, Math.round(input.actual_yield));
   const remarks = input.completion_remarks?.trim() || null;
-  const splits = normalizeCompletionSplits(input.splits, existing);
+  const splits = opts?.matchExpected
+    ? defaultCompletionSplits(calculation, existing.capacity)
+    : normalizeCompletionSplits(input.splits, existing);
+  const actualYield = opts?.matchExpected
+    ? splits.reduce((sum, split) => sum + Math.max(0, Math.round(split.qty)), 0)
+    : Math.max(0, Math.round(input.actual_yield));
 
   if (splits.length > 0) {
     const splitSum = splits.reduce((sum, s) => sum + s.qty, 0);
@@ -970,7 +1117,7 @@ export async function completePrepProduction(
     if (stockResult.error) throw new Error(stockResult.error);
   }
 
-  const completedAt = hkNowDateTime();
+  const completedAt = opts?.completedAt?.trim() || hkNowDateTime();
   await db
     .prepare(
       `UPDATE kitchen_prep_orders SET

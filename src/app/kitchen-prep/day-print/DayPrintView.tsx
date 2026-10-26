@@ -20,6 +20,10 @@ import {
   type StewFormulaMapLike,
 } from '@/lib/kitchen-prep';
 import { OsmanthusSpareToggle, usePrepDayOsmanthusSpare } from '@/components/kitchen-prep/OsmanthusSpareToggle';
+import {
+  OSMANTHUS_DAY_PRINT_TABLE_COLUMNS,
+  OSMANTHUS_DAY_PRINT_TABLE_TOTAL_LABEL,
+} from '@/app/kitchen-prep/day-print/osmanthus-table-columns';
 import { BTN, bi } from '@/lib/ui-labels';
 
 function orderChipLabel(order: DayMaterialsOrderChip): string {
@@ -298,13 +302,14 @@ function SugarGroup({ group }: { group: DaySugarWaterGroup }) {
                 </tr>
               ) : (
                 <tr className="bg-[#f3f0ea] text-[11px] font-bold text-[#6b6358]">
-                  <th className="px-2 py-2 text-left print:px-1.5">容量</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">今次要燉</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">燕餅 g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">桂花 g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">片糖 g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">水(煮糖) g</th>
-                  <th className="px-2 py-2 text-right print:px-1.5">水(冷泡) g</th>
+                  {OSMANTHUS_DAY_PRINT_TABLE_COLUMNS.map((col) => (
+                    <th
+                      key={col.label}
+                      className={`px-2 py-2 print:px-1.5 ${col.align === 'left' ? 'text-left' : 'text-right'}`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               )}
             </thead>
@@ -404,7 +409,7 @@ function GroupTotal({
   return (
     <tr className={rowClass}>
       <td className={labelClass} style={cellStyle} colSpan={combo ? 2 : 1}>
-        {combo ? '紅棗＋冰糖 合計' : '桂花合計'}
+        {combo ? '紅棗＋冰糖 合計' : OSMANTHUS_DAY_PRINT_TABLE_TOTAL_LABEL}
       </td>
       <td className={nowClass} style={cellStyle}>
         {group.bottles}

@@ -8,9 +8,12 @@ import {
   groupPrepOrdersForBoard,
   planPrepBatchOrderCode,
   planPrepCapacityLines,
+  prepDayCardTitle,
   prepDayMaterialsPrintPath,
   prepGroupPrintPath,
+  prepSessionCardTitle,
   prepSessionWorkflow,
+  prepWeekdayLabel,
   summarizeDayMaterials,
   sessionPotBuckets,
   sortPrepOrdersForBoard,
@@ -261,6 +264,11 @@ describe('session pot limits', () => {
       '2026-10-27|unset',
     ]);
     expect(prepDayMaterialsPrintPath('2026-10-27')).toBe('/kitchen-prep/day-print?date=2026-10-27');
+    expect(prepWeekdayLabel('2026-10-27')).toBe('星期二');
+    expect(prepDayCardTitle('2026-10-27')).toBe('2026-10-27 星期二 · 全日');
+    expect(prepSessionCardTitle('2026-10-27', 'AM')).toBe('2026-10-27 星期二 · 上午批次');
+    expect(prepSessionCardTitle('2026-10-27', 'PM')).toBe('2026-10-27 星期二 · 下午批次');
+    expect(prepSessionCardTitle('2026-10-27', null)).toBe('2026-10-27 星期二 · 未設定');
   });
 });
 

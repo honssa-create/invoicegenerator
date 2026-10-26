@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
@@ -20,13 +20,13 @@ import {
   formatPrepOrderScheduleLines,
   getPrepStatusAction,
   groupPrepDaysForBoard,
-  isMultiCapacityPrep,
   isRedDateAllowed,
   parsePrepScheduleSlot,
+  prepDayCardTitle,
   prepDayMaterialsPrintPath,
   prepGroupPrintPath,
   prepOrderLines,
-  prepSessionTitle,
+  prepSessionCardTitle,
   prepSessionWorkflow,
   sortPrepOrdersForBoard,
   summarizePrepOrderLines,
@@ -46,6 +46,32 @@ import {
   prepListCacheKey,
   setKitchenPrepListCache,
 } from '@/lib/kitchen-prep-list-cache';
+
+function flavorDisplay(text: string): string {
+  return text.replaceAll('｜', ' · ').replace(/ x(?=\d)/g, ' ×');
+}
+
+function scheduleBadge(slot: PrepScheduleSlot | null | undefined) {
+  if (slot === 'AM') {
+    return (
+      <span className="inline-flex h-7 min-w-12 items-center justify-center rounded-lg bg-[#dbeafe] px-2.5 text-[13px] font-extrabold tracking-wide text-[#1d4ed8]">
+        AM
+      </span>
+    );
+  }
+  if (slot === 'PM') {
+    return (
+      <span className="inline-flex h-7 min-w-12 items-center justify-center rounded-lg bg-[#ffedd5] px-2.5 text-[13px] font-extrabold tracking-wide text-[#c2410c]">
+        PM
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex h-7 min-w-12 items-center justify-center rounded-lg bg-gray-200 px-2.5 text-[13px] font-extrabold text-gray-700">
+      未設定
+    </span>
+  );
+}
 
 const STATUS_COLORS: Record<string, string> = {
   not_started: 'bg-gray-100 text-gray-600',
@@ -544,105 +570,114 @@ function KitchenPrepListContent() {
     });
   };
 
-  const renderOrderRow = (o: PrepOrder) => (
-    <tr
-      key={o.id}
-      onClick={() => router.push(`/kitchen-prep/${o.id}`)}
-      onMouseEnter={() => prefetchKitchenPrepDetail(o.id)}
-      onFocus={() => prefetchKitchenPrepDetail(o.id)}
-      className={`hover:bg-brand-50/50 cursor-pointer ${selected.has(o.id) ? 'bg-brand-50/40' : ''} ${isMultiCapacityPrep(o) ? 'border-l-4 border-l-brand-500' : ''}`}
-    >
-      <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={selected.has(o.id)}
-          onChange={() => toggleSelect(o.id)}
-          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-          aria-label={bi(`Select ${o.order_code}`, `選擇 ${o.order_code}`)}
-        />
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{o.stewing_date}</td>
-      <td className="px-4 py-3 whitespace-nowrap">
-        {o.schedule_slot ? (
-          <span
-            className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
-              o.schedule_slot === 'AM' ? 'bg-sky-100 text-sky-800' : 'bg-violet-100 text-violet-800'
-            }`}
-          >
-            {PREP_SCHEDULE_SLOT_LABELS[o.schedule_slot]}
-          </span>
-        ) : (
-          <span className="text-gray-400">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 font-mono text-brand-600 whitespace-nowrap">
-        {o.linked_order_id ? (
-          <Link href={`/orders/${o.linked_order_id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">
-            {o.order_code}
-          </Link>
-        ) : (
-          o.order_code
-        )}
-      </td>
-      <td className="px-4 py-3 text-gray-700">{PREP_ORDER_TYPE_LABELS[o.order_type]}</td>
-      <td className="px-4 py-3 text-gray-800">
-        {isMultiCapacityPrep(o) ? (
-          <div className="space-y-1">
-            {summarizePrepOrderLines(o).map((line) => (
-              <div key={line.capacity} className="leading-snug">
-                <span className="font-semibold">{line.label}</span>
-                <span className="text-gray-600"> · {line.text}</span>
-              </div>
+  const toggleSessionSelection = (ids: number[]) => {
+    setSelected((prev) => {
+      const all = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (all) {
+        for (const id of ids) next.delete(id);
+        return next;
+      }
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  };
+
+  const renderOrderRow = (o: PrepOrder) => {
+    const lines = summarizePrepOrderLines(o);
+    return (
+      <tr
+        key={o.id}
+        onClick={() => router.push(`/kitchen-prep/${o.id}`)}
+        onMouseEnter={() => prefetchKitchenPrepDetail(o.id)}
+        onFocus={() => prefetchKitchenPrepDetail(o.id)}
+        className={`cursor-pointer hover:bg-gray-50 ${selected.has(o.id) ? 'bg-brand-50/40' : ''}`}
+      >
+        <td className="w-10 border-b border-gray-200 px-3.5 py-[11px]" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected.has(o.id)}
+            onChange={() => toggleSelect(o.id)}
+            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+            aria-label={bi(`Select ${o.order_code}`, `選擇 ${o.order_code}`)}
+          />
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px] whitespace-nowrap">
+          {scheduleBadge(o.schedule_slot)}
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px] whitespace-nowrap">
+          <div className="text-[15px] font-extrabold text-gray-900">
+            {o.linked_order_id ? (
+              <Link href={`/orders/${o.linked_order_id}`} onClick={(e) => e.stopPropagation()} className="text-brand-700 hover:underline">
+                {o.order_code}
+              </Link>
+            ) : (
+              o.order_code
+            )}
+          </div>
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px]">
+          <div className="flex flex-wrap gap-1">
+            {(lines.length ? lines : [{ capacity: o.capacity, label: PREP_CAPACITY_LABELS[o.capacity] || o.capacity }]).map((line) => (
+              <span key={line.capacity} className="inline-block rounded-md bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-900">
+                {line.label}
+              </span>
             ))}
           </div>
-        ) : (
-          <span className="font-semibold">{PREP_CAPACITY_LABELS[o.capacity] || o.capacity}</span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>
-          {PREP_STATUS_LABELS[o.status]}
-        </span>
-        {o.status === 'completed' && o.actual_yield != null && (
-          <p className="text-xs text-gray-500 mt-1">
-            Yield {o.actual_yield}
-            {o.expected_yield != null && o.actual_yield !== o.expected_yield && (
-              <span className="text-red-600 font-medium"> / exp {o.expected_yield}</span>
-            )}
-          </p>
-        )}
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap text-gray-600 tabular-nums">
-        {o.stewing_started_at || '—'}
-      </td>
-      <td className="px-4 py-3 text-right">
-        <div className="inline-flex items-center justify-end gap-2">
-          {(() => {
-            const action = getPrepStatusAction(o.status);
-            if (!action) return null;
-            return (
-              <button
-                type="button"
-                disabled={advancingId === o.id}
-                onClick={(e) => { void handleStatusAction(o, e); }}
-                className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm whitespace-nowrap disabled:opacity-50"
-              >
-                {advancingId === o.id ? '更新中…' : action.label}
-              </button>
-            );
-          })()}
-          <button
-            type="button"
-            disabled={deletingId === o.id || bulkDeleting}
-            onClick={(e) => { e.stopPropagation(); remove(o.id); }}
-            className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-medium rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap"
-          >
-            {deletingId === o.id ? BTN.deleting : BTN.delete}
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px] text-gray-800">
+          {lines.length
+            ? lines.map((line) => flavorDisplay(line.text)).filter(Boolean).join(' · ') || '—'
+            : '—'}
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px] text-xs text-gray-500">
+          {PREP_ORDER_TYPE_LABELS[o.order_type]}
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px]">
+          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_COLORS[o.status] || 'bg-gray-100 text-gray-700'}`}>
+            {PREP_STATUS_LABELS[o.status]}
+          </span>
+          {o.status === 'completed' && o.actual_yield != null && (
+            <p className="mt-1 text-xs text-gray-500">
+              Yield {o.actual_yield}
+              {o.expected_yield != null && o.actual_yield !== o.expected_yield && (
+                <span className="font-medium text-red-600"> / exp {o.expected_yield}</span>
+              )}
+            </p>
+          )}
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px] whitespace-nowrap tabular-nums text-gray-600">
+          {o.stewing_started_at || '—'}
+        </td>
+        <td className="border-b border-gray-200 px-3.5 py-[11px] text-right" onClick={(e) => e.stopPropagation()}>
+          <div className="inline-flex items-center justify-end gap-2">
+            {(() => {
+              const action = getPrepStatusAction(o.status);
+              if (!action) return null;
+              return (
+                <button
+                  type="button"
+                  disabled={advancingId === o.id}
+                  onClick={(e) => { void handleStatusAction(o, e); }}
+                  className="inline-flex min-h-10 items-center justify-center whitespace-nowrap rounded-xl bg-green-600 px-3 py-2 text-sm font-bold text-white shadow-sm hover:bg-green-700 active:bg-green-800 disabled:opacity-50"
+                >
+                  {advancingId === o.id ? '更新中…' : action.label}
+                </button>
+              );
+            })()}
+            <button
+              type="button"
+              disabled={deletingId === o.id || bulkDeleting}
+              onClick={(e) => { e.stopPropagation(); remove(o.id); }}
+              className="inline-flex min-h-10 items-center justify-center whitespace-nowrap rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              {deletingId === o.id ? BTN.deleting : BTN.delete}
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   const remove = async (id: number) => {
     if (
@@ -954,147 +989,165 @@ function KitchenPrepListContent() {
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h2 className="font-semibold text-gray-900">Scheduled Orders 排程列表</h2>
+          {sortedOrders.length > 0 && (
+            <label className="inline-flex items-center gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAllVisible}
+                className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                aria-label={bi('Select all visible', '全選可見')}
+              />
+              {bi('Select all visible', '全選可見')}
+            </label>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+          <button
+            type="button"
+            onClick={() => toggleSort('stewing_date')}
+            className="font-semibold text-gray-700 hover:text-gray-900"
+          >
+            燉製日期{sortIndicator('stewing_date')}
+          </button>
           {!loading && orders.length > 0 && (
-            <span className="text-xs text-gray-500">
+            <span>
               {sortedOrders.length === orders.length
                 ? bi(`${orders.length} order(s)`, `${orders.length} 張`)
                 : bi(`${sortedOrders.length} of ${orders.length}`, `${sortedOrders.length} / ${orders.length} 張`)}
             </span>
           )}
         </div>
-        {loading ? (
-          <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" /></div>
-        ) : orders.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">{bi('No scheduled prep orders yet. Create one to get started.', '尚無排程備料單。建立第一張以開始。')}</div>
-        ) : sortedOrders.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">{bi('No prep orders match these filters.', '沒有符合篩選條件的備料單。')}</div>
-        ) : (
-          <table className="w-full min-w-[960px] text-sm">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                <th className="px-4 py-3 w-12">
-                  <input
-                    type="checkbox"
-                    checked={allVisibleSelected}
-                    onChange={toggleSelectAllVisible}
-                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-                    aria-label={bi('Select all visible', '全選可見')}
-                  />
-                </th>
-                <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('stewing_date')}>
-                  Target Stewing Date 燉製日期{sortIndicator('stewing_date')}
-                </th>
-                <th className="px-4 py-3 whitespace-nowrap" title="Within a date: AM, then PM, then unset">
-                  時段 AM/PM
-                </th>
-                <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('order_code')}>
-                  Order ID{sortIndicator('order_code')}
-                </th>
-                <th className="px-4 py-3">Order Type 訂單類型</th>
-                <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('capacity')}>
-                  容量 Capacity{sortIndicator('capacity')}
-                </th>
-                <th className="px-4 py-3 cursor-pointer hover:text-gray-800" onClick={() => toggleSort('status')}>
-                  Status{sortIndicator('status')}
-                </th>
-                <th className="px-4 py-3 whitespace-nowrap">開始炖製時間</th>
-                <th className="px-4 py-3 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {dayGroups.map((day) => (
-                <Fragment key={day.stewingDate || 'undated'}>
-                  <tr className="bg-stone-800 text-white">
-                    <td colSpan={9} className="px-4 py-3">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold">{day.stewingDate || '—'}</p>
-                          <p className="text-xs text-stone-300 mt-0.5">
-                            {bi('Day materials', '全日材料')} · AM + PM + {bi('unset', '未設定')}
-                          </p>
-                        </div>
-                        <Link
-                          href={prepDayMaterialsPrintPath(day.stewingDate)}
-                          className="inline-flex items-center justify-center shrink-0 min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-white text-stone-900 hover:bg-stone-100"
-                        >
-                          {bi('Print day materials', '列印全日材料')}
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                  {day.sessions.map((group) => {
-                    const workflow = prepSessionWorkflow(group.orders.map((order) => order.status));
-                    const busy = sessionBusy === group.sessionKey;
-                    return (
-                      <Fragment key={group.sessionKey}>
-                        <tr className="bg-brand-50/70">
-                          <td colSpan={9} className="px-4 py-3">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-semibold text-gray-900 mb-2">
-                                  {prepSessionTitle(group.stewingDate, group.scheduleSlot)}
-                                </p>
-                                <PrepSessionSummary lines={group.summary.lines} buckets={group.summary.potBuckets} />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                                {workflow === 'start' && (
-                                  <button
-                                    type="button"
-                                    disabled={Boolean(sessionBusy)}
-                                    onClick={() => {
-                                      void applySessionAction(
-                                        group.sessionKey,
-                                        group.orders.map((order) => order.id),
-                                        'start',
-                                      );
-                                    }}
-                                    className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
-                                  >
-                                    {busy ? '更新中…' : bi('Start stewing', '開始燉製')}
-                                  </button>
-                                )}
-                                {workflow === 'complete' && (
-                                  <button
-                                    type="button"
-                                    disabled={Boolean(sessionBusy)}
-                                    onClick={() => {
-                                      void applySessionAction(
-                                        group.sessionKey,
-                                        group.orders.map((order) => order.id),
-                                        'complete',
-                                      );
-                                    }}
-                                    className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-green-700 text-white hover:bg-green-800 disabled:opacity-50"
-                                  >
-                                    {busy ? '更新中…' : bi('Complete stewing', '燉製完成')}
-                                  </button>
-                                )}
-                                <Link
-                                  href={prepGroupPrintPath(group.orders.map((order) => order.id))}
-                                  className="inline-flex items-center justify-center min-h-[40px] px-3 py-2 text-sm font-semibold rounded-lg bg-brand-600 text-white hover:bg-brand-700"
-                                >
-                                  {bi(
-                                    `Print ${group.orders.length} prep sheet(s)`,
-                                    `列印 ${group.orders.length} 張備料單`,
-                                  )}
-                                </Link>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                        {group.orders.map((order) => renderOrderRow(order))}
-                      </Fragment>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        )}
       </div>
+
+      {loading ? (
+        <div className="rounded-2xl border-2 border-gray-300 bg-white p-12 text-center"><div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-brand-600" /></div>
+      ) : orders.length === 0 ? (
+        <div className="rounded-2xl border-2 border-gray-300 bg-white p-12 text-center text-gray-500">{bi('No scheduled prep orders yet. Create one to get started.', '尚無排程備料單。建立第一張以開始。')}</div>
+      ) : sortedOrders.length === 0 ? (
+        <div className="rounded-2xl border-2 border-gray-300 bg-white p-12 text-center text-gray-500">{bi('No prep orders match these filters.', '沒有符合篩選條件的備料單。')}</div>
+      ) : (
+        <div>
+          {dayGroups.map((day) => (
+            <section
+              key={day.stewingDate || 'undated'}
+              className="mb-[22px] overflow-hidden rounded-2xl border-2 border-gray-300 bg-white"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2.5 bg-[#111827] px-4 py-3.5 text-white">
+                <h3 className="text-[17px] font-extrabold">📅 {prepDayCardTitle(day.stewingDate)}</h3>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href={prepDayMaterialsPrintPath(day.stewingDate)}
+                    className="inline-flex min-h-10 items-center justify-center rounded-[10px] bg-[#fbbf24] px-3.5 py-2 text-sm font-extrabold text-[#111827] hover:brightness-95"
+                  >
+                    🖨 Print 全日材料合計
+                  </Link>
+                </div>
+              </div>
+              <div className="bg-gray-100 p-3">
+                {day.sessions.map((group, sessionIndex) => {
+                  const workflow = prepSessionWorkflow(group.orders.map((order) => order.status));
+                  const busy = Boolean(sessionBusy);
+                  const sessionIds = group.orders.map((order) => order.id);
+                  const lastSession = sessionIndex === day.sessions.length - 1;
+                  return (
+                    <article
+                      key={group.sessionKey}
+                      className={`overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-sm ${lastSession ? '' : 'mb-3'}`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-gray-200 bg-gray-50 px-4 py-3">
+                        <div className="flex items-center gap-2.5 text-base font-extrabold text-gray-900">
+                          {scheduleBadge(group.scheduleSlot)}
+                          <span>{prepSessionCardTitle(group.stewingDate, group.scheduleSlot)}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            href={prepGroupPrintPath(sessionIds)}
+                            className="inline-flex min-h-10 items-center justify-center rounded-[10px] bg-[#0f766e] px-3.5 py-2 text-[13px] font-bold text-white hover:brightness-95"
+                          >
+                            🖨 Print 組備料
+                          </Link>
+                          <button
+                            type="button"
+                            disabled={busy || workflow !== 'start'}
+                            onClick={() => {
+                              void applySessionAction(group.sessionKey, sessionIds, 'start');
+                            }}
+                            className="inline-flex min-h-10 items-center justify-center rounded-[10px] border border-[#059669] bg-[#059669] px-3 py-2 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-[.45]"
+                          >
+                            {sessionBusy === group.sessionKey && workflow === 'start' ? '更新中…' : '開始燉製'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy || workflow !== 'complete'}
+                            onClick={() => {
+                              void applySessionAction(group.sessionKey, sessionIds, 'complete');
+                            }}
+                            className="inline-flex min-h-10 items-center justify-center rounded-[10px] border border-[#059669] bg-white px-3 py-2 text-[13px] font-bold text-[#047857] disabled:cursor-not-allowed disabled:opacity-[.45]"
+                          >
+                            {sessionBusy === group.sessionKey && workflow === 'complete' ? '更新中…' : '燉製完成'}
+                          </button>
+                        </div>
+                      </div>
+                      <PrepSessionSummary
+                        variant="strip"
+                        lines={group.summary.lines}
+                        buckets={group.summary.potBuckets}
+                      />
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[880px] border-collapse text-sm">
+                          <thead>
+                            <tr className="text-left text-xs font-bold text-gray-500">
+                              <th className="w-10 border-b border-gray-200 px-3.5 py-[11px]">
+                                <input
+                                  type="checkbox"
+                                  checked={sessionIds.length > 0 && sessionIds.every((id) => selected.has(id))}
+                                  onChange={() => toggleSessionSelection(sessionIds)}
+                                  className="h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                  aria-label={bi('Select this session', '選擇此時段')}
+                                />
+                              </th>
+                              <th className="border-b border-gray-200 px-3.5 py-[11px]">時段</th>
+                              <th
+                                className="cursor-pointer border-b border-gray-200 px-3.5 py-[11px] hover:text-gray-800"
+                                onClick={() => toggleSort('order_code')}
+                              >
+                                單號 Order{sortIndicator('order_code')}
+                              </th>
+                              <th
+                                className="cursor-pointer border-b border-gray-200 px-3.5 py-[11px] hover:text-gray-800"
+                                onClick={() => toggleSort('capacity')}
+                              >
+                                容量{sortIndicator('capacity')}
+                              </th>
+                              <th className="border-b border-gray-200 px-3.5 py-[11px]">口味</th>
+                              <th className="border-b border-gray-200 px-3.5 py-[11px]">類別</th>
+                              <th
+                                className="cursor-pointer border-b border-gray-200 px-3.5 py-[11px] hover:text-gray-800"
+                                onClick={() => toggleSort('status')}
+                              >
+                                狀態{sortIndicator('status')}
+                              </th>
+                              <th className="whitespace-nowrap border-b border-gray-200 px-3.5 py-[11px]">開始炖製時間</th>
+                              <th className="border-b border-gray-200 px-3.5 py-[11px] text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="[&_tr:last-child_td]:border-b-0">
+                            {group.orders.map((order) => renderOrderRow(order))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
 
       {completeOrder && (
         <CompletionModal

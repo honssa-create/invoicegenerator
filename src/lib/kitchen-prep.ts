@@ -2093,14 +2093,21 @@ export function writePrepDayOsmanthusSpareEnabled(enabled: boolean) {
   }
 }
 
-/** Scale 桂花組 yellow boxes; 合計 = scaled 水(煮糖) + scaled 冷泡水. */
+function osmanthusSpareLabelSuffix(factor: number): string {
+  return factor === 1 ? '' : ` ×${factor}`;
+}
+
+/** Scale 桂花組 yellow boxes; 合計 = scaled 水(煮糖) + scaled 冷泡水. Labels gain ×1.3 when scaled. */
 export function applyOsmanthusSpareToBoxes(
   boxes: DaySugarWaterBox[],
   factor: number,
 ): DaySugarWaterBox[] {
   if (factor === 1) return boxes;
+  const labelSuffix = osmanthusSpareLabelSuffix(factor);
   const scaled = boxes.map((box) =>
-    box.key === 'boilColdSoakTotal' ? box : { ...box, amount: round2(box.amount * factor) },
+    box.key === 'boilColdSoakTotal'
+      ? { ...box, label: `${box.label}${labelSuffix}` }
+      : { ...box, label: `${box.label}${labelSuffix}`, amount: round2(box.amount * factor) },
   );
   const boil = scaled.find((box) => box.key === 'boilSugar')?.amount ?? 0;
   const cold = scaled.find((box) => box.key === 'coldSoak')?.amount ?? 0;
@@ -2154,6 +2161,7 @@ function sumDayMaterialLines(lines: DayMaterialLine[]) {
  * ① 桂花 is its own pot (boil + cold soak).
  * ② 紅棗 and 冰糖 share one pot: boil sugar only, no cold soak.
  * Both groups are always returned so an empty flavor still shows its boxes.
+ * Table rows and group totals stay raw; only osmanthus yellow-box amounts (and labels when spare is on) scale.
  */
 export function buildDaySugarWaterSheet(
   summary: DayMaterialsSummary,

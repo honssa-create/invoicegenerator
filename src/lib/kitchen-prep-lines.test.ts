@@ -445,6 +445,15 @@ describe('day materials and session workflow', () => {
     expect(osSpare.boxes[0].amount).toBeCloseTo(osmanthus.boxes[0].amount * factor, 5);
     expect(osSpare.boxes[1].amount).toBeCloseTo(osmanthus.boxes[1].amount * factor, 5);
     expect(osSpare.boxes[4].amount).toBeCloseTo(osSpare.boxes[0].amount + osSpare.boxes[1].amount, 5);
+    expect(osSpare.boxes.map((box) => box.label)).toEqual([
+      '水(煮糖) ×1.3',
+      '冷泡水 ×1.3',
+      '片糖 ×1.3',
+      '桂花乾 ×1.3',
+      '合計（水煮糖＋冷泡水） ×1.3',
+    ]);
+    expect(osSpare.boilSugar).toBeCloseTo(osmanthus.boilSugar, 5);
+    expect(osSpare.rows[0]?.boilSugar).toBeCloseTo(osmanthus.rows[0]?.boilSugar ?? 0, 5);
     expect(sheetSpare.groups[1].boxes.map((box) => box.key)).toEqual(['rockSugar', 'redDate', 'boilSugar']);
     expect(sheetSpare.groups[1].boxes[2].amount).toBeCloseTo(combo.boxes[2].amount, 5);
     expect(osmanthus.bottles).toBe(135);

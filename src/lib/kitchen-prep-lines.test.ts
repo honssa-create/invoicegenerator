@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateRawNeedsFromPrepOrders,
+  buildDaySugarWaterSheet,
+  CAPACITY_FLAVOR_FORMULAS,
   computePrepCalculationForOrder,
+  dayMaterialsCapacityLabel,
   defaultCompletionSplits,
+  formatDayMaterialAmount,
+  formatDayMaterialGrams,
+  formatDayMaterialsOrderDetail,
+  formatPrepDayHeading,
+  formatPrepDayOrderTypes,
+  formatPrepDaySlotCoverage,
   formatPrepOrderScheduleLines,
+  formulaFromLines,
+  getFormulaLines,
   groupPrepDaysForBoard,
   groupPrepOrdersForBoard,
   planPrepBatchOrderCode,
@@ -16,9 +27,13 @@ import {
   sortPrepOrdersForBoard,
   summarizePrepCapacityLines,
   summarizePrepSessions,
+  STEW_WATER_BOIL_SUGAR,
+  STEW_WATER_COLD_SOAK,
   STEW_POT_LIMIT_LARGE,
   STEW_POT_LIMIT_MIXED_75_45,
   STEW_POT_LIMIT_SMALL,
+  type PrepFlavor,
+  type StewFormulaMapLike,
 } from './kitchen-prep';
 
 describe('planPrepBatchOrderCode', () => {
@@ -264,6 +279,32 @@ describe('session pot limits', () => {
   });
 });
 
+function formulasWithWater(
+  patches: Array<{ capacity: string; flavor: PrepFlavor; boil: number; cold?: number }>,
+): StewFormulaMapLike {
+  const formulas = structuredClone(CAPACITY_FLAVOR_FORMULAS) as StewFormulaMapLike;
+  for (const patch of patches) {
+    const cell = formulas[patch.capacity]?.[patch.flavor];
+    if (!cell) throw new Error(`missing formula ${patch.capacity} ${patch.flavor}`);
+    const lines = getFormulaLines(cell, patch.flavor).map((line) => {
+      if (line.name === STEW_WATER_BOIL_SUGAR) return { ...line, qty: patch.boil };
+      if (line.name === STEW_WATER_COLD_SOAK && patch.cold != null) return { ...line, qty: patch.cold };
+      return line;
+    });
+    if (!lines.some((line) => line.name === STEW_WATER_BOIL_SUGAR)) {
+      lines.push({ name: STEW_WATER_BOIL_SUGAR, qty: patch.boil });
+    }
+    if (patch.cold != null && !lines.some((line) => line.name === STEW_WATER_COLD_SOAK)) {
+      lines.push({ name: STEW_WATER_COLD_SOAK, qty: patch.cold });
+    }
+    formulas[patch.capacity] = {
+      ...formulas[patch.capacity],
+      [patch.flavor]: formulaFromLines(lines),
+    };
+  }
+  return formulas;
+}
+
 describe('day materials and session workflow', () => {
   it('sums 今次 grams across AM, PM, and unset and ignores actual extras', () => {
     const summary = summarizeDayMaterials([
@@ -306,10 +347,112 @@ describe('day materials and session workflow', () => {
     const rock = summary.lines.find((line) => line.flavor === 'rock_sugar');
     expect(osmanthus?.bottles).toBe(180);
     expect(osmanthus?.slabSugar).toBeCloseTo(180 * 5.03, 5);
+    expect(osmanthus?.boilSugar).toBe(0);
+    expect(osmanthus?.coldSoak).toBe(0);
+    expect(formatDayMaterialAmount(osmanthus?.boilSugar || 0)).toBe('—');
     expect(rock?.bottles).toBe(12);
     expect(summary.totals.bottles).toBe(192);
+    expect(summary.totals.boilSugar).toBe(0);
     expect(summary.slotBottles).toEqual({ AM: 80, PM: 100, unset: 12 });
     expect(summary.orders.map((order) => order.orderCode)).toEqual(['AM-A', 'PM-A', 'UNSET']);
+    expect(summary.orders[0].detail).toBe('45g 桂80');
+  });
+
+  it('groups 桂花 alone and 紅棗＋冰糖 together, with water from the catalog formula', () => {
+    const formulas = formulasWithWater([
+      { capacity: '45g', flavor: 'osmanthus', boil: 12, cold: 8.125 },
+      { capacity: '25g', flavor: 'osmanthus', boil: 12, cold: 8.124 },
+      { capacity: '75g', flavor: 'osmanthus', boil: 12, cold: 8.13 },
+      { capacity: '45g', flavor: 'red_date', boil: 12, cold: 9 },
+      { capacity: '25g', flavor: 'rock_sugar', boil: 20 },
+    ]);
+    const summary = summarizeDayMaterials(
+      [
+        {
+          id: 1,
+          order_code: '#10986',
+          order_type: 'wedding',
+          stewing_date: '2026-10-27',
+          schedule_slot: 'AM',
+          capacity: '45g',
+          qty_osmanthus: 60,
+          qty_red_date: 60,
+          qty_rock_sugar: 0,
+        },
+        {
+          id: 2,
+          order_code: '#12104-01',
+          order_type: 'wedding',
+          stewing_date: '2026-10-27',
+          schedule_slot: 'PM',
+          capacity: '45g',
+          qty_osmanthus: 40,
+          qty_red_date: 70,
+          qty_rock_sugar: 0,
+          lines: [
+            { capacity: '45g', qty_osmanthus: 40, qty_red_date: 70, qty_rock_sugar: 0 },
+            { capacity: '25g', qty_osmanthus: 25, qty_red_date: 0, qty_rock_sugar: 25 },
+            { capacity: '75g', qty_osmanthus: 10, qty_red_date: 0, qty_rock_sugar: 0 },
+          ],
+        },
+      ],
+      formulas,
+    );
+
+    const os45 = summary.lines.find((line) => line.flavor === 'osmanthus' && line.capacity === '45g');
+    expect(os45?.bottles).toBe(100);
+    expect(os45?.osmanthus).toBeCloseTo(13, 5);
+    expect(os45?.slabSugar).toBeCloseTo(503, 5);
+    expect(os45?.boilSugar).toBeCloseTo(1200, 5);
+    expect(os45?.coldSoak).toBeCloseTo(812.5, 5);
+    const red = summary.lines.find((line) => line.flavor === 'red_date');
+    expect(red?.coldSoak).toBeCloseTo(130 * 9, 5);
+    expect(red?.boilSugar).toBeCloseTo(1560, 5);
+
+    const sheet = buildDaySugarWaterSheet(summary);
+    expect(sheet.groups.map((group) => group.id)).toEqual(['osmanthus', 'combo']);
+    const osmanthus = sheet.groups[0];
+    const combo = sheet.groups[1];
+    expect(osmanthus.boxes.map((box) => box.key)).toEqual(['boilSugar', 'coldSoak', 'slabSugar', 'osmanthus']);
+    expect(osmanthus.boxes.map((box) => box.label)).toEqual([
+      '要準備糖水量（煮糖）',
+      '冷泡水',
+      '片糖',
+      '桂花乾',
+    ]);
+    expect(osmanthus.bottles).toBe(135);
+    expect(osmanthus.boilSugar).toBeCloseTo(1200 + 300 + 120, 5);
+    expect(osmanthus.coldSoak).toBeCloseTo(812.5 + 203.1 + 81.3, 5);
+    expect(combo.boxes.map((box) => box.key)).toEqual(['boilSugar', 'rockSugar', 'redDate']);
+    expect(combo.boxes.some((box) => box.key === 'coldSoak')).toBe(false);
+    expect(combo.coldSoak).toBe(0);
+    expect(combo.bottleNote).toBe('紅130 + 冰25');
+    expect(combo.rows.map((row) => `${row.flavor}:${row.capacity}`)).toEqual(['red_date:45g', 'rock_sugar:25g']);
+    expect(combo.boilSugar).toBeCloseTo(1560 + 500, 5);
+    expect(sheet.footer.osmanthusColdSoak).toBeCloseTo(osmanthus.coldSoak, 5);
+    expect(sheet.footer.osmanthusColdSoak).not.toBeCloseTo(red?.coldSoak || 0, 0);
+    expect(sheet.footer.boilSugar).toBeCloseTo(osmanthus.boilSugar + combo.boilSugar, 5);
+    expect(sheet.footer.comboBoil).toBeCloseTo(combo.boilSugar, 5);
+    expect(formatDayMaterialGrams(0)).toBe('—');
+    expect(formatDayMaterialAmount(1620)).toBe('1,620');
+    expect(formatDayMaterialAmount(1096.9)).toBe('1,096.9');
+    expect(formatDayMaterialGrams(2060)).toBe('2,060 g');
+    expect(formatPrepDayHeading('2026-10-27')).toBe('2026-10-27 星期二 · 全日');
+    expect(formatPrepDaySlotCoverage(['AM', 'PM'])).toBe('AM + PM');
+    expect(formatPrepDaySlotCoverage(['AM', null])).toBe('AM + 未設定');
+    expect(formatPrepDayOrderTypes(['wedding', 'wedding'])).toBe('回禮訂單 Wedding');
+    expect(formatPrepDayOrderTypes(['wedding', 'daily'])).toBe('回禮訂單 Wedding · 日常訂單 Daily');
+    expect(dayMaterialsCapacityLabel('75g')).toBe('75g（高身）');
+    expect(dayMaterialsCapacityLabel('75g_big_belly')).toBe('75g（大肚）');
+    expect(summary.orders[1].detail).toBe('45g 桂40+紅70 · 25g 桂25+冰25 · 75g（高身） 桂10');
+    expect(
+      formatDayMaterialsOrderDetail({
+        capacity: '45g',
+        qty_osmanthus: 0,
+        qty_red_date: 30,
+        qty_rock_sugar: 0,
+      }),
+    ).toBe('45g 紅30');
   });
 
   it('shows start until every open order is stewing, then complete', () => {

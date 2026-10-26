@@ -422,13 +422,21 @@ describe('day materials and session workflow', () => {
     expect(sheet.groups.map((group) => group.id)).toEqual(['osmanthus', 'combo']);
     const osmanthus = sheet.groups[0];
     const combo = sheet.groups[1];
-    expect(osmanthus.boxes.map((box) => box.key)).toEqual(['boilSugar', 'coldSoak', 'slabSugar', 'osmanthus']);
+    expect(osmanthus.boxes.map((box) => box.key)).toEqual([
+      'boilSugar',
+      'coldSoak',
+      'slabSugar',
+      'osmanthus',
+      'boilColdSoakTotal',
+    ]);
     expect(osmanthus.boxes.map((box) => box.label)).toEqual([
-      '要準備糖水量（煮糖）',
+      '水(煮糖)',
       '冷泡水',
       '片糖',
       '桂花乾',
+      '合計（水煮糖＋冷泡水）',
     ]);
+    expect(osmanthus.boxes[4].amount).toBeCloseTo(osmanthus.boxes[0].amount + osmanthus.boxes[1].amount, 5);
     expect(osmanthus.bottles).toBe(135);
     expect(osmanthus.boilSugar).toBeCloseTo(1200 + 300 + 120, 5);
     expect(osmanthus.coldSoak).toBeCloseTo(812.5 + 203.1 + 81.3, 5);

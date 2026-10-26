@@ -2012,6 +2012,7 @@ export function summarizeDayMaterials(
 
 export type DaySugarWaterBoxKey =
   | 'boilSugar'
+  | 'boilColdSoakTotal'
   | 'coldSoak'
   | 'slabSugar'
   | 'osmanthus'
@@ -2124,10 +2125,16 @@ export function buildDaySugarWaterSheet(summary: DayMaterialsSummary): DaySugarW
       rows: osmanthusRows,
       ...osmanthus,
       boxes: [
-        { key: 'boilSugar', label: '要準備糖水量（煮糖）', amount: osmanthus.boilSugar, highlight: true },
+        { key: 'boilSugar', label: '水(煮糖)', amount: osmanthus.boilSugar, highlight: true },
         { key: 'coldSoak', label: '冷泡水', amount: osmanthus.coldSoak, highlight: true },
         { key: 'slabSugar', label: '片糖', amount: osmanthus.slabSugar, highlight: false },
         { key: 'osmanthus', label: '桂花乾', amount: osmanthus.osmanthus, highlight: false },
+        {
+          key: 'boilColdSoakTotal',
+          label: '合計（水煮糖＋冷泡水）',
+          amount: round2(osmanthus.boilSugar + osmanthus.coldSoak),
+          highlight: true,
+        },
       ],
     },
     {

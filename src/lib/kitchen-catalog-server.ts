@@ -10,6 +10,7 @@ import {
   mergeStewWaterCatalogRawMaterials,
   mergeStewWaterFormulaLines,
   mergeCatalogGiftBoxTypes,
+  mergeStewFormulaSheet20261026,
   mergeSuiXinGiftBoxBoms,
   normalizeCatalogBundle,
   validateKitchenCatalogBundle,
@@ -20,7 +21,12 @@ import {
 } from './kitchen-catalog';
 
 /** Bump when merge helpers change so existing DBs re-run once. */
-export const KITCHEN_CATALOG_MERGE_VERSION = '2026-08-v3';
+export const KITCHEN_CATALOG_MERGE_VERSION = '2026-10-26-stew';
+
+/** Per-user guard so a later catalog-version bump does not reset stew grams. */
+export function stewFormulaSheetMigrationKey(userId: number): string {
+  return `kitchen_stew_formula_sheet_2026_10_26:${userId}`;
+}
 
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -158,6 +164,26 @@ async function runCatalogMerges(
       );
   }
 
+  const sheetKey = stewFormulaSheetMigrationKey(userId);
+  const sheetApplied = (await db.prepare('SELECT key FROM app_migrations WHERE key = ?').get(sheetKey)) as
+    | { key: string }
+    | undefined;
+  if (!sheetApplied) {
+    const sheet = mergeStewFormulaSheet20261026({ catalog, formulas });
+    catalog = sheet.catalog;
+    formulas = sheet.formulas;
+    await db
+      .prepare(
+        `UPDATE kitchen_settings
+         SET catalog_json = ?, formulas_json = ?, updated_at = datetime('now')
+         WHERE user_id = ?`
+      )
+      .run(JSON.stringify(catalog), JSON.stringify(formulas), userId);
+    await db
+      .prepare(`INSERT INTO app_migrations (key) VALUES (?) ON CONFLICT DO NOTHING`)
+      .run(sheetKey);
+  }
+
   await persistCatalogMergeVersion(userId);
   return { catalog, formulas };
 }
@@ -274,7 +300,7 @@ const prepDetailContextCache = new Map<
     at: number;
     data: {
       formulas: KitchenFormulas;
-      capacities: Array<{ id: string; label: string; sortOrder: number }>;
+      capacities: Array<{ id: string; label: string; sortOrder: number; active: boolean }>;
     };
   }
 >();
@@ -287,7 +313,7 @@ export function invalidateKitchenPrepDetailContextCache(userId?: number) {
 /** Formulas + capacity labels for prep detail — one settings row read on the fast path. */
 export async function readKitchenPrepDetailContext(userId: number): Promise<{
   formulas: KitchenFormulas;
-  capacities: Array<{ id: string; label: string; sortOrder: number }>;
+  capacities: Array<{ id: string; label: string; sortOrder: number; active: boolean }>;
 }> {
   const cached = prepDetailContextCache.get(userId);
   if (cached && Date.now() - cached.at < PREP_DETAIL_CONTEXT_CACHE_TTL_MS) {
@@ -323,7 +349,12 @@ export async function readKitchenPrepDetailContext(userId: number): Promise<{
     ).formulas;
     const capacities = [...catalog.capacities]
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-      .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+      .map((c) => ({
+        id: c.id,
+        label: c.label,
+        sortOrder: c.sortOrder ?? 0,
+        active: c.active !== false,
+      }));
     const data = { formulas, capacities };
     prepDetailContextCache.set(userId, { at: Date.now(), data });
     return data;
@@ -332,7 +363,12 @@ export async function readKitchenPrepDetailContext(userId: number): Promise<{
   const bundle = await loadKitchenCatalog(userId);
   const capacities = [...bundle.catalog.capacities]
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-    .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+    .map((c) => ({
+      id: c.id,
+      label: c.label,
+      sortOrder: c.sortOrder ?? 0,
+      active: c.active !== false,
+    }));
   const data = { formulas: bundle.formulas, capacities };
   prepDetailContextCache.set(userId, { at: Date.now(), data });
   return data;
@@ -354,17 +390,30 @@ export async function readKitchenCapacityOptions(
 
   await ensureSettingsRow(userId);
   const row = (await db
-    .prepare('SELECT catalog_json FROM kitchen_settings WHERE user_id = ?')
-    .get(userId)) as { catalog_json: string | null } | undefined;
+    .prepare('SELECT catalog_json, catalog_merge_version FROM kitchen_settings WHERE user_id = ?')
+    .get(userId)) as { catalog_json: string | null; catalog_merge_version: string | null } | undefined;
+  if (row?.catalog_merge_version !== KITCHEN_CATALOG_MERGE_VERSION) {
+    const bundle = await loadKitchenCatalog(userId);
+    const data = activeCapacityOptions(bundle.catalog.capacities);
+    capacityOptionsCache.set(userId, { at: Date.now(), data });
+    return data;
+  }
   const defaults = defaultKitchenCatalogBundle();
   const catalog = row?.catalog_json
     ? normalizeCatalogBundle(parseJson(row.catalog_json, defaults.catalog), null, defaults).catalog
     : defaults.catalog;
-  const data = [...catalog.capacities]
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-    .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
+  const data = activeCapacityOptions(catalog.capacities);
   capacityOptionsCache.set(userId, { at: Date.now(), data });
   return data;
+}
+
+function activeCapacityOptions(
+  capacities: Array<{ id: string; label: string; sortOrder: number; active?: boolean }>,
+): Array<{ id: string; label: string; sortOrder: number }> {
+  return [...capacities]
+    .filter((c) => c.active !== false)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((c) => ({ id: c.id, label: c.label, sortOrder: c.sortOrder ?? 0 }));
 }
 
 const CATALOG_BUNDLE_CACHE_TTL_MS = 120_000;

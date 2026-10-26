@@ -12,6 +12,7 @@ import {
   uniqueCatalogId,
   mergeCatalogGiftBoxTypes,
   mergeSuiXinGiftBoxBoms,
+  mergeStewFormulaSheet20261026,
   mergeStewWaterFormulaLines,
   giftBoxBomRawOptions,
 } from './kitchen-catalog';
@@ -25,7 +26,9 @@ import {
   STEW_WATER_BOIL_SUGAR,
   STEW_WATER_COLD_SOAK,
   BIRD_NEST_FORMULA_PLACEHOLDER,
+  type PrepFlavor,
 } from './kitchen-prep';
+import { mapWeddingCapacityToPrep, normalizeWeddingGiftBottleCapacity, weddingGiftBottleCapacityOptions } from './orders';
 
 describe('kitchen catalog defaults', () => {
   it('seeds raw materials, gift boxes, and finished SKUs', () => {
@@ -270,6 +273,122 @@ describe('stew variable ingredient lines', () => {
     );
     expect(consumed.find((l) => l.name === '冰糖')?.qty).toBe(35.7);
     expect(consumed.find((l) => l.name === '大燕餅')?.qty).toBe(8);
+  });
+});
+
+describe('stew formula sheet 2026-10-26', () => {
+  function qty(cap: string, flavor: PrepFlavor, name: string): number | null {
+    const formulas = defaultKitchenFormulas().stewFormulas;
+    const lines = getFormulaLines(getStewFlavorFormula(cap, flavor, formulas), flavor);
+    return lines.find((l) => l.name === name)?.qty ?? null;
+  }
+
+  it('matches the 26/10/2026 table per bottle', () => {
+    expect(qty('25g', 'osmanthus', '燕餅')).toBeCloseTo(0.4, 3);
+    expect(qty('25g', 'osmanthus', '片糖')).toBeCloseTo(2.25, 3);
+    expect(qty('25g', 'osmanthus', '桂花')).toBeCloseTo(0.056, 3);
+    expect(qty('25g', 'osmanthus', STEW_WATER_BOIL_SUGAR)).toBeCloseTo(11.56, 3);
+    expect(qty('25g', 'osmanthus', STEW_WATER_COLD_SOAK)).toBeCloseTo(8.55, 3);
+    expect(qty('25g', 'rock_sugar', '燕餅')).toBeCloseTo(0.4, 3);
+    expect(qty('25g', 'rock_sugar', '冰糖')).toBeCloseTo(1.587, 3);
+    expect(qty('25g', 'rock_sugar', STEW_WATER_BOIL_SUGAR)).toBeCloseTo(20, 3);
+    expect(qty('25g', 'rock_sugar', STEW_WATER_COLD_SOAK)).toBeNull();
+    expect(getStewFlavorFormula('25g', 'red_date', defaultKitchenFormulas().stewFormulas)).toBeNull();
+
+    expect(qty('45g', 'osmanthus', '燕餅')).toBeCloseTo(0.8, 3);
+    expect(qty('45g', 'osmanthus', '片糖')).toBeCloseTo(3.94, 3);
+    expect(qty('45g', 'osmanthus', '桂花')).toBeCloseTo(0.099, 3);
+    expect(qty('45g', 'osmanthus', STEW_WATER_BOIL_SUGAR)).toBeCloseTo(20.05, 3);
+    expect(qty('45g', 'osmanthus', STEW_WATER_COLD_SOAK)).toBeCloseTo(14.95, 3);
+    expect(qty('45g', 'rock_sugar', '燕餅')).toBeCloseTo(0.8, 3);
+    expect(qty('45g', 'rock_sugar', '冰糖')).toBeCloseTo(2.776, 3);
+    expect(qty('45g', 'red_date', '紅棗')).toBeCloseTo(1.5, 3);
+    expect(qty('45g', 'red_date', '冰糖')).toBeCloseTo(2.776, 3);
+    expect(qty('45g', 'red_date', STEW_WATER_COLD_SOAK)).toBeNull();
+
+    expect(qty('75g', 'osmanthus', '燕餅')).toBeCloseTo(1.7, 3);
+    expect(qty('75g', 'osmanthus', '片糖')).toBeCloseTo(6.64, 3);
+    expect(qty('75g', 'osmanthus', '桂花')).toBeCloseTo(0.166, 3);
+    expect(qty('75g', 'osmanthus', STEW_WATER_BOIL_SUGAR)).toBeCloseTo(33.79, 3);
+    expect(qty('75g', 'osmanthus', STEW_WATER_COLD_SOAK)).toBeCloseTo(25.21, 3);
+    expect(qty('75g', 'rock_sugar', '燕餅')).toBeCloseTo(1.75, 3);
+    expect(qty('75g', 'rock_sugar', '冰糖')).toBeCloseTo(4.68, 3);
+    expect(qty('75g', 'red_date', '燕餅')).toBeCloseTo(1.7, 3);
+    expect(qty('75g', 'red_date', '紅棗')).toBeCloseTo(2.4, 3);
+
+    expect(qty('75g_big_belly', 'osmanthus', '燕餅')).toBeCloseTo(1.7, 3);
+    expect(qty('75g_big_belly', 'osmanthus', '片糖')).toBeCloseTo(7.21, 3);
+    expect(qty('75g_big_belly', 'osmanthus', '桂花')).toBeCloseTo(0.18, 3);
+    expect(qty('75g_big_belly', 'osmanthus', STEW_WATER_BOIL_SUGAR)).toBeCloseTo(36.65, 3);
+    expect(qty('75g_big_belly', 'osmanthus', STEW_WATER_COLD_SOAK)).toBeCloseTo(27.35, 3);
+    expect(qty('75g_big_belly', 'rock_sugar', '冰糖')).toBeCloseTo(5.077, 3);
+    expect(qty('75g_big_belly', 'rock_sugar', STEW_WATER_BOIL_SUGAR)).toBeCloseTo(64, 3);
+    expect(qty('75g_big_belly', 'red_date', '燕餅')).toBeCloseTo(1.7, 3);
+    expect(qty('75g_big_belly', 'red_date', '冰糖')).toBeCloseTo(5.077, 3);
+    expect(qty('75g_big_belly', 'red_date', '紅棗')).toBeCloseTo(2.4, 3);
+  });
+
+  it('pauses 75g 厚 and keeps 75g 薄 active', () => {
+    const caps = defaultKitchenCatalog().capacities;
+    expect(caps.find((c) => c.id === '75g')).toMatchObject({ label: '75g 厚', active: false });
+    expect(caps.find((c) => c.id === '75g_big_belly')).toMatchObject({ label: '75g 薄', active: true });
+    expect(caps.find((c) => c.id === '25g')?.active).toBe(true);
+    expect(caps.find((c) => c.id === '45g')?.active).toBe(true);
+  });
+
+  it('rewrites saved legacy labels and grams without touching gift-box BOMs', () => {
+    const bundle = defaultKitchenCatalogBundle();
+    bundle.catalog.capacities = bundle.catalog.capacities.map((c) => {
+      if (c.id === '75g') return { ...c, label: '75g (燕身樽)', active: true };
+      if (c.id === '75g_big_belly') return { ...c, label: '75g (大肚樽)', active: true };
+      return c;
+    });
+    bundle.formulas.stewFormulas['25g']!.osmanthus = formulaFromLines([
+      { name: '燕餅', qty: 0.4 },
+      { name: '桂花', qty: 0.06 },
+      { name: '片糖', qty: 2.24 },
+    ]);
+    bundle.formulas.giftBoxBoms.star_gold = [{ kind: 'finished', sku: 'keep-me', qty: 9 }];
+    bundle.catalog.finishedLabels['75g|osmanthus'] = '75g 桂花 (高身樽)';
+    bundle.catalog.finishedLabels['75g_big_belly|osmanthus'] = '75g 桂花 (大肚樽)';
+
+    const merged = mergeStewFormulaSheet20261026(bundle);
+    expect(merged.catalog.capacities.find((c) => c.id === '75g')).toMatchObject({
+      label: '75g 厚',
+      active: false,
+    });
+    expect(merged.catalog.capacities.find((c) => c.id === '75g_big_belly')).toMatchObject({
+      label: '75g 薄',
+      active: true,
+    });
+    const osmanthus = getFormulaLines(merged.formulas.stewFormulas['25g']!.osmanthus!, 'osmanthus');
+    expect(osmanthus.find((l) => l.name === '桂花')?.qty).toBeCloseTo(0.056, 3);
+    expect(osmanthus.find((l) => l.name === '片糖')?.qty).toBeCloseTo(2.25, 3);
+    expect(merged.formulas.giftBoxBoms.star_gold).toEqual([{ kind: 'finished', sku: 'keep-me', qty: 9 }]);
+    expect(merged.catalog.finishedLabels['75g|osmanthus']).toBe('75g 桂花 (厚)');
+    expect(merged.catalog.finishedLabels['75g_big_belly|osmanthus']).toBe('75g 桂花 (薄)');
+
+    const reenabled = mergeStewFormulaSheet20261026({
+      ...merged,
+      catalog: {
+        ...merged.catalog,
+        capacities: merged.catalog.capacities.map((c) =>
+          c.id === '75g' ? { ...c, active: true } : c
+        ),
+      },
+    });
+    expect(reenabled.catalog.capacities.find((c) => c.id === '75g')?.active).toBe(true);
+  });
+
+  it('maps legacy wedding bottle text onto 厚 and 薄 prep ids', () => {
+    expect(normalizeWeddingGiftBottleCapacity('75g(高身樽)')).toBe('75g 厚');
+    expect(normalizeWeddingGiftBottleCapacity('75g (燕身樽)')).toBe('75g 厚');
+    expect(normalizeWeddingGiftBottleCapacity('75g')).toBe('75g 厚');
+    expect(normalizeWeddingGiftBottleCapacity('75g(大肚樽)')).toBe('75g 薄');
+    expect(mapWeddingCapacityToPrep('75g(高身樽)')).toBe('75g');
+    expect(mapWeddingCapacityToPrep('75g 薄')).toBe('75g_big_belly');
+    expect(weddingGiftBottleCapacityOptions('')).toEqual(['25g', '45g', '75g 薄']);
+    expect(weddingGiftBottleCapacityOptions('75g(高身樽)')).toEqual(['25g', '45g', '75g 薄', '75g 厚']);
   });
 });
 

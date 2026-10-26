@@ -385,7 +385,7 @@ async function getPrepOrdersByIds(ids: number[]): Promise<Map<number, PrepOrder>
 export type PrepOrderDetailPayload = {
   order: PrepOrder;
   calculation: PrepCalculation;
-  capacities: Array<{ id: string; label: string }>;
+  capacities: Array<{ id: string; label: string; active?: boolean }>;
   batch: PrepBatchView;
   stewFormulas: StewFormulaMapLike;
 };
@@ -440,7 +440,7 @@ export async function loadPrepOrderDetail(
   return {
     order,
     calculation,
-    capacities: capacities.map((c) => ({ id: c.id, label: c.label })),
+    capacities: capacities.map((c) => ({ id: c.id, label: c.label, active: c.active !== false })),
     batch,
     stewFormulas: formulas.stewFormulas,
   };

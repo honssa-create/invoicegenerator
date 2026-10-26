@@ -311,6 +311,7 @@ export default function KitchenAdminPanel({
                   <thead>
                     <tr className="text-left text-[10px] text-gray-400">
                       <th className="pb-0.5 pr-1">標籤</th>
+                      <th className="pb-0.5 w-8">啟</th>
                       <th className="pb-0.5 w-8" />
                     </tr>
                   </thead>
@@ -324,6 +325,19 @@ export default function KitchenAdminPanel({
                             onChange={(e) => {
                               const next = [...catalog.capacities];
                               next[i] = { ...c, label: e.target.value };
+                              setCatalog({ ...catalog, capacities: next });
+                            }}
+                          />
+                        </td>
+                        <td className="py-0.5 text-center">
+                          <input
+                            type="checkbox"
+                            className="scale-90"
+                            checked={c.active !== false}
+                            title="新備料／訂單可選"
+                            onChange={(e) => {
+                              const next = [...catalog.capacities];
+                              next[i] = { ...c, active: e.target.checked };
                               setCatalog({ ...catalog, capacities: next });
                             }}
                           />
@@ -358,7 +372,7 @@ export default function KitchenAdminPanel({
                       ...catalog,
                       capacities: [
                         ...catalog.capacities,
-                        { id, label: '', sortOrder: catalog.capacities.length },
+                        { id, label: '', sortOrder: catalog.capacities.length, active: true },
                       ],
                     });
                   }}
@@ -366,7 +380,7 @@ export default function KitchenAdminPanel({
                   + 新增容量
                 </button>
                 <p className="text-[10px] text-gray-400 mt-1 leading-tight">
-                  口味：桂花／紅棗／冰糖
+                  口味：桂花／紅棗／冰糖。取消「啟」仍保留燉製配方，但新廚房備料同訂單容量唔會提供。
                 </p>
               </div>
             </div>
@@ -537,9 +551,15 @@ export default function KitchenAdminPanel({
           {tab === 'stew' && (
             <div className="space-y-2 max-h-[min(32rem,65vh)] overflow-y-auto">
               {catalog.capacities.map((cap) => (
-                <div key={cap.id} className="border border-gray-100 rounded p-1.5">
+                <div
+                  key={cap.id}
+                  className={`border rounded p-1.5 ${cap.active === false ? 'border-amber-200 bg-amber-50/40' : 'border-gray-100'}`}
+                >
                   <div className="font-medium text-[11px] text-gray-700 mb-1">
                     {cap.label || cap.id}
+                    {cap.active === false ? (
+                      <span className="ml-1 text-[10px] font-semibold text-amber-700">暫時唔用</span>
+                    ) : null}
                   </div>
                   <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {(FINISHED_FLAVORS as PrepFlavor[]).map((flavor) => {

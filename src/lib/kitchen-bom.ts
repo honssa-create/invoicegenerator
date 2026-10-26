@@ -52,12 +52,12 @@ export const FINISHED_SKU_LABELS: Record<string, string> = {
   [finishedSku('45g', 'osmanthus')]: '45g 桂花',
   [finishedSku('45g', 'red_date')]: '45g 紅棗',
   [finishedSku('45g', 'rock_sugar')]: '45g 冰糖',
-  [finishedSku('75g_big_belly', 'osmanthus')]: '75g 桂花 (大肚樽)',
-  [finishedSku('75g_big_belly', 'red_date')]: '75g 紅棗 (大肚樽)',
-  [finishedSku('75g_big_belly', 'rock_sugar')]: '75g 冰糖 (大肚樽)',
-  [finishedSku('75g', 'osmanthus')]: '75g 桂花 (高身樽)',
-  [finishedSku('75g', 'red_date')]: '75g 紅棗 (高身樽)',
-  [finishedSku('75g', 'rock_sugar')]: '75g 冰糖 (高身樽)',
+  [finishedSku('75g_big_belly', 'osmanthus')]: '75g 桂花 (薄)',
+  [finishedSku('75g_big_belly', 'red_date')]: '75g 紅棗 (薄)',
+  [finishedSku('75g_big_belly', 'rock_sugar')]: '75g 冰糖 (薄)',
+  [finishedSku('75g', 'osmanthus')]: '75g 桂花 (厚)',
+  [finishedSku('75g', 'red_date')]: '75g 紅棗 (厚)',
+  [finishedSku('75g', 'rock_sugar')]: '75g 冰糖 (厚)',
 };
 
 export type BomLine =

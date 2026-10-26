@@ -74,24 +74,24 @@ describe('prep materials table', () => {
     expect(osmanthus.now).toBe(40);
     expect(osmanthus.materials.bottles).toBe(40);
     expect(osmanthus.materials.birdNest).toBe(32);
-    expect(osmanthus.materials.osmanthus).toBe(5.2);
-    expect(osmanthus.materials.slabSugar).toBe(201.2);
+    expect(osmanthus.materials.osmanthus).toBeCloseTo(3.96, 2);
+    expect(osmanthus.materials.slabSugar).toBeCloseTo(157.6, 2);
     expect(osmanthus.materials.rockSugar).toBe(0);
-    expect(osmanthus.materials.boilSugarWater).toBe(0);
-    expect(osmanthus.materials.coldSoakWater).toBe(0);
+    expect(osmanthus.materials.boilSugarWater).toBeCloseTo(802, 2);
+    expect(osmanthus.materials.coldSoakWater).toBeCloseTo(598, 2);
     const rock = table.boxes[1].rows[0];
     expect(rock.now).toBe(25);
     expect(rock.materials.birdNest).toBe(10);
-    expect(rock.materials.rockSugar).toBe(49.5);
+    expect(rock.materials.rockSugar).toBeCloseTo(39.67, 2);
     expect(rock.materials.bottles).toBe(25);
-    expect(rock.materials.boilSugarWater).toBe(0);
+    expect(rock.materials.boilSugarWater).toBe(500);
     expect(rock.materials.coldSoakWater).toBe(0);
     expect(table.now).toBe(65);
     expect(table.prior).toBe(0);
     expect(table.materials.birdNest).toBe(42);
     expect(table.materials.bottles).toBe(65);
-    expect(table.materials.boilSugarWater).toBe(0);
-    expect(table.materials.coldSoakWater).toBe(0);
+    expect(table.materials.boilSugarWater).toBeCloseTo(1302, 2);
+    expect(table.materials.coldSoakWater).toBeCloseTo(598, 2);
   });
 
   it('sums 水(煮糖) and 水(冷泡) from formula lines into row, box, and footer totals', () => {
@@ -177,16 +177,16 @@ describe('prep materials table', () => {
     expect(g25.headerAside).toBe('今次要燉 25');
     expect(g25.rows[0]).toMatchObject({ label: '冰糖', prior: 0, now: 25 });
     expect(g25.rows[0].materials.birdNest).toBe(10);
-    expect(g25.rows[0].materials.rockSugar).toBe(49.5);
+    expect(g25.rows[0].materials.rockSugar).toBeCloseTo(39.67, 2);
     expect(g25.rows[0].materials.bottles).toBe(25);
     expect(table.prior).toBe(40);
     expect(table.now).toBe(25);
     expect(table.materials).toMatchObject({
       birdNest: 10,
       osmanthus: 0,
-      rockSugar: 49.5,
+      rockSugar: 39.67,
       slabSugar: 0,
-      boilSugarWater: 0,
+      boilSugarWater: 500,
       coldSoakWater: 0,
       bottles: 25,
     });
@@ -252,7 +252,7 @@ describe('prep materials table', () => {
       expect(osmanthus).toEqual(['桂花', '0', '—', '—', '—', '—', '—', '—']);
 
       const footer = rows.find((row) => row[0] === '各容量合計');
-      expect(footer).toEqual(['各容量合計', '25', '10', '—', '49.5', '—', '—', '—']);
+      expect(footer).toEqual(['各容量合計', '25', '10', '—', '39.67', '—', '500', '—']);
       expect(footer).not.toContain('40');
     }
   });

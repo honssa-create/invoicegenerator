@@ -14,6 +14,7 @@ import {
   PREP_STATUSES,
   computePrepCalculationForOrder,
   parsePrepScheduleSlot,
+  prepOrderLines,
   validatePrepFlavorQtys,
   type BirdNestType,
   type PrepCapacity,
@@ -64,7 +65,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const kitchenOwnerId = await resolveKitchenOwnerUserId();
     const { capacities: capacityOptions, formulas } =
       await readKitchenPrepDetailContext(kitchenOwnerId);
-    const allowedCaps = new Set(capacityOptions.map((c) => c.id));
+    const existingCapIds = new Set(prepOrderLines(existing).map((line) => line.capacity));
+    existingCapIds.add(existing.capacity);
+    const allowedCaps = new Set(
+      capacityOptions
+        .filter((c) => c.active !== false || existingCapIds.has(c.id))
+        .map((c) => c.id)
+    );
+    for (const id of Array.from(existingCapIds)) allowedCaps.add(id);
 
     const parseBirdNestField = (v: unknown, fallback: BirdNestType): BirdNestType =>
       v === 'small' || v === 'large' ? v : fallback;

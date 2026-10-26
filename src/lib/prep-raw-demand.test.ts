@@ -15,7 +15,7 @@ describe('computePrepOrderRawNeeds', () => {
     );
     const map = Object.fromEntries(lines.map((l) => [l.name, l.qty]));
     expect(map['大燕餅']).toBeCloseTo(13 * 0.4, 5);
-    expect(map['冰糖']).toBeCloseTo(13 * 1.98, 5);
+    expect(map['冰糖']).toBeCloseTo(20.63, 2);
     expect(map['25g玻璃燉瓶']).toBe(13);
   });
 
@@ -27,7 +27,7 @@ describe('computePrepOrderRawNeeds', () => {
     });
     const map = Object.fromEntries(lines.map((l) => [l.name, l.qty]));
     expect(map['大燕餅']).toBeCloseTo(10 * 0.4, 5);
-    expect(map['冰糖']).toBeCloseTo(10 * 1.98, 5);
+    expect(map['冰糖']).toBeCloseTo(15.87, 2);
   });
 
   it('deducts 細燕餅 when small bird nest type is selected', () => {
@@ -74,12 +74,12 @@ describe('aggregateRawNeedsFromPrepOrders', () => {
         bird_nest_rock_sugar: 'small',
       },
     ]);
-    // 10 osmanthus: 大燕餅 4, 桂花 0.72, 片糖 27.9
-    // 5 rock_sugar (細燕餅): 細燕餅 2, 冰糖 9.9
+    // 10 osmanthus: 大燕餅 4, 桂花 0.56, 片糖 22.5
+    // 5 rock_sugar (細燕餅): 細燕餅 2, 冰糖 7.94 (5 × 1.587, rounded)
     expect(raw['大燕餅']).toBeCloseTo(4, 5);
     expect(raw['細燕餅']).toBeCloseTo(2, 5);
-    expect(raw['桂花']).toBeCloseTo(10 * 0.072, 5);
-    expect(raw['片糖']).toBeCloseTo(10 * 2.79, 5);
-    expect(raw['冰糖']).toBeCloseTo(5 * 1.98, 5);
+    expect(raw['桂花']).toBeCloseTo(0.56, 2);
+    expect(raw['片糖']).toBeCloseTo(22.5, 2);
+    expect(raw['冰糖']).toBeCloseTo(7.94, 2);
   });
 });

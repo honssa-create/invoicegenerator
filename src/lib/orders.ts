@@ -2929,20 +2929,50 @@ export const WEDDING_GIFT_ACTUAL_FLAVORS: { key: string; label: string; clientKe
   { key: 'actual_qty_red_date', label: '紅棗味', clientKey: 'qty_red_date' },
 ];
 
-export const WEDDING_GIFT_BOTTLE_CAPACITIES = ['25g', '45g', '75g(高身樽)', '75g(大肚樽)'] as const;
+/** Active choices. 75g 厚 stays readable on old orders but is not offered here. */
+export const WEDDING_GIFT_BOTTLE_CAPACITIES = ['25g', '45g', '75g 薄'] as const;
 export type WeddingGiftBottleCapacity = (typeof WEDDING_GIFT_BOTTLE_CAPACITIES)[number];
 
-/** Map legacy stored `75g` to the renamed tall-bottle option. */
+const WEDDING_THICK_CAPACITY_ALIASES = new Set([
+  '75g',
+  '75g(高身樽)',
+  '75g (高身樽)',
+  '75g(燕身樽)',
+  '75g (燕身樽)',
+  '75g 高身樽',
+  '75g 燕身樽',
+  '75g 厚',
+]);
+
+const WEDDING_THIN_CAPACITY_ALIASES = new Set([
+  '75g(大肚樽)',
+  '75g (大肚樽)',
+  '75g 大肚樽',
+  '75g 薄',
+]);
+
+/** Map stored bottle text onto the current 厚 / 薄 labels. Legacy 高身 and 燕身 stay 厚. */
 export function normalizeWeddingGiftBottleCapacity(v: string): string {
-  return v === '75g' ? '75g(高身樽)' : v;
+  const t = v.trim();
+  if (WEDDING_THICK_CAPACITY_ALIASES.has(t)) return '75g 厚';
+  if (WEDDING_THIN_CAPACITY_ALIASES.has(t)) return '75g 薄';
+  return t;
+}
+
+/** Dropdown values. An existing 厚 (or other legacy) selection stays visible on that order. */
+export function weddingGiftBottleCapacityOptions(current: string): string[] {
+  const options: string[] = [...WEDDING_GIFT_BOTTLE_CAPACITIES];
+  const normalized = normalizeWeddingGiftBottleCapacity(current);
+  if (normalized && !options.includes(normalized)) options.push(normalized);
+  return options;
 }
 
 /** Map order bottle_capacity → kitchen-prep capacity id. */
 export function mapWeddingCapacityToPrep(capacity: string): PrepCapacity | null {
   const c = normalizeWeddingGiftBottleCapacity(capacity.trim());
   if (c === '25g' || c === '45g') return c;
-  if (c === '75g(高身樽)') return '75g';
-  if (c === '75g(大肚樽)') return '75g_big_belly';
+  if (c === '75g 厚') return '75g';
+  if (c === '75g 薄') return '75g_big_belly';
   return null;
 }
 
@@ -2951,7 +2981,7 @@ export function mapWeddingCapacityToPackId(capacity: string): '25' | '45' | '75'
   const c = normalizeWeddingGiftBottleCapacity(capacity.trim());
   if (c === '25g') return '25';
   if (c === '45g') return '45';
-  if (c === '75g(高身樽)' || c === '75g(大肚樽)') return '75';
+  if (c === '75g 厚' || c === '75g 薄') return '75';
   return null;
 }
 

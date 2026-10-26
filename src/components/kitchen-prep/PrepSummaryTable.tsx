@@ -36,35 +36,35 @@ const TONE: Record<PrepMaterialsTone, { box: string; head: string }> = {
   },
 };
 
+const MATERIAL_COLUMNS: { key: keyof PrepMaterialAmounts; label: string; width: string }[] = [
+  { key: 'birdNest', label: '燕餅 g', width: '8%' },
+  { key: 'osmanthus', label: '桂花 g', width: '8%' },
+  { key: 'rockSugar', label: '冰糖 g', width: '8%' },
+  { key: 'slabSugar', label: '片糖 g', width: '8%' },
+  { key: 'boilSugarWater', label: '水(煮糖) g', width: '11%' },
+  { key: 'coldSoakWater', label: '水(冷泡) g', width: '11%' },
+  { key: 'bottles', label: '玻璃瓶', width: '9%' },
+];
+
 function MaterialsCols() {
   return (
     <colgroup>
-      <col style={{ width: '18%' }} />
+      <col style={{ width: '13%' }} />
       <col style={{ width: '12%' }} />
       <col style={{ width: '12%' }} />
-      <col style={{ width: '9.5%' }} />
-      <col style={{ width: '9.5%' }} />
-      <col style={{ width: '9.5%' }} />
-      <col style={{ width: '9.5%' }} />
-      <col style={{ width: '10%' }} />
+      {MATERIAL_COLUMNS.map((col) => (
+        <col key={col.key} style={{ width: col.width }} />
+      ))}
     </colgroup>
   );
 }
 
-function amountCell(qty: number, className: string) {
-  return <td className={className}>{formatPrepMaterialAmount(qty)}</td>;
-}
-
 function materialCells(materials: PrepMaterialAmounts, className: string) {
-  return (
-    <>
-      {amountCell(materials.birdNest, className)}
-      {amountCell(materials.osmanthus, className)}
-      {amountCell(materials.rockSugar, className)}
-      {amountCell(materials.slabSugar, className)}
-      {amountCell(materials.bottles, className)}
-    </>
-  );
+  return MATERIAL_COLUMNS.map((col) => (
+    <td key={col.key} className={className}>
+      {formatPrepMaterialAmount(materials[col.key])}
+    </td>
+  ));
 }
 
 export default function PrepSummaryTable({
@@ -112,18 +112,18 @@ export default function PrepSummaryTable({
               <p className={`font-semibold tabular-nums text-[#6b6358] whitespace-nowrap ${isPrint ? 'text-base' : 'text-lg'}`}>{box.headerAside}</p>
             </div>
             <div className="overflow-x-auto">
-              <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 720 }}>
+              <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 960 }}>
                 <MaterialsCols />
                 <thead>
                   <tr className="bg-[#f3f0ea] text-[11px] font-semibold text-[#6b6358]">
-                    <th className={`${headPad} text-left`}>口味</th>
-                    <th className={`${headPad} text-right`}>上單已燉</th>
-                    <th className={`${headPad} text-right`}>今次要燉</th>
-                    <th className={`${headPad} text-right`}>燕餅 g</th>
-                    <th className={`${headPad} text-right`}>桂花 g</th>
-                    <th className={`${headPad} text-right`}>冰糖 g</th>
-                    <th className={`${headPad} text-right`}>片糖 g</th>
-                    <th className={`${headPad} text-right`}>玻璃瓶</th>
+                    <th className={`${headPad} text-left whitespace-nowrap`}>口味</th>
+                    <th className={`${headPad} text-right whitespace-nowrap`}>上單已燉</th>
+                    <th className={`${headPad} text-right whitespace-nowrap`}>今次要燉</th>
+                    {MATERIAL_COLUMNS.map((col) => (
+                      <th key={col.key} className={`${headPad} text-right whitespace-nowrap`}>
+                        {col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -148,11 +148,11 @@ export default function PrepSummaryTable({
         );
       })}
       <div className="overflow-x-auto">
-        <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 720 }}>
+        <table className={`${text} w-full border-collapse`} style={{ tableLayout: 'fixed', minWidth: 960 }}>
           <MaterialsCols />
           <tbody>
             <tr>
-              <td className={`${pad} text-left font-bold`} style={footerStyle}>
+              <td className={`${pad} text-left font-bold whitespace-nowrap`} style={footerStyle}>
                 各容量合計
               </td>
               <td className={prevClass} style={footerStyle}>
@@ -161,9 +161,9 @@ export default function PrepSummaryTable({
               <td className={`${pad} ${nowClass}`} style={footerStyle}>
                 {table.now}
               </td>
-              {(['birdNest', 'osmanthus', 'rockSugar', 'slabSugar', 'bottles'] as const).map((key) => (
-                <td key={key} className={subtotalNumClass} style={footerStyle}>
-                  {formatPrepMaterialAmount(table.materials[key])}
+              {MATERIAL_COLUMNS.map((col) => (
+                <td key={col.key} className={subtotalNumClass} style={footerStyle}>
+                  {formatPrepMaterialAmount(table.materials[col.key])}
                 </td>
               ))}
             </tr>

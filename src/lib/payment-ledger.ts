@@ -57,6 +57,15 @@ export function ledgerAttachmentSrc(
   return raw;
 }
 
+/** Ledger 類別. Nestiee 婚宴回禮 sync uses 回禮; the others are for later sources. */
+export const PAYMENT_LEDGER_CATEGORIES = ['回禮', '襟章', '燕窩', '其他'] as const;
+export type PaymentLedgerCategory = (typeof PAYMENT_LEDGER_CATEGORIES)[number];
+export const DEFAULT_PAYMENT_LEDGER_CATEGORY: PaymentLedgerCategory = '回禮';
+
+export function isPaymentLedgerCategory(value: unknown): value is PaymentLedgerCategory {
+  return typeof value === 'string' && (PAYMENT_LEDGER_CATEGORIES as readonly string[]).includes(value);
+}
+
 export type PaymentLedgerDraft = {
   dedupe_key: string;
   paid_date: string | null;
@@ -67,6 +76,7 @@ export type PaymentLedgerDraft = {
   attachments: PaymentLedgerAttachment[];
   clickup_task_id: string;
   source: 'comment' | 'installment';
+  category: PaymentLedgerCategory;
 };
 
 const FIELD_DATE_1 = '第一次Payment日期';
@@ -322,6 +332,7 @@ function installmentDraft(
     attachments: [],
     clickup_task_id: task.id,
     source: 'installment',
+    category: DEFAULT_PAYMENT_LEDGER_CATEGORY,
   };
 }
 
@@ -375,6 +386,7 @@ function commentDrafts(task: ClickUpTask, comments: ClickUpComment[], orderNo: s
       attachments,
       clickup_task_id: task.id,
       source: 'comment' as const,
+      category: DEFAULT_PAYMENT_LEDGER_CATEGORY,
     };
     if (amounts.length <= 1) {
       rows.push({
@@ -429,6 +441,7 @@ export function extractPaymentLedgerRows(task: ClickUpTask, comments: ClickUpCom
       attachments: [],
       clickup_task_id: task.id,
       source: 'installment',
+      category: DEFAULT_PAYMENT_LEDGER_CATEGORY,
     });
   }
 

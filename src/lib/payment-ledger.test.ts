@@ -141,6 +141,7 @@ describe('extractPaymentLedgerRows', () => {
       source: 'installment',
       link: 'https://app.clickup.com/t/z94x8e8u0a',
     });
+    expect(rows[0].category).toBe('回禮');
     expect(rows[0].notes).toContain('Full Paid');
     expect(rows[0].notes).toContain('100% Full payment');
     expect(rows[0].attachments).toEqual([
@@ -278,6 +279,11 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     expect(afterFirst).toHaveLength(1);
     expect(afterFirst[0].amount).toBe(6288.5);
     expect(afterFirst[0].order_no).toBe('12104');
+    expect(afterFirst[0].category).toBe('回禮');
+
+    const { updatePaymentLedgerCategory } = await import('./payment-ledger-server');
+    const edited = await updatePaymentLedgerCategory(TEST_USER_ID, afterFirst[0].id, '燕窩');
+    expect(edited?.category).toBe('燕窩');
 
     const second = await syncPaymentLedger(TEST_USER_ID, client);
     expect(second.comment_fetches).toBe(0);
@@ -294,5 +300,6 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     expect(afterThird).toHaveLength(1);
     expect(afterThird[0].amount).toBe(7000);
     expect(afterThird[0].order_no).toBe('12104');
+    expect(afterThird[0].category).toBe('燕窩');
   });
 });

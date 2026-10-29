@@ -8,7 +8,9 @@ import { useAuth } from '@/components/AuthProvider';
 import {
   isImageAttachment,
   ledgerAttachmentSrc,
+  PAYMENT_LEDGER_CATEGORIES,
   type PaymentLedgerAttachment,
+  type PaymentLedgerCategory,
 } from '@/lib/payment-ledger';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
 
@@ -22,6 +24,7 @@ type Entry = {
   notes: string | null;
   link: string | null;
   attachments: PaymentLedgerAttachment[];
+  category: PaymentLedgerCategory;
 };
 
 type SyncInfo = {
@@ -140,6 +143,25 @@ export default function PaymentLedgerPage() {
 
   const lastErrors = (sync?.last?.errors || []).filter((message) => message && message !== sync?.last?.skipped);
 
+  const saveCategory = async (id: number, category: PaymentLedgerCategory) => {
+    const previous = entries.find((row) => row.id === id)?.category;
+    setEntries((current) => current.map((row) => (row.id === id ? { ...row, category } : row)));
+    try {
+      const res = await fetch(`/api/payment-ledger/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+    } catch (err) {
+      setEntries((current) =>
+        current.map((row) => (row.id === id && previous ? { ...row, category: previous } : row)),
+      );
+      setError(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
+
   return (
     <AppLayout>
       <div className="page-header">
@@ -255,6 +277,7 @@ export default function PaymentLedgerPage() {
                 <th className="px-6 py-3">Paid Date</th>
                 <th className="px-6 py-3">Amount</th>
                 <th className="px-6 py-3">Order No.</th>
+                <th className="px-6 py-3">類別</th>
                 <th className="px-6 py-3">Notes</th>
                 <th className="px-6 py-3">Link</th>
                 <th className="px-6 py-3">attachment</th>
@@ -266,6 +289,21 @@ export default function PaymentLedgerPage() {
                   <td className="px-6 py-3 text-sm text-gray-700 whitespace-nowrap">{row.paid_date || '—'}</td>
                   <td className="px-6 py-3 text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatAmount(row.amount)}</td>
                   <td className="px-6 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">{row.order_no || '—'}</td>
+                  <td className="px-6 py-3 text-sm">
+                    <select
+                      aria-label="類別"
+                      value={row.category || '回禮'}
+                      disabled={readOnly}
+                      onChange={(event) => saveCategory(row.id, event.target.value as PaymentLedgerCategory)}
+                      className="min-h-[36px] rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 disabled:bg-gray-50"
+                    >
+                      {PAYMENT_LEDGER_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-6 py-3 text-sm text-gray-700 max-w-xs whitespace-pre-line">{row.notes || '—'}</td>
                   <td className="px-6 py-3 text-sm">
                     {row.link ? (

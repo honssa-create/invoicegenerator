@@ -5,9 +5,12 @@ import { getSyncState, setSyncState } from './hub-server';
 import { getClickUpCredentials } from './integration-settings-server';
 import {
   clickUpPaymentListId,
+  DEFAULT_PAYMENT_LEDGER_CATEGORY,
   extractPaymentLedgerRows,
   isClickUpAttachmentUrl,
+  isPaymentLedgerCategory,
   type PaymentLedgerAttachment,
+  type PaymentLedgerCategory,
   type PaymentLedgerDraft,
 } from './payment-ledger';
 
@@ -36,6 +39,7 @@ export type PaymentLedgerEntry = {
   attachments: PaymentLedgerAttachment[];
   source: string;
   clickup_task_id: string | null;
+  category: PaymentLedgerCategory;
   updated_at: string | null;
 };
 
@@ -112,7 +116,7 @@ function parseAttachments(raw: unknown): PaymentLedgerAttachment[] {
 export async function listPaymentLedger(userId: number): Promise<PaymentLedgerEntry[]> {
   const rows = await db
     .prepare(
-      `SELECT id, paid_date, amount, order_no, notes, link, attachments_json, source, clickup_task_id, updated_at
+      `SELECT id, paid_date, amount, order_no, notes, link, attachments_json, source, clickup_task_id, category, updated_at
        FROM payment_ledger
        WHERE user_id = ?
        ORDER BY paid_date DESC NULLS LAST, id DESC
@@ -129,8 +133,28 @@ export async function listPaymentLedger(userId: number): Promise<PaymentLedgerEn
     attachments: parseAttachments(row.attachments_json),
     source: String(row.source || ''),
     clickup_task_id: (row.clickup_task_id as string) || null,
+    category: isPaymentLedgerCategory(row.category) ? row.category : DEFAULT_PAYMENT_LEDGER_CATEGORY,
     updated_at: (row.updated_at as string) || null,
   }));
+}
+
+/** Manual 類別 edit. Sync inserts default 回禮 and does not overwrite this on later polls. */
+export async function updatePaymentLedgerCategory(
+  userId: number,
+  entryId: number,
+  category: string,
+): Promise<PaymentLedgerEntry | null> {
+  if (!isPaymentLedgerCategory(category)) return null;
+  const updated = await db
+    .prepare(
+      `UPDATE payment_ledger
+       SET category = ?, updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE id = ? AND user_id = ?`,
+    )
+    .run(category, entryId, userId);
+  if (!updated.changes) return null;
+  const rows = await listPaymentLedger(userId);
+  return rows.find((row) => row.id === entryId) || null;
 }
 
 export async function paymentLedgerSyncStatus(userId: number): Promise<{
@@ -203,9 +227,9 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
     .prepare(
       `INSERT INTO payment_ledger (
          user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
-         clickup_task_id, source, updated_at
+         clickup_task_id, source, category, updated_at
        ) VALUES (
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
        )
        ON CONFLICT (user_id, dedupe_key) DO UPDATE SET
@@ -230,6 +254,7 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
       JSON.stringify(row.attachments || []),
       row.clickup_task_id,
       row.source,
+      row.category || DEFAULT_PAYMENT_LEDGER_CATEGORY,
     );
 }
 

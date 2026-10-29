@@ -913,10 +913,22 @@ CREATE TABLE IF NOT EXISTS payment_ledger (
   attachments_json TEXT NOT NULL DEFAULT '[]',
   clickup_task_id TEXT,
   source TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '回禮',
   created_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
   updated_at TEXT DEFAULT (to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')),
-  UNIQUE (user_id, dedupe_key)
+  UNIQUE (user_id, dedupe_key),
+  CONSTRAINT payment_ledger_category_check CHECK (category IN ('回禮', '襟章', '燕窩', '其他'))
 );
+
+ALTER TABLE payment_ledger ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '回禮';
+
+DO $$ BEGIN
+  ALTER TABLE payment_ledger
+    ADD CONSTRAINT payment_ledger_category_check
+    CHECK (category IN ('回禮', '襟章', '燕窩', '其他'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS payment_ledger_tasks (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

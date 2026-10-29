@@ -8,6 +8,7 @@ import {
   ledgerAttachmentSrc,
   orderNoFromTaskTitle,
   parsePaymentAmounts,
+  selectCommentPaymentAmounts,
 } from './payment-ledger';
 
 function task(partial: Partial<ClickUpTask> & Pick<ClickUpTask, 'id' | 'name'>): ClickUpTask {
@@ -75,11 +76,32 @@ describe('orderNoFromTaskTitle', () => {
   });
 });
 
+/** Order 11124, 2026-10-24. One comment; the ledger was booking 5337 + 1835 + 1835. */
+const ORDER_11124_ADDON_NOTES =
+  '加單金額：$1,835；原單已標記 100% Full Paid，因此只記錄加單金額，未加入尾數欄位。 · 【🔁 回禮樽訂單尾數確認】 · 加單金額：$1,835 · 總額：$5,337 · 轉數快 FPS ID：110700226 (Honour Label Limited)';
+
 describe('parsePaymentAmounts', () => {
   it('keeps payment totals and skips per-bottle prices', () => {
     expect(parsePaymentAmounts('已付 $829.40')).toEqual([829.4]);
     expect(parsePaymentAmounts('總額：$6,288.90')).toEqual([6288.9]);
     expect(parsePaymentAmounts('$4,976@$41.47/樽 (原價$45/樽)')).toEqual([4976]);
+  });
+
+  it('still lists every dollar figure, including a repeated 加單金額 and the 總額', () => {
+    expect(parsePaymentAmounts(ORDER_11124_ADDON_NOTES)).toEqual([1835, 1835, 5337]);
+  });
+});
+
+describe('selectCommentPaymentAmounts', () => {
+  it('books the 加單金額 once and ignores 總額 on the order 11124 notes', () => {
+    expect(selectCommentPaymentAmounts(ORDER_11124_ADDON_NOTES)).toEqual([1835]);
+  });
+
+  it('dedupes a repeated 加單金額 and keeps two different add-on figures', () => {
+    expect(selectCommentPaymentAmounts('加单金额：HK$200.00\n加单金额：$200\n總額：$900')).toEqual([200]);
+    expect(selectCommentPaymentAmounts('加單金額：$100\n加單金額：$40\n總額：$9,000')).toEqual([100, 40]);
+    expect(selectCommentPaymentAmounts('加單金額：$45/樽\n總額：$900')).toEqual([]);
+    expect(selectCommentPaymentAmounts('已付 $100 · 尾數 $40')).toEqual([100, 40]);
   });
 });
 
@@ -222,6 +244,66 @@ describe('extractPaymentLedgerRows', () => {
       custom_fields: [labels(['未付款'])],
     });
     expect(extractPaymentLedgerRows(unpaid, [])).toEqual([]);
+  });
+
+  it('books order 11124 加單 notes as one row for 1835', () => {
+    const rows = extractPaymentLedgerRows(task({ id: 't11124', name: '11124 - wedding 回禮' }), [
+      {
+        id: 'c11124',
+        comment_text: ORDER_11124_ADDON_NOTES,
+        date: '1792814400000',
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      dedupe_key: 'comment:t11124:c11124',
+      paid_date: '2026-10-24',
+      amount: 1835,
+      order_no: '11124',
+      source: 'comment',
+      category: '回禮',
+    });
+    expect(rows[0].notes).toContain('加單金額：$1,835');
+    expect(rows[0].notes).toContain('總額：$5,337');
+    expect(rows.some((row) => row.amount === 5337)).toBe(false);
+  });
+
+  it('keeps the 加單 row beside an installment and does not book 總額', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 't11124b',
+        name: '11124 - wedding 回禮',
+        custom_fields: [
+          labels(['Full Paid']),
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1792180800000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '3502' },
+        ],
+      }),
+      [{ id: 'c11124', comment_text: ORDER_11124_ADDON_NOTES, date: '1792814400000' }],
+    );
+    expect(rows.map((row) => [row.source, row.amount, row.dedupe_key])).toEqual([
+      ['installment', 3502, 'installment:t11124b:1'],
+      ['comment', 1835, 'comment:t11124b:c11124'],
+    ]);
+  });
+
+  it('still records each amount when one comment lists two different payments', () => {
+    const rows = extractPaymentLedgerRows(task({ id: 'multi', name: '12001 - two payments' }), [
+      { id: 'c', comment_text: '已付 $100 · 尾數 $40', date: '1792255649598' },
+    ]);
+    expect(rows.map((row) => [row.dedupe_key, row.amount])).toEqual([
+      ['comment:multi:c:0', 100],
+      ['comment:multi:c:1', 40],
+    ]);
+  });
+
+  it('keeps distinct 加單金額 figures and still ignores 總額', () => {
+    const rows = extractPaymentLedgerRows(task({ id: 'addon2', name: '11125' }), [
+      { id: 'c', comment_text: '加單金額：$100\n加單金額：$40\n總額：$9,000', date: '1792255649598' },
+    ]);
+    expect(rows.map((row) => row.amount)).toEqual([100, 40]);
+    expect(rows.map((row) => row.dedupe_key)).toEqual(['comment:addon2:c:0', 'comment:addon2:c:1']);
+    expect(rows.some((row) => row.amount === 9000)).toBe(false);
   });
 
   it('records a paid label even before an amount is filled in', () => {

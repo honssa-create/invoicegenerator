@@ -316,10 +316,28 @@ export function commentLooksLikePayment(text: string, attachmentNames: string[])
   return false;
 }
 
-/** Dollar amounts that are not per-bottle unit prices (`$45/樽`). */
+const MONEY_AMOUNT = /(?:HK\$|HKD|＄|\$)\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/;
+/** 加單 comment marker. Broader than this, `EXTRA_CHARGE` also matches notes like 加20樽金額. */
+const ADDON_CHARGE_LABEL = /加單金額|加单金额/;
+
+function amountsClose(a: number, b: number): boolean {
+  return Math.abs(a - b) < 0.005;
+}
+
+/** Currency figure written immediately after a 加單金額 label, not a later 總額. */
+const ADDON_MONEY_AFTER_LABEL =
+  /^[\s:：,，.。、\]】)）]{0,8}(?:HK\$|HKD|＄|\$)\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/;
+
+/**
+ * Dollar amounts that are not per-bottle unit prices (`$45/樽`).
+ * Label-blind: every HK$/HKD/$/＄ figure is returned, including 總額.
+ * 加單 comments do not use this list directly — see `selectCommentPaymentAmounts`.
+ *
+ * RULE (enforced by `selectCommentPaymentAmounts`, not by this scanner)：加單 comment（有「加單金額」）只入帳加單金額一筆；唔好入總額；同一 comment 重複加單金額只計一次。
+ */
 export function parsePaymentAmounts(text: string): number[] {
   const amounts: number[] = [];
-  const re = /(?:HK\$|HKD|＄|\$)\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/gi;
+  const re = new RegExp(MONEY_AMOUNT.source, 'gi');
   let match: RegExpExecArray | null;
   while ((match = re.exec(text))) {
     const after = text.slice(match.index + match[0].length, match.index + match[0].length + 8);
@@ -328,6 +346,35 @@ export function parsePaymentAmounts(text: string): number[] {
     if (Number.isFinite(n) && n > 0) amounts.push(n);
   }
   return amounts;
+}
+
+/**
+ * Amounts from one payment comment.
+ *
+ * RULE：加單 comment（有「加單金額」）只入帳加單金額一筆；唔好入總額；同一 comment 重複加單金額只計一次。
+ * The dollar figure has to sit next to 加單金額 / 加单金额 (e.g. `加單金額：$1,835`).
+ * 總額 and any other labeled total in that comment are ignored. The same 加單金額
+ * repeated in the comment is kept once, so the ledger row is `comment:{taskId}:{commentId}`
+ * with no `:index`. Two different 加單金額 figures stay as separate amounts so a real
+ * second add-on is not dropped or added into 總額. Comments without 加單金額 still
+ * return every payment amount, and `commentDrafts` emits `:index` when there are several.
+ */
+export function selectCommentPaymentAmounts(text: string): number[] {
+  if (!ADDON_CHARGE_LABEL.test(text)) return parsePaymentAmounts(text);
+  const found: number[] = [];
+  const re = new RegExp(ADDON_CHARGE_LABEL.source, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const afterLabel = text.slice(match.index + match[0].length, match.index + match[0].length + 32);
+    const money = ADDON_MONEY_AFTER_LABEL.exec(afterLabel);
+    if (!money) continue;
+    const after = afterLabel.slice(money[0].length, money[0].length + 8);
+    if (/^\s*[/／]\s*(?:樽|瓶|pcs|pc|ml)/i.test(after)) continue;
+    const amount = Number(`${money[1].replace(/,/g, '')}${money[2] || ''}`);
+    if (!Number.isFinite(amount) || amount <= 0 || found.some((kept) => amountsClose(kept, amount))) continue;
+    found.push(amount);
+  }
+  return found;
 }
 
 function paidStatusLabels(labels: string[]): string[] {
@@ -359,10 +406,6 @@ function installmentDraft(
   };
 }
 
-function amountsClose(a: number, b: number): boolean {
-  return Math.abs(a - b) < 0.005;
-}
-
 function mergeIntoInstallment(target: PaymentLedgerDraft, extra: PaymentLedgerDraft) {
   target.notes = joinNotes(target.notes, extra.notes);
   target.attachments = dedupeAttachments([...target.attachments, ...extra.attachments]);
@@ -389,6 +432,11 @@ function matchingInstallment(comment: PaymentLedgerDraft, installments: PaymentL
   return installments.find((row) => row.dedupe_key.endsWith(':1')) || installments[0] || null;
 }
 
+/**
+ * One payment comment → ledger drafts.
+ * RULE：加單 comment（有「加單金額」）只入帳加單金額一筆；唔好入總額；同一 comment 重複加單金額只計一次。
+ * A single kept amount uses `comment:{taskId}:{commentId}` (no `:index`).
+ */
 function commentDrafts(task: ClickUpTask, comments: ClickUpComment[], orderNo: string): PaymentLedgerDraft[] {
   const rows: PaymentLedgerDraft[] = [];
   for (const comment of comments) {
@@ -399,7 +447,7 @@ function commentDrafts(task: ClickUpTask, comments: ClickUpComment[], orderNo: s
     const names = attachments.map((item) => item.name);
     if (!commentLooksLikePayment(text, names)) continue;
     const notes = notesFromComment(text, names);
-    const amounts = parsePaymentAmounts(notes || text);
+    const amounts = selectCommentPaymentAmounts(notes || text);
     const paidDate = clickUpMsToHkDate(comment.date);
     const base = {
       paid_date: paidDate,

@@ -292,7 +292,9 @@ function notesFromComment(text: string, attachmentNames: string[]): string {
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => !names.has(line.toLowerCase()) && !isFilenameLine(line));
-  const interesting = lines.filter((line) => PAYMENT_SIGNAL.test(line) || EXTRA_CHARGE.test(line) || /[$＄]/.test(line));
+  const interesting = lines.filter(
+    (line) => PAYMENT_SIGNAL.test(line) || EXTRA_CHARGE.test(line) || /[$＄]/.test(line) || /第[一二12]次/.test(line),
+  );
   const chosen = interesting.length ? interesting : lines;
   return chosen.join(' · ').slice(0, 500);
 }
@@ -359,14 +361,16 @@ function installmentDraft(
   };
 }
 
-function amountsClose(a: number, b: number): boolean {
-  return Math.abs(a - b) < 0.005;
-}
-
-/** Same payment when one side dropped the cents ($6,288 vs $6,288.50). A different charge is farther apart. */
+/**
+ * Same payment when one side dropped the cents ($6,288 vs $6,288.50).
+ * A different charge is at least $1 away.
+ */
 function amountsNear(a: number, b: number): boolean {
   return Math.abs(a - b) < 1;
 }
+
+/** Written into Notes when a same-day payment comment cannot be tied to the installment. */
+export const SAME_DAY_PAYMENT_AMBIGUITY_NOTE = '同日有付款留言／收據，未能確定係同一筆定另一筆';
 
 const RECEIPT_FILE = /\.(?:png|jpe?g|webp|gif|bmp|heic|heif|avif|pdf)(?:$|[?#])/i;
 
@@ -397,18 +401,26 @@ function installmentsOnHkDay(installments: PaymentLedgerDraft[], paidDate: strin
   return installments.filter((row) => row.paid_date === paidDate);
 }
 
+function namesSecondInstallment(blob: string): boolean {
+  return /第二次|第2次/.test(blob);
+}
+
+function namesFirstInstallment(blob: string): boolean {
+  return /第一次|第1次/.test(blob) && !namesSecondInstallment(blob);
+}
+
 /**
- * A comment that only restates an installment (same amount, or a Full Paid / 50% receipt
+ * A comment that only restates an installment (amount within $1, or a Full Paid / 50% receipt
  * with no separate amount) is folded into that installment so the ledger keeps one row.
  * 加單 / 尾數 comments stay as their own rows.
- * A no-amount receipt is paired to the installment with the same Hong Kong calendar day
- * when that day identifies 第一次 or 第二次; otherwise it stays on the first installment.
+ * A no-amount receipt that names neither installment is paired by Hong Kong day only when
+ * that day matches exactly one of 第一次／第二次. 第一次／第二次 in the comment wins over the day.
  */
 function matchingInstallment(comment: PaymentLedgerDraft, installments: PaymentLedgerDraft[]): PaymentLedgerDraft | null {
   if (EXTRA_CHARGE.test(comment.notes)) return null;
   if (comment.amount != null) {
     const matches = installments.filter(
-      (row) => row.amount != null && amountsClose(row.amount, comment.amount as number),
+      (row) => row.amount != null && amountsNear(row.amount, comment.amount as number),
     );
     if (!matches.length) return null;
     const sameDay = installmentsOnHkDay(matches, comment.paid_date);
@@ -420,55 +432,74 @@ function matchingInstallment(comment: PaymentLedgerDraft, installments: PaymentL
   if (/第二次|第2次|尾[數数]/.test(blob)) {
     return installments.find((row) => row.dedupe_key.endsWith(':2')) || installments[0] || null;
   }
+  if (namesFirstInstallment(blob)) {
+    return installments.find((row) => row.dedupe_key.endsWith(':1')) || installments[0] || null;
+  }
   const sameDay = installmentsOnHkDay(installments, comment.paid_date);
-  if (sameDay.length) return sameDay.find((row) => row.dedupe_key.endsWith(':1')) || sameDay[0];
+  if (sameDay.length === 1) return sameDay[0];
+  if (sameDay.length > 1) return sameDay.find((row) => row.dedupe_key.endsWith(':1')) || sameDay[0];
   return installments.find((row) => row.dedupe_key.endsWith(':1')) || installments[0] || null;
 }
 
-/**
- * RULE：第一次／第二次 Payment 同付款留言如果係香港同一日（Asia/Hong_Kong），
- * 而且留言有圖片或檔案收據，要把該收據一併放到該期入帳列的附件，唔好只留在留言列。
- * 加單收據，同金額明顯唔同的另一筆付款，唔好抄去分期。
- *
- * The comment row is kept. Only receipt files are copied onto the installment
- * (`attachments`, later stored as `attachments_json`). Folded comments are not
- * seen here — `mergeIntoInstallment` already moved their files.
- */
-function sameDayReceiptInstallment(
-  comment: PaymentLedgerDraft,
-  installments: PaymentLedgerDraft[],
-): PaymentLedgerDraft | null {
-  if (!comment.paid_date) return null;
+function isClearlySeparatePayment(comment: PaymentLedgerDraft, sameDay: PaymentLedgerDraft[]): boolean {
   const blob = commentBlob(comment);
-  if (EXTRA_CHARGE.test(comment.notes) || EXTRA_CHARGE.test(blob)) return null;
+  if (EXTRA_CHARGE.test(comment.notes) || EXTRA_CHARGE.test(blob)) return true;
+  if (/尾[數数]/.test(blob)) return true;
+  if (comment.amount == null) return false;
+  const priced = sameDay.filter((row) => row.amount != null);
+  if (!priced.length) return false;
+  return priced.every((row) => !amountsNear(row.amount as number, comment.amount as number));
+}
+
+/** Receipt file that names 第一次 or 第二次 and does not state another amount. */
+function clearlyReceiptFor(comment: PaymentLedgerDraft, sameDay: PaymentLedgerDraft[]): PaymentLedgerDraft | null {
+  if (comment.amount != null) return null;
   if (!comment.attachments.some(isReceiptFileAttachment)) return null;
-  let candidates = installmentsOnHkDay(installments, comment.paid_date);
-  if (!candidates.length) return null;
-  if (/第二次|第2次/.test(blob)) {
-    candidates = candidates.filter((row) => row.dedupe_key.endsWith(':2'));
-  } else if (/第一次|第1次/.test(blob)) {
-    candidates = candidates.filter((row) => row.dedupe_key.endsWith(':1'));
+  const blob = commentBlob(comment);
+  if (namesSecondInstallment(blob)) {
+    return sameDay.find((row) => row.dedupe_key.endsWith(':2')) || null;
   }
-  if (!candidates.length) return null;
-  if (comment.amount != null) {
-    const priced = candidates.filter((row) => row.amount != null);
-    const near = priced.filter((row) => amountsNear(row.amount as number, comment.amount as number));
-    if (priced.length && !near.length) return null;
-    if (near.length === 1) return near[0];
-    if (near.length > 1) return null;
-    candidates = candidates.filter((row) => row.amount == null);
+  if (namesFirstInstallment(blob)) {
+    return sameDay.find((row) => row.dedupe_key.endsWith(':1')) || null;
   }
-  if (candidates.length === 1) return candidates[0];
   return null;
 }
 
-function attachSameDayReceipts(installments: PaymentLedgerDraft[], comments: PaymentLedgerDraft[]) {
+function noteSameDayAmbiguity(row: PaymentLedgerDraft) {
+  row.notes = joinNotes(row.notes, SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+}
+
+/**
+ * RULE：同日唔代表一定係同一筆。要分清係兩筆付款定一筆（例如留言只係第一次／第二次嗰筆嘅收據）。
+ * 確定係同一筆先將收據併入該期入帳列；確定係另一筆就分開兩行。
+ * 未能確定就唔好當係同一筆，備註要寫：同日有付款留言／收據，未能確定係同一筆定另一筆。
+ *
+ * Same Hong Kong calendar day is not enough to attach a file. Comments already folded by
+ * `matchingInstallment` are not passed here. A named installment plus its receipt file is
+ * merged. 加單, 尾數, and a different amount stay separate with no 備註. Anything left
+ * unclear keeps both rows and flags Notes on the comment and each same-day installment.
+ */
+function reviewSameDayPayments(
+  installments: PaymentLedgerDraft[],
+  comments: PaymentLedgerDraft[],
+): PaymentLedgerDraft[] {
+  const kept: PaymentLedgerDraft[] = [];
   for (const comment of comments) {
-    const target = sameDayReceiptInstallment(comment, installments);
-    if (!target) continue;
-    const receipts = comment.attachments.filter(isReceiptFileAttachment);
-    target.attachments = dedupeAttachments([...target.attachments, ...receipts]);
+    const sameDay = installmentsOnHkDay(installments, comment.paid_date);
+    if (!sameDay.length || isClearlySeparatePayment(comment, sameDay)) {
+      kept.push(comment);
+      continue;
+    }
+    const target = clearlyReceiptFor(comment, sameDay);
+    if (target) {
+      mergeIntoInstallment(target, comment);
+      continue;
+    }
+    noteSameDayAmbiguity(comment);
+    for (const row of sameDay) noteSameDayAmbiguity(row);
+    kept.push(comment);
   }
+  return kept;
 }
 
 function commentDrafts(task: ClickUpTask, comments: ClickUpComment[], orderNo: string): PaymentLedgerDraft[] {
@@ -556,8 +587,7 @@ export function extractPaymentLedgerRows(task: ClickUpTask, comments: ClickUpCom
     if (target) mergeIntoInstallment(target, comment);
     else kept.push(comment);
   }
-  attachSameDayReceipts(installments, kept);
-  return [...installments, ...kept];
+  return [...installments, ...reviewSameDayPayments(installments, kept)];
 }
 
 function fieldText(field: ClickUpCustomField | undefined): string {

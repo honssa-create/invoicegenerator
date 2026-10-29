@@ -8,6 +8,7 @@ import {
   ledgerAttachmentSrc,
   orderNoFromTaskTitle,
   parsePaymentAmounts,
+  SAME_DAY_PAYMENT_AMBIGUITY_NOTE,
 } from './payment-ledger';
 
 function task(partial: Partial<ClickUpTask> & Pick<ClickUpTask, 'id' | 'name'>): ClickUpTask {
@@ -224,7 +225,7 @@ describe('extractPaymentLedgerRows', () => {
     expect(extractPaymentLedgerRows(unpaid, [])).toEqual([]);
   });
 
-  it('copies a same-day receipt onto the installment and leaves the comment row', () => {
+  it('folds one payment, keeps two payments, and flags an uncertain same-day receipt', () => {
     const paired = task({
       id: 'pair-day',
       name: '12110 - Ada',
@@ -249,6 +250,11 @@ describe('extractPaymentLedgerRows', () => {
         comment: [file('fps', 'image.png', 'https://attachments.example/fps-day2.png')],
       },
       {
+        id: 'c-text',
+        comment_text: 'FPS',
+        date: '1790695800000',
+      },
+      {
         id: 'c-next',
         comment_text: 'image.png\nFPS\n',
         date: '1790699400000',
@@ -265,6 +271,12 @@ describe('extractPaymentLedgerRows', () => {
         comment_text: 'image.png\n已付 $829.40\n',
         date: '1790651369825',
         comment: [file('other', 'image.png', 'https://attachments.example/other.png')],
+      },
+      {
+        id: 'c-tail',
+        comment_text: 'image.png\n尾數\n',
+        date: '1790695800000',
+        comment: [file('tail', 'image.png', 'https://attachments.example/tail.png')],
       },
       {
         id: 'c-near',
@@ -295,28 +307,39 @@ describe('extractPaymentLedgerRows', () => {
     const urls = (key: string) => (byKey[key].attachments || []).map((item) => item.url);
 
     expect(byKey['installment:pair-day:1'].paid_date).toBe('2026-08-10');
-    expect(urls('installment:pair-day:1')).toEqual([
-      'https://attachments.example/near.png',
-      'https://attachments.example/fps.pdf',
-    ]);
+    expect(urls('installment:pair-day:1')).toEqual(['https://attachments.example/near.png']);
+    expect(byKey['installment:pair-day:1'].notes).toContain('已付 $6,288');
+    expect(byKey['installment:pair-day:1'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(byKey['comment:pair-day:c-near']).toBeUndefined();
+
     expect(byKey['installment:pair-day:2'].paid_date).toBe('2026-09-29');
-    expect(urls('installment:pair-day:2')).toEqual([
-      'https://attachments.example/full2.png',
-      'https://attachments.example/fps-day2.png',
-    ]);
+    expect(urls('installment:pair-day:2')).toEqual(['https://attachments.example/full2.png']);
+    expect(byKey['installment:pair-day:2'].notes).toContain('100% Full payment');
+    expect(byKey['installment:pair-day:2'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(byKey['comment:pair-day:c-full2']).toBeUndefined();
+
     expect(urls('comment:pair-day:c-fps')).toEqual(['https://attachments.example/fps-day2.png']);
-    expect(urls('comment:pair-day:c-next')).toEqual(['https://attachments.example/next-day.png']);
+    expect(byKey['comment:pair-day:c-fps'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(byKey['comment:pair-day:c-text'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(byKey['comment:pair-day:c-pdf'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(urls('comment:pair-day:c-pdf')).toEqual(['https://attachments.example/fps.pdf']);
+
+    for (const id of ['c-next', 'c-addon', 'c-other', 'c-tail']) {
+      expect(byKey[`comment:pair-day:${id}`].notes).not.toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    }
     expect(urls('comment:pair-day:c-addon')).toEqual(['https://attachments.example/addon.png']);
     expect(urls('comment:pair-day:c-other')).toEqual(['https://attachments.example/other.png']);
-    expect(urls('comment:pair-day:c-near')).toEqual(['https://attachments.example/near.png']);
-    expect(byKey['comment:pair-day:c-full2']).toBeUndefined();
+    expect(urls('comment:pair-day:c-tail')).toEqual(['https://attachments.example/tail.png']);
     const installmentUrls = urls('installment:pair-day:1').concat(urls('installment:pair-day:2'));
-    expect(installmentUrls).not.toContain('https://attachments.example/next-day.png');
+    expect(installmentUrls).not.toContain('https://attachments.example/fps-day2.png');
+    expect(installmentUrls).not.toContain('https://attachments.example/fps.pdf');
     expect(installmentUrls).not.toContain('https://attachments.example/addon.png');
     expect(installmentUrls).not.toContain('https://attachments.example/other.png');
+    expect(installmentUrls).not.toContain('https://attachments.example/tail.png');
+    expect(installmentUrls).not.toContain('https://attachments.example/next-day.png');
   });
 
-  it('uses the Hong Kong day to choose which same-day installment receives the receipt', () => {
+  it('merges a named installment receipt and flags an unnamed same-day comment', () => {
     const both = task({
       id: 'same-day',
       name: '12111 - Bea',
@@ -330,7 +353,7 @@ describe('extractPaymentLedgerRows', () => {
     const rows = extractPaymentLedgerRows(both, [
       {
         id: 'c-second',
-        comment_text: '第二次 FPS\nimage.png\n',
+        comment_text: '第二次\nFPS\nimage.png\n',
         date: '1790695800000',
         comment: [
           {
@@ -357,13 +380,15 @@ describe('extractPaymentLedgerRows', () => {
     expect(byKey['installment:same-day:2'].attachments.map((item) => item.url)).toEqual([
       'https://attachments.example/second.png',
     ]);
+    expect(byKey['installment:same-day:2'].notes).toContain('第二次');
     expect(byKey['installment:same-day:1'].attachments).toEqual([]);
-    expect(byKey['comment:same-day:c-second'].attachments.map((item) => item.url)).toEqual([
-      'https://attachments.example/second.png',
-    ]);
+    expect(byKey['comment:same-day:c-second']).toBeUndefined();
     expect(byKey['comment:same-day:c-ambiguous'].attachments.map((item) => item.url)).toEqual([
       'https://attachments.example/ambiguous.png',
     ]);
+    expect(byKey['comment:same-day:c-ambiguous'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(byKey['installment:same-day:1'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
+    expect(byKey['installment:same-day:2'].notes).toContain(SAME_DAY_PAYMENT_AMBIGUITY_NOTE);
   });
 
   it('records a paid label even before an amount is filled in', () => {

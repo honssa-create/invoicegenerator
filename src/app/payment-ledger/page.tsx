@@ -285,11 +285,11 @@ export default function PaymentLedgerPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayed.map((row) => (
-                <tr key={row.id} className="hover:bg-gray-50 align-top">
-                  <td className="px-6 py-3 text-sm text-gray-700 whitespace-nowrap">{row.paid_date || '—'}</td>
-                  <td className="px-6 py-3 text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatAmount(row.amount)}</td>
-                  <td className="px-6 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">{row.order_no || '—'}</td>
-                  <td className="px-6 py-3 text-sm">
+                <tr key={row.id} className="hover:bg-gray-50 align-middle">
+                  <td className="px-6 py-3 align-middle text-sm text-gray-700 whitespace-nowrap">{row.paid_date || '—'}</td>
+                  <td className="px-6 py-3 align-middle text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatAmount(row.amount)}</td>
+                  <td className="px-6 py-3 align-middle text-sm font-medium text-gray-900 whitespace-nowrap">{row.order_no || '—'}</td>
+                  <td className="px-6 py-3 align-middle text-sm">
                     <select
                       aria-label="類別"
                       value={row.category || '回禮'}
@@ -304,8 +304,8 @@ export default function PaymentLedgerPage() {
                       ))}
                     </select>
                   </td>
-                  <td className="px-6 py-3 text-sm text-gray-700 max-w-xs whitespace-pre-line">{row.notes || '—'}</td>
-                  <td className="px-6 py-3 text-sm">
+                  <td className="px-6 py-3 align-middle text-sm text-gray-700 max-w-xs whitespace-pre-line">{row.notes || '—'}</td>
+                  <td className="px-6 py-3 align-middle text-sm">
                     {row.link ? (
                       <a href={row.link} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">
                         {BTN.open}
@@ -314,7 +314,7 @@ export default function PaymentLedgerPage() {
                       '—'
                     )}
                   </td>
-                  <td className="px-6 py-3 text-sm text-gray-700">
+                  <td className="px-6 py-3 align-middle text-sm text-gray-700">
                     <AttachmentCell
                       entryId={row.id}
                       attachments={row.attachments || []}

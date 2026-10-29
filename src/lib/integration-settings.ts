@@ -101,6 +101,12 @@ export interface ClickUpSettingsMasked {
   list_id: string;
   api_token_set: boolean;
   api_token_hint: string;
+  /** True when `CLICKUP_WEBHOOK_SECRET` is set on the server. The secret itself is never returned. */
+  webhook_secret_set: boolean;
+  /** Nestiee 婚宴回禮 list the payment ledger reads. Separate from Order Hub `list_id`. */
+  payment_list_id: string;
+  /** Absolute URL when the settings request has a public origin. */
+  webhook_url: string;
 }
 
 export const SF_EXPRESS_DEFAULT_PRINT_TEMPLATE = 'fm_150_hongkonglocal_HYSBOO5I2I7';

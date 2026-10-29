@@ -4,7 +4,9 @@ import db from './db';
 import { getSyncState, setSyncState } from './hub-server';
 import { getClickUpCredentials } from './integration-settings-server';
 import {
+  CLICKUP_PAYMENT_WEBHOOK_PATH,
   clickUpPaymentListId,
+  clickUpPaymentWebhookUrl,
   DEFAULT_PAYMENT_LEDGER_CATEGORY,
   extractPaymentLedgerRows,
   isClickUpAttachmentUrl,
@@ -157,12 +159,18 @@ export async function updatePaymentLedgerCategory(
   return rows.find((row) => row.id === entryId) || null;
 }
 
-export async function paymentLedgerSyncStatus(userId: number): Promise<{
+export async function paymentLedgerSyncStatus(
+  userId: number,
+  origin?: string,
+): Promise<{
   configured: boolean;
   list_id: string;
   scan_page: number;
   watermark: string | null;
   last: PaymentLedgerSyncResult | null;
+  webhook_secret_set: boolean;
+  webhook_path: string;
+  webhook_url: string;
 }> {
   const creds = await getClickUpCredentials(userId);
   const lastRaw = await readState(userId, KEY.last);
@@ -180,6 +188,9 @@ export async function paymentLedgerSyncStatus(userId: number): Promise<{
     scan_page: numState(await readState(userId, KEY.scanPage)),
     watermark: await readState(userId, KEY.watermark),
     last,
+    webhook_secret_set: Boolean(process.env.CLICKUP_WEBHOOK_SECRET?.trim()),
+    webhook_path: CLICKUP_PAYMENT_WEBHOOK_PATH,
+    webhook_url: origin ? clickUpPaymentWebhookUrl(origin) : '',
   };
 }
 
@@ -291,6 +302,18 @@ export async function saveTaskPaymentRows(
     }
   });
   return { upserted, removed };
+}
+
+/** Full refresh of one task: payment fields and every payment comment. Used by the ClickUp webhook. */
+export async function applyPaymentLedgerTask(
+  userId: number,
+  task: ClickUpTask,
+  comments: ClickUpComment[],
+): Promise<{ upserted: number; removed: number }> {
+  const rows = extractPaymentLedgerRows(task, comments);
+  const saved = await saveTaskPaymentRows(userId, task.id, rows, { replaceComments: true });
+  await rememberTask(userId, task, new Date().toISOString());
+  return saved;
 }
 
 async function rememberTask(

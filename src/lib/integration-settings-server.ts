@@ -17,6 +17,7 @@ import {
   type YedpaySettings,
   type ClickUpSettings,
 } from './integration-settings';
+import { clickUpPaymentListId, clickUpPaymentWebhookUrl } from './payment-ledger';
 import { normalizeWooStoreUrl } from './woo-url';
 
 function maskSecret(value: string | undefined): { set: boolean; hint: string } {
@@ -211,7 +212,10 @@ async function getRawIntegrationSettings(userId: number): Promise<IntegrationSet
   return parseSettings(row?.settings_json);
 }
 
-export async function getIntegrationSettingsMasked(userId: number): Promise<IntegrationSettingsMasked> {
+export async function getIntegrationSettingsMasked(
+  userId: number,
+  options?: { origin?: string },
+): Promise<IntegrationSettingsMasked> {
   const s = await getIntegrationSettings(userId);
   const maskWoo = (store: WooStoreSettings) => {
     const key = maskSecret(store.key);
@@ -265,6 +269,9 @@ export async function getIntegrationSettingsMasked(userId: number): Promise<Inte
       list_id: s.clickup.list_id,
       api_token_set: clickupToken.set,
       api_token_hint: clickupToken.hint,
+      webhook_secret_set: Boolean(process.env.CLICKUP_WEBHOOK_SECRET?.trim()),
+      payment_list_id: clickUpPaymentListId(),
+      webhook_url: options?.origin ? clickUpPaymentWebhookUrl(options.origin) : '',
     },
     sf_express: {
       partner_id: s.sf_express.partner_id,

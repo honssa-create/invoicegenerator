@@ -12,6 +12,36 @@ export function clickUpPaymentListId(): string {
   return (process.env.CLICKUP_PAYMENT_LIST_ID || DEFAULT_CLICKUP_PAYMENT_LIST_ID).trim();
 }
 
+/** Custom fields the ledger reads. Webhook `taskUpdated` events for other fields are ignored. */
+export const PAYMENT_LEDGER_CLICKUP_FIELDS = [
+  '第一次Payment日期',
+  '第一次Payment ($)',
+  '第二次Payment日期',
+  '第2次Payment($)',
+  'Payment',
+  'Order #',
+] as const;
+
+const [FIELD_DATE_1, FIELD_AMOUNT_1, FIELD_DATE_2, FIELD_AMOUNT_2, FIELD_PAYMENT, FIELD_ORDER_NO] =
+  PAYMENT_LEDGER_CLICKUP_FIELDS;
+
+export function isPaymentLedgerClickUpField(name: string | null | undefined): boolean {
+  const want = (name || '').replace(/\s+/g, '');
+  if (!want) return false;
+  return PAYMENT_LEDGER_CLICKUP_FIELDS.some((field) => field.replace(/\s+/g, '') === want);
+}
+
+export const CLICKUP_PAYMENT_WEBHOOK_PATH = '/api/webhooks/clickup';
+
+/** Events to subscribe when creating the list webhook. `taskUpdated` also carries payment custom-field edits. */
+export const CLICKUP_PAYMENT_WEBHOOK_EVENTS = ['taskCommentPosted', 'taskCommentUpdated', 'taskUpdated'] as const;
+
+export function clickUpPaymentWebhookUrl(origin: string): string {
+  const base = (origin || '').trim().replace(/\/$/, '');
+  if (!base) return CLICKUP_PAYMENT_WEBHOOK_PATH;
+  return `${base}${CLICKUP_PAYMENT_WEBHOOK_PATH}`;
+}
+
 export type PaymentLedgerAttachment = {
   name: string;
   url: string;
@@ -78,13 +108,6 @@ export type PaymentLedgerDraft = {
   source: 'comment' | 'installment';
   category: PaymentLedgerCategory;
 };
-
-const FIELD_DATE_1 = '第一次Payment日期';
-const FIELD_AMOUNT_1 = '第一次Payment ($)';
-const FIELD_DATE_2 = '第二次Payment日期';
-const FIELD_AMOUNT_2 = '第2次Payment($)';
-const FIELD_PAYMENT = 'Payment';
-const FIELD_ORDER_NO = 'Order #';
 
 const PAYMENT_SIGNAL =
   /(?:\bpayment\b|full\s*paid|full\s*payment|\bfps\b|銀行轉[帳账]|已付|尾[數数]|加單金額|加单金额|(?<!\d)50\s*%)/i;

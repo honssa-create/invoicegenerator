@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   RESEND_BRAND_LABELS,
   RESEND_UI_BRAND_KEYS,
@@ -12,6 +12,7 @@ import {
   type WooPlatformKey,
 } from '@/lib/integration-settings';
 import { ORDER_TYPES } from '@/lib/orders';
+import { CLICKUP_PAYMENT_WEBHOOK_EVENTS } from '@/lib/payment-ledger';
 import { useUnsavedChangesWarning } from '@/hooks/useUnsavedChangesWarning';
 
 const inputCls =
@@ -41,7 +42,14 @@ const EMPTY_MASKED: IntegrationSettingsMasked = {
     environment: 'sandbox',
   },
   yedpay: { user_id: '', access_token_set: false, access_token_hint: '' },
-  clickup: { list_id: '', api_token_set: false, api_token_hint: '' },
+  clickup: {
+    list_id: '',
+    api_token_set: false,
+    api_token_hint: '',
+    webhook_secret_set: false,
+    payment_list_id: '901812202272',
+    webhook_url: '',
+  },
   sf_express: {
     partner_id: '',
     partner_id_set: false,
@@ -112,6 +120,23 @@ export default function IntegrationsSettingsPanel({
     cupmoka: { api_key: '', from_email: '', order_types: [] },
   });
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  const [copied, setCopied] = useState('');
+
+  useEffect(() => {
+    if (loading) return;
+    if (window.location.hash !== '#clickup') return;
+    document.getElementById('clickup')?.scrollIntoView({ block: 'start' });
+  }, [loading]);
+
+  const copyValue = async (value: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => (current === key ? '' : current)), 2000);
+    } catch {
+      onToast('Could not copy', 'error');
+    }
+  };
 
   const currentSnapshot = useMemo(
     () => JSON.stringify({ woo, qb, yedpay, clickup, sf, resend }),
@@ -482,37 +507,14 @@ export default function IntegrationsSettingsPanel({
       </section>
 
       {/* ClickUp */}
-      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
-          <h2 className="text-lg font-semibold text-gray-900">ClickUp 回禮</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Personal API token from ClickUp → Settings → Apps → API Token, plus the List ID (number after{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">/li/</code> in the list link). Import from Hub.
-          </p>
-        </div>
-        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium text-gray-500">List ID</label>
-            <input
-              type="text"
-              value={clickup.list_id}
-              onChange={(e) => setClickup({ ...clickup, list_id: e.target.value })}
-              placeholder="901812202272"
-              className={`${inputCls} mt-1`}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-500">API Token</label>
-            <input
-              type="password"
-              value={clickup.api_token}
-              onChange={(e) => setClickup({ ...clickup, api_token: e.target.value })}
-              placeholder={masked.clickup.api_token_set ? masked.clickup.api_token_hint : 'pk_…'}
-              className={`${inputCls} mt-1`}
-            />
-          </div>
-        </div>
-      </section>
+      <ClickUpIntegrationSection
+        clickup={clickup}
+        setClickup={setClickup}
+        masked={masked}
+        copied={copied}
+        onCopy={copyValue}
+        inputCls={inputCls}
+      />
 
       {/* SF Express */}
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -709,5 +711,171 @@ export default function IntegrationsSettingsPanel({
         </div>
       </section>
     </div>
+  );
+}
+
+function StatusPill({ ok, children }: { ok: boolean; children: ReactNode }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+        ok ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ClickUpIntegrationSection({
+  clickup,
+  setClickup,
+  masked,
+  copied,
+  onCopy,
+  inputCls,
+}: {
+  clickup: { list_id: string; api_token: string };
+  setClickup: (next: { list_id: string; api_token: string }) => void;
+  masked: IntegrationSettingsMasked;
+  copied: string;
+  onCopy: (value: string, key: string) => void;
+  inputCls: string;
+}) {
+  const paymentListId = masked.clickup.payment_list_id || '901812202272';
+  const webhookUrl = masked.clickup.webhook_url || '/api/webhooks/clickup';
+  const createBody = JSON.stringify(
+    {
+      endpoint: webhookUrl,
+      events: [...CLICKUP_PAYMENT_WEBHOOK_EVENTS],
+      list_id: Number(paymentListId) || paymentListId,
+    },
+    null,
+    2,
+  );
+  const curl = `curl -X POST "https://api.clickup.com/api/v2/team/TEAM_ID/webhook" \\\n  -H "Authorization: YOUR_CLICKUP_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '${createBody}'`;
+
+  return (
+    <section id="clickup" className="bg-white border border-gray-200 rounded-xl overflow-hidden scroll-mt-24">
+      <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
+        <h2 className="text-lg font-semibold text-gray-900">ClickUp</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          One personal API token feeds Order Hub task import and 入帳紀錄. The payment webhook is registered with the
+          ClickUp API. ClickUp has an Apps screen for the token, and no product screen for this webhook.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <StatusPill ok={masked.clickup.api_token_set}>
+            API token {masked.clickup.api_token_set ? `set ${masked.clickup.api_token_hint}` : 'not set'}
+          </StatusPill>
+          <StatusPill ok={masked.clickup.webhook_secret_set}>
+            CLICKUP_WEBHOOK_SECRET {masked.clickup.webhook_secret_set ? 'set' : 'not set'}
+          </StatusPill>
+          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+            入帳紀錄 list {paymentListId}
+            {paymentListId === '901812202272' ? ' · Nestiee 婚宴回禮' : ''}
+          </span>
+        </div>
+      </div>
+      <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-500">Order Hub list ID</label>
+          <input
+            type="text"
+            value={clickup.list_id}
+            onChange={(e) => setClickup({ ...clickup, list_id: e.target.value })}
+            placeholder="List imported by Hub"
+            className={`${inputCls} mt-1`}
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Number after <code className="text-xs bg-gray-100 px-1 rounded">/li/</code> in the Hub list link. This is
+            the Order Hub import list. 入帳紀錄 uses {paymentListId} (override with{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">CLICKUP_PAYMENT_LIST_ID</code>).
+          </p>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-500">API Token</label>
+          <input
+            type="password"
+            value={clickup.api_token}
+            onChange={(e) => setClickup({ ...clickup, api_token: e.target.value })}
+            placeholder={masked.clickup.api_token_set ? masked.clickup.api_token_hint : 'pk_…'}
+            className={`${inputCls} mt-1`}
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            ClickUp → avatar → Settings → Apps → API Token. Leave blank when saving to keep the current token. Env
+            fallback: <code className="text-xs bg-gray-100 px-1 rounded">CLICKUP_API_TOKEN</code>.
+          </p>
+        </div>
+      </div>
+      <div className="px-5 pb-4 space-y-3">
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-medium text-gray-500">Payment ledger webhook URL</label>
+            <button
+              type="button"
+              onClick={() => onCopy(webhookUrl, 'url')}
+              className="text-xs font-medium text-brand-700 hover:underline"
+            >
+              {copied === 'url' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <code className="mt-1 block break-all rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800">
+            {webhookUrl}
+          </code>
+          <p className="text-xs text-gray-500 mt-1">
+            Uses <code className="text-xs bg-gray-100 px-1 rounded">APP_URL</code> when that env var is set, so
+            production shows the public Railway origin.
+          </p>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
+          <li>
+            Create or copy the API token in ClickUp (Apps → API Token) and save it here. Order Hub and the 入帳紀錄
+            cron both use it. Hub import still does not read comments.
+          </li>
+          <li>
+            Workspace id: <code className="text-xs bg-gray-100 px-1 rounded">GET https://api.clickup.com/api/v2/team</code>{' '}
+            with header <code className="text-xs bg-gray-100 px-1 rounded">Authorization: &lt;token&gt;</code>. Use{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">teams[0].id</code> as <code className="text-xs bg-gray-100 px-1 rounded">TEAM_ID</code>.
+          </li>
+          <li>
+            Create the webhook with the API. Scope it to list <strong>{paymentListId}</strong>. Events:{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">taskCommentPosted</code>,{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">taskCommentUpdated</code>,{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">taskUpdated</code>.
+          </li>
+          <li>
+            Copy <code className="text-xs bg-gray-100 px-1 rounded">webhook.secret</code> from the create response into
+            the app env var <code className="text-xs bg-gray-100 px-1 rounded">CLICKUP_WEBHOOK_SECRET</code>, then
+            redeploy. The value stays out of this screen and out of git. Until it is set,{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">POST /api/webhooks/clickup</code> returns 503 and ClickUp
+            marks the webhook unhealthy.
+          </li>
+          <li>
+            A comment or a payment custom field edit (第一次／第二次 Payment date and amount, Payment, Order #) on that
+            list refetches the task and upserts 入帳紀錄. Other field edits are acknowledged and skipped. The 15-minute
+            cron still backfills anything the webhook misses.
+          </li>
+        </ol>
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-medium text-gray-500">Create Webhook request</label>
+            <button
+              type="button"
+              onClick={() => onCopy(curl, 'curl')}
+              className="text-xs font-medium text-brand-700 hover:underline"
+            >
+              {copied === 'curl' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <pre className="mt-1 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 whitespace-pre-wrap">
+            {curl}
+          </pre>
+          <p className="text-xs text-gray-500 mt-1">
+            Replace <code className="text-xs bg-gray-100 px-1 rounded">TEAM_ID</code> and{' '}
+            <code className="text-xs bg-gray-100 px-1 rounded">YOUR_CLICKUP_TOKEN</code>. ClickUp Automations → Call
+            webhook sends a different body, so this endpoint rejects it. Use the Create Webhook API above.
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }

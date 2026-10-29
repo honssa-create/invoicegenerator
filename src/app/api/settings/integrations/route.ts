@@ -6,13 +6,15 @@ import {
   saveIntegrationSettings,
 } from '@/lib/integration-settings-server';
 import type { IntegrationSettingsUpdate } from '@/lib/integration-settings-server';
+import { getPublicOrigin } from '@/lib/request-origin';
 
 export async function GET(request: Request) {
   const session = await requireApiAdmin(request);
   if (session instanceof NextResponse) return session;
 
   const ownerId = await getDataOwnerId(session);
-  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
+  const origin = getPublicOrigin(request);
+  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId, { origin }) });
 }
 
 export async function PUT(request: Request) {
@@ -35,5 +37,6 @@ export async function PUT(request: Request) {
       { status: 400 }
     );
   }
-  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId) });
+  const origin = getPublicOrigin(request);
+  return NextResponse.json({ settings: await getIntegrationSettingsMasked(ownerId, { origin }) });
 }

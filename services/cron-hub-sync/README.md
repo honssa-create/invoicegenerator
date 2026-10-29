@@ -6,7 +6,9 @@ Railway cron service: triggers InvoiceFlow Order Hub sync every 15 minutes.
 
 `GET /api/cron/hub-sync` with `Authorization: Bearer $CRON_SECRET`
 
-The same run then calls `GET /api/cron/payment-ledger` (入帳紀錄). That job reads ClickUp task comments, which Order Hub sync does not. It uses the ClickUp API token from Settings → Integrations (or `CLICKUP_API_TOKEN`). The list defaults to Nestiee 婚宴回禮 `901812202272`; set `CLICKUP_PAYMENT_LIST_ID` only to point at a different list. No new secret is required when the token is already configured.
+The same run then calls `GET /api/cron/payment-ledger` (入帳紀錄). That job reads ClickUp task comments, which Order Hub sync does not. It uses the ClickUp API token from Settings → Integrations (or `CLICKUP_API_TOKEN`). The list defaults to Nestiee 婚宴回禮 `901812202272`; set `CLICKUP_PAYMENT_LIST_ID` only to point at a different list. No new secret is required for this cron when the token is already configured.
+
+Comment and payment-field edits can also arrive immediately at `POST /api/webhooks/clickup`. That route needs **`CLICKUP_WEBHOOK_SECRET`** on the app service (the `webhook.secret` from ClickUp’s Create Webhook response). The cron service does not need that variable. The cron walk remains the backfill when a webhook is missed. Setup steps are on Settings → API Integrations → ClickUp.
 
 ## Railway setup
 

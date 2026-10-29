@@ -440,7 +440,7 @@ function AttachmentCell({
               key={key}
               type="button"
               onClick={() => openAt(index)}
-              className="h-16 w-16 shrink-0 overflow-hidden rounded border border-gray-200 bg-gray-50 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
+              className="h-11 w-11 shrink-0 overflow-hidden rounded border border-gray-200 bg-gray-50 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
               aria-label={item.name || 'attachment'}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}

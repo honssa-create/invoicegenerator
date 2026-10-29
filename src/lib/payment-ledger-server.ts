@@ -269,7 +269,11 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
     );
 }
 
-/** Replace installment rows for a task. Comment rows are replaced only when comments were fetched. */
+/**
+ * Replace installment rows for a task. Comment rows are replaced only when comments were fetched.
+ * Installment `attachments` already include same-day receipt files copied off payment comments
+ * (`attachSameDayReceipts`). This upsert stores that list on the installment row.
+ */
 export async function saveTaskPaymentRows(
   userId: number,
   taskId: string,

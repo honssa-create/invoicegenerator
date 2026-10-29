@@ -224,6 +224,148 @@ describe('extractPaymentLedgerRows', () => {
     expect(extractPaymentLedgerRows(unpaid, [])).toEqual([]);
   });
 
+  it('copies a same-day receipt onto the installment and leaves the comment row', () => {
+    const paired = task({
+      id: 'pair-day',
+      name: '12110 - Ada',
+      custom_fields: [
+        labels(['Full Paid']),
+        { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1786305600000' },
+        { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '6288.5' },
+        { id: 'd2', name: '第二次Payment日期', type: 'date', value: '1790625600000' },
+        { id: 'a2', name: '第2次Payment($)', type: 'number', value: '1658.8' },
+      ],
+    });
+    const file = (id: string, name: string, url: string) => ({
+      type: 'image',
+      text: name,
+      image: { id, name, url },
+    });
+    const rows = extractPaymentLedgerRows(paired, [
+      {
+        id: 'c-fps',
+        comment_text: 'image.png\nFPS\n',
+        date: '1790695800000',
+        comment: [file('fps', 'image.png', 'https://attachments.example/fps-day2.png')],
+      },
+      {
+        id: 'c-next',
+        comment_text: 'image.png\nFPS\n',
+        date: '1790699400000',
+        comment: [file('next', 'image.png', 'https://attachments.example/next-day.png')],
+      },
+      {
+        id: 'c-addon',
+        comment_text: 'image.png\n加單金額：$200\n',
+        date: '1786345200000',
+        comment: [file('addon', 'image.png', 'https://attachments.example/addon.png')],
+      },
+      {
+        id: 'c-other',
+        comment_text: 'image.png\n已付 $829.40\n',
+        date: '1790651369825',
+        comment: [file('other', 'image.png', 'https://attachments.example/other.png')],
+      },
+      {
+        id: 'c-near',
+        comment_text: 'image.png\n已付 $6,288\n',
+        date: '1786345200000',
+        comment: [file('near', 'image.png', 'https://attachments.example/near.png')],
+      },
+      {
+        id: 'c-pdf',
+        comment_text: 'fps.pdf\nFPS\n',
+        date: '1786345200000',
+        comment: [
+          {
+            type: 'attachment',
+            text: 'fps.pdf',
+            attachment: { id: 'pdf', name: 'fps.pdf', url: 'https://attachments.example/fps.pdf' },
+          },
+        ],
+      },
+      {
+        id: 'c-full2',
+        comment_text: 'image.png\n100% Full payment\n',
+        date: '1790695800000',
+        comment: [file('full2', 'image.png', 'https://attachments.example/full2.png')],
+      },
+    ]);
+    const byKey = Object.fromEntries(rows.map((row) => [row.dedupe_key, row]));
+    const urls = (key: string) => (byKey[key].attachments || []).map((item) => item.url);
+
+    expect(byKey['installment:pair-day:1'].paid_date).toBe('2026-08-10');
+    expect(urls('installment:pair-day:1')).toEqual([
+      'https://attachments.example/near.png',
+      'https://attachments.example/fps.pdf',
+    ]);
+    expect(byKey['installment:pair-day:2'].paid_date).toBe('2026-09-29');
+    expect(urls('installment:pair-day:2')).toEqual([
+      'https://attachments.example/full2.png',
+      'https://attachments.example/fps-day2.png',
+    ]);
+    expect(urls('comment:pair-day:c-fps')).toEqual(['https://attachments.example/fps-day2.png']);
+    expect(urls('comment:pair-day:c-next')).toEqual(['https://attachments.example/next-day.png']);
+    expect(urls('comment:pair-day:c-addon')).toEqual(['https://attachments.example/addon.png']);
+    expect(urls('comment:pair-day:c-other')).toEqual(['https://attachments.example/other.png']);
+    expect(urls('comment:pair-day:c-near')).toEqual(['https://attachments.example/near.png']);
+    expect(byKey['comment:pair-day:c-full2']).toBeUndefined();
+    const installmentUrls = urls('installment:pair-day:1').concat(urls('installment:pair-day:2'));
+    expect(installmentUrls).not.toContain('https://attachments.example/next-day.png');
+    expect(installmentUrls).not.toContain('https://attachments.example/addon.png');
+    expect(installmentUrls).not.toContain('https://attachments.example/other.png');
+  });
+
+  it('uses the Hong Kong day to choose which same-day installment receives the receipt', () => {
+    const both = task({
+      id: 'same-day',
+      name: '12111 - Bea',
+      custom_fields: [
+        { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1790625600000' },
+        { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '1000' },
+        { id: 'd2', name: '第二次Payment日期', type: 'date', value: '1790625600000' },
+        { id: 'a2', name: '第2次Payment($)', type: 'number', value: '2000' },
+      ],
+    });
+    const rows = extractPaymentLedgerRows(both, [
+      {
+        id: 'c-second',
+        comment_text: '第二次 FPS\nimage.png\n',
+        date: '1790695800000',
+        comment: [
+          {
+            type: 'image',
+            text: 'image.png',
+            image: { id: 'second', name: 'image.png', url: 'https://attachments.example/second.png' },
+          },
+        ],
+      },
+      {
+        id: 'c-ambiguous',
+        comment_text: 'FPS\nimage.png\n',
+        date: '1790695800000',
+        comment: [
+          {
+            type: 'image',
+            text: 'image.png',
+            image: { id: 'amb', name: 'image.png', url: 'https://attachments.example/ambiguous.png' },
+          },
+        ],
+      },
+    ]);
+    const byKey = Object.fromEntries(rows.map((row) => [row.dedupe_key, row]));
+    expect(byKey['installment:same-day:2'].attachments.map((item) => item.url)).toEqual([
+      'https://attachments.example/second.png',
+    ]);
+    expect(byKey['installment:same-day:1'].attachments).toEqual([]);
+    expect(byKey['comment:same-day:c-second'].attachments.map((item) => item.url)).toEqual([
+      'https://attachments.example/second.png',
+    ]);
+    expect(byKey['comment:same-day:c-ambiguous'].attachments.map((item) => item.url)).toEqual([
+      'https://attachments.example/ambiguous.png',
+    ]);
+  });
+
   it('records a paid label even before an amount is filled in', () => {
     const labeled = task({
       id: 'label-only',

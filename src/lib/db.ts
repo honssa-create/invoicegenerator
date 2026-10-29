@@ -102,6 +102,7 @@ const NO_RETURNING_TABLES = new Set([
   'app_migrations',
   'role_permissions',
   'kitchen_settings',
+  'payment_ledger_tasks',
 ]);
 
 function insertTableName(sql: string): string | null {

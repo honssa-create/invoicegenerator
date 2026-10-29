@@ -5,8 +5,14 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
 import { useAuth } from '@/components/AuthProvider';
-import type { PaymentLedgerAttachment } from '@/lib/payment-ledger';
+import {
+  isImageAttachment,
+  ledgerAttachmentSrc,
+  type PaymentLedgerAttachment,
+} from '@/lib/payment-ledger';
 import { BTN, TITLE, bi } from '@/lib/ui-labels';
+
+type LightboxImage = { src: string; name: string };
 
 type Entry = {
   id: number;
@@ -38,6 +44,17 @@ function formatAmount(amount: number | null): string {
   return amount.toLocaleString('en-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function FileChip({ name, href }: { name: string; href?: string }) {
+  const className =
+    'inline-flex max-w-[10rem] items-center truncate rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700';
+  if (!href) return <span className={className}>{name}</span>;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className={`${className} hover:bg-gray-100`}>
+      {name}
+    </a>
+  );
+}
+
 export default function PaymentLedgerPage() {
   const { isSectionReadOnly } = useAuth();
   const readOnly = isSectionReadOnly('payment_ledger');
@@ -49,6 +66,8 @@ export default function PaymentLedgerPage() {
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
   const [search, setSearch] = useState('');
+  const [lightbox, setLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null);
+  const [brokenThumbs, setBrokenThumbs] = useState<Set<string>>(() => new Set());
 
   const load = () => {
     setLoading(true);
@@ -66,6 +85,27 @@ export default function PaymentLedgerPage() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLightbox(null);
+      if (event.key === 'ArrowRight') {
+        setLightbox((current) =>
+          current ? { ...current, index: (current.index + 1) % current.images.length } : current,
+        );
+      }
+      if (event.key === 'ArrowLeft') {
+        setLightbox((current) =>
+          current
+            ? { ...current, index: (current.index - 1 + current.images.length) % current.images.length }
+            : current,
+        );
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   const displayed = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -237,23 +277,19 @@ export default function PaymentLedgerPage() {
                     )}
                   </td>
                   <td className="px-6 py-3 text-sm text-gray-700">
-                    {row.attachments?.length ? (
-                      <ul className="space-y-1">
-                        {row.attachments.map((item) => (
-                          <li key={`${item.name}-${item.url}`}>
-                            {item.url ? (
-                              <a href={item.url} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline break-all">
-                                {item.name || 'attachment'}
-                              </a>
-                            ) : (
-                              <span>{item.name || 'attachment'}</span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      '—'
-                    )}
+                    <AttachmentCell
+                      entryId={row.id}
+                      attachments={row.attachments || []}
+                      brokenThumbs={brokenThumbs}
+                      onBroken={(key) =>
+                        setBrokenThumbs((current) => {
+                          const next = new Set(current);
+                          next.add(key);
+                          return next;
+                        })
+                      }
+                      onOpen={(images, index) => setLightbox({ images, index })}
+                    />
                   </td>
                 </tr>
               ))}
@@ -261,6 +297,128 @@ export default function PaymentLedgerPage() {
           </table>
         )}
       </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute right-4 top-4 z-10 h-10 w-10 rounded-full bg-white/10 text-xl text-white hover:bg-white/20"
+            aria-label={BTN.close}
+          >
+            ×
+          </button>
+          {lightbox.images.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setLightbox((current) =>
+                    current
+                      ? { ...current, index: (current.index - 1 + current.images.length) % current.images.length }
+                      : current,
+                  );
+                }}
+                className="absolute left-2 z-10 h-12 w-12 rounded-full bg-white/10 text-2xl text-white hover:bg-white/20 sm:left-6"
+                aria-label={bi('Previous image', '上一張')}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setLightbox((current) =>
+                    current ? { ...current, index: (current.index + 1) % current.images.length } : current,
+                  );
+                }}
+                className="absolute right-2 z-10 h-12 w-12 rounded-full bg-white/10 text-2xl text-white hover:bg-white/20 sm:right-6"
+                aria-label={bi('Next image', '下一張')}
+              >
+                ›
+              </button>
+            </>
+          )}
+          <div className="flex max-h-[92vh] max-w-[92vw] flex-col items-center gap-3" onClick={(event) => event.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={lightbox.images[lightbox.index]?.src}
+              alt={lightbox.images[lightbox.index]?.name || 'attachment'}
+              className="max-h-[84vh] max-w-[92vw] cursor-default rounded-lg bg-white object-contain shadow-2xl"
+            />
+            <p className="max-w-[92vw] truncate text-sm text-white/80">
+              {lightbox.images[lightbox.index]?.name}
+              {lightbox.images.length > 1 ? ` · ${lightbox.index + 1} / ${lightbox.images.length}` : ''}
+            </p>
+          </div>
+        </div>
+      )}
     </AppLayout>
+  );
+}
+
+function AttachmentCell({
+  entryId,
+  attachments,
+  brokenThumbs,
+  onBroken,
+  onOpen,
+}: {
+  entryId: number;
+  attachments: PaymentLedgerAttachment[];
+  brokenThumbs: Set<string>;
+  onBroken: (key: string) => void;
+  onOpen: (images: LightboxImage[], index: number) => void;
+}) {
+  if (!attachments.length) return <>—</>;
+
+  const images = attachments
+    .map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => isImageAttachment(item) && !brokenThumbs.has(`${entryId}:${index}`));
+
+  const openAt = (attachmentIndex: number) => {
+    const gallery = images.map(({ item, index }) => ({
+      src: ledgerAttachmentSrc(entryId, index, item, 'full'),
+      name: item.name || 'attachment',
+    }));
+    const galleryIndex = images.findIndex(({ index }) => index === attachmentIndex);
+    if (galleryIndex >= 0) onOpen(gallery, galleryIndex);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {attachments.map((item, index) => {
+        const key = `${entryId}:${index}:${item.url || item.name}`;
+        const thumbKey = `${entryId}:${index}`;
+        const image = isImageAttachment(item) && !brokenThumbs.has(thumbKey);
+        if (image) {
+          const src = ledgerAttachmentSrc(entryId, index, item, 'thumb');
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => openAt(index)}
+              className="h-16 w-16 shrink-0 overflow-hidden rounded border border-gray-200 bg-gray-50 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
+              aria-label={item.name || 'attachment'}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={src}
+                alt={item.name || 'attachment'}
+                loading="lazy"
+                onError={() => onBroken(thumbKey)}
+                className="h-full w-full object-cover"
+              />
+            </button>
+          );
+        }
+        const href = item.url ? ledgerAttachmentSrc(entryId, index, item, 'full') : undefined;
+        return <FileChip key={key} name={item.name || 'attachment'} href={href} />;
+      })}
+    </div>
   );
 }

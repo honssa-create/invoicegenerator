@@ -6,6 +6,7 @@ import { getClickUpCredentials } from './integration-settings-server';
 import {
   clickUpPaymentListId,
   extractPaymentLedgerRows,
+  isClickUpAttachmentUrl,
   type PaymentLedgerAttachment,
   type PaymentLedgerDraft,
 } from './payment-ledger';
@@ -467,4 +468,81 @@ export async function syncPaymentLedger(
 
   await writeState(userId, KEY.last, JSON.stringify(result));
   return result;
+}
+
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+export type LedgerFileResult =
+  | { body: Uint8Array; contentType: string }
+  | { error: string; status: number };
+
+function contentTypeFor(header: string | null, name: string): string {
+  const raw = (header || '').split(';')[0].trim().toLowerCase();
+  if (raw && raw !== 'application/octet-stream') return raw;
+  const ext = (name.split('?')[0].match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'pdf') return 'application/pdf';
+  return raw || 'application/octet-stream';
+}
+
+/** Follow only ClickUp hosts. Try the public URL first, then the API token if ClickUp refuses it. */
+async function fetchClickUpFile(startUrl: string, token: string): Promise<Response> {
+  let current = startUrl;
+  let usedToken = false;
+  for (let hop = 0; hop < 4; hop += 1) {
+    const parsed = new URL(current);
+    if (parsed.protocol !== 'https:' || !isClickUpAttachmentUrl(current)) {
+      throw new Error('Attachment URL is not on a ClickUp host.');
+    }
+    const headers: Record<string, string> = {};
+    if (token && usedToken) headers.Authorization = token;
+    const res = await fetch(current, { headers, redirect: 'manual', signal: AbortSignal.timeout(20_000) });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) return res;
+      current = new URL(location, current).toString();
+      continue;
+    }
+    if ((res.status === 401 || res.status === 403) && token && !usedToken) {
+      usedToken = true;
+      continue;
+    }
+    return res;
+  }
+  throw new Error('Attachment redirect loop.');
+}
+
+export async function readLedgerAttachment(
+  userId: number,
+  entryId: number,
+  index: number,
+  variant: 'thumb' | 'full',
+): Promise<LedgerFileResult> {
+  const row = await db
+    .prepare(`SELECT attachments_json FROM payment_ledger WHERE id = ? AND user_id = ?`)
+    .get(entryId, userId) as { attachments_json?: string } | undefined;
+  if (!row) return { error: 'Not found', status: 404 };
+  const attachments = parseAttachments(row.attachments_json);
+  const item = attachments[index];
+  if (!item) return { error: 'Not found', status: 404 };
+  const url = (variant === 'thumb' ? item.thumbnail_url || item.url : item.url || '').trim();
+  if (!url || !isClickUpAttachmentUrl(url)) return { error: 'Not a ClickUp file', status: 400 };
+
+  const token = (await getClickUpCredentials(userId)).api_token.trim();
+  let res: Response;
+  try {
+    res = await fetchClickUpFile(url, token);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Attachment fetch failed';
+    return { error: message, status: 502 };
+  }
+  if (!res.ok) return { error: `ClickUp file ${res.status}`, status: 502 };
+  const contentType = contentTypeFor(res.headers.get('content-type'), item.name || url);
+  if (contentType.startsWith('text/html')) return { error: 'Attachment was not a file', status: 502 };
+  const buffer = new Uint8Array(await res.arrayBuffer());
+  if (buffer.byteLength > MAX_ATTACHMENT_BYTES) return { error: 'Attachment is too large', status: 413 };
+  return { body: buffer, contentType };
 }

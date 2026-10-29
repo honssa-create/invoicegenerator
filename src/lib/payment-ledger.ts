@@ -15,8 +15,47 @@ export function clickUpPaymentListId(): string {
 export type PaymentLedgerAttachment = {
   name: string;
   url: string;
+  /** Smaller ClickUp rendition for the table. Lightbox uses `url`. */
+  thumbnail_url?: string;
   id?: string;
 };
+
+const IMAGE_EXT = /\.(?:png|jpe?g|webp|gif|bmp|heic|heif|avif)(?:$|[?#])/i;
+const CLICKUP_FILE_HOST = /(^|\.)clickup\.com$|(^|\.)clickup-attachments\.com$/i;
+
+/** Previewable picture: image extension on the name or URL, or a data:image URL. */
+export function isImageAttachment(item: { name?: string; url?: string }): boolean {
+  const url = (item.url || '').trim();
+  if (!url) return false;
+  if (url.startsWith('data:image/')) return true;
+  const path = url.split('?')[0];
+  return IMAGE_EXT.test(item.name || '') || IMAGE_EXT.test(path);
+}
+
+/** ClickUp-hosted files are loaded through our API so the token stays on the server. */
+export function isClickUpAttachmentUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && CLICKUP_FILE_HOST.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Table / lightbox src. ClickUp hosts go through the authenticated file route. */
+export function ledgerAttachmentSrc(
+  entryId: number,
+  index: number,
+  item: PaymentLedgerAttachment,
+  variant: 'thumb' | 'full',
+): string {
+  const raw = (variant === 'thumb' ? item.thumbnail_url || item.url : item.url || '').trim();
+  if (!raw) return '';
+  if (isClickUpAttachmentUrl(raw)) {
+    return `/api/payment-ledger/files?id=${entryId}&index=${index}&variant=${variant}`;
+  }
+  return raw;
+}
 
 export type PaymentLedgerDraft = {
   dedupe_key: string;
@@ -125,17 +164,52 @@ function isFilenameLine(line: string): boolean {
   return trimmed.length > 0 && trimmed.length < 180 && FILE_LINE.test(trimmed);
 }
 
+function attachmentFromSource(src: Record<string, unknown>, fallbackName: string): PaymentLedgerAttachment | null {
+  const name = String(src.name || src.title || fallbackName || 'attachment').trim() || 'attachment';
+  const url = String(src.url || src.thumbnail_large || src.url_w_query || '').trim();
+  const thumbnail = String(src.thumbnail_small || src.thumbnail_medium || src.thumbnail_large || '').trim();
+  const id = src.id != null ? String(src.id) : undefined;
+  if (!name && !url) return null;
+  return {
+    name,
+    url,
+    ...(thumbnail && thumbnail !== url ? { thumbnail_url: thumbnail } : {}),
+    ...(id ? { id } : {}),
+  };
+}
+
+/** Keep every distinct file URL. A filename-only copy is dropped when the same name already has a URL. */
 export function dedupeAttachments(list: PaymentLedgerAttachment[]): PaymentLedgerAttachment[] {
-  const byKey = new Map<string, PaymentLedgerAttachment>();
+  const withUrl: PaymentLedgerAttachment[] = [];
+  const seenUrl = new Set<string>();
+  const namesWithUrl = new Set<string>();
   for (const item of list) {
-    const name = (item.name || '').trim();
     const url = (item.url || '').trim();
-    const key = (name || url).toLowerCase();
-    if (!key) continue;
-    const prev = byKey.get(key);
-    if (!prev || (!prev.url && url)) byKey.set(key, { name: name || 'attachment', url, id: item.id || prev?.id });
+    if (!url) continue;
+    const key = url.toLowerCase();
+    if (seenUrl.has(key)) continue;
+    seenUrl.add(key);
+    const name = (item.name || '').trim() || 'attachment';
+    namesWithUrl.add(name.toLowerCase());
+    withUrl.push({
+      name,
+      url,
+      ...(item.thumbnail_url ? { thumbnail_url: item.thumbnail_url } : {}),
+      ...(item.id ? { id: item.id } : {}),
+    });
   }
-  return Array.from(byKey.values());
+  const nameOnly: PaymentLedgerAttachment[] = [];
+  const seenName = new Set<string>();
+  for (const item of list) {
+    if ((item.url || '').trim()) continue;
+    const name = (item.name || '').trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (namesWithUrl.has(key) || seenName.has(key)) continue;
+    seenName.add(key);
+    nameOnly.push({ name, url: '', ...(item.id ? { id: item.id } : {}) });
+  }
+  return [...withUrl, ...nameOnly];
 }
 
 export function attachmentsFromClickUpComment(comment: ClickUpComment): PaymentLedgerAttachment[] {
@@ -153,10 +227,8 @@ export function attachmentsFromClickUpComment(comment: ClickUpComment): PaymentL
       continue;
     }
     for (const src of sources) {
-      const name = String(src.name || src.title || record.text || 'attachment').trim();
-      const url = String(src.url || src.thumbnail_large || src.url_w_query || '').trim();
-      const id = src.id != null ? String(src.id) : undefined;
-      if (name || url) found.push({ name: name || 'attachment', url, id });
+      const item = attachmentFromSource(src, typeof record.text === 'string' ? record.text : '');
+      if (item) found.push(item);
     }
   }
   for (const line of (comment.comment_text || '').split('\n')) {

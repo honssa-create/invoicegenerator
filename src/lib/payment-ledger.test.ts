@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ClickUpComment, ClickUpTask } from './clickup';
 import {
+  attachmentsFromClickUpComment,
   commentLooksLikePayment,
   extractPaymentLedgerRows,
+  isImageAttachment,
+  ledgerAttachmentSrc,
   orderNoFromTaskTitle,
   parsePaymentAmounts,
 } from './payment-ledger';
@@ -79,6 +82,49 @@ describe('parsePaymentAmounts', () => {
     expect(parsePaymentAmounts('$4,976@$41.47/樽 (原價$45/樽)')).toEqual([4976]);
   });
 });
+
+describe('attachment previews', () => {
+  it('keeps every photo even when ClickUp names them all image.png', () => {
+    const files = attachmentsFromClickUpComment({
+      id: 'c1',
+      comment_text: 'image.png\nimage.png\nFull payment\n',
+      comment: [
+        {
+          type: 'image',
+          text: 'image.png',
+          image: {
+            id: 'a',
+            name: 'image.png',
+            url: 'https://cdn.example/a.png',
+            thumbnail_small: 'https://cdn.example/a-thumb.png',
+          },
+        },
+        {
+          type: 'image',
+          text: 'image.png',
+          image: { id: 'b', name: 'image.png', url: 'https://cdn.example/b.png' },
+        },
+      ],
+    });
+    expect(files.map((file) => file.url)).toEqual(['https://cdn.example/a.png', 'https://cdn.example/b.png']);
+    expect(files[0].thumbnail_url).toBe('https://cdn.example/a-thumb.png');
+    expect(isImageAttachment(files[0])).toBe(true);
+    expect(isImageAttachment({ name: 'note.pdf', url: 'https://cdn.example/note.pdf' })).toBe(false);
+    expect(isImageAttachment({ name: 'image.png', url: '' })).toBe(false);
+    expect(ledgerAttachmentSrc(4, 0, files[0], 'thumb')).toBe('https://cdn.example/a-thumb.png');
+    expect(
+      ledgerAttachmentSrc(4, 1, {
+        name: 'image.png',
+        url: 'https://t1.p.clickup-attachments.com/t1/x/image.png',
+      }, 'full'),
+    ).toBe('/api/payment-ledger/files?id=4&index=1&variant=full');
+    expect(isClickUpSafe('https://evil.com/image.png')).toBe(false);
+  });
+});
+
+function isClickUpSafe(url: string): boolean {
+  return ledgerAttachmentSrc(1, 0, { name: 'image.png', url }, 'full').startsWith('/api/');
+}
 
 describe('extractPaymentLedgerRows', () => {
   it('maps the first payment installment and folds the receipt comment into that row', () => {

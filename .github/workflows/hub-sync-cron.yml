@@ -35,3 +35,16 @@ jobs:
               exit 1
               ;;
           esac
+          LEDGER_CODE=$(curl -sS -o /tmp/payment-ledger-body.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE}/api/cron/payment-ledger")
+          echo "Payment ledger HTTP ${LEDGER_CODE}"
+          cat /tmp/payment-ledger-body.json
+          echo
+          case "${LEDGER_CODE}" in
+            2??) ;;
+            *)
+              echo "Payment ledger sync failed with HTTP ${LEDGER_CODE}"
+              exit 1
+              ;;
+          esac

@@ -24,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/expenses', label: NAV.expenses, icon: '🧾', section: 'expenses' },
   { href: '/part-time', label: NAV.partTime, icon: '⏱️', section: 'part_time' },
   { href: '/reconciliation', label: NAV.reconciliation, icon: '🏦', section: 'reconciliation' },
+  { href: '/payment-ledger', label: NAV.paymentLedger, icon: '💳', section: 'payment_ledger' },
   { href: '/cashflow', label: NAV.cashflow, icon: '💹', section: 'cashflow' },
   { href: '/scan-table', label: NAV.scanTable, icon: '📊', section: 'scan_table' },
   { href: '/customers', label: NAV.customers, icon: '👥', section: 'customers' },

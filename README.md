@@ -75,6 +75,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `REMINDER_DAYS` | Age (days) after which an unpaid invoice triggers a reminder | `30` |
 | `CRON_SECRET` | Bearer token for external schedulers: `/api/cron/payment-reminders`, `/api/cron/hub-sync`, and other `/api/cron/*` routes | _(unset)_ |
 | `HUB_OWNER_USER_ID` | User id whose WooCommerce / QuickBooks / ClickUp integration settings cron hub-sync uses (defaults to first admin) | _(unset)_ |
+| `CLICKUP_API_TOKEN` | Fallback ClickUp personal API token when Settings → Integrations → ClickUp is empty. Used by Order Hub import and the payment ledger (入帳紀錄) | _(unset)_ |
+| `CLICKUP_LIST_ID` | Fallback ClickUp list id for Order Hub task import | _(unset)_ |
+| `CLICKUP_PAYMENT_LIST_ID` | ClickUp list polled for 入帳紀錄. Defaults to Nestiee 婚宴回禮 `901812202272` | `901812202272` |
 | `WOO_HTTP_USER_AGENT` | User-Agent for server-side Woo API calls. SiteGround WAF 403s incomplete/old UAs; default is a full Chrome 140 string | _(unset)_ |
 | `RECEIPTS_DIR` | Local/volume receipt image folder (use `/data/receipts` on Railway with a volume) | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
@@ -147,3 +150,16 @@ Incremental WooCommerce, QuickBooks (if connected), and ClickUp (if API token + 
 **GitHub Actions** (optional backup — workflow [`.github/workflows/hub-sync-cron.yml`](.github/workflows/hub-sync-cron.yml) — every 15 minutes + manual dispatch)
 1. Repo → Settings → Secrets and variables → Actions: add `APP_URL` (e.g. `https://your-app.up.railway.app`, no trailing slash required) and `CRON_SECRET` (same value as Railway).
 2. Actions → **Hub sync cron** → Run workflow once; confirm Order Hub “Last import” updates.
+
+## Payment ledger (入帳紀錄)
+
+`/payment-ledger` lists Nestiee 婚宴回禮 payments (Paid Date, Amount, Order No., Notes, Link, attachment). Rows come from ClickUp task comments that look like payments and from the list’s payment custom fields (第一次／第二次 Payment date and amount, plus the Payment label). The same comment and the same installment are upserted, not inserted again.
+
+Sync does **not** go through Order Hub. `GET|POST /api/cron/payment-ledger` with `Authorization: Bearer $CRON_SECRET` polls comments in batches (the existing hub-sync cron calls it after the hub import). Each run fetches at most 40 comment threads so it stays inside ClickUp’s rate limit; the first pass walks the list over successive runs.
+
+ClickUp token, in order:
+
+1. Settings → Integrations → ClickUp → API token (same token Order Hub already uses), or
+2. `CLICKUP_API_TOKEN` on the app service.
+
+The list id defaults to `901812202272` (Nestiee 婚宴回禮). Set `CLICKUP_PAYMENT_LIST_ID` only if that list changes. Do not put the token in the repo.

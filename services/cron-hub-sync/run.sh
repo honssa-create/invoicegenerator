@@ -23,6 +23,20 @@ cat /tmp/cron-body.json
 echo
 
 case "${HTTP_CODE}" in
-  2??) exit 0 ;;
+  2??) ;;
   *) echo "Hub sync failed with HTTP ${HTTP_CODE}"; exit 1 ;;
+esac
+
+LEDGER_URL="${BASE}/api/cron/payment-ledger"
+echo "GET ${LEDGER_URL}"
+LEDGER_CODE=$(curl -sS --max-time 180 -o /tmp/cron-ledger-body.json -w '%{http_code}' \
+  -H "Authorization: Bearer ${CRON_SECRET}" \
+  "${LEDGER_URL}")
+echo "HTTP ${LEDGER_CODE}"
+cat /tmp/cron-ledger-body.json
+echo
+
+case "${LEDGER_CODE}" in
+  2??) exit 0 ;;
+  *) echo "Payment ledger sync failed with HTTP ${LEDGER_CODE}"; exit 1 ;;
 esac

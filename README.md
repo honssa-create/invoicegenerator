@@ -78,6 +78,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `CLICKUP_API_TOKEN` | Fallback ClickUp personal API token when Settings → Integrations → ClickUp is empty. Used by Order Hub import and the payment ledger (入帳紀錄) | _(unset)_ |
 | `CLICKUP_LIST_ID` | Fallback ClickUp list id for Order Hub task import | _(unset)_ |
 | `CLICKUP_PAYMENT_LIST_ID` | ClickUp list polled for 入帳紀錄. Defaults to Nestiee 婚宴回禮 `901812202272` | `901812202272` |
+| `CLICKUP_WEBHOOK_SECRET` | `webhook.secret` from ClickUp Create Webhook. `POST /api/webhooks/clickup` rejects calls until this is set. Not the API token | _(unset)_ |
 | `WOO_HTTP_USER_AGENT` | User-Agent for server-side Woo API calls. SiteGround WAF 403s incomplete/old UAs; default is a full Chrome 140 string | _(unset)_ |
 | `RECEIPTS_DIR` | Local/volume receipt image folder (use `/data/receipts` on Railway with a volume) | `data/receipts` |
 | `R2_ENDPOINT` | Cloudflare R2 S3 API endpoint | _(unset — local disk fallback)_ |
@@ -163,3 +164,5 @@ ClickUp token, in order:
 2. `CLICKUP_API_TOKEN` on the app service.
 
 The list id defaults to `901812202272` (Nestiee 婚宴回禮). Set `CLICKUP_PAYMENT_LIST_ID` only if that list changes. Do not put the token in the repo.
+
+Instant updates use `POST /api/webhooks/clickup`. ClickUp signs the raw body with `X-Signature` (hex HMAC-SHA256). Set **`CLICKUP_WEBHOOK_SECRET`** to the `webhook.secret` returned when the webhook is created, then redeploy. Settings → API Integrations → ClickUp shows whether the API token and this secret are set, the public webhook URL (`APP_URL` when set), the payment list id, and a Create Webhook request scoped to that list (`taskCommentPosted`, `taskCommentUpdated`, `taskUpdated`). There is no ClickUp product screen for this webhook; the API token itself is under ClickUp → Settings → Apps → API Token. Comment posts and edits to the payment custom fields (第一次／第二次 Payment date and amount, Payment, Order #) refetch the task and upsert the same ledger rows as the cron. The cron remains the backfill. Order Hub’s list id is separate and still does not read comments.

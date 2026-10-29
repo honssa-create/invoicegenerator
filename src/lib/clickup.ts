@@ -20,8 +20,18 @@ export type ClickUpTask = {
   date_created?: string | null;
   date_updated?: string | null;
   url?: string | null;
+  list?: { id?: string | number | null; name?: string | null } | null;
   custom_fields?: ClickUpCustomField[];
 };
+
+export class ClickUpApiError extends Error {
+  status: number;
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = 'ClickUpApiError';
+    this.status = status;
+  }
+}
 
 export type FetchOpts = {
   date_updated_gt?: string;
@@ -89,6 +99,26 @@ export async function fetchClickUpListTaskPage(
   }
   const tasks = body.tasks || [];
   return { tasks, hasMore: tasks.length >= 100 };
+}
+
+/** One task, including custom fields and `list.id`. Webhook delivery uses this to confirm the payment list. */
+export async function fetchClickUpTask(token: string, taskId: string): Promise<ClickUpTask> {
+  const trimmed = token.trim();
+  const id = taskId.trim();
+  if (!trimmed) throw new ClickUpApiError(401, 'ClickUp API token is required.');
+  if (!id) throw new ClickUpApiError(400, 'ClickUp task id is required.');
+  const res = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(id)}`, {
+    headers: { Authorization: trimmed },
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new ClickUpApiError(res.status, `ClickUp task ${res.status}: ${text.slice(0, 200)}`);
+  }
+  try {
+    return JSON.parse(text) as ClickUpTask;
+  } catch {
+    throw new ClickUpApiError(502, 'ClickUp task returned invalid JSON.');
+  }
 }
 
 /** Task comments, oldest pages followed via `start` / `start_id`. Capped so one task cannot stall a sync. */

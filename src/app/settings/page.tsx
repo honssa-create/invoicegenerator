@@ -46,6 +46,17 @@ export default function SettingsPage() {
   useModalUnsavedWarning(editingId !== null, { editingId, editValue });
 
   useEffect(() => {
+    if (!isAdmin) return;
+    const openIntegrations = () => {
+      const hash = window.location.hash;
+      if (hash === '#integrations' || hash === '#clickup') setSection('integrations');
+    };
+    openIntegrations();
+    window.addEventListener('hashchange', openIntegrations);
+    return () => window.removeEventListener('hashchange', openIntegrations);
+  }, [isAdmin]);
+
+  useEffect(() => {
     if (!isAdmin && section === 'integrations') setSection('dropdowns');
   }, [isAdmin, section]);
 
@@ -182,8 +193,8 @@ export default function SettingsPage() {
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
             {isAdmin
               ? bi(
-                  'Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, Yedpay, SF Express, Resend).',
-                  '管理支出下拉選項及外部 API 整合（WooCommerce、QuickBooks、Yedpay、順豐）。',
+                  'Manage expense dropdown options and external API integrations (WooCommerce, QuickBooks, ClickUp, Yedpay, SF Express, Resend).',
+                  '管理支出下拉選項及外部 API 整合（WooCommerce、QuickBooks、ClickUp、Yedpay、順豐）。',
                 )
               : bi('Manage expense dropdown options.', '管理支出下拉選項。')}
           </p>
@@ -224,7 +235,7 @@ export default function SettingsPage() {
                 }`}
               >
                 API Integrations
-                <span className="block text-xs font-normal text-gray-500 mt-0.5">WooCommerce, QuickBooks, Yedpay, Resend</span>
+                <span className="block text-xs font-normal text-gray-500 mt-0.5">WooCommerce, ClickUp, QuickBooks, Resend</span>
               </button>
             )}
           </nav>

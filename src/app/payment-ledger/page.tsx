@@ -32,6 +32,9 @@ type SyncInfo = {
   list_id: string;
   scan_page: number;
   watermark: string | null;
+  webhook_secret_set?: boolean;
+  webhook_path?: string;
+  webhook_url?: string;
   last: {
     tasks_seen?: number;
     comment_fetches?: number;
@@ -71,6 +74,7 @@ export default function PaymentLedgerPage() {
   const [search, setSearch] = useState('');
   const [lightbox, setLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null);
   const [brokenThumbs, setBrokenThumbs] = useState<Set<string>>(() => new Set());
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -207,6 +211,52 @@ export default function PaymentLedgerPage() {
             {'. '}
             {bi('Override with CLICKUP_PAYMENT_LIST_ID if needed.', '如需改清單，設定 CLICKUP_PAYMENT_LIST_ID。')}
           </span>
+        </div>
+      )}
+
+      {sync && (
+        <div id="clickup-payment-setup" className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700">
+          <p className="font-medium text-gray-900">{bi('ClickUp setup', 'ClickUp 設定')}</p>
+          <ul className="mt-2 space-y-1">
+            <li>
+              API token：{sync.configured ? bi('set', '已設定') : bi('not set', '未設定')}
+            </li>
+            <li>
+              <code className="text-xs">CLICKUP_WEBHOOK_SECRET</code>：
+              {sync.webhook_secret_set ? bi('set', '已設定') : bi('not set', '未設定')}
+            </li>
+            <li>
+              {bi('List', '清單')} {sync.list_id}
+              {sync.list_id === '901812202272' ? ' · Nestiee 婚宴回禮' : ''}
+            </li>
+            <li className="flex flex-wrap items-center gap-2">
+              <span>{bi('Webhook URL', 'Webhook 網址')}</span>
+              <code className="break-all text-xs">{sync.webhook_url || sync.webhook_path}</code>
+              {sync.webhook_url ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-brand-700 hover:underline"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(sync.webhook_url || '').then(() => {
+                      setCopiedUrl(true);
+                      window.setTimeout(() => setCopiedUrl(false), 2000);
+                    });
+                  }}
+                >
+                  {copiedUrl ? bi('Copied', '已複製') : bi('Copy', '複製')}
+                </button>
+              ) : null}
+            </li>
+          </ul>
+          <p className="mt-2 text-xs text-gray-500">
+            {bi(
+              'Register that URL in ClickUp for this list with taskCommentPosted, taskCommentUpdated, and taskUpdated. Comments and the payment custom fields upsert here. Put webhook.secret in CLICKUP_WEBHOOK_SECRET. Steps and the create-webhook request are under Settings → API Integrations.',
+              '在 ClickUp 為這個清單註冊該網址，事件為 taskCommentPosted、taskCommentUpdated、taskUpdated。留言與付款自訂欄位會寫入這裡。把 webhook.secret 設成 CLICKUP_WEBHOOK_SECRET。步驟與建立 webhook 的請求在 設定 → API Integrations。',
+            )}{' '}
+            <Link href="/settings#clickup" className="font-medium text-brand-700 underline">
+              {bi('Open Settings', '開啟設定')}
+            </Link>
+          </p>
         </div>
       )}
 

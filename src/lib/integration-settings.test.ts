@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   saveIntegrationSettings,
   getIntegrationSettingsMasked,
@@ -11,6 +11,22 @@ import db from './db';
 const TEST_USER_ID = 99903;
 
 describe('integration settings', () => {
+  const previousWebhookSecret = process.env.CLICKUP_WEBHOOK_SECRET;
+
+  afterEach(() => {
+    if (previousWebhookSecret === undefined) delete process.env.CLICKUP_WEBHOOK_SECRET;
+    else process.env.CLICKUP_WEBHOOK_SECRET = previousWebhookSecret;
+  });
+
+  it('reports ClickUp token masking, payment list, and webhook URL without returning the webhook secret', async () => {
+    process.env.CLICKUP_WEBHOOK_SECRET = 'super-secret-value';
+    const masked = await getIntegrationSettingsMasked(TEST_USER_ID, { origin: 'https://app.example.com/' });
+    expect(masked.clickup.payment_list_id).toBe('901812202272');
+    expect(masked.clickup.webhook_url).toBe('https://app.example.com/api/webhooks/clickup');
+    expect(masked.clickup.webhook_secret_set).toBe(true);
+    expect(JSON.stringify(masked.clickup)).not.toContain('super-secret-value');
+  });
+
   it('saves and merges woocommerce credentials without clearing secrets', async () => {
     await db.prepare('DELETE FROM integration_settings WHERE user_id = ?').run(TEST_USER_ID);
     await db.prepare('INSERT OR IGNORE INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)').run(

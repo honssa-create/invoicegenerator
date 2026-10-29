@@ -1,4 +1,5 @@
 import db from './db';
+import { isKitchenPrepAutoScheduleEnabled } from './kitchen-prep-auto-schedule';
 import { trashKitchenPrep } from '@/lib/trash';
 import type {
   PrepCalculation,
@@ -1226,6 +1227,8 @@ function parseOrderFields(fieldsJson: string | null | undefined): Record<string,
   }
 }
 
+export { isKitchenPrepAutoScheduleEnabled };
+
 /**
  * Create or sync a wedding kitchen-prep row for a 回禮 sales order.
  * Idempotent on linked_order_id. Does not alter completed preps.
@@ -1234,6 +1237,8 @@ export async function ensurePrepFromWeddingOrder(
   ownerId: number,
   orderId: number
 ): Promise<PrepOrder | null> {
+  if (!isKitchenPrepAutoScheduleEnabled()) return null;
+
   const order = await db
     .prepare('SELECT id, po_number, status, fields_json FROM orders WHERE id = ? AND user_id = ?')
     .get(orderId, ownerId) as
@@ -1357,6 +1362,10 @@ export async function runKitchenPrepAutoImport(userId: number | null): Promise<{
   activated: number;
   skipped: number;
 }> {
+  if (!isKitchenPrepAutoScheduleEnabled()) {
+    return { processed: 0, created: 0, activated: 0, skipped: 0 };
+  }
+
   const today = hkTodayIso();
   let created = 0;
   let activated = 0;

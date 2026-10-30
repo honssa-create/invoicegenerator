@@ -413,9 +413,101 @@ function mergeIntoInstallment(target: PaymentLedgerDraft, extra: PaymentLedgerDr
   if (target.amount == null && extra.amount != null) target.amount = extra.amount;
 }
 
+/** Written on both rows when a same-day comment cannot be tied to one installment. */
+export const SAME_DAY_UNCERTAIN_NOTE = '同日有付款留言／收據，未能確定係同一筆定另一筆';
+
+const SAME_DAY_AMOUNT_WINDOW = 1;
+const FULL_OR_HALF_RECEIPT = /full\s*paid|full\s*payment|(?<!\d)50\s*%/i;
+const SLOT_ONE = /第一次/;
+const SLOT_TWO = /第二次|第2次/;
+const BALANCE_PAYMENT = /尾[數数]/;
+
+export type SameDayPaymentReview =
+  | { decision: 'one'; dedupe_key: string }
+  | { decision: 'two' }
+  | { decision: 'uncertain' }
+  | { decision: 'not-same-day' };
+
+function commentBlob(comment: Pick<PaymentLedgerDraft, 'notes' | 'attachments'>): string {
+  return `${comment.notes} ${comment.attachments.map((item) => item.name).join(' ')}`;
+}
+
+function hasReceiptFile(comment: Pick<PaymentLedgerDraft, 'attachments'>): boolean {
+  return comment.attachments.some((item) => (item.url || '').trim() || (item.name || '').trim());
+}
+
+function amountsWithinDollar(a: number, b: number): boolean {
+  return Math.abs(a - b) <= SAME_DAY_AMOUNT_WINDOW;
+}
+
+function installmentSlot(row: PaymentLedgerDraft): 1 | 2 | null {
+  if (row.dedupe_key.endsWith(':1')) return 1;
+  if (row.dedupe_key.endsWith(':2')) return 2;
+  return null;
+}
+
+function namedInstallmentSlot(blob: string): 1 | 2 | 'both' | null {
+  const first = SLOT_ONE.test(blob);
+  const second = SLOT_TWO.test(blob);
+  if (first && second) return 'both';
+  if (first) return 1;
+  if (second) return 2;
+  return null;
+}
+
+/**
+ * Same Hong Kong calendar day does not by itself mean one payment.
+ * `paid_date` values are already `YYYY-MM-DD` in Asia/Hong_Kong.
+ *
+ * RULE：同日唔代表一定係同一筆。要分清係兩筆付款定一筆（例如留言只係第一次／第二次嗰筆嘅收據）。
+ * 確定係同一筆先將收據併入該期入帳列；確定係另一筆就分開兩行。
+ * 未能確定就唔好當係同一筆，備註要寫：同日有付款留言／收據，未能確定係同一筆定另一筆。
+ *
+ * One payment: amount within $1, or a Full/50% receipt with no separate amount,
+ * or the comment names 第一次/第二次 and has a receipt file.
+ * Two payments: a different amount, 加單, or 尾數. The receipt stays on the comment.
+ */
+export function reviewSameDayPayments(
+  comment: PaymentLedgerDraft,
+  installments: PaymentLedgerDraft[],
+): SameDayPaymentReview {
+  const day = comment.paid_date;
+  if (!day) return { decision: 'not-same-day' };
+  const sameDay = installments.filter((row) => row.paid_date === day);
+  if (!sameDay.length) return { decision: 'not-same-day' };
+
+  const blob = commentBlob(comment);
+  if (EXTRA_CHARGE.test(comment.notes) || BALANCE_PAYMENT.test(blob)) return { decision: 'two' };
+
+  if (comment.amount != null) {
+    const close = sameDay.filter((row) => row.amount != null && amountsWithinDollar(row.amount, comment.amount as number));
+    if (close.length === 1) return { decision: 'one', dedupe_key: close[0].dedupe_key };
+    if (close.length > 1) return { decision: 'uncertain' };
+    if (sameDay.some((row) => row.amount != null)) return { decision: 'two' };
+    return { decision: 'uncertain' };
+  }
+
+  const slot = namedInstallmentSlot(blob);
+  const slotRow =
+    slot === 1 || slot === 2 ? sameDay.find((row) => installmentSlot(row) === slot) : undefined;
+  const fullOrHalf = FULL_OR_HALF_RECEIPT.test(blob);
+  const namedReceipt = (slot === 1 || slot === 2) && hasReceiptFile(comment);
+
+  if (fullOrHalf || namedReceipt) {
+    if (slotRow) return { decision: 'one', dedupe_key: slotRow.dedupe_key };
+    if (slot === 'both' || (slot && !slotRow)) return { decision: 'uncertain' };
+    if (sameDay.length === 1) return { decision: 'one', dedupe_key: sameDay[0].dedupe_key };
+    return { decision: 'uncertain' };
+  }
+
+  return { decision: 'uncertain' };
+}
+
 /**
  * A comment that only restates an installment (same amount, or a Full Paid / 50% receipt
  * with no separate amount) is folded into that installment so the ledger keeps one row.
+ * Used when the comment is not on the installment's Hong Kong calendar day.
+ * Same-day comments go through `reviewSameDayPayments` first.
  * 加單 / 尾數 comments stay as their own rows.
  */
 function matchingInstallment(comment: PaymentLedgerDraft, installments: PaymentLedgerDraft[]): PaymentLedgerDraft | null {
@@ -518,6 +610,27 @@ export function extractPaymentLedgerRows(task: ClickUpTask, comments: ClickUpCom
 
   const kept: PaymentLedgerDraft[] = [];
   for (const comment of commentDrafts(task, comments, orderNo)) {
+    const review = reviewSameDayPayments(comment, installments);
+    if (review.decision === 'one') {
+      const target = installments.find((row) => row.dedupe_key === review.dedupe_key);
+      if (target) {
+        mergeIntoInstallment(target, comment);
+        continue;
+      }
+    }
+    if (review.decision === 'uncertain') {
+      const day = comment.paid_date;
+      comment.notes = joinNotes(comment.notes, SAME_DAY_UNCERTAIN_NOTE);
+      for (const row of installments) {
+        if (row.paid_date === day) row.notes = joinNotes(row.notes, SAME_DAY_UNCERTAIN_NOTE);
+      }
+      kept.push(comment);
+      continue;
+    }
+    if (review.decision === 'two') {
+      kept.push(comment);
+      continue;
+    }
     const target = matchingInstallment(comment, installments);
     if (target) mergeIntoInstallment(target, comment);
     else kept.push(comment);

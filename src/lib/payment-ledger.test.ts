@@ -8,7 +8,10 @@ import {
   ledgerAttachmentSrc,
   orderNoFromTaskTitle,
   parsePaymentAmounts,
+  reviewSameDayPayments,
+  SAME_DAY_UNCERTAIN_NOTE,
   selectCommentPaymentAmounts,
+  type PaymentLedgerDraft,
 } from './payment-ledger';
 
 function task(partial: Partial<ClickUpTask> & Pick<ClickUpTask, 'id' | 'name'>): ClickUpTask {
@@ -317,6 +320,280 @@ describe('extractPaymentLedgerRows', () => {
     expect(rows[0].notes).toContain('50% payment');
     expect(rows[0].notes).toContain('FPS');
     expect(rows[0].amount).toBeNull();
+  });
+});
+
+function draft(partial: Partial<PaymentLedgerDraft> & Pick<PaymentLedgerDraft, 'dedupe_key'>): PaymentLedgerDraft {
+  return {
+    paid_date: '2026-08-10',
+    amount: null,
+    order_no: '10949',
+    notes: '',
+    link: '',
+    attachments: [],
+    clickup_task_id: 't',
+    source: partial.dedupe_key.startsWith('comment') ? 'comment' : 'installment',
+    category: '回禮',
+    ...partial,
+  };
+}
+
+const receiptFile = { name: 'receipt.png', url: 'https://cdn.example/receipt.png' };
+
+describe('reviewSameDayPayments', () => {
+  const first = draft({
+    dedupe_key: 'installment:t:1',
+    paid_date: '2026-08-10',
+    amount: 1000,
+    notes: '第一次付款',
+  });
+  const second = draft({
+    dedupe_key: 'installment:t:2',
+    paid_date: '2026-09-29',
+    amount: 500,
+    notes: '第二次付款',
+  });
+
+  it('treats an amount within $1 as one payment and folds onto that installment', () => {
+    const comment = draft({
+      dedupe_key: 'comment:t:c',
+      paid_date: '2026-08-10',
+      amount: 1000.8,
+      notes: '已付 $1000.80',
+      attachments: [receiptFile],
+    });
+    expect(reviewSameDayPayments(comment, [first, second])).toEqual({
+      decision: 'one',
+      dedupe_key: 'installment:t:1',
+    });
+    expect(reviewSameDayPayments({ ...comment, amount: 1001 }, [first])).toEqual({
+      decision: 'one',
+      dedupe_key: 'installment:t:1',
+    });
+  });
+
+  it('keeps a different amount, 加單, or 尾數 as its own row', () => {
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:diff',
+          paid_date: '2026-08-10',
+          amount: 829.4,
+          notes: '已付 $829.40',
+          attachments: [receiptFile],
+        }),
+        [first, second],
+      ),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:addon',
+          paid_date: '2026-08-10',
+          amount: 1000,
+          notes: '加單金額：$1,000',
+          attachments: [receiptFile],
+        }),
+        [first],
+      ),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:balance',
+          paid_date: '2026-09-29',
+          amount: 500,
+          notes: '尾數 $500',
+          attachments: [receiptFile],
+        }),
+        [first, second],
+      ),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(
+        draft({ dedupe_key: 'comment:t:far', paid_date: '2026-08-10', amount: 1001.01, notes: '已付 $1001.01' }),
+        [first],
+      ),
+    ).toEqual({ decision: 'two' });
+  });
+
+  it('folds a Full/50% receipt or a named installment receipt when there is no separate amount', () => {
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:full',
+          paid_date: '2026-08-10',
+          notes: '100% Full payment',
+          attachments: [receiptFile],
+        }),
+        [first, second],
+      ),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t:1' });
+    const secondSameDay = { ...second, paid_date: '2026-08-10' };
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:slot2',
+          paid_date: '2026-08-10',
+          notes: '第二次收據',
+          attachments: [receiptFile],
+        }),
+        [first, secondSameDay],
+      ),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t:2' });
+  });
+
+  it('does not treat a same-day comment as the installment when the link is unclear', () => {
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:vague',
+          paid_date: '2026-08-10',
+          notes: '銀行轉帳',
+          attachments: [{ name: 'image.png', url: '' }],
+        }),
+        [first, second],
+      ),
+    ).toEqual({ decision: 'uncertain' });
+    expect(
+      reviewSameDayPayments(
+        draft({ dedupe_key: 'comment:t:other', paid_date: '2026-10-18', notes: '100% Full payment' }),
+        [first],
+      ),
+    ).toEqual({ decision: 'not-same-day' });
+  });
+});
+
+describe('same-day ledger rows', () => {
+  it('folds a same-day receipt when the amount is within $1', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 'near',
+        name: '12010',
+        custom_fields: [
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1786305600000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '1000' },
+        ],
+      }),
+      [
+        {
+          id: 'c',
+          comment_text: '已付 $1000.80\nimage.png',
+          date: '1786364209075',
+          comment: [
+            {
+              type: 'image',
+              text: 'image.png',
+              image: { id: 'r1', name: 'image.png', url: 'https://cdn.example/r.png' },
+            },
+          ],
+        },
+      ],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      dedupe_key: 'installment:near:1',
+      paid_date: '2026-08-10',
+      amount: 1000,
+      source: 'installment',
+    });
+    expect(rows[0].attachments.map((item) => item.url)).toEqual(['https://cdn.example/r.png']);
+    expect(rows[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+  });
+
+  it('keeps a same-day 尾數 receipt on its own row even when the amount matches', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 'bal',
+        name: '12011',
+        custom_fields: [
+          { id: 'd2', name: '第二次Payment日期', type: 'date', value: '1790625600000' },
+          { id: 'a2', name: '第2次Payment($)', type: 'number', value: '500' },
+        ],
+      }),
+      [
+        {
+          id: 'c',
+          comment_text: '尾數 $500\nreceipt.png',
+          date: '1790651369825',
+          comment: [
+            {
+              type: 'image',
+              text: 'receipt.png',
+              image: { id: 'b1', name: 'receipt.png', url: 'https://cdn.example/balance.png' },
+            },
+          ],
+        },
+      ],
+    );
+    const installment = rows.find((row) => row.source === 'installment');
+    const comment = rows.find((row) => row.source === 'comment');
+    expect(installment?.attachments).toEqual([]);
+    expect(installment?.notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(comment).toMatchObject({
+      dedupe_key: 'comment:bal:c',
+      paid_date: '2026-09-29',
+      amount: 500,
+    });
+    expect(comment?.attachments.map((item) => item.url)).toEqual(['https://cdn.example/balance.png']);
+    expect(comment?.notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+  });
+
+  it('keeps a same-day 加單 row and still books only the add-on amount', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 'addon-day',
+        name: '11124 - wedding 回禮',
+        custom_fields: [
+          labels(['Full Paid']),
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1792814400000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '1835' },
+        ],
+      }),
+      [{ id: 'c11124', comment_text: ORDER_11124_ADDON_NOTES, date: '1792814400000' }],
+    );
+    expect(rows.map((row) => [row.source, row.amount, row.dedupe_key])).toEqual([
+      ['installment', 1835, 'installment:addon-day:1'],
+      ['comment', 1835, 'comment:addon-day:c11124'],
+    ]);
+    expect(rows.some((row) => row.amount === 5337)).toBe(false);
+    expect(rows.some((row) => row.notes.includes(SAME_DAY_UNCERTAIN_NOTE))).toBe(false);
+  });
+
+  it('leaves both rows and writes the uncertain note when the same day is not enough', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 'unsure',
+        name: '12012',
+        custom_fields: [
+          labels(['Full Paid']),
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1786305600000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '4976' },
+          { id: 'd2', name: '第二次Payment日期', type: 'date', value: '1790625600000' },
+          { id: 'a2', name: '第2次Payment($)', type: 'number', value: '1658.8' },
+        ],
+      }),
+      [
+        {
+          id: 'c',
+          comment_text: '銀行轉帳\nimage.png',
+          date: '1786364209075',
+        },
+      ],
+    );
+    const first = rows.find((row) => row.dedupe_key === 'installment:unsure:1');
+    const second = rows.find((row) => row.dedupe_key === 'installment:unsure:2');
+    const comment = rows.find((row) => row.source === 'comment');
+    expect(comment).toMatchObject({
+      dedupe_key: 'comment:unsure:c',
+      paid_date: '2026-08-10',
+      amount: null,
+      notes: `銀行轉帳 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+    });
+    expect(comment?.attachments.map((item) => item.name)).toEqual(['image.png']);
+    expect(first?.notes).toBe(`Full Paid · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`);
+    expect(second?.notes).toBe('Full Paid · 第二次付款');
+    expect(second?.paid_date).toBe('2026-09-29');
   });
 });
 

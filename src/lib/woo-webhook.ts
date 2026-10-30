@@ -20,9 +20,14 @@ export function wooWebhookSecretFromEnv(platform: WooWebhookPlatform): string[] 
 
 export function wooWebhookVerificationSecrets(
   platform: WooWebhookPlatform,
-  store?: Pick<WooStoreConfig, 'consumerSecret'> | null,
+  store?: Pick<WooStoreConfig, 'consumerSecret' | 'webhookSecret'> | null,
 ): string[] {
-  const secrets = wooWebhookSecretFromEnv(platform);
+  const secrets: string[] = [];
+  const fromSettings = store?.webhookSecret?.trim();
+  if (fromSettings) secrets.push(fromSettings);
+  for (const envSecret of wooWebhookSecretFromEnv(platform)) {
+    if (!secrets.includes(envSecret)) secrets.push(envSecret);
+  }
   const consumer = store?.consumerSecret?.trim();
   if (consumer && !secrets.includes(consumer)) secrets.push(consumer);
   return secrets;

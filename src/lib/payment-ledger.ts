@@ -4,6 +4,7 @@
  * No database access — safe to unit test and to import from server code.
  */
 import type { ClickUpComment, ClickUpCustomField, ClickUpTask } from './clickup';
+import { clampPageLimit, clampPageOffset, isoDateParam } from './list-query';
 
 export const DEFAULT_CLICKUP_PAYMENT_LIST_ID = '901812202272';
 
@@ -94,6 +95,36 @@ export const DEFAULT_PAYMENT_LEDGER_CATEGORY: PaymentLedgerCategory = '回禮';
 
 export function isPaymentLedgerCategory(value: unknown): value is PaymentLedgerCategory {
   return typeof value === 'string' && (PAYMENT_LEDGER_CATEGORIES as readonly string[]).includes(value);
+}
+
+export const PAYMENT_LEDGER_PAGE_SIZE = 50;
+export const PAYMENT_LEDGER_MAX_PAGE_SIZE = 200;
+
+export type PaymentLedgerListQuery = {
+  dateStart: string;
+  dateEnd: string;
+  category: PaymentLedgerCategory | '';
+  q: string;
+  limit: number;
+  offset: number;
+};
+
+export function parsePaymentLedgerListQuery(params: {
+  dateStart?: string | null;
+  dateEnd?: string | null;
+  category?: string | null;
+  q?: string | null;
+  limit?: string | number | null;
+  offset?: string | number | null;
+}): PaymentLedgerListQuery {
+  return {
+    dateStart: isoDateParam(params.dateStart),
+    dateEnd: isoDateParam(params.dateEnd),
+    category: isPaymentLedgerCategory(params.category) ? params.category : '',
+    q: (params.q || '').trim().slice(0, 200),
+    limit: clampPageLimit(params.limit, PAYMENT_LEDGER_PAGE_SIZE, PAYMENT_LEDGER_MAX_PAGE_SIZE),
+    offset: clampPageOffset(params.offset),
+  };
 }
 
 export type PaymentLedgerDraft = {

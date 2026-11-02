@@ -634,7 +634,7 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     const first = await syncPaymentLedger(TEST_USER_ID, client);
     expect(first.comment_fetches).toBe(1);
     expect(first.errors).toEqual([]);
-    const afterFirst = await listPaymentLedger(TEST_USER_ID);
+    const afterFirst = (await listPaymentLedger(TEST_USER_ID)).entries;
     expect(afterFirst).toHaveLength(1);
     expect(afterFirst[0].amount).toBe(6288.5);
     expect(afterFirst[0].order_no).toBe('12104');
@@ -647,7 +647,7 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     const second = await syncPaymentLedger(TEST_USER_ID, client);
     expect(second.comment_fetches).toBe(0);
     expect(commentCalls).toBe(1);
-    expect(await listPaymentLedger(TEST_USER_ID)).toHaveLength(1);
+    expect((await listPaymentLedger(TEST_USER_ID)).entries).toHaveLength(1);
 
     current.date_updated = '2';
     current.custom_fields = (current.custom_fields || []).map((field) =>
@@ -655,7 +655,7 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     );
     const third = await syncPaymentLedger(TEST_USER_ID, client);
     expect(third.comment_fetches).toBe(1);
-    const afterThird = await listPaymentLedger(TEST_USER_ID);
+    const afterThird = (await listPaymentLedger(TEST_USER_ID)).entries;
     expect(afterThird).toHaveLength(1);
     expect(afterThird[0].amount).toBe(7000);
     expect(afterThird[0].order_no).toBe('12104');

@@ -25,10 +25,20 @@ export interface CashflowResponse {
   month: string; // YYYY-MM
   totals: CashflowTotals;
   entries: LedgerEntry[];
+  total?: number;
+  limit?: number;
+  offset?: number;
 }
 
-export function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7);
+/** `YYYY-MM` in Asia/Hong_Kong. UTC `toISOString` is a different calendar day near midnight. */
+export function currentMonth(now: Date = new Date()): string {
+  const day = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Hong_Kong',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  return day.slice(0, 7);
 }
 
 export function formatMoney(n: number): string {

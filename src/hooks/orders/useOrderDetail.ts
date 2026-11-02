@@ -56,6 +56,42 @@ export function useOrderDetail(orderId: string) {
     setOrder((o) => (o ? { ...o, fields: { ...o.fields, [key]: value as string | boolean } } : o));
   }, []);
 
+  const searchInvoices = useCallback((q: string) => {
+    const params = new URLSearchParams({ fields: 'options', limit: '40' });
+    if (q.trim()) params.set('q', q.trim());
+    fetch(`/api/invoices?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!Array.isArray(d?.invoices)) return;
+        setInvoices(
+          d.invoices.map((i: InvoiceOption) => ({
+            id: i.id,
+            invoice_number: i.invoice_number,
+            status: i.status,
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  const searchQuotations = useCallback((q: string) => {
+    const params = new URLSearchParams({ fields: 'options', limit: '40' });
+    if (q.trim()) params.set('q', q.trim());
+    fetch(`/api/quotations?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!Array.isArray(d?.quotations)) return;
+        setQuotations(
+          d.quotations.map((item: QuotationOption) => ({
+            id: item.id,
+            quote_number: item.quote_number,
+            status: item.status,
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
+
   const refetchOrder = useCallback(() => {
     if (patchesInFlightRef.current > 0) return;
     fetch(`/api/orders/${orderId}`)
@@ -226,6 +262,8 @@ export function useOrderDetail(orderId: string) {
     loading,
     invoices,
     quotations,
+    searchInvoices,
+    searchQuotations,
     quoteToast,
     setQuoteToast,
     accountUsers,

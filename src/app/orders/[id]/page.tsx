@@ -7,6 +7,7 @@ import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import CustomerSelect from '@/components/CustomerSelect';
+import LinkedRecordPicker from '@/components/orders/LinkedRecordPicker';
 import OrderDetailTypePanel from '@/components/orders/OrderDetailTypePanel';
 import PaymentDetailSection from '@/components/orders/sections/PaymentDetailSection';
 import { labeled, nonNeg, readOnly, ORDER_DETAIL_SOFT_INPUT } from '@/components/orders/order-detail-ui';
@@ -70,6 +71,8 @@ export default function OrderDetailPage() {
     loading,
     invoices,
     quotations,
+    searchInvoices,
+    searchQuotations,
     quoteToast,
     setQuoteToast,
     accountUsers,
@@ -578,14 +581,26 @@ export default function OrderDetailPage() {
                   ) : (
                     <p className="text-sm text-gray-400">No quotation linked.</p>
                   )}
-                  <select
+                  <LinkedRecordPicker
                     value={order.quotation_id || ''}
-                    onChange={(e) => patch({ linked_quotation_id: e.target.value || null })}
+                    onChange={(next) => patch({ linked_quotation_id: next || null })}
+                    options={quotations.map((q) => ({
+                      id: q.id,
+                      label: `${displayQuotationNumber(q.quote_number)} · ${q.status}`,
+                    }))}
+                    fallback={
+                      order.linked_quotation
+                        ? {
+                            id: order.linked_quotation.id,
+                            label: `${displayQuotationNumber(order.linked_quotation.quote_number)} · ${order.linked_quotation.status}`,
+                          }
+                        : null
+                    }
+                    onSearch={searchQuotations}
+                    searchPlaceholder="Search quotation…"
+                    emptyLabel="— Not linked —"
                     className={softInput}
-                  >
-                    <option value="">— Not linked —</option>
-                    {quotations.map((q) => <option key={q.id} value={q.id}>{displayQuotationNumber(q.quote_number)} · {q.status}</option>)}
-                  </select>
+                  />
                 </div>
               )}
               {labeled(
@@ -598,14 +613,26 @@ export default function OrderDetailPage() {
                   ) : (
                     <p className="text-sm text-gray-400">No invoice linked.</p>
                   )}
-                  <select
+                  <LinkedRecordPicker
                     value={order.linked_invoice?.id || ''}
-                    onChange={(e) => patch({ linked_invoice_id: e.target.value || null })}
+                    onChange={(next) => patch({ linked_invoice_id: next || null })}
+                    options={invoices.map((inv) => ({
+                      id: inv.id,
+                      label: `${displayInvoiceNumber(inv.invoice_number)} · ${inv.status}`,
+                    }))}
+                    fallback={
+                      order.linked_invoice
+                        ? {
+                            id: order.linked_invoice.id,
+                            label: `${displayInvoiceNumber(order.linked_invoice.invoice_number)} · ${order.linked_invoice.status}`,
+                          }
+                        : null
+                    }
+                    onSearch={searchInvoices}
+                    searchPlaceholder="Search invoice…"
+                    emptyLabel="— Not linked —"
                     className={softInput}
-                  >
-                    <option value="">— Not linked —</option>
-                    {invoices.map((inv) => <option key={inv.id} value={inv.id}>{displayInvoiceNumber(inv.invoice_number)} · {inv.status}</option>)}
-                  </select>
+                  />
                 </div>
               )}
             </div>

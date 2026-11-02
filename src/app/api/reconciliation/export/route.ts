@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
 import { PAYMENT_METHOD_LABELS } from '@/lib/reconciliation';
-import { listReconciliationRecords } from '@/lib/reconciliation-server';
+import { listReconciliationPage, parseReconciliationListQuery } from '@/lib/reconciliation-server';
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -14,45 +14,17 @@ export async function GET(request: Request) {
   }
 
   const ownerId = await getDataOwnerId(session);
-  const records = await listReconciliationRecords(ownerId);
-
   const url = new URL(request.url);
-  const zone = url.searchParams.get('zone')?.trim() || '';
-  const method = url.searchParams.get('method')?.trim() || '';
-  const dateStart = url.searchParams.get('dateStart')?.trim() || '';
-  const dateEnd = url.searchParams.get('dateEnd')?.trim() || '';
-  const q = url.searchParams.get('q')?.trim().toLowerCase() || '';
-
-  const filtered = records.filter((r) => {
-    if (zone === 'high' && !(r.status === 'Pending Approval' && r.confidence === 'high')) return false;
-    if (zone === 'medium' && !(r.status === 'Pending Approval' && r.confidence === 'medium')) return false;
-    if (zone === 'attention' && !(r.status === 'Unmatched' || r.status === 'Discrepancy')) return false;
-    if (zone === 'matched' && r.status !== 'Matched') return false;
-    if (method && r.payment_method !== method) return false;
-    const d = r.deposit_time.replace('T', ' ').slice(0, 10);
-    if (dateStart && d < dateStart) return false;
-    if (dateEnd && d > dateEnd) return false;
-    if (q) {
-      const hay = [
-        r.order_no,
-        r.invoice_number,
-        r.suggested_order_no,
-        r.suggested_invoice_number,
-        r.suggested_customer_name,
-        r.remarks,
-        r.created_by,
-        r.approved_by,
-        r.payment_method,
-        r.status,
-        String(r.gross_amount),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  const query = parseReconciliationListQuery(url.searchParams, { maxLimit: 20000 });
+  const filtered = (
+    await listReconciliationPage(ownerId, {
+      ...query,
+      limit: 20000,
+      offset: 0,
+      maxLimit: 20000,
+      hydrateSuggestedAmounts: false,
+    })
+  ).records;
 
   const headers = [
     '入帳日期',

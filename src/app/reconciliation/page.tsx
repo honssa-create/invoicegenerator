@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState, Fragment } from 'react';
+import { Suspense, useEffect, useRef, useState, Fragment } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -22,11 +22,8 @@ import {
   RECONCILIATION_SELECT_CLS,
   RECONCILIATION_TABLE_COL_COUNT,
   RECONCILIATION_ZONE_META,
-  depositDateKey,
   formatReconciliationDateTime,
-  isRelatedPendingRecord,
   parseReconciliationAmountHint,
-  reconciliationRecordInZone,
   type ReconciliationView,
   type ReconciliationSortKey,
   type ZoneFilter,
@@ -50,6 +47,8 @@ function ReconciliationContent() {
   const list = useReconciliationList();
   const {
     records,
+    total,
+    linkRelatedTotal,
     summary,
     candidates,
     loading,
@@ -80,6 +79,7 @@ function ReconciliationContent() {
     zoneCounts,
     load,
     loadCandidates,
+    setScope,
     clearFilters,
     toggleZone,
     toggleSort,
@@ -169,6 +169,25 @@ function ReconciliationContent() {
     setZoneFilter,
   ]);
 
+  useEffect(() => {
+    setScope({
+      focusRecordId,
+      matchedOrderId,
+      linkOrderId,
+      linkAmount: linkAmountHint,
+      linkDate: linkDateHint,
+      linkAll: showAllLinkRecords,
+    });
+  }, [
+    focusRecordId,
+    matchedOrderId,
+    linkOrderId,
+    linkAmountHint,
+    linkDateHint,
+    showAllLinkRecords,
+    setScope,
+  ]);
+
   const changeView = (nextView: ReconciliationView) => {
     setView(nextView);
     setLinkOrderId(null);
@@ -223,89 +242,12 @@ function ReconciliationContent() {
 
   const highCount = zoneCounts.high;
 
-  const relatedPending = useMemo(() => {
-    if (linkOrderId == null) return [];
-    return records.filter((r) => isRelatedPendingRecord(r, linkOrderId, linkAmountHint, linkDateHint));
-  }, [records, linkOrderId, linkAmountHint, linkDateHint]);
+  const linkShowingAllUnverified = linkOrderId != null && (linkRelatedTotal === 0 || showAllLinkRecords);
 
-  const linkShowingAllUnverified =
-    linkOrderId != null && (relatedPending.length === 0 || showAllLinkRecords);
-
-  const displayed = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let list = records.filter((r) => {
-      if (focusRecordId != null) return r.id === focusRecordId;
-      if (matchedOrderId != null) return r.status === 'Matched' && r.order_id === matchedOrderId;
-      if (linkOrderId != null) {
-        if (relatedPending.length > 0 && !showAllLinkRecords) {
-          return isRelatedPendingRecord(r, linkOrderId, linkAmountHint, linkDateHint);
-        }
-        return r.status !== 'Matched';
-      }
-      if (zoneFilter && !reconciliationRecordInZone(r, zoneFilter)) return false;
-      if (methodFilter && r.payment_method !== methodFilter) return false;
-      const d = depositDateKey(r.deposit_time);
-      if (dateStart && d < dateStart) return false;
-      if (dateEnd && d > dateEnd) return false;
-      if (q) {
-        const hay = [
-          r.order_no,
-          r.invoice_number,
-          r.suggested_order_no,
-          r.suggested_invoice_number,
-          r.suggested_customer_name,
-          r.remarks,
-          r.created_by,
-          r.approved_by,
-          r.payment_method,
-          r.status,
-          String(r.gross_amount),
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-
-    const dir = sort.dir === 'asc' ? 1 : -1;
-    list = [...list].sort((a, b) => {
-      const av = a[sort.key];
-      const bv = b[sort.key];
-      if (
-        sort.key === 'gross_amount' ||
-        sort.key === 'transaction_fee' ||
-        sort.key === 'net_amount'
-      ) {
-        return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
-      }
-      const as = String(av ?? '');
-      const bs = String(bv ?? '');
-      return as.localeCompare(bs, undefined, { numeric: true }) * dir;
-    });
-    return list;
-  }, [
-    records,
-    zoneFilter,
-    methodFilter,
-    dateStart,
-    dateEnd,
-    search,
-    sort,
-    linkOrderId,
-    linkAmountHint,
-    linkDateHint,
-    relatedPending,
-    showAllLinkRecords,
-    focusRecordId,
-    matchedOrderId,
-  ]);
-
-  const totalPages = Math.max(1, Math.ceil(displayed.length / RECONCILIATION_PAGE_SIZE));
-  const pageStart = displayed.length ? (page - 1) * RECONCILIATION_PAGE_SIZE : 0;
-  const pageEnd = Math.min(page * RECONCILIATION_PAGE_SIZE, displayed.length);
-  const pageRows = displayed.slice(pageStart, pageEnd);
+  const totalPages = Math.max(1, Math.ceil(total / RECONCILIATION_PAGE_SIZE));
+  const pageStart = total ? (page - 1) * RECONCILIATION_PAGE_SIZE : 0;
+  const pageEnd = Math.min(page * RECONCILIATION_PAGE_SIZE, total);
+  const pageRows = records;
   const skipPageResetRef = useRef(true);
 
   useEffect(() => {
@@ -743,14 +685,14 @@ function ReconciliationContent() {
             {linkDateHint ? ` · ${linkDateHint}` : ''}
             <div className="text-brand-700/80 text-xs mt-0.5">
               {linkShowingAllUnverified
-                ? relatedPending.length === 0
+                ? linkRelatedTotal === 0
                   ? `No close matches found — showing all unverified deposits. Pick one and confirm with “${BTN.linkToOrder}”`
                   : `Showing all unverified deposits — choose any record and confirm with “${BTN.linkToOrder}”`
                 : `Showing related pending deposits — confirm with “${BTN.linkToOrder}”`}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {relatedPending.length > 0 && (
+            {linkRelatedTotal > 0 && (
               <button
                 type="button"
                 onClick={() => setShowAllLinkRecords((current) => !current)}
@@ -868,9 +810,9 @@ function ReconciliationContent() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
             <div className="text-sm text-gray-600">
-              {displayed.length === 0
+              {total === 0
                 ? 'No records'
-                : `Showing ${pageStart + 1}–${pageEnd} of ${displayed.length}`}
+                : `Showing ${pageStart + 1}–${pageEnd} of ${total}`}
               {zoneFilter ? (
                 <span className="text-gray-400"> · {RECONCILIATION_ZONE_META[zoneFilter].title}</span>
               ) : (
@@ -918,7 +860,7 @@ function ReconciliationContent() {
               </table>
             </div>
           )}
-          {displayed.length > RECONCILIATION_PAGE_SIZE && (
+          {total > RECONCILIATION_PAGE_SIZE && (
             <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
               <button
                 type="button"

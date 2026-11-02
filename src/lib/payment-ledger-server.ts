@@ -3,6 +3,7 @@ import { fetchClickUpListTaskPage, fetchClickUpTaskComments } from './clickup';
 import db from './db';
 import { getSyncState, setSyncState } from './hub-server';
 import { getClickUpCredentials } from './integration-settings-server';
+import { containsLike } from './list-query';
 import {
   CLICKUP_PAYMENT_WEBHOOK_PATH,
   clickUpPaymentListId,
@@ -11,9 +12,11 @@ import {
   extractPaymentLedgerRows,
   isClickUpAttachmentUrl,
   isPaymentLedgerCategory,
+  parsePaymentLedgerListQuery,
   type PaymentLedgerAttachment,
   type PaymentLedgerCategory,
   type PaymentLedgerDraft,
+  type PaymentLedgerListQuery,
 } from './payment-ledger';
 
 const PROVIDER = 'clickup';
@@ -115,17 +118,10 @@ function parseAttachments(raw: unknown): PaymentLedgerAttachment[] {
   }
 }
 
-export async function listPaymentLedger(userId: number): Promise<PaymentLedgerEntry[]> {
-  const rows = await db
-    .prepare(
-      `SELECT id, paid_date, amount, order_no, notes, link, attachments_json, source, clickup_task_id, category, updated_at
-       FROM payment_ledger
-       WHERE user_id = ?
-       ORDER BY paid_date DESC NULLS LAST, id DESC
-       LIMIT 2000`,
-    )
-    .all(userId);
-  return rows.map((row) => ({
+const LEDGER_COLUMNS = `id, paid_date, amount, order_no, notes, link, attachments_json, source, clickup_task_id, category, updated_at`;
+
+function mapLedgerRow(row: Record<string, unknown>): PaymentLedgerEntry {
+  return {
     id: Number(row.id),
     paid_date: (row.paid_date as string) || null,
     amount: row.amount == null ? null : Number(row.amount),
@@ -137,7 +133,82 @@ export async function listPaymentLedger(userId: number): Promise<PaymentLedgerEn
     clickup_task_id: (row.clickup_task_id as string) || null,
     category: isPaymentLedgerCategory(row.category) ? row.category : DEFAULT_PAYMENT_LEDGER_CATEGORY,
     updated_at: (row.updated_at as string) || null,
-  }));
+  };
+}
+
+export type PaymentLedgerListResult = {
+  entries: PaymentLedgerEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export async function getPaymentLedgerEntry(
+  userId: number,
+  entryId: number,
+): Promise<PaymentLedgerEntry | null> {
+  const row = (await db
+    .prepare(`SELECT ${LEDGER_COLUMNS} FROM payment_ledger WHERE id = ? AND user_id = ?`)
+    .get(entryId, userId)) as Record<string, unknown> | undefined;
+  return row ? mapLedgerRow(row) : null;
+}
+
+export async function listPaymentLedger(
+  userId: number,
+  query: Partial<PaymentLedgerListQuery> = {},
+): Promise<PaymentLedgerListResult> {
+  const parsed = parsePaymentLedgerListQuery(query);
+  const where: string[] = ['user_id = ?'];
+  const params: unknown[] = [userId];
+
+  if (parsed.dateStart || parsed.dateEnd) {
+    where.push('paid_date IS NOT NULL');
+    if (parsed.dateStart) {
+      where.push('paid_date >= ?');
+      params.push(parsed.dateStart);
+    }
+    if (parsed.dateEnd) {
+      where.push('paid_date <= ?');
+      params.push(parsed.dateEnd);
+    }
+  }
+  if (parsed.category) {
+    where.push('category = ?');
+    params.push(parsed.category);
+  }
+  if (parsed.q) {
+    const like = containsLike(parsed.q);
+    where.push(`(
+      COALESCE(order_no, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(notes, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(link, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(amount::text, '') ILIKE ? ESCAPE '!'
+    )`);
+    params.push(like, like, like, like);
+  }
+
+  const whereSql = where.join(' AND ');
+  const [countRow, rows] = await Promise.all([
+    db
+      .prepare(`SELECT COUNT(*)::int AS total FROM payment_ledger WHERE ${whereSql}`)
+      .get(...params) as Promise<{ total: number } | undefined>,
+    db
+      .prepare(
+        `SELECT ${LEDGER_COLUMNS}
+         FROM payment_ledger
+         WHERE ${whereSql}
+         ORDER BY paid_date DESC NULLS LAST, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, parsed.limit, parsed.offset) as Promise<Record<string, unknown>[]>,
+  ]);
+
+  return {
+    entries: rows.map(mapLedgerRow),
+    total: Number(countRow?.total) || 0,
+    limit: parsed.limit,
+    offset: parsed.offset,
+  };
 }
 
 /** Manual 類別 edit. Sync inserts default 回禮 and does not overwrite this on later polls. */
@@ -155,8 +226,7 @@ export async function updatePaymentLedgerCategory(
     )
     .run(category, entryId, userId);
   if (!updated.changes) return null;
-  const rows = await listPaymentLedger(userId);
-  return rows.find((row) => row.id === entryId) || null;
+  return getPaymentLedgerEntry(userId, entryId);
 }
 
 export async function paymentLedgerSyncStatus(

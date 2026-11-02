@@ -1,6 +1,8 @@
 import db from './db';
 import { getInvoiceWithDetails, invoiceTotalsByIds } from './invoices';
 import { logActivity } from './activity';
+import { clampPageLimit, clampPageOffset, containsLike, isoDateParam } from './list-query';
+import { linkDepositAnchor } from './reconciliation-page-utils';
 import {
   extractOrderNoFromYedpay,
   forEachYedpayTransactionPage,
@@ -14,6 +16,7 @@ import {
   classifyMediumCandidates,
   isWithinHours,
   MEDIUM_MATCH_WINDOW_HOURS,
+  PAYMENT_METHODS,
   paymentMethodMatches,
   type PaymentMethod,
   type ReconCandidateSummary,
@@ -21,6 +24,7 @@ import {
   type ReconciliationRecord,
   type ReconciliationStatus,
 } from './reconciliation';
+import type { ReconciliationSummary } from './reconciliation-page-utils';
 import {
   computeOrderPaidTotal,
   derivePaymentStatusLabel,
@@ -155,36 +159,313 @@ function rowToRecord(row: Record<string, unknown>): ReconciliationRecord {
   };
 }
 
+const LIST_FROM = `FROM reconciliation_records r
+       LEFT JOIN invoices i ON i.id = r.invoice_id
+       LEFT JOIN orders so ON so.id = r.suggested_order_id
+       LEFT JOIN invoices si ON si.id = r.suggested_invoice_id`;
+
 const LIST_SELECT = `SELECT r.*,
        COALESCE(i.invoice_number, si.invoice_number) AS invoice_number,
        so.po_number AS suggested_order_no,
        so.name AS suggested_customer_name,
        si.invoice_number AS suggested_invoice_number
-       FROM reconciliation_records r
-       LEFT JOIN invoices i ON i.id = r.invoice_id
-       LEFT JOIN orders so ON so.id = r.suggested_order_id
-       LEFT JOIN invoices si ON si.id = r.suggested_invoice_id`;
+       ${LIST_FROM}`;
 
-export async function listReconciliationRecords(userId: number): Promise<ReconciliationRecord[]> {
-  const rows = await db
+const RECON_SORT_SQL: Record<string, string> = {
+  deposit_time: 'r.deposit_time',
+  gross_amount: 'r.gross_amount',
+  transaction_fee: 'r.transaction_fee',
+  net_amount: 'r.net_amount',
+  status: 'r.status',
+  created_at: 'r.created_at',
+  created_by: "COALESCE(r.created_by, '')",
+};
+
+const RECON_PAGE_MAX = 200;
+const RECON_EXPORT_MAX = 20000;
+
+export type ReconciliationListQuery = {
+  dateStart?: string;
+  dateEnd?: string;
+  zone?: string;
+  method?: string;
+  q?: string;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  id?: number;
+  matchedOrderId?: number;
+  linkOrderId?: number;
+  linkAmount?: number | null;
+  linkDate?: string | null;
+  linkAll?: boolean;
+  limit?: number;
+  offset?: number;
+  maxLimit?: number;
+  hydrateSuggestedAmounts?: boolean;
+};
+
+export type ReconciliationListPage = {
+  records: ReconciliationRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: ReconciliationSummary;
+  linkRelatedTotal: number;
+};
+
+function positiveId(raw: string | null): number | undefined {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export function parseReconciliationListQuery(
+  params: URLSearchParams,
+  opts?: { maxLimit?: number },
+): ReconciliationListQuery {
+  const amount = Number(params.get('linkAmount'));
+  return {
+    dateStart: isoDateParam(params.get('dateStart')),
+    dateEnd: isoDateParam(params.get('dateEnd')),
+    zone: (params.get('zone') || '').trim(),
+    method: (params.get('method') || '').trim(),
+    q: (params.get('q') || '').trim().slice(0, 200),
+    sort: (params.get('sort') || 'deposit_time').trim(),
+    dir: params.get('dir') === 'asc' ? 'asc' : 'desc',
+    id: positiveId(params.get('id')),
+    matchedOrderId: positiveId(params.get('matchedOrderId')),
+    linkOrderId: positiveId(params.get('linkOrderId')),
+    linkAmount: Number.isFinite(amount) && amount > 0 ? amount : null,
+    linkDate: params.get('linkDate'),
+    linkAll: params.get('linkAll') === '1',
+    limit: clampPageLimit(params.get('limit'), 50, opts?.maxLimit ?? RECON_PAGE_MAX),
+    offset: clampPageOffset(params.get('offset')),
+    maxLimit: opts?.maxLimit,
+  };
+}
+
+function zoneSql(zone: string): string | null {
+  if (zone === 'high') return `r.status = 'Pending Approval' AND r.confidence = 'high'`;
+  if (zone === 'medium') return `r.status = 'Pending Approval' AND r.confidence = 'medium'`;
+  if (zone === 'attention') return `r.status IN ('Unmatched', 'Discrepancy')`;
+  if (zone === 'matched') return `r.status = 'Matched'`;
+  return null;
+}
+
+function isPaymentMethod(value: string): value is PaymentMethod {
+  return (PAYMENT_METHODS as readonly string[]).includes(value);
+}
+
+function relatedLinkSql(
+  orderId: number,
+  amount: number | null,
+  dateRaw: string | null,
+): { sql: string; params: unknown[] } {
+  const anchor = linkDepositAnchor(dateRaw);
+  const hasAmount = amount != null && Number.isFinite(amount) && amount > 0;
+  const hours = MEDIUM_MATCH_WINDOW_HOURS * 3600;
+  return {
+    sql: `(
+      r.suggested_order_id = ?
+      OR (
+        r.candidate_order_ids_json IS NOT NULL
+        AND r.candidate_order_ids_json ~ '^\\s*\\['
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(r.candidate_order_ids_json::jsonb) elem
+          WHERE elem->>'order_id' = ?
+        )
+      )
+      OR (
+        ? = TRUE
+        AND ABS(r.gross_amount - ?::float8) <= 0.02
+        AND (
+          ? = 'none'
+          OR (
+            ? = 'window'
+            AND r.deposit_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            AND abs(extract(epoch FROM (
+              to_timestamp(
+                CASE
+                  WHEN btrim(r.deposit_time) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                    THEN btrim(r.deposit_time) || ' 12:00:00'
+                  WHEN replace(btrim(r.deposit_time), 'T', ' ') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
+                    THEN replace(btrim(r.deposit_time), 'T', ' ') || ':00'
+                  ELSE left(replace(btrim(r.deposit_time), 'T', ' '), 19)
+                END,
+                'YYYY-MM-DD HH24:MI:SS'
+              ) - to_timestamp(?, 'YYYY-MM-DD HH24:MI:SS')
+            ))) <= ${hours}
+          )
+        )
+      )
+    )`,
+    params: [orderId, String(orderId), hasAmount, hasAmount ? amount : 0, anchor.mode, anchor.mode, anchor.anchor],
+  };
+}
+
+function listFilters(
+  userId: number,
+  query: ReconciliationListQuery,
+  mode: 'browse' | 'related' | 'unmatched',
+): { where: string; params: unknown[] } {
+  const where: string[] = ['r.user_id = ?'];
+  const params: unknown[] = [userId];
+
+  if (query.id) {
+    where.push('r.id = ?');
+    params.push(query.id);
+    return { where: where.join(' AND '), params };
+  }
+  if (query.matchedOrderId) {
+    where.push(`r.order_id = ? AND r.status = 'Matched'`);
+    params.push(query.matchedOrderId);
+    return { where: where.join(' AND '), params };
+  }
+  if (query.linkOrderId) {
+    where.push(`r.status <> 'Matched'`);
+    if (mode === 'related') {
+      const related = relatedLinkSql(query.linkOrderId, query.linkAmount ?? null, query.linkDate ?? null);
+      where.push(related.sql);
+      params.push(...related.params);
+    }
+    return { where: where.join(' AND '), params };
+  }
+
+  const zone = zoneSql(query.zone || '');
+  if (zone) where.push(zone);
+  if (query.method && isPaymentMethod(query.method)) {
+    where.push('r.payment_method = ?');
+    params.push(query.method);
+  }
+  if (query.dateStart) {
+    where.push(`left(replace(r.deposit_time, 'T', ' '), 10) >= ?`);
+    params.push(query.dateStart);
+  }
+  if (query.dateEnd) {
+    where.push(`left(replace(r.deposit_time, 'T', ' '), 10) <= ?`);
+    params.push(query.dateEnd);
+  }
+  const q = (query.q || '').trim();
+  if (q) {
+    const like = containsLike(q);
+    where.push(`(
+      COALESCE(r.order_no, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(i.invoice_number, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(so.po_number, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(so.reference_number, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(so.name, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(si.invoice_number, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(r.remarks, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(r.created_by, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(r.approved_by, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(r.external_id, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(r.payment_method, '') ILIKE ? ESCAPE '!'
+      OR COALESCE(r.status, '') ILIKE ? ESCAPE '!'
+      OR r.gross_amount::text ILIKE ? ESCAPE '!'
+    )`);
+    for (let n = 0; n < 13; n += 1) params.push(like);
+  }
+  return { where: where.join(' AND '), params };
+}
+
+async function countReconciliation(where: string, params: unknown[]): Promise<number> {
+  const row = (await db
+    .prepare(`SELECT COUNT(*)::int AS total ${LIST_FROM} WHERE ${where}`)
+    .get(...params)) as { total: number } | undefined;
+  return Number(row?.total) || 0;
+}
+
+async function summarizeReconciliation(userId: number): Promise<ReconciliationSummary> {
+  const row = (await db
     .prepare(
-      `${LIST_SELECT}
-       WHERE r.user_id = ?
-       ORDER BY r.deposit_time DESC, r.id DESC`
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status = 'Matched')::int AS matched,
+         COUNT(*) FILTER (WHERE status = 'Unmatched')::int AS unmatched,
+         COUNT(*) FILTER (WHERE status = 'Discrepancy')::int AS discrepancy,
+         COUNT(*) FILTER (WHERE status = 'Pending Approval')::int AS pending_approval,
+         COUNT(*) FILTER (WHERE status = 'Pending Approval' AND confidence = 'high')::int AS pending_high,
+         COUNT(*) FILTER (WHERE status = 'Pending Approval' AND confidence = 'medium')::int AS pending_medium,
+         COALESCE(SUM(gross_amount), 0) AS gross_total,
+         COALESCE(SUM(net_amount), 0) AS net_total,
+         COALESCE(SUM(transaction_fee), 0) AS fee_total
+       FROM reconciliation_records
+       WHERE user_id = ?`,
     )
-    .all(userId) as Record<string, unknown>[];
+    .get(userId)) as Record<string, unknown> | undefined;
+  return {
+    total: Number(row?.total) || 0,
+    matched: Number(row?.matched) || 0,
+    unmatched: Number(row?.unmatched) || 0,
+    discrepancy: Number(row?.discrepancy) || 0,
+    pendingApproval: Number(row?.pending_approval) || 0,
+    pendingHigh: Number(row?.pending_high) || 0,
+    pendingMedium: Number(row?.pending_medium) || 0,
+    grossTotal: Number(row?.gross_total) || 0,
+    netTotal: Number(row?.net_total) || 0,
+    feeTotal: Number(row?.fee_total) || 0,
+  };
+}
 
-  const records = rows.map(rowToRecord);
+async function hydrateSuggestedAmounts(userId: number, records: ReconciliationRecord[]): Promise<void> {
   const suggestedIds = records
     .map((r) => r.suggested_invoice_id)
     .filter((id): id is number => typeof id === 'number' && id > 0);
   const totals = await invoiceTotalsByIds(userId, suggestedIds);
-  for (const r of records) {
-    if (r.suggested_invoice_id) {
-      r.suggested_amount = totals.get(r.suggested_invoice_id) ?? null;
+  for (const record of records) {
+    if (record.suggested_invoice_id) {
+      record.suggested_amount = totals.get(record.suggested_invoice_id) ?? null;
     }
   }
-  return records;
+}
+
+export async function listReconciliationPage(
+  userId: number,
+  query: ReconciliationListQuery = {},
+): Promise<ReconciliationListPage> {
+  const maxLimit = query.maxLimit ?? RECON_PAGE_MAX;
+  const limit = clampPageLimit(query.limit, 50, maxLimit);
+  const offset = clampPageOffset(query.offset);
+  const sortCol = RECON_SORT_SQL[query.sort || ''] || RECON_SORT_SQL.deposit_time;
+  const dir = query.dir === 'asc' ? 'ASC' : 'DESC';
+
+  let linkRelatedTotal = 0;
+  let mode: 'browse' | 'related' | 'unmatched' = 'browse';
+  if (query.linkOrderId && !query.id && !query.matchedOrderId) {
+    const related = listFilters(userId, query, 'related');
+    linkRelatedTotal = await countReconciliation(related.where, related.params);
+    mode = !query.linkAll && linkRelatedTotal > 0 ? 'related' : 'unmatched';
+  }
+
+  const filters = listFilters(userId, query, mode);
+  const [summary, total, rows] = await Promise.all([
+    summarizeReconciliation(userId),
+    countReconciliation(filters.where, filters.params),
+    db
+      .prepare(
+        `${LIST_SELECT}
+         WHERE ${filters.where}
+         ORDER BY ${sortCol} ${dir}, r.id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...filters.params, limit, offset) as Promise<Record<string, unknown>[]>,
+  ]);
+
+  const records = rows.map(rowToRecord);
+  if (query.hydrateSuggestedAmounts !== false) {
+    await hydrateSuggestedAmounts(userId, records);
+  }
+
+  return { records, total, limit, offset, summary, linkRelatedTotal };
+}
+
+/** @deprecated Prefer listReconciliationPage. Kept for callers that want every row of one user. */
+export async function listReconciliationRecords(userId: number): Promise<ReconciliationRecord[]> {
+  const page = await listReconciliationPage(userId, {
+    limit: RECON_EXPORT_MAX,
+    offset: 0,
+    maxLimit: RECON_EXPORT_MAX,
+  });
+  return page.records;
 }
 
 export async function getReconciliationRecord(userId: number, id: number): Promise<ReconciliationRecord | null> {

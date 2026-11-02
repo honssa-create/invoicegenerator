@@ -6,9 +6,6 @@ import { displayInvoiceNumber } from '@/lib/record-numbering-core';
 import { readListUi, writeListUi } from '@/lib/list-ui-storage';
 import { bi } from '@/lib/ui-labels';
 import {
-  depositDateKey,
-  isRelatedPendingRecord,
-  reconciliationRecordInZone,
   RECONCILIATION_PAGE_SIZE,
   type MatchCandidate,
   type ReconciliationSortKey,
@@ -28,6 +25,24 @@ const SORT_KEYS: ReconciliationSortKey[] = [
   'created_by',
 ];
 
+export type ReconciliationListScope = {
+  focusRecordId: number | null;
+  matchedOrderId: number | null;
+  linkOrderId: number | null;
+  linkAmount: number | null;
+  linkDate: string | null;
+  linkAll: boolean;
+};
+
+const EMPTY_SCOPE: ReconciliationListScope = {
+  focusRecordId: null,
+  matchedOrderId: null,
+  linkOrderId: null,
+  linkAmount: null,
+  linkDate: null,
+  linkAll: false,
+};
+
 type ReconciliationListUiState = {
   zoneFilter: ZoneFilter | null;
   dateStart: string;
@@ -41,6 +56,8 @@ type ReconciliationListUiState = {
 export function useReconciliationList() {
   const savedUi = useMemo(() => readListUi<ReconciliationListUiState>(RECONCILIATION_LIST_UI_KEY), []);
   const [records, setRecords] = useState<ReconciliationRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  const [linkRelatedTotal, setLinkRelatedTotal] = useState(0);
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null);
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,18 +91,80 @@ export function useReconciliationList() {
     const n = Number(savedUi?.page);
     return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
   });
+  const [debouncedSearch, setDebouncedSearch] = useState(savedUi?.search ?? '');
+  const [scope, setScopeState] = useState<ReconciliationListScope>(EMPTY_SCOPE);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const setScope = useCallback((next: ReconciliationListScope) => {
+    setScopeState((prev) => {
+      if (
+        prev.focusRecordId === next.focusRecordId &&
+        prev.matchedOrderId === next.matchedOrderId &&
+        prev.linkOrderId === next.linkOrderId &&
+        prev.linkAmount === next.linkAmount &&
+        prev.linkDate === next.linkDate &&
+        prev.linkAll === next.linkAll
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
 
   const load = useCallback(() => {
+    let cancelled = false;
     setLoading(true);
-    fetch('/api/reconciliation')
+    const params = new URLSearchParams();
+    params.set('limit', String(RECONCILIATION_PAGE_SIZE));
+    params.set('offset', String((page - 1) * RECONCILIATION_PAGE_SIZE));
+    params.set('sort', sort.key);
+    params.set('dir', sort.dir);
+    if (scope.focusRecordId) {
+      params.set('id', String(scope.focusRecordId));
+    } else if (scope.matchedOrderId) {
+      params.set('matchedOrderId', String(scope.matchedOrderId));
+    } else if (scope.linkOrderId) {
+      params.set('linkOrderId', String(scope.linkOrderId));
+      if (scope.linkAmount != null) params.set('linkAmount', String(scope.linkAmount));
+      if (scope.linkDate) params.set('linkDate', scope.linkDate);
+      if (scope.linkAll) params.set('linkAll', '1');
+    } else {
+      if (zoneFilter) params.set('zone', zoneFilter);
+      if (methodFilter) params.set('method', methodFilter);
+      if (dateStart) params.set('dateStart', dateStart);
+      if (dateEnd) params.set('dateEnd', dateEnd);
+      if (debouncedSearch) params.set('q', debouncedSearch);
+    }
+    fetch(`/api/reconciliation?${params.toString()}`)
       .then((r) => r.json())
       .then((d) => {
+        if (cancelled) return;
         setRecords(d.records || []);
+        setTotal(Number(d.total) || 0);
+        setLinkRelatedTotal(Number(d.linkRelatedTotal) || 0);
         setSummary(d.summary || null);
         setYedpayConfigured(Boolean(d.yedpayConfigured));
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    page,
+    sort,
+    scope,
+    zoneFilter,
+    methodFilter,
+    dateStart,
+    dateEnd,
+    debouncedSearch,
+  ]);
 
   const loadCandidates = useCallback((q?: string) => {
     const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
@@ -96,7 +175,8 @@ export function useReconciliationList() {
   }, []);
 
   useEffect(() => {
-    load();
+    const cancel = load();
+    return cancel;
   }, [load]);
 
   useEffect(() => {
@@ -111,82 +191,12 @@ export function useReconciliationList() {
     });
   }, [zoneFilter, dateStart, dateEnd, search, methodFilter, sort, page]);
 
-  const zoneCounts = useMemo(
-    () => ({
-      high: records.filter((r) => reconciliationRecordInZone(r, 'high')).length,
-      medium: records.filter((r) => reconciliationRecordInZone(r, 'medium')).length,
-      attention: records.filter((r) => reconciliationRecordInZone(r, 'attention')).length,
-      matched: records.filter((r) => reconciliationRecordInZone(r, 'matched')).length,
-    }),
-    [records],
-  );
-
-  const filterRecords = useCallback(
-    (
-      list: ReconciliationRecord[],
-      opts: {
-        focusRecordId: number | null;
-        matchedOrderId: number | null;
-        linkOrderId: number | null;
-        linkAmountHint: number | null;
-        linkDateHint: string | null;
-        showAllLinkRecords: boolean;
-      },
-    ) => {
-      const q = search.trim().toLowerCase();
-      return list.filter((r) => {
-        if (opts.focusRecordId != null) return r.id === opts.focusRecordId;
-        if (opts.matchedOrderId != null) {
-          return r.order_id === opts.matchedOrderId && r.status === 'Matched';
-        }
-        if (opts.linkOrderId != null) {
-          if (!opts.showAllLinkRecords) {
-            return isRelatedPendingRecord(r, opts.linkOrderId, opts.linkAmountHint, opts.linkDateHint);
-          }
-          return r.status !== 'Matched';
-        }
-        if (zoneFilter && !reconciliationRecordInZone(r, zoneFilter)) return false;
-        if (methodFilter && r.payment_method !== methodFilter) return false;
-        if (dateStart && depositDateKey(r.deposit_time) < dateStart) return false;
-        if (dateEnd && depositDateKey(r.deposit_time) > dateEnd) return false;
-        if (!q) return true;
-        const hay = [
-          r.order_no,
-          r.invoice_number,
-          r.suggested_order_no,
-          r.suggested_invoice_number,
-          r.remarks,
-          r.created_by,
-          r.external_id,
-          r.suggested_customer_name,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return hay.includes(q);
-      });
-    },
-    [dateEnd, dateStart, methodFilter, search, zoneFilter],
-  );
-
-  const sortRecords = useCallback(
-    (list: ReconciliationRecord[]) => {
-      const dir = sort.dir === 'asc' ? 1 : -1;
-      return [...list].sort((a, b) => {
-        const key = sort.key;
-        const av = a[key];
-        const bv = b[key];
-        if (key === 'deposit_time' || key === 'created_at') {
-          return (new Date(String(av)).getTime() - new Date(String(bv)).getTime()) * dir;
-        }
-        if (key === 'status') {
-          return String(av).localeCompare(String(bv)) * dir;
-        }
-        return ((Number(av) || 0) - (Number(bv) || 0)) * dir;
-      });
-    },
-    [sort],
-  );
+  const zoneCounts = {
+    high: summary?.pendingHigh ?? 0,
+    medium: summary?.pendingMedium ?? 0,
+    attention: (summary?.unmatched ?? 0) + (summary?.discrepancy ?? 0),
+    matched: summary?.matched ?? 0,
+  };
 
   const clearFilters = () => {
     setDateStart('');
@@ -364,6 +374,8 @@ export function useReconciliationList() {
 
   return {
     records,
+    total,
+    linkRelatedTotal,
     summary,
     candidates,
     loading,
@@ -394,8 +406,7 @@ export function useReconciliationList() {
     zoneCounts,
     load,
     loadCandidates,
-    filterRecords,
-    sortRecords,
+    setScope,
     clearFilters,
     toggleZone,
     toggleSort,

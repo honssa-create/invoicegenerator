@@ -1,4 +1,5 @@
-const TTL_MS = 120_000;
+/** Tag suggestions change rarely. A longer TTL avoids a jsonb scan on every order open. */
+const TTL_MS = 10 * 60_000;
 
 type Entry = { tags: string[]; expiresAt: number };
 

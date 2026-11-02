@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 import { getDataOwnerId } from '@/lib/org-server';
-import { listReconciliationRecords } from '@/lib/reconciliation-server';
+import { listReconciliationPage, parseReconciliationListQuery } from '@/lib/reconciliation-server';
 import { yedpayConfigured } from '@/lib/yedpay';
 
 export async function GET(request: Request) {
@@ -9,27 +9,16 @@ export async function GET(request: Request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const ownerId = await getDataOwnerId(session);
-  const records = await listReconciliationRecords(ownerId);
-
-  const pendingHigh = records.filter((r) => r.status === 'Pending Approval' && r.confidence === 'high');
-  const pendingMedium = records.filter((r) => r.status === 'Pending Approval' && r.confidence === 'medium');
-
-  const summary = {
-    total: records.length,
-    matched: records.filter((r) => r.status === 'Matched').length,
-    unmatched: records.filter((r) => r.status === 'Unmatched').length,
-    discrepancy: records.filter((r) => r.status === 'Discrepancy').length,
-    pendingApproval: records.filter((r) => r.status === 'Pending Approval').length,
-    pendingHigh: pendingHigh.length,
-    pendingMedium: pendingMedium.length,
-    grossTotal: records.reduce((s, r) => s + r.gross_amount, 0),
-    netTotal: records.reduce((s, r) => s + r.net_amount, 0),
-    feeTotal: records.reduce((s, r) => s + r.transaction_fee, 0),
-  };
+  const query = parseReconciliationListQuery(new URL(request.url).searchParams);
+  const page = await listReconciliationPage(ownerId, query);
 
   return NextResponse.json({
-    records,
-    summary,
+    records: page.records,
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+    summary: page.summary,
+    linkRelatedTotal: page.linkRelatedTotal,
     yedpayConfigured: await yedpayConfigured(ownerId),
   });
 }

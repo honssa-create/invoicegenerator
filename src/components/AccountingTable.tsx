@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { currentMonth } from '@/lib/cashflow';
 import { orderPaymentReceiptUrl } from '@/lib/image-url';
 import type { PaymentSlot } from '@/lib/orders';
 import { displayOrderNumber } from '@/lib/record-numbering-core';
@@ -30,20 +31,47 @@ interface Entry {
 
 const PAGE_SIZE = 50;
 
+type Summary = { total: number; verified: number; pending: number };
+
 export default function AccountingTable() {
   const router = useRouter();
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [summary, setSummary] = useState<Summary>({ total: 0, verified: 0, pending: 0 });
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [onlyPending, setOnlyPending] = useState(false);
+  const [month, setMonth] = useState(currentMonth);
+  const [allMonths, setAllMonths] = useState(false);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    fetch('/api/accounting')
+    setPage(1);
+  }, [onlyPending, month, allMonths]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const params = new URLSearchParams();
+    params.set('month', allMonths ? 'all' : month);
+    if (onlyPending) params.set('pending', '1');
+    params.set('limit', String(PAGE_SIZE));
+    params.set('offset', String((page - 1) * PAGE_SIZE));
+    fetch(`/api/accounting?${params.toString()}`)
       .then((r) => r.json())
-      .then((d) => setEntries(d.entries || []))
-      .finally(() => setLoading(false));
-  }, []);
+      .then((d) => {
+        if (cancelled) return;
+        setEntries(d.entries || []);
+        setTotal(Number(d.total) || 0);
+        setSummary(d.summary || { total: 0, verified: 0, pending: 0 });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onlyPending, month, allMonths, page]);
 
   const goLinkPayment = (entry: Entry) => {
     const params = new URLSearchParams();
@@ -63,18 +91,10 @@ export default function AccountingTable() {
     router.push(`/reconciliation?matchedOrderId=${entry.order_id}`);
   };
 
-  const shown = useMemo(
-    () => (onlyPending ? entries.filter((entry) => !entry.verified) : entries),
-    [entries, onlyPending]
-  );
-
-  useEffect(() => {
-    setPage(1);
-  }, [onlyPending]);
-
-  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
-  const pageRows = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const verifiedCount = entries.filter((entry) => entry.verified).length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageRows = entries;
+  const verifiedCount = summary.verified;
+  const entryCount = summary.total;
 
   return (
     <>
@@ -82,7 +102,7 @@ export default function AccountingTable() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full sm:max-w-md">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <p className="text-xs text-gray-500">{bi('Entries', '筆數')}</p>
-            <p className="text-2xl font-bold">{entries.length}</p>
+            <p className="text-2xl font-bold">{entryCount}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <p className="text-xs text-gray-500">{BTN.verified}</p>
@@ -90,8 +110,31 @@ export default function AccountingTable() {
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <p className="text-xs text-gray-500">{BTN.pending}</p>
-            <p className="text-2xl font-bold text-amber-600">{entries.length - verifiedCount}</p>
+            <p className="text-2xl font-bold text-amber-600">{summary.pending}</p>
           </div>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+          <label className="flex flex-col text-sm text-gray-600">
+            <span className="text-[11px] font-medium text-gray-500 mb-1">{bi('Month', '月份')}</span>
+            <input
+              type="month"
+              value={allMonths ? '' : month}
+              disabled={allMonths}
+              onChange={(event) => {
+                if (event.target.value) setMonth(event.target.value);
+              }}
+              className="min-h-[44px] px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-50"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-600 min-h-[44px] sm:min-h-0 sm:mb-2">
+            <input
+              type="checkbox"
+              checked={allMonths}
+              onChange={(event) => setAllMonths(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+            />
+            {bi('All months', '全部月份')}
+          </label>
         </div>
         <label className="flex items-center gap-2 text-sm text-gray-600 min-h-[44px] sm:min-h-0">
           <input
@@ -109,7 +152,7 @@ export default function AccountingTable() {
           <div className="p-12 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
           </div>
-        ) : shown.length === 0 ? (
+        ) : pageRows.length === 0 ? (
           <div className="p-12 text-center text-gray-500">{MSG.noPaymentEntriesYet}</div>
         ) : (
           <>
@@ -200,7 +243,7 @@ export default function AccountingTable() {
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm text-gray-600">
                 <span>
-                  {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, shown.length)} of {shown.length}
+                  {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
                 </span>
                 <div className="flex gap-2">
                   <button

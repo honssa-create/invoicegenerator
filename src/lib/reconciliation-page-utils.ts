@@ -97,6 +97,26 @@ export function parseReconciliationAmountHint(raw: string | null): number | null
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * Anchor for the ±48h related-deposit window.
+ * Date-only hints use 12:00, matching `parseDepositDate`.
+ * `reject` means a hint was present but not a date, so amount-only matching must not apply.
+ */
+export function linkDepositAnchor(raw: string | null | undefined): {
+  mode: 'none' | 'window' | 'reject';
+  anchor: string;
+} {
+  const text = (raw || '').trim();
+  if (!text) return { mode: 'none', anchor: '1970-01-01 00:00:00' };
+  const parsed = parseDepositDate(text);
+  if (!parsed) return { mode: 'reject', anchor: '1970-01-01 00:00:00' };
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    mode: 'window',
+    anchor: `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`,
+  };
+}
+
 export function parseDepositDate(v: string): Date | null {
   const s = v.replace('T', ' ').trim();
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(s);

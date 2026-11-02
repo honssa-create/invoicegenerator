@@ -14,13 +14,16 @@ import {
   type CashflowResponse,
   type LedgerEntry,
 } from '@/lib/cashflow';
+
+const CASHFLOW_PAGE_SIZE = 100;
 import { BTN, MSG, TITLE, bi } from '@/lib/ui-labels';
 
 const EMPTY_FORM = { category: INCOME_CATEGORIES[0], txn_date: new Date().toISOString().slice(0, 10), amount: '', account: RECEIVED_ACCOUNTS[0], remarks: '' };
 
 export default function CashflowPage() {
   const [data, setData] = useState<CashflowResponse | null>(null);
-  const [month, setMonth] = useState(currentMonth());
+  const [month, setMonth] = useState(currentMonth);
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [receiptPath, setReceiptPath] = useState('');
@@ -31,8 +34,23 @@ export default function CashflowPage() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = () => fetch(`/api/cashflow?month=${month}`).then((r) => r.json()).then(setData);
-  useEffect(() => { load(); }, [month]);
+  const load = () => {
+    const params = new URLSearchParams();
+    params.set('month', month);
+    params.set('limit', String(CASHFLOW_PAGE_SIZE));
+    params.set('offset', String((page - 1) * CASHFLOW_PAGE_SIZE));
+    let cancelled = false;
+    fetch(`/api/cashflow?${params.toString()}`)
+      .then((r) => r.json())
+      .then((payload) => {
+        if (!cancelled) setData(payload);
+      });
+    return () => {
+      cancelled = true;
+    };
+  };
+  useEffect(() => { setPage(1); }, [month]);
+  useEffect(() => load(), [month, page]);
 
   useModalUnsavedWarning(showForm, { form, receiptPath, preview: Boolean(preview) });
 
@@ -152,6 +170,31 @@ export default function CashflowPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {data && (data.total || 0) > CASHFLOW_PAGE_SIZE && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm text-gray-600">
+            <span>
+              {(page - 1) * CASHFLOW_PAGE_SIZE + 1}–{Math.min(page * CASHFLOW_PAGE_SIZE, data.total || 0)} of {data.total}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page <= 1}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((current) => current + 1)}
+                disabled={page * CASHFLOW_PAGE_SIZE >= (data.total || 0)}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

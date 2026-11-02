@@ -19,10 +19,15 @@ export async function GET(request: Request) {
   const file = await readLedgerAttachment(ownerId, id, index, variant);
   if ('error' in file) return NextResponse.json({ error: file.error }, { status: file.status });
 
+  // ClickUp attachment bytes are immutable for a given entry id + index.
+  // Thumbs are requested once per visible row; a day-long private cache stops the list from re-proxying them.
+  const cacheControl =
+    variant === 'thumb' ? 'private, max-age=86400' : 'private, max-age=3600';
+
   return new NextResponse(Buffer.from(file.body), {
     headers: {
       'Content-Type': file.contentType,
-      'Cache-Control': 'private, max-age=300',
+      'Cache-Control': cacheControl,
       'X-Content-Type-Options': 'nosniff',
     },
   });

@@ -13,7 +13,14 @@ export async function GET(request: Request) {
   const ownerId = await getDataOwnerId(session);
   const { searchParams } = new URL(request.url);
   if (searchParams.get('fields') === 'options') {
-    return NextResponse.json({ quotations: await listQuotationOptions(ownerId) });
+    const limitRaw = searchParams.get('limit');
+    const limit = limitRaw == null ? undefined : Number(limitRaw);
+    return NextResponse.json({
+      quotations: await listQuotationOptions(ownerId, {
+        q: searchParams.get('q') || undefined,
+        limit: Number.isFinite(limit) ? limit : undefined,
+      }),
+    });
   }
   const limitParam = searchParams.get('limit');
   if (limitParam != null) {

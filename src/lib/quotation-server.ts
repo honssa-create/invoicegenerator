@@ -1,4 +1,5 @@
 import db from './db';
+import { containsLike } from './list-query';
 import { allocateGlobalRecordNumber } from './record-numbering';
 import { calculateQuotationTotals, type QuotationFile, type QuotationItem, type QuotationWithDetails } from './quotations';
 import { loadFilesGrouped } from './attachment-server';
@@ -185,11 +186,30 @@ export async function listQuotations(
   });
 }
 
-/** Dropdown options for linking quotations to orders. */
+export const LINKED_QUOTATION_OPTION_LIMIT = 40;
+
+/** Dropdown options for linking quotations to orders. Pass `limit` to keep order bootstrap small. */
 export async function listQuotationOptions(
   userId: number,
+  opts?: { limit?: number; q?: string },
 ): Promise<{ id: number; quote_number: string; status: string }[]> {
+  const params: unknown[] = [userId];
+  let where = 'WHERE user_id = ?';
+  const q = opts?.q?.trim();
+  if (q) {
+    where += ` AND (quote_number ILIKE ? ESCAPE '!' OR status ILIKE ? ESCAPE '!')`;
+    const like = containsLike(q);
+    params.push(like, like);
+  }
+  let limitSql = '';
+  if (opts?.limit != null) {
+    const limit = Math.min(100, Math.max(1, Math.floor(opts.limit)));
+    limitSql = ' LIMIT ?';
+    params.push(limit);
+  }
   return (await db
-    .prepare('SELECT id, quote_number, status FROM quotations WHERE user_id = ? ORDER BY created_at DESC')
-    .all(userId)) as { id: number; quote_number: string; status: string }[];
+    .prepare(
+      `SELECT id, quote_number, status FROM quotations ${where} ORDER BY created_at DESC, id DESC${limitSql}`,
+    )
+    .all(...params)) as { id: number; quote_number: string; status: string }[];
 }

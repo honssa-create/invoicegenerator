@@ -1,4 +1,5 @@
 import db from './db';
+import { containsLike } from './list-query';
 import { allocateGlobalRecordNumber } from './record-numbering';
 import type { InvoiceFile, InvoiceItem, InvoiceWithDetails } from './types';
 import { calculateInvoiceTotals } from './utils';
@@ -294,11 +295,30 @@ export async function getLinkedInvoiceSummaryForOrder(
   };
 }
 
-/** Dropdown options for linking invoices to orders. */
+export const LINKED_INVOICE_OPTION_LIMIT = 40;
+
+/** Dropdown options for linking invoices to orders. Pass `limit` to keep order bootstrap small. */
 export async function listInvoiceOptions(
   userId: number,
+  opts?: { limit?: number; q?: string },
 ): Promise<{ id: number; invoice_number: string; status: string }[]> {
+  const params: unknown[] = [userId];
+  let where = 'WHERE user_id = ?';
+  const q = opts?.q?.trim();
+  if (q) {
+    where += ` AND (invoice_number ILIKE ? ESCAPE '!' OR status ILIKE ? ESCAPE '!')`;
+    const like = containsLike(q);
+    params.push(like, like);
+  }
+  let limitSql = '';
+  if (opts?.limit != null) {
+    const limit = Math.min(100, Math.max(1, Math.floor(opts.limit)));
+    limitSql = ' LIMIT ?';
+    params.push(limit);
+  }
   return (await db
-    .prepare('SELECT id, invoice_number, status FROM invoices WHERE user_id = ? ORDER BY created_at DESC')
-    .all(userId)) as { id: number; invoice_number: string; status: string }[];
+    .prepare(
+      `SELECT id, invoice_number, status FROM invoices ${where} ORDER BY created_at DESC, id DESC${limitSql}`,
+    )
+    .all(...params)) as { id: number; invoice_number: string; status: string }[];
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
 import FilterBar from '@/components/FilterBar';
@@ -9,6 +9,7 @@ import {
   isImageAttachment,
   ledgerAttachmentSrc,
   PAYMENT_LEDGER_CATEGORIES,
+  PAYMENT_LEDGER_PAGE_SIZE,
   type PaymentLedgerAttachment,
   type PaymentLedgerCategory,
 } from '@/lib/payment-ledger';
@@ -65,33 +66,60 @@ export default function PaymentLedgerPage() {
   const { isSectionReadOnly } = useAuth();
   const readOnly = isSectionReadOnly('payment_ledger');
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [sync, setSync] = useState<SyncInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [dateStart, setDateStart] = useState('');
   const [dateEnd, setDateEnd] = useState('');
+  const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
   const [lightbox, setLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null);
   const [brokenThumbs, setBrokenThumbs] = useState<Set<string>>(() => new Set());
   const [copiedUrl, setCopiedUrl] = useState(false);
 
-  const load = () => {
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [dateStart, dateEnd, category, debouncedSearch]);
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    fetch('/api/payment-ledger')
+    const params = new URLSearchParams();
+    if (dateStart) params.set('dateStart', dateStart);
+    if (dateEnd) params.set('dateEnd', dateEnd);
+    if (category) params.set('category', category);
+    if (debouncedSearch) params.set('q', debouncedSearch);
+    params.set('limit', String(PAYMENT_LEDGER_PAGE_SIZE));
+    params.set('offset', String((page - 1) * PAYMENT_LEDGER_PAGE_SIZE));
+    fetch(`/api/payment-ledger?${params.toString()}`)
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to load');
+        if (cancelled) return;
         setEntries(data.entries || []);
+        setTotal(Number(data.total) || 0);
         setSync(data.sync || null);
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dateStart, dateEnd, category, debouncedSearch, page, reloadKey]);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -114,21 +142,10 @@ export default function PaymentLedgerPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [lightbox]);
 
-  const displayed = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return entries.filter((row) => {
-      const date = row.paid_date || '';
-      if (dateStart && date && date < dateStart) return false;
-      if (dateEnd && date && date > dateEnd) return false;
-      if ((dateStart || dateEnd) && !date) return false;
-      if (!q) return true;
-      const attachmentText = (row.attachments || []).map((item) => `${item.name} ${item.url}`).join(' ');
-      return [row.order_no, row.notes, row.link, row.amount != null ? String(row.amount) : '', attachmentText]
-        .join(' ')
-        .toLowerCase()
-        .includes(q);
-    });
-  }, [entries, dateStart, dateEnd, search]);
+  const filtersActive = Boolean(dateStart || dateEnd || category || debouncedSearch);
+  const totalPages = Math.max(1, Math.ceil(total / PAYMENT_LEDGER_PAGE_SIZE));
+  const pageStart = total ? (page - 1) * PAYMENT_LEDGER_PAGE_SIZE + 1 : 0;
+  const pageEnd = Math.min(page * PAYMENT_LEDGER_PAGE_SIZE, total);
 
   const syncNow = async () => {
     setSyncing(true);
@@ -137,7 +154,7 @@ export default function PaymentLedgerPage() {
       const res = await fetch('/api/payment-ledger/sync', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync failed');
-      load();
+      setReloadKey((current) => current + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
@@ -158,6 +175,15 @@ export default function PaymentLedgerPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Save failed');
+      if (data.entry) {
+        setEntries((current) => {
+          if (category && data.entry.category !== category) {
+            return current.filter((row) => row.id !== id);
+          }
+          return current.map((row) => (row.id === id ? { ...row, ...data.entry } : row));
+        });
+        if (category && data.entry.category !== category) setTotal((current) => Math.max(0, current - 1));
+      }
     } catch (err) {
       setEntries((current) =>
         current.map((row) => (row.id === id && previous ? { ...row, category: previous } : row)),
@@ -290,18 +316,34 @@ export default function PaymentLedgerPage() {
         onClear={() => {
           setDateStart('');
           setDateEnd('');
+          setCategory('');
           setSearch('');
         }}
-      />
+      >
+        <div className="flex flex-col min-w-0 sm:min-w-[8rem]">
+          <label className="text-[11px] font-medium text-gray-500 mb-1">{bi('Category', '類別')}</label>
+          <select
+            aria-label={bi('Category', '類別')}
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+            className="w-full min-h-[44px] px-3 py-2.5 sm:px-2.5 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+          >
+            <option value="">{bi('All', '全部')}</option>
+            {PAYMENT_LEDGER_CATEGORIES.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+      </FilterBar>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
           <h2 className="font-semibold text-gray-900">{bi('Payment Ledger', '入帳紀錄')}</h2>
-          {!loading && entries.length > 0 && (
+          {!loading && total > 0 && (
             <span className="text-xs text-gray-500">
-              {displayed.length === entries.length
-                ? bi(`${entries.length} record(s)`, `${entries.length} 筆`)
-                : bi(`${displayed.length} of ${entries.length}`, `${displayed.length} / ${entries.length} 筆`)}
+              {bi(`${pageStart}–${pageEnd} of ${total}`, `${pageStart}–${pageEnd} / ${total} 筆`)}
             </span>
           )}
         </div>
@@ -309,14 +351,14 @@ export default function PaymentLedgerPage() {
           <div className="p-12 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto" />
           </div>
-        ) : entries.length === 0 ? (
+        ) : total === 0 && !filtersActive ? (
           <div className="p-12 text-center text-gray-500">
             {bi(
               'No payment rows yet. Sync reads Nestiee 婚宴回禮 comments and the first / second payment fields.',
               '尚未有入帳。同步會讀取 Nestiee 婚宴回禮的付款留言，以及第一次／第二次付款欄位。',
             )}
           </div>
-        ) : displayed.length === 0 ? (
+        ) : entries.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
             {bi('No rows match these filters.', '沒有符合篩選條件的入帳。')}
           </div>
@@ -334,7 +376,7 @@ export default function PaymentLedgerPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {displayed.map((row) => (
+              {entries.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50 align-middle">
                   <td className="px-6 py-3 align-middle text-sm text-gray-700 whitespace-nowrap">{row.paid_date || '—'}</td>
                   <td className="px-6 py-3 align-middle text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatAmount(row.amount)}</td>
@@ -383,6 +425,29 @@ export default function PaymentLedgerPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={page <= 1}
+              className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+            >
+              ← Prev
+            </button>
+            <span className="text-xs text-gray-500">
+              {page} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              disabled={page >= totalPages}
+              className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 text-xs font-medium"
+            >
+              Next →
+            </button>
+          </div>
         )}
       </div>
 
@@ -449,6 +514,48 @@ export default function PaymentLedgerPage() {
   );
 }
 
+const THUMB_PLACEHOLDER =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+/** Start the ClickUp proxy only when the thumb is near the viewport. */
+function LazyThumb({ src, alt, onError }: { src: string; alt: string; onError: () => void }) {
+  const ref = useRef<HTMLImageElement>(null);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setActive(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (observed) => {
+        if (observed.some((entry) => entry.isIntersecting)) {
+          setActive(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      ref={ref}
+      src={active ? src : THUMB_PLACEHOLDER}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={active ? onError : undefined}
+      className="h-full w-full object-cover"
+    />
+  );
+}
+
 function AttachmentCell({
   entryId,
   attachments,
@@ -493,14 +600,7 @@ function AttachmentCell({
               className="h-11 w-11 shrink-0 overflow-hidden rounded border border-gray-200 bg-gray-50 cursor-zoom-in hover:ring-2 hover:ring-brand-400"
               aria-label={item.name || 'attachment'}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={src}
-                alt={item.name || 'attachment'}
-                loading="lazy"
-                onError={() => onBroken(thumbKey)}
-                className="h-full w-full object-cover"
-              />
+              <LazyThumb src={src} alt={item.name || 'attachment'} onError={() => onBroken(thumbKey)} />
             </button>
           );
         }

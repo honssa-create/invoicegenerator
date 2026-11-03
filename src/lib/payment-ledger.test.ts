@@ -8,6 +8,8 @@ import {
   ledgerAttachmentSrc,
   orderNoFromTaskTitle,
   parsePaymentAmounts,
+  paymentMethodFromLabels,
+  paymentMethodFromText,
   planOrder12212SameDayRepair,
   reviewSameDayPayments,
   SAME_DAY_UNCERTAIN_NOTE,
@@ -280,6 +282,7 @@ describe('extractPaymentLedgerRows', () => {
     });
     expect(rows[0].notes).toContain('加單金額：$1,835');
     expect(rows[0].notes).toContain('總額：$5,337');
+    expect(rows[0].payment_method).toBeNull();
     expect(rows.some((row) => row.amount === 5337)).toBe(false);
   });
 
@@ -332,6 +335,94 @@ describe('extractPaymentLedgerRows', () => {
     expect(rows[0].notes).toContain('50% payment');
     expect(rows[0].notes).toContain('FPS');
     expect(rows[0].amount).toBeNull();
+    expect(rows[0].payment_method).toBe('FPS');
+  });
+});
+
+describe('付款方式', () => {
+  it('reads one method from a Payment label and ignores status labels', () => {
+    expect(paymentMethodFromLabels(['50% payment', 'FPS'])).toBe('FPS');
+    expect(paymentMethodFromLabels(['Full Paid', '銀行轉賬'])).toBe('轉帳');
+    expect(paymentMethodFromLabels(['未付款'])).toBeNull();
+    expect(paymentMethodFromLabels(['FPS', '銀行轉賬'])).toBeNull();
+  });
+
+  it('reads FPS, 轉帳, PayMe, cheque, and cash from comment text', () => {
+    expect(paymentMethodFromText('客人用轉數快付款')).toBe('FPS');
+    expect(paymentMethodFromText('FPS')).toBe('FPS');
+    expect(paymentMethodFromText('銀行轉帳')).toBe('轉帳');
+    expect(paymentMethodFromText('銀行轉賬 $1,000')).toBe('轉帳');
+    expect(paymentMethodFromText('Bank transfer')).toBe('轉帳');
+    expect(paymentMethodFromText('PayMe 收款')).toBe('PayMe');
+    expect(paymentMethodFromText('100% Full payment')).toBeNull();
+    expect(paymentMethodFromText('支票')).toBe('支票');
+    expect(paymentMethodFromText('現金 $500')).toBe('現金');
+    expect(paymentMethodFromText('credit card')).toBe('信用卡');
+    expect(paymentMethodFromText('已付 $100')).toBeNull();
+  });
+
+  it('does not treat the company FPS ID as the payment method', () => {
+    expect(paymentMethodFromText('轉數快 FPS ID：110700226 (Honour Label Limited)')).toBeNull();
+    expect(paymentMethodFromText('FPS 識別碼: 110700226')).toBeNull();
+    expect(paymentMethodFromText(ORDER_11124_ADDON_NOTES)).toBeNull();
+    expect(paymentMethodFromText('用轉數快付款，FPS ID：110700226')).toBe('FPS');
+  });
+
+  it('leaves the cell blank when the text names two methods', () => {
+    expect(paymentMethodFromText('FPS 或 銀行轉帳')).toBeNull();
+  });
+
+  it('stores 轉帳 from a comment and folds it onto an installment that has no method', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 'method-fold',
+        name: '12088 - transfer',
+        custom_fields: [
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1792180800000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '1000' },
+        ],
+      }),
+      [{ id: 'c', comment_text: '銀行轉帳\n已付 $1000', date: '1792255649598' }],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe('installment');
+    expect(rows[0].payment_method).toBe('轉帳');
+  });
+
+  it('keeps the Payment label when a folded comment does not name a method', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 'method-label',
+        name: '12089 - fps',
+        custom_fields: [
+          labels(['Full Paid', 'FPS']),
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1792180800000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '1000' },
+        ],
+      }),
+      [{ id: 'c', comment_text: '已付 $1000\nimage.png', date: '1792255649598' }],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payment_method).toBe('FPS');
+  });
+
+  it('reads the method from a receipt filename', () => {
+    const rows = extractPaymentLedgerRows(task({ id: 'file-method', name: '12100' }), [
+      {
+        id: 'c',
+        comment_text: '已付 $200',
+        date: '1792255649598',
+        comment: [
+          {
+            type: 'image',
+            text: 'PayMe.png',
+            image: { name: 'PayMe.png', url: 'https://cdn.example/payme.png' },
+          },
+        ],
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payment_method).toBe('PayMe');
   });
 });
 
@@ -346,6 +437,7 @@ function draft(partial: Partial<PaymentLedgerDraft> & Pick<PaymentLedgerDraft, '
     clickup_task_id: 't',
     source: partial.dedupe_key.startsWith('comment') ? 'comment' : 'installment',
     category: '回禮',
+    payment_method: null,
     ...partial,
   };
 }
@@ -897,10 +989,13 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     expect(afterFirst[0].amount).toBe(6288.5);
     expect(afterFirst[0].order_no).toBe('12104');
     expect(afterFirst[0].category).toBe('回禮');
+    expect(afterFirst[0].payment_method).toBeNull();
 
-    const { updatePaymentLedgerCategory } = await import('./payment-ledger-server');
+    const { updatePaymentLedgerCategory, updatePaymentLedgerMethod } = await import('./payment-ledger-server');
     const edited = await updatePaymentLedgerCategory(TEST_USER_ID, afterFirst[0].id, '燕窩');
     expect(edited?.category).toBe('燕窩');
+    const method = await updatePaymentLedgerMethod(TEST_USER_ID, afterFirst[0].id, '支票');
+    expect(method?.payment_method).toBe('支票');
 
     const second = await syncPaymentLedger(TEST_USER_ID, client);
     expect(second.comment_fetches).toBe(0);
@@ -918,6 +1013,7 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     expect(afterThird[0].amount).toBe(7000);
     expect(afterThird[0].order_no).toBe('12104');
     expect(afterThird[0].category).toBe('燕窩');
+    expect(afterThird[0].payment_method).toBe('支票');
   });
 });
 

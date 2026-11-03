@@ -921,6 +921,7 @@ CREATE TABLE IF NOT EXISTS payment_ledger (
 );
 
 ALTER TABLE payment_ledger ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '回禮';
+ALTER TABLE payment_ledger ADD COLUMN IF NOT EXISTS payment_method TEXT;
 
 DO $$ BEGIN
   ALTER TABLE payment_ledger

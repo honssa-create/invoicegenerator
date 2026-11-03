@@ -11,6 +11,8 @@ import {
   extractPaymentLedgerRows,
   isClickUpAttachmentUrl,
   isPaymentLedgerCategory,
+  isPaymentLedgerMethod,
+  paymentMethodFromText,
   ORDER_12212_SAME_DAY_REPAIR,
   planOrder12212SameDayRepair,
   type PaymentLedgerAttachment,
@@ -47,6 +49,7 @@ export type PaymentLedgerEntry = {
   source: string;
   clickup_task_id: string | null;
   category: PaymentLedgerCategory;
+  payment_method: string | null;
   updated_at: string | null;
 };
 
@@ -125,7 +128,8 @@ function parseAttachments(raw: unknown): PaymentLedgerAttachment[] {
 export async function listPaymentLedger(userId: number): Promise<PaymentLedgerEntry[]> {
   const rows = await db
     .prepare(
-      `SELECT id, paid_date, amount, order_no, notes, link, attachments_json, source, clickup_task_id, category, updated_at
+      `SELECT id, paid_date, amount, order_no, notes, link, attachments_json, source, clickup_task_id,
+              category, payment_method, updated_at
        FROM payment_ledger
        WHERE user_id = ?
        ORDER BY paid_date DESC NULLS LAST, id DESC
@@ -143,6 +147,7 @@ export async function listPaymentLedger(userId: number): Promise<PaymentLedgerEn
     source: String(row.source || ''),
     clickup_task_id: (row.clickup_task_id as string) || null,
     category: isPaymentLedgerCategory(row.category) ? row.category : DEFAULT_PAYMENT_LEDGER_CATEGORY,
+    payment_method: typeof row.payment_method === 'string' && row.payment_method.trim() ? row.payment_method.trim() : null,
     updated_at: (row.updated_at as string) || null,
   }));
 }
@@ -164,6 +169,53 @@ export async function updatePaymentLedgerCategory(
   if (!updated.changes) return null;
   const rows = await listPaymentLedger(userId);
   return rows.find((row) => row.id === entryId) || null;
+}
+
+/** Manual 付款方式 edit. Empty string clears the cell and is kept across later syncs. */
+export async function updatePaymentLedgerMethod(
+  userId: number,
+  entryId: number,
+  paymentMethod: string,
+): Promise<PaymentLedgerEntry | null> {
+  const updated = await db
+    .prepare(
+      `UPDATE payment_ledger
+       SET payment_method = ?, updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE id = ? AND user_id = ?`,
+    )
+    .run(paymentMethod.trim() || '', entryId, userId);
+  if (!updated.changes) return null;
+  const rows = await listPaymentLedger(userId);
+  return rows.find((row) => row.id === entryId) || null;
+}
+
+/**
+ * Fill blank 付款方式 from notes already stored on the row.
+ * Runs at the start of each sync, including rows whose ClickUp task is not refetched this pass.
+ * A manual value (including a cleared empty string) is left as-is.
+ */
+export async function backfillPaymentMethodsFromNotes(userId: number): Promise<number> {
+  const rows = await db
+    .prepare(
+      `SELECT id, notes
+       FROM payment_ledger
+       WHERE user_id = ? AND payment_method IS NULL AND notes IS NOT NULL AND btrim(notes) <> ''`,
+    )
+    .all(userId);
+  let filled = 0;
+  for (const row of rows) {
+    const method = paymentMethodFromText(String(row.notes || ''));
+    if (!method) continue;
+    const result = await db
+      .prepare(
+        `UPDATE payment_ledger
+         SET payment_method = ?, updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
+         WHERE id = ? AND user_id = ? AND payment_method IS NULL`,
+      )
+      .run(method, row.id, userId);
+    filled += result.changes || 0;
+  }
+  return filled;
 }
 
 export async function paymentLedgerSyncStatus(
@@ -245,9 +297,9 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
     .prepare(
       `INSERT INTO payment_ledger (
          user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
-         clickup_task_id, source, category, updated_at
+         clickup_task_id, source, category, payment_method, updated_at
        ) VALUES (
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
        )
        ON CONFLICT (user_id, dedupe_key) DO UPDATE SET
@@ -259,6 +311,7 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
          attachments_json = EXCLUDED.attachments_json,
          clickup_task_id = EXCLUDED.clickup_task_id,
          source = EXCLUDED.source,
+         payment_method = COALESCE(payment_ledger.payment_method, EXCLUDED.payment_method),
          updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')`,
     )
     .run(
@@ -273,6 +326,7 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
       row.clickup_task_id,
       row.source,
       row.category || DEFAULT_PAYMENT_LEDGER_CATEGORY,
+      row.payment_method || null,
     );
 }
 
@@ -288,6 +342,7 @@ type StoredLedgerRow = {
   clickup_task_id: string | null;
   source: string | null;
   category: string | null;
+  payment_method: string | null;
 };
 
 function finiteAmount(value: number | string | null): number | null {
@@ -304,7 +359,7 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
   const rows = await db
     .prepare(
       `SELECT user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
-              clickup_task_id, source, category
+              clickup_task_id, source, category, payment_method
        FROM payment_ledger
        WHERE btrim(order_no) = ?`,
     )
@@ -328,6 +383,7 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
       clickup_task_id: taskId,
       source: row.source,
       category: isPaymentLedgerCategory(row.category) ? row.category : DEFAULT_PAYMENT_LEDGER_CATEGORY,
+      payment_method: isPaymentLedgerMethod(row.payment_method) ? row.payment_method : null,
     });
     groups.set(key, group);
   }
@@ -341,6 +397,7 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
           .prepare(
             `UPDATE payment_ledger
              SET notes = ?, attachments_json = ?, amount = ?,
+                 payment_method = COALESCE(payment_ledger.payment_method, ?),
                  updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
              WHERE user_id = ? AND dedupe_key = ? AND source = 'installment'`,
           )
@@ -348,6 +405,7 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
             update.notes || null,
             JSON.stringify(update.attachments || []),
             update.amount,
+            update.payment_method || null,
             group.userId,
             update.dedupe_key,
           );
@@ -542,6 +600,14 @@ export async function syncPaymentLedger(
     pushError(
       result,
       `Order 12212 same-day fold: ${err instanceof Error ? err.message : 'repair failed'}`,
+    );
+  }
+  try {
+    await backfillPaymentMethodsFromNotes(userId);
+  } catch (err) {
+    pushError(
+      result,
+      `付款方式 backfill: ${err instanceof Error ? err.message : 'backfill failed'}`,
     );
   }
   const creds = await getClickUpCredentials(userId);

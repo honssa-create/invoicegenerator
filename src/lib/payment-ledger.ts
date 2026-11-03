@@ -96,6 +96,106 @@ export function isPaymentLedgerCategory(value: unknown): value is PaymentLedgerC
   return typeof value === 'string' && (PAYMENT_LEDGER_CATEGORIES as readonly string[]).includes(value);
 }
 
+/**
+ * 付款方式. ClickUp's Payment label and comment text map onto this list.
+ * Blank means the source did not name a method.
+ */
+export const PAYMENT_LEDGER_METHODS = [
+  'FPS',
+  '轉帳',
+  'PayMe',
+  '支票',
+  '現金',
+  '信用卡',
+  '八達通',
+  '支付寶',
+  '微信支付',
+  '其他',
+] as const;
+export type PaymentLedgerMethod = (typeof PAYMENT_LEDGER_METHODS)[number];
+
+export function isPaymentLedgerMethod(value: unknown): value is PaymentLedgerMethod {
+  return typeof value === 'string' && (PAYMENT_LEDGER_METHODS as readonly string[]).includes(value);
+}
+
+/** Manual edit. Empty string clears the cell; anything else must be a known method. */
+export function parsePaymentLedgerMethodInput(value: unknown): PaymentLedgerMethod | '' | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return '';
+  return isPaymentLedgerMethod(text) ? text : null;
+}
+
+const LABEL_TO_PAYMENT_METHOD: Record<string, PaymentLedgerMethod> = {
+  fps: 'FPS',
+  轉數快: 'FPS',
+  銀行轉賬: '轉帳',
+  銀行轉帳: '轉帳',
+  銀行轉账: '轉帳',
+  轉帳: '轉帳',
+  轉賬: '轉帳',
+  轉账: '轉帳',
+  payme: 'PayMe',
+  支票: '支票',
+  現金: '現金',
+  信用卡: '信用卡',
+  八達通: '八達通',
+  支付寶: '支付寶',
+  支付宝: '支付寶',
+  微信支付: '微信支付',
+  其他: '其他',
+};
+
+/** ClickUp Payment labels that name a method. Status labels (Full Paid, 50% payment) are ignored. */
+export function paymentMethodFromLabels(labels: string[]): PaymentLedgerMethod | null {
+  const found: PaymentLedgerMethod[] = [];
+  for (const label of labels) {
+    const text = label.trim();
+    const method = LABEL_TO_PAYMENT_METHOD[text.toLowerCase()] || LABEL_TO_PAYMENT_METHOD[text];
+    if (method && !found.includes(method)) found.push(method);
+  }
+  if (found.length !== 1) return null;
+  return found[0];
+}
+
+const PAYMENT_METHOD_PATTERNS: Array<{ method: PaymentLedgerMethod; pattern: RegExp }> = [
+  { method: 'PayMe', pattern: /pay\s*me\b/i },
+  { method: '八達通', pattern: /八達通|\boctopus\b/i },
+  { method: '支付寶', pattern: /支付寶|支付宝|\balipay\b/i },
+  { method: '微信支付', pattern: /微信支付|微信付款|wechat\s*pay/i },
+  { method: '支票', pattern: /支票|\bcheque\b/i },
+  { method: '現金', pattern: /現金|\bcash\b/i },
+  { method: '信用卡', pattern: /信用卡|信用咭|credit\s*card|\bvisa\b|\bmastercard\b/i },
+  { method: '轉帳', pattern: /銀行轉[帳賬账]|轉[帳賬账]|\bbank\s*transfer\b|過數/i },
+  { method: 'FPS', pattern: /轉數快|\bfps\b|faster\s*payment/i },
+  { method: '其他', pattern: /付款方式\s*[:：]\s*其他|其他付款方式/ },
+];
+
+/**
+ * Honour's own receiving account, copied into almost every confirmation.
+ * "轉數快 FPS ID：110700226" is payee instructions, not proof this payment used FPS.
+ */
+function withoutPayeeAccount(text: string): string {
+  return text.replace(
+    /(?:轉數快\s*)?FPS\s*(?:識別碼|ID)\s*[:：]?\s*\d+|轉數快\s*(?:識別碼|ID)\s*[:：]?\s*\d+/gi,
+    ' ',
+  );
+}
+
+/**
+ * One clear method from comment / notes / filename text.
+ * Two different methods, or only a payee FPS ID, stay blank.
+ */
+export function paymentMethodFromText(text: string | null | undefined): PaymentLedgerMethod | null {
+  const cleaned = withoutPayeeAccount(String(text || ''));
+  const found: PaymentLedgerMethod[] = [];
+  for (const rule of PAYMENT_METHOD_PATTERNS) {
+    if (rule.pattern.test(cleaned) && !found.includes(rule.method)) found.push(rule.method);
+  }
+  if (found.length !== 1) return null;
+  return found[0];
+}
+
 export type PaymentLedgerDraft = {
   dedupe_key: string;
   paid_date: string | null;
@@ -107,6 +207,7 @@ export type PaymentLedgerDraft = {
   clickup_task_id: string;
   source: 'comment' | 'installment';
   category: PaymentLedgerCategory;
+  payment_method: PaymentLedgerMethod | null;
 };
 
 const PAYMENT_SIGNAL =
@@ -437,6 +538,7 @@ function installmentDraft(
     clickup_task_id: task.id,
     source: 'installment',
     category: DEFAULT_PAYMENT_LEDGER_CATEGORY,
+    payment_method: paymentMethodFromLabels(labels),
   };
 }
 
@@ -445,6 +547,7 @@ function mergeIntoInstallment(target: PaymentLedgerDraft, extra: PaymentLedgerDr
   target.attachments = dedupeAttachments([...target.attachments, ...extra.attachments]);
   if (!target.paid_date && extra.paid_date) target.paid_date = extra.paid_date;
   if (target.amount == null && extra.amount != null) target.amount = extra.amount;
+  if (!target.payment_method && extra.payment_method) target.payment_method = extra.payment_method;
 }
 
 /** Written on both rows when a same-day comment cannot be tied to one installment. */
@@ -626,6 +729,7 @@ function commentDrafts(task: ClickUpTask, comments: ClickUpComment[], orderNo: s
     const notes = notesFromComment(text, names);
     const amounts = selectCommentPaymentAmounts(notes || text);
     const paidDate = clickUpMsToHkDate(comment.date);
+    const payment_method = paymentMethodFromText(`${notes}\n${names.join('\n')}`);
     const base = {
       paid_date: paidDate,
       order_no: orderNo,
@@ -635,6 +739,7 @@ function commentDrafts(task: ClickUpTask, comments: ClickUpComment[], orderNo: s
       clickup_task_id: task.id,
       source: 'comment' as const,
       category: DEFAULT_PAYMENT_LEDGER_CATEGORY,
+      payment_method,
     };
     if (amounts.length <= 1) {
       rows.push({
@@ -690,6 +795,7 @@ export function extractPaymentLedgerRows(task: ClickUpTask, comments: ClickUpCom
       clickup_task_id: task.id,
       source: 'installment',
       category: DEFAULT_PAYMENT_LEDGER_CATEGORY,
+      payment_method: paymentMethodFromLabels(labels),
     });
   }
 
@@ -750,6 +856,7 @@ function cloneDraft(row: PaymentLedgerDraft): PaymentLedgerDraft {
     attachments: [...(row.attachments || [])],
     clickup_task_id: row.clickup_task_id || '',
     category: row.category || DEFAULT_PAYMENT_LEDGER_CATEGORY,
+    payment_method: row.payment_method || null,
   };
 }
 
@@ -758,6 +865,7 @@ function draftSnapshot(row: PaymentLedgerDraft): string {
     amount: row.amount,
     notes: row.notes,
     attachments: row.attachments,
+    payment_method: row.payment_method || null,
   });
 }
 

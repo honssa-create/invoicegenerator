@@ -317,6 +317,12 @@ export function commentLooksLikePayment(text: string, attachmentNames: string[])
 }
 
 const MONEY_AMOUNT = /(?:HK\$|HKD|＄|\$)\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/;
+/**
+ * Amount written after a payment label when the comment left off HK$ / $.
+ * `1st payment 7866`, `payment 7,866`. The number has to stay on the same line.
+ */
+const LABELED_BARE_AMOUNT =
+  /(?:\b(?:1st|2nd|3rd|first|second|third)\s+payment\b|\bpayment\b|已付|付款)[ \t]*[:：]?[ \t]*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/i;
 /** 加單 comment marker. Broader than this, `EXTRA_CHARGE` also matches notes like 加20樽金額. */
 const ADDON_CHARGE_LABEL = /加單金額|加单金额/;
 
@@ -328,9 +334,36 @@ function amountsClose(a: number, b: number): boolean {
 const ADDON_MONEY_AFTER_LABEL =
   /^[\s:：,，.。、\]】)）]{0,8}(?:HK\$|HKD|＄|\$)\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/;
 
+function skipBareAmountTail(after: string): boolean {
+  if (/^[ \t]*[/／]\s*(?:樽|瓶|pcs|pc|ml)/i.test(after)) return true;
+  // 樽/瓶 are not ASCII word characters, so a trailing \b would miss them at end of text.
+  if (/^[ \t]*(?:樽|瓶)/.test(after)) return true;
+  if (/^[ \t]*(?:pcs|pc|ml)\b/i.test(after)) return true;
+  if (/^[ \t]*(?:%|％)/.test(after)) return true;
+  if (/^[-/.]\d/.test(after)) return true;
+  return false;
+}
+
+/** Same-line payment labels with no currency symbol. Skips a figure already captured as HK$ / $. */
+function appendLabeledBareAmounts(text: string, amounts: number[]) {
+  const re = new RegExp(LABELED_BARE_AMOUNT.source, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const end = match.index + match[0].length;
+    const after = text.slice(end, end + 8);
+    if (skipBareAmountTail(after)) continue;
+    const n = Number(`${match[1].replace(/,/g, '')}${match[2] || ''}`);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (amounts.some((kept) => amountsClose(kept, n))) continue;
+    amounts.push(n);
+  }
+}
+
 /**
  * Dollar amounts that are not per-bottle unit prices (`$45/樽`).
- * Label-blind: every HK$/HKD/$/＄ figure is returned, including 總額.
+ * Every HK$/HKD/$/＄ figure is returned, including 總額.
+ * A payment label with no currency symbol is included too (`1st payment 7866`,
+ * `payment 7866`). Dates, percentages (`100%`), and per-bottle quantities are not.
  * 加單 comments do not use this list directly — see `selectCommentPaymentAmounts`.
  *
  * RULE (enforced by `selectCommentPaymentAmounts`, not by this scanner)：加單 comment（有「加單金額」）只入帳加單金額一筆；唔好入總額；同一 comment 重複加單金額只計一次。
@@ -345,6 +378,7 @@ export function parsePaymentAmounts(text: string): number[] {
     const n = Number(`${match[1].replace(/,/g, '')}${match[2] || ''}`);
     if (Number.isFinite(n) && n > 0) amounts.push(n);
   }
+  appendLabeledBareAmounts(text, amounts);
   return amounts;
 }
 
@@ -417,9 +451,9 @@ function mergeIntoInstallment(target: PaymentLedgerDraft, extra: PaymentLedgerDr
 export const SAME_DAY_UNCERTAIN_NOTE = '同日有付款留言／收據，未能確定係同一筆定另一筆';
 
 const SAME_DAY_AMOUNT_WINDOW = 1;
-const FULL_OR_HALF_RECEIPT = /full\s*paid|full\s*payment|(?<!\d)50\s*%/i;
-const SLOT_ONE = /第一次/;
-const SLOT_TWO = /第二次|第2次/;
+const FULL_OR_HALF_RECEIPT = /full\s*paid|full\s*payment|(?<!\d)50\s*%|(?<!\d)100\s*%/i;
+const SLOT_ONE = /第一次|(?<![A-Za-z0-9])(?:1st|first)(?![A-Za-z0-9])/i;
+const SLOT_TWO = /第二次|第2次|(?<![A-Za-z0-9])(?:2nd|second)(?![A-Za-z0-9])/i;
 const BALANCE_PAYMENT = /尾[數数]/;
 
 export type SameDayPaymentReview =
@@ -455,6 +489,54 @@ function namedInstallmentSlot(blob: string): 1 | 2 | 'both' | null {
   return null;
 }
 
+function uniqueAmounts(amounts: number[]): number[] {
+  const out: number[] = [];
+  for (const amount of amounts) {
+    if (!out.some((kept) => amountsClose(kept, amount))) out.push(amount);
+  }
+  return out;
+}
+
+/** Bare numbers that can be checked against an installment. Dates, percents, and per-bottle prices are left out. */
+function standalonePaymentNumbers(text: string): number[] {
+  const re = /(?<![\d,])(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?(?![\d,])/g;
+  const out: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const end = match.index + match[0].length;
+    const after = text.slice(end, end + 10);
+    const before = text.slice(Math.max(0, match.index - 8), match.index);
+    if (skipBareAmountTail(after)) continue;
+    if (/\d[-/.]$/.test(before)) continue;
+    const n = Number(`${match[1].replace(/,/g, '')}${match[2] || ''}`);
+    if (Number.isFinite(n) && n > 0) out.push(n);
+  }
+  return out;
+}
+
+/** When the comment never wrote a currency symbol, use a bare number that hits exactly one same-day installment. */
+function echoedInstallmentAmount(blob: string, sameDay: PaymentLedgerDraft[]): number | null {
+  const numbers = standalonePaymentNumbers(blob);
+  const hits = sameDay.filter(
+    (row) => row.amount != null && numbers.some((n) => amountsWithinDollar(n, row.amount as number)),
+  );
+  if (hits.length !== 1 || hits[0].amount == null) return null;
+  return hits[0].amount;
+}
+
+/**
+ * Amount used for the same-day compare.
+ * Stored comment rows can have a null amount while the notes still say `1st payment 7866`.
+ * Several different labeled amounts are a conflict, not a guess.
+ */
+function sameDayAmount(comment: PaymentLedgerDraft, sameDay: PaymentLedgerDraft[]): number | 'conflict' | null {
+  if (comment.amount != null) return comment.amount;
+  const labeled = uniqueAmounts(selectCommentPaymentAmounts(comment.notes));
+  if (labeled.length > 1) return 'conflict';
+  if (labeled.length === 1) return labeled[0];
+  return echoedInstallmentAmount(commentBlob(comment), sameDay);
+}
+
 /**
  * Same Hong Kong calendar day does not by itself mean one payment.
  * `paid_date` values are already `YYYY-MM-DD` in Asia/Hong_Kong.
@@ -463,8 +545,9 @@ function namedInstallmentSlot(blob: string): 1 | 2 | 'both' | null {
  * 確定係同一筆先將收據併入該期入帳列；確定係另一筆就分開兩行。
  * 未能確定就唔好當係同一筆，備註要寫：同日有付款留言／收據，未能確定係同一筆定另一筆。
  *
- * One payment: amount within $1, or a Full/50% receipt with no separate amount,
- * or the comment names 第一次/第二次 and has a receipt file.
+ * One payment: amount within $1 of exactly one installment (including a bare
+ * `1st payment 7866` with no HK$), or a Full/50%/100% receipt with no conflicting
+ * separate amount, or the comment names 第一次/1st/first or 第二次/2nd/second and has a receipt file.
  * Two payments: a different amount, 加單, or 尾數. The receipt stays on the comment.
  */
 export function reviewSameDayPayments(
@@ -479,8 +562,10 @@ export function reviewSameDayPayments(
   const blob = commentBlob(comment);
   if (EXTRA_CHARGE.test(comment.notes) || BALANCE_PAYMENT.test(blob)) return { decision: 'two' };
 
-  if (comment.amount != null) {
-    const close = sameDay.filter((row) => row.amount != null && amountsWithinDollar(row.amount, comment.amount as number));
+  const amount = sameDayAmount(comment, sameDay);
+  if (amount === 'conflict') return { decision: 'uncertain' };
+  if (amount != null) {
+    const close = sameDay.filter((row) => row.amount != null && amountsWithinDollar(row.amount, amount));
     if (close.length === 1) return { decision: 'one', dedupe_key: close[0].dedupe_key };
     if (close.length > 1) return { decision: 'uncertain' };
     if (sameDay.some((row) => row.amount != null)) return { decision: 'two' };
@@ -504,7 +589,7 @@ export function reviewSameDayPayments(
 }
 
 /**
- * A comment that only restates an installment (same amount, or a Full Paid / 50% receipt
+ * A comment that only restates an installment (same amount, or a Full Paid / 50% / 100% receipt
  * with no separate amount) is folded into that installment so the ledger keeps one row.
  * Used when the comment is not on the installment's Hong Kong calendar day.
  * Same-day comments go through `reviewSameDayPayments` first.
@@ -515,10 +600,10 @@ function matchingInstallment(comment: PaymentLedgerDraft, installments: PaymentL
   if (comment.amount != null) {
     return installments.find((row) => row.amount != null && amountsClose(row.amount, comment.amount as number)) || null;
   }
-  const blob = `${comment.notes} ${comment.attachments.map((item) => item.name).join(' ')}`;
-  const receipt = /full\s*paid|full\s*payment|(?<!\d)50\s*%|\bpayment\b/i.test(blob);
+  const blob = commentBlob(comment);
+  const receipt = FULL_OR_HALF_RECEIPT.test(blob) || /\bpayment\b/i.test(blob);
   if (!receipt) return null;
-  if (/第二次|第2次|尾[數数]/.test(blob)) {
+  if (SLOT_TWO.test(blob) || BALANCE_PAYMENT.test(blob)) {
     return installments.find((row) => row.dedupe_key.endsWith(':2')) || installments[0] || null;
   }
   return installments.find((row) => row.dedupe_key.endsWith(':1')) || installments[0] || null;
@@ -636,6 +721,105 @@ export function extractPaymentLedgerRows(task: ClickUpTask, comments: ClickUpCom
     else kept.push(comment);
   }
   return [...installments, ...kept];
+}
+
+/** Live order Vanessa confirmed is one payment. The one-shot repair does not touch other orders. */
+export const ORDER_12212_SAME_DAY_REPAIR = '12212';
+
+export type SameDayRepairPlan = {
+  updates: PaymentLedgerDraft[];
+  delete_keys: string[];
+};
+
+function withoutUncertainNote(notes: string): string {
+  const parts = (notes || '')
+    .split(SAME_DAY_UNCERTAIN_NOTE)
+    .join(' ')
+    .split(' · ')
+    .map((part) => part.trim())
+    .filter((part) => part && part !== '·');
+  return joinNotes(...parts);
+}
+
+function cloneDraft(row: PaymentLedgerDraft): PaymentLedgerDraft {
+  return {
+    ...row,
+    notes: row.notes || '',
+    order_no: (row.order_no || '').trim(),
+    link: row.link || '',
+    attachments: [...(row.attachments || [])],
+    clickup_task_id: row.clickup_task_id || '',
+    category: row.category || DEFAULT_PAYMENT_LEDGER_CATEGORY,
+  };
+}
+
+function draftSnapshot(row: PaymentLedgerDraft): string {
+  return JSON.stringify({
+    amount: row.amount,
+    notes: row.notes,
+    attachments: row.attachments,
+  });
+}
+
+function planOneTaskSameDayRepair(rows: PaymentLedgerDraft[]): SameDayRepairPlan {
+  const installments = rows.filter((row) => row.source === 'installment').map(cloneDraft);
+  const comments = rows.filter((row) => row.source === 'comment').map(cloneDraft);
+  const before = new Map(installments.map((row) => [row.dedupe_key, draftSnapshot(row)]));
+  const delete_keys: string[] = [];
+  for (const comment of comments) {
+    if (!(comment.notes || '').includes(SAME_DAY_UNCERTAIN_NOTE)) continue;
+    const review = reviewSameDayPayments(comment, installments);
+    if (review.decision !== 'one') continue;
+    const target = installments.find((row) => row.dedupe_key === review.dedupe_key);
+    if (!target) continue;
+    const extra = { ...comment, notes: withoutUncertainNote(comment.notes) };
+    if (extra.amount == null) {
+      const labeled = uniqueAmounts(selectCommentPaymentAmounts(extra.notes));
+      if (labeled.length === 1) extra.amount = labeled[0];
+    }
+    mergeIntoInstallment(target, extra);
+    delete_keys.push(comment.dedupe_key);
+  }
+  const removed = new Set(delete_keys);
+  const foldedDays = new Set(comments.filter((row) => removed.has(row.dedupe_key)).map((row) => row.paid_date));
+  for (const inst of installments) {
+    if (!foldedDays.has(inst.paid_date)) continue;
+    const pending = comments.some(
+      (row) =>
+        !removed.has(row.dedupe_key) &&
+        row.paid_date === inst.paid_date &&
+        (row.notes || '').includes(SAME_DAY_UNCERTAIN_NOTE),
+    );
+    if (!pending) inst.notes = withoutUncertainNote(inst.notes);
+  }
+  return {
+    updates: installments.filter((row) => before.get(row.dedupe_key) !== draftSnapshot(row)),
+    delete_keys,
+  };
+}
+
+/**
+ * Fold stored order 12212 rows that the corrected same-day rule now calls one payment.
+ * Only a comment that already carries the uncertain note is eligible, and only when
+ * `reviewSameDayPayments` returns `one`. Other orders are ignored.
+ */
+export function planOrder12212SameDayRepair(rows: PaymentLedgerDraft[]): SameDayRepairPlan {
+  const groups = new Map<string, PaymentLedgerDraft[]>();
+  for (const row of rows) {
+    if ((row.order_no || '').trim() !== ORDER_12212_SAME_DAY_REPAIR) continue;
+    const key = row.clickup_task_id || '';
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  const updates: PaymentLedgerDraft[] = [];
+  const delete_keys: string[] = [];
+  for (const group of Array.from(groups.values())) {
+    const plan = planOneTaskSameDayRepair(group);
+    updates.push(...plan.updates);
+    delete_keys.push(...plan.delete_keys);
+  }
+  return { updates, delete_keys };
 }
 
 function fieldText(field: ClickUpCustomField | undefined): string {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ClickUpApiError, type ClickUpComment, type ClickUpTask } from './clickup';
 import { ingestClickUpPaymentWebhook } from './clickup-payment-webhook';
 import db from './db';
+import { backfillPaymentMethodsFromNotes, updatePaymentLedgerMethod } from './payment-ledger-server';
 
 const USER_ID = 99941;
 
@@ -157,5 +158,43 @@ describe('ingestClickUpPaymentWebhook', () => {
       n: number;
     };
     expect(Number(count.n)).toBe(0);
+  });
+
+  it('fills 付款方式 from stored notes and keeps a manual edit', async () => {
+    await cleanup();
+    await db
+      .prepare('INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)')
+      .run(USER_ID, 'ledger-webhook@example.com', 'hash', 'Ledger Webhook');
+    await db
+      .prepare(
+        `INSERT INTO payment_ledger (user_id, dedupe_key, notes, source, payment_method)
+         VALUES (?, 'comment:method:transfer', '銀行轉帳', 'comment', NULL),
+                (?, 'comment:method:payee', '轉數快 FPS ID：110700226', 'comment', NULL),
+                (?, 'comment:method:manual', '銀行轉帳', 'comment', 'PayMe')`,
+      )
+      .run(USER_ID, USER_ID, USER_ID);
+
+    expect(await backfillPaymentMethodsFromNotes(USER_ID)).toBe(1);
+    const rows = (await db
+      .prepare(
+        `SELECT dedupe_key, payment_method FROM payment_ledger WHERE user_id = ? ORDER BY dedupe_key`,
+      )
+      .all(USER_ID)) as { dedupe_key: string; payment_method: string | null }[];
+    expect(rows).toEqual([
+      { dedupe_key: 'comment:method:manual', payment_method: 'PayMe' },
+      { dedupe_key: 'comment:method:payee', payment_method: null },
+      { dedupe_key: 'comment:method:transfer', payment_method: '轉帳' },
+    ]);
+
+    const transfer = (await db
+      .prepare(`SELECT id FROM payment_ledger WHERE user_id = ? AND dedupe_key = 'comment:method:transfer'`)
+      .get(USER_ID)) as { id: number };
+    const cleared = await updatePaymentLedgerMethod(USER_ID, transfer.id, '');
+    expect(cleared?.payment_method).toBeNull();
+    expect(await backfillPaymentMethodsFromNotes(USER_ID)).toBe(0);
+    const kept = (await db
+      .prepare(`SELECT payment_method FROM payment_ledger WHERE id = ?`)
+      .get(transfer.id)) as { payment_method: string | null };
+    expect(kept.payment_method).toBe('');
   });
 });

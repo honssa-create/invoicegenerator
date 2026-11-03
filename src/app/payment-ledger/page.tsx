@@ -9,6 +9,7 @@ import {
   isImageAttachment,
   ledgerAttachmentSrc,
   PAYMENT_LEDGER_CATEGORIES,
+  PAYMENT_LEDGER_METHODS,
   type PaymentLedgerAttachment,
   type PaymentLedgerCategory,
 } from '@/lib/payment-ledger';
@@ -25,6 +26,7 @@ type Entry = {
   link: string | null;
   attachments: PaymentLedgerAttachment[];
   category: PaymentLedgerCategory;
+  payment_method: string | null;
 };
 
 type SyncInfo = {
@@ -123,7 +125,14 @@ export default function PaymentLedgerPage() {
       if ((dateStart || dateEnd) && !date) return false;
       if (!q) return true;
       const attachmentText = (row.attachments || []).map((item) => `${item.name} ${item.url}`).join(' ');
-      return [row.order_no, row.notes, row.link, row.amount != null ? String(row.amount) : '', attachmentText]
+      return [
+        row.order_no,
+        row.notes,
+        row.link,
+        row.payment_method,
+        row.amount != null ? String(row.amount) : '',
+        attachmentText,
+      ]
         .join(' ')
         .toLowerCase()
         .includes(q);
@@ -161,6 +170,26 @@ export default function PaymentLedgerPage() {
     } catch (err) {
       setEntries((current) =>
         current.map((row) => (row.id === id && previous ? { ...row, category: previous } : row)),
+      );
+      setError(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
+
+  const savePaymentMethod = async (id: number, paymentMethod: string) => {
+    const previous = entries.find((row) => row.id === id)?.payment_method ?? null;
+    const next = paymentMethod || null;
+    setEntries((current) => current.map((row) => (row.id === id ? { ...row, payment_method: next } : row)));
+    try {
+      const res = await fetch(`/api/payment-ledger/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payment_method: paymentMethod }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+    } catch (err) {
+      setEntries((current) =>
+        current.map((row) => (row.id === id ? { ...row, payment_method: previous } : row)),
       );
       setError(err instanceof Error ? err.message : 'Save failed');
     }
@@ -286,7 +315,7 @@ export default function PaymentLedgerPage() {
         onDateEnd={setDateEnd}
         search={search}
         onSearch={setSearch}
-        searchPlaceholder={bi('Order no., notes, amount…', '訂單編號、事由、金額…')}
+        searchPlaceholder={bi('Order no., notes, amount, payment method…', '訂單編號、事由、金額、付款方式…')}
         onClear={() => {
           setDateStart('');
           setDateEnd('');
@@ -321,12 +350,13 @@ export default function PaymentLedgerPage() {
             {bi('No rows match these filters.', '沒有符合篩選條件的入帳。')}
           </div>
         ) : (
-          <table className="w-full min-w-[960px]">
+          <table className="w-full min-w-[1080px]">
             <thead>
               <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
                 <th className="px-6 py-3">Paid Date</th>
                 <th className="px-6 py-3">Amount</th>
                 <th className="px-6 py-3">Order No.</th>
+                <th className="px-6 py-3">付款方式</th>
                 <th className="px-6 py-3">類別</th>
                 <th className="px-6 py-3">Notes</th>
                 <th className="px-6 py-3">Link</th>
@@ -339,6 +369,26 @@ export default function PaymentLedgerPage() {
                   <td className="px-6 py-3 align-middle text-sm text-gray-700 whitespace-nowrap">{row.paid_date || '—'}</td>
                   <td className="px-6 py-3 align-middle text-sm text-gray-900 tabular-nums whitespace-nowrap">{formatAmount(row.amount)}</td>
                   <td className="px-6 py-3 align-middle text-sm font-medium text-gray-900 whitespace-nowrap">{row.order_no || '—'}</td>
+                  <td className="px-6 py-3 align-middle text-sm">
+                    <select
+                      aria-label="付款方式"
+                      value={row.payment_method || ''}
+                      disabled={readOnly}
+                      onChange={(event) => savePaymentMethod(row.id, event.target.value)}
+                      className="min-h-[36px] min-w-[6.5rem] rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 disabled:bg-gray-50"
+                    >
+                      <option value="">—</option>
+                      {PAYMENT_LEDGER_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
+                      {row.payment_method &&
+                      !(PAYMENT_LEDGER_METHODS as readonly string[]).includes(row.payment_method) ? (
+                        <option value={row.payment_method}>{row.payment_method}</option>
+                      ) : null}
+                    </select>
+                  </td>
                   <td className="px-6 py-3 align-middle text-sm">
                     <select
                       aria-label="類別"

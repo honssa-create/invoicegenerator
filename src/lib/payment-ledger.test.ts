@@ -8,6 +8,7 @@ import {
   ledgerAttachmentSrc,
   orderNoFromTaskTitle,
   parsePaymentAmounts,
+  planOrder12212SameDayRepair,
   reviewSameDayPayments,
   SAME_DAY_UNCERTAIN_NOTE,
   selectCommentPaymentAmounts,
@@ -92,6 +93,17 @@ describe('parsePaymentAmounts', () => {
 
   it('still lists every dollar figure, including a repeated 加單金額 and the 總額', () => {
     expect(parsePaymentAmounts(ORDER_11124_ADDON_NOTES)).toEqual([1835, 1835, 5337]);
+  });
+
+  it('reads a bare payment amount and ignores dates, percents, and per-bottle prices', () => {
+    expect(parsePaymentAmounts('1st payment 7866, 02-11-2026 ; [100% payment]')).toEqual([7866]);
+    expect(parsePaymentAmounts('payment 7,866')).toEqual([7866]);
+    expect(parsePaymentAmounts('first payment 7866.5')).toEqual([7866.5]);
+    expect(parsePaymentAmounts('2nd payment 500')).toEqual([500]);
+    expect(parsePaymentAmounts('[100% payment]')).toEqual([]);
+    expect(parsePaymentAmounts('payment 45/樽')).toEqual([]);
+    expect(parsePaymentAmounts('payment 45樽')).toEqual([]);
+    expect(parsePaymentAmounts('1st payment 7866 ($45/樽)')).toEqual([7866]);
   });
 });
 
@@ -443,6 +455,120 @@ describe('reviewSameDayPayments', () => {
     ).toEqual({ decision: 'one', dedupe_key: 'installment:t:2' });
   });
 
+  it('folds order 12212 when the comment says 1st payment 7866 and 100% with no currency symbol', () => {
+    const installment = draft({
+      dedupe_key: 'installment:t12212:1',
+      paid_date: '2026-11-02',
+      amount: 7866,
+      order_no: '12212',
+      notes: 'Full Paid · 第一次付款 · 100% full payment',
+    });
+    const other = draft({
+      dedupe_key: 'installment:t12212:2',
+      paid_date: '2026-11-02',
+      amount: 4000,
+      order_no: '12212',
+      notes: '第二次付款',
+    });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t12212:c',
+          paid_date: '2026-11-02',
+          amount: null,
+          order_no: '12212',
+          notes: '1st payment 7866, 02-11-2026 ; [100% payment]',
+          attachments: [receiptFile],
+        }),
+        [installment, other],
+      ),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t12212:1' });
+  });
+
+  it('treats English installment names and 100% as a full receipt', () => {
+    const firstSame = { ...first, paid_date: '2026-08-10' };
+    const secondSame = { ...second, paid_date: '2026-08-10' };
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:second',
+          paid_date: '2026-08-10',
+          notes: '2nd payment receipt',
+          attachments: [receiptFile],
+        }),
+        [firstSame, secondSame],
+      ),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t:2' });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:hundred',
+          paid_date: '2026-08-10',
+          notes: '[100% payment]',
+          attachments: [receiptFile],
+        }),
+        [first],
+      ),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t:1' });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:hundred-both',
+          paid_date: '2026-08-10',
+          notes: '[100% payment]',
+          attachments: [receiptFile],
+        }),
+        [firstSame, secondSame],
+      ),
+    ).toEqual({ decision: 'uncertain' });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:different',
+          paid_date: '2026-11-02',
+          notes: '1st payment 5000 ; [100% payment]',
+          attachments: [receiptFile],
+        }),
+        [
+          draft({
+            dedupe_key: 'installment:t:1',
+            paid_date: '2026-11-02',
+            amount: 7866,
+            notes: '第一次付款',
+          }),
+        ],
+      ),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(
+        draft({
+          dedupe_key: 'comment:t:21st',
+          paid_date: '2026-08-10',
+          notes: '21st payment',
+          attachments: [receiptFile],
+        }),
+        [first],
+      ),
+    ).toEqual({ decision: 'uncertain' });
+  });
+
+  it('uses a bare number that matches exactly one same-day installment', () => {
+    const firstSame = { ...first, paid_date: '2026-08-10' };
+    const secondSame = { ...second, paid_date: '2026-08-10' };
+    expect(
+      reviewSameDayPayments(
+        draft({ dedupe_key: 'comment:t:echo', paid_date: '2026-08-10', notes: 'received 1000 today' }),
+        [firstSame, secondSame],
+      ),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t:1' });
+    expect(
+      reviewSameDayPayments(
+        draft({ dedupe_key: 'comment:t:nomatch', paid_date: '2026-08-10', notes: 'ref 1234' }),
+        [firstSame, secondSame],
+      ),
+    ).toEqual({ decision: 'uncertain' });
+  });
+
   it('does not treat a same-day comment as the installment when the link is unclear', () => {
     expect(
       reviewSameDayPayments(
@@ -595,6 +721,138 @@ describe('same-day ledger rows', () => {
     expect(second?.notes).toBe('Full Paid · 第二次付款');
     expect(second?.paid_date).toBe('2026-09-29');
   });
+
+  it('folds the order 12212 comment into the installment and keeps the receipt', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 't12212',
+        name: '12212',
+        custom_fields: [
+          labels(['Full Paid', '100% full payment']),
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1793548800000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '7866' },
+        ],
+      }),
+      [
+        {
+          id: 'c12212',
+          comment_text: '1st payment 7866, 02-11-2026 ; [100% payment]\nreceipt.png',
+          date: '1793548800000',
+          comment: [
+            {
+              type: 'image',
+              text: 'receipt.png',
+              image: { id: 'r12212', name: 'receipt.png', url: 'https://cdn.example/12212.png' },
+            },
+          ],
+        },
+      ],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      dedupe_key: 'installment:t12212:1',
+      paid_date: '2026-11-02',
+      amount: 7866,
+      order_no: '12212',
+      source: 'installment',
+    });
+    expect(rows[0].notes).toContain('1st payment 7866, 02-11-2026 ; [100% payment]');
+    expect(rows[0].notes).toContain('Full Paid');
+    expect(rows[0].notes).toContain('第一次付款');
+    expect(rows[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(rows[0].attachments.map((item) => item.url)).toEqual(['https://cdn.example/12212.png']);
+  });
+});
+
+describe('planOrder12212SameDayRepair', () => {
+  const receipt = { name: 'receipt.png', url: 'https://cdn.example/12212.png' };
+
+  it('merges the stored uncertain pair for order 12212 and leaves every other row', () => {
+    const plan = planOrder12212SameDayRepair([
+      draft({
+        dedupe_key: 'installment:t12212:1',
+        paid_date: '2026-11-02',
+        amount: 7866,
+        order_no: '12212',
+        notes: `Full Paid · 第一次付款 · 100% full payment · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        clickup_task_id: 't12212',
+        source: 'installment',
+        category: '燕窩',
+      }),
+      draft({
+        dedupe_key: 'comment:t12212:c',
+        paid_date: '2026-11-02',
+        amount: null,
+        order_no: '12212',
+        notes: `1st payment 7866, 02-11-2026 ; [100% payment] · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        attachments: [receipt],
+        clickup_task_id: 't12212',
+        source: 'comment',
+        link: 'https://app.clickup.com/t/t12212?comment=c',
+      }),
+      draft({
+        dedupe_key: 'comment:t12212:plain',
+        paid_date: '2026-11-02',
+        amount: null,
+        order_no: '12212',
+        notes: '1st payment 7866, 02-11-2026 ; [100% payment]',
+        attachments: [receipt],
+        clickup_task_id: 't12212',
+        source: 'comment',
+      }),
+      draft({
+        dedupe_key: 'installment:t12212:2',
+        paid_date: '2026-11-03',
+        amount: 200,
+        order_no: '12212',
+        notes: '第二次付款',
+        clickup_task_id: 't12212',
+        source: 'installment',
+      }),
+      draft({
+        dedupe_key: 'comment:t12212:addon',
+        paid_date: '2026-11-03',
+        amount: 200,
+        order_no: '12212',
+        notes: `加單金額：$200 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        clickup_task_id: 't12212',
+        source: 'comment',
+      }),
+      draft({
+        dedupe_key: 'comment:other:c',
+        paid_date: '2026-11-02',
+        amount: null,
+        order_no: '12012',
+        notes: `1st payment 7866 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        attachments: [receipt],
+        clickup_task_id: 'other',
+        source: 'comment',
+      }),
+      draft({
+        dedupe_key: 'installment:other:1',
+        paid_date: '2026-11-02',
+        amount: 7866,
+        order_no: '12012',
+        notes: `第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        clickup_task_id: 'other',
+        source: 'installment',
+      }),
+    ]);
+
+    expect(plan.delete_keys).toEqual(['comment:t12212:c']);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]).toMatchObject({
+      dedupe_key: 'installment:t12212:1',
+      amount: 7866,
+      category: '燕窩',
+      source: 'installment',
+    });
+    expect(plan.updates[0].notes).toContain('1st payment 7866, 02-11-2026 ; [100% payment]');
+    expect(plan.updates[0].notes).toContain('Full Paid');
+    expect(plan.updates[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(plan.updates[0].attachments).toEqual([receipt]);
+    expect(plan.updates[0].link).toBe('');
+  });
 });
 
 const hasDb = Boolean(process.env.DATABASE_URL?.trim());
@@ -660,5 +918,108 @@ describe.skipIf(!hasDb)('syncPaymentLedger', () => {
     expect(afterThird[0].amount).toBe(7000);
     expect(afterThird[0].order_no).toBe('12104');
     expect(afterThird[0].category).toBe('燕窩');
+  });
+});
+
+const REPAIR_USER_ID = 99942;
+
+describe.skipIf(!hasDb)('repairOrder12212SameDayFold', () => {
+  beforeEach(async () => {
+    const db = (await import('./db')).default;
+    const { ORDER_12212_SAME_DAY_FOLD_MIGRATION } = await import('./payment-ledger-server');
+    await db.prepare('DELETE FROM payment_ledger WHERE user_id = ?').run(REPAIR_USER_ID);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(REPAIR_USER_ID);
+    await db.prepare('DELETE FROM app_migrations WHERE key = ?').run(ORDER_12212_SAME_DAY_FOLD_MIGRATION);
+    await db.prepare('INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)').run(
+      REPAIR_USER_ID,
+      `ledger-${REPAIR_USER_ID}@example.com`,
+      'hash',
+      'Ledger Repair',
+    );
+  });
+
+  it('folds the stored order 12212 pair once and leaves a different order alone', async () => {
+    const db = (await import('./db')).default;
+    const { repairOrder12212SameDayFoldOnce, listPaymentLedger } = await import('./payment-ledger-server');
+    const insert = db.prepare(
+      `INSERT INTO payment_ledger (
+         user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
+         clickup_task_id, source, category
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    await insert.run(
+      REPAIR_USER_ID,
+      'installment:t12212:1',
+      '2026-11-02',
+      7866,
+      '12212',
+      `Full Paid · 第一次付款 · 100% full payment · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'https://app.clickup.com/t/t12212',
+      '[]',
+      't12212',
+      'installment',
+      '燕窩',
+    );
+    await insert.run(
+      REPAIR_USER_ID,
+      'comment:t12212:c',
+      '2026-11-02',
+      null,
+      '12212',
+      `1st payment 7866, 02-11-2026 ; [100% payment] · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'https://app.clickup.com/t/t12212?comment=c',
+      JSON.stringify([{ name: 'receipt.png', url: 'https://cdn.example/12212.png' }]),
+      't12212',
+      'comment',
+      '回禮',
+    );
+    await insert.run(
+      REPAIR_USER_ID,
+      'installment:other:1',
+      '2026-11-02',
+      7866,
+      '12012',
+      `第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'https://app.clickup.com/t/other',
+      '[]',
+      'other',
+      'installment',
+      '回禮',
+    );
+    await insert.run(
+      REPAIR_USER_ID,
+      'comment:other:c',
+      '2026-11-02',
+      null,
+      '12012',
+      `1st payment 7866 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'https://app.clickup.com/t/other?comment=c',
+      JSON.stringify([{ name: 'other.png', url: 'https://cdn.example/other.png' }]),
+      'other',
+      'comment',
+      '回禮',
+    );
+
+    const first = await repairOrder12212SameDayFoldOnce();
+    expect(first).toEqual({ merged: 1, applied: true });
+    const rows = await listPaymentLedger(REPAIR_USER_ID);
+    const order12212 = rows.filter((row) => row.order_no === '12212');
+    const order12012 = rows.filter((row) => row.order_no === '12012');
+    expect(order12212).toHaveLength(1);
+    expect(order12212[0]).toMatchObject({
+      amount: 7866,
+      source: 'installment',
+      category: '燕窩',
+      link: 'https://app.clickup.com/t/t12212',
+    });
+    expect(order12212[0].notes).toContain('1st payment 7866');
+    expect(order12212[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(order12212[0].attachments.map((item) => item.url)).toEqual(['https://cdn.example/12212.png']);
+    expect(order12012).toHaveLength(2);
+    expect(order12012.every((row) => (row.notes || '').includes(SAME_DAY_UNCERTAIN_NOTE))).toBe(true);
+
+    const second = await repairOrder12212SameDayFoldOnce();
+    expect(second).toEqual({ merged: 0, applied: false });
+    expect((await listPaymentLedger(REPAIR_USER_ID)).filter((row) => row.order_no === '12212')).toHaveLength(1);
   });
 });

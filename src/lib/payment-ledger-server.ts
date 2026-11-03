@@ -11,10 +11,15 @@ import {
   extractPaymentLedgerRows,
   isClickUpAttachmentUrl,
   isPaymentLedgerCategory,
+  ORDER_12212_SAME_DAY_REPAIR,
+  planOrder12212SameDayRepair,
   type PaymentLedgerAttachment,
   type PaymentLedgerCategory,
   type PaymentLedgerDraft,
 } from './payment-ledger';
+
+/** One-shot key. Set after order 12212 uncertain same-day rows have been folded once. */
+export const ORDER_12212_SAME_DAY_FOLD_MIGRATION = 'payment_ledger_order_12212_same_day_fold_v1';
 
 const PROVIDER = 'clickup';
 const COMMENT_BUDGET = 40;
@@ -55,6 +60,8 @@ export type PaymentLedgerSyncResult = {
   cycle_complete: boolean;
   errors: string[];
   skipped?: string;
+  /** Set on the sync that runs the order 12212 one-shot, including when nothing needed folding. */
+  order_12212_folded?: number;
 };
 
 export type PaymentLedgerClickUpClient = {
@@ -269,6 +276,109 @@ async function upsertRow(userId: number, row: PaymentLedgerDraft): Promise<void>
     );
 }
 
+type StoredLedgerRow = {
+  user_id: number | string;
+  dedupe_key: string;
+  paid_date: string | null;
+  amount: number | string | null;
+  order_no: string | null;
+  notes: string | null;
+  link: string | null;
+  attachments_json: unknown;
+  clickup_task_id: string | null;
+  source: string | null;
+  category: string | null;
+};
+
+function finiteAmount(value: number | string | null): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Merge already-stored order 12212 same-day duplicates that the corrected rule calls one payment.
+ * Does not delete uncertain rows for any other order, and does not touch a 12212 comment the rule still calls two or uncertain.
+ */
+export async function repairOrder12212SameDayFold(): Promise<number> {
+  const rows = await db
+    .prepare(
+      `SELECT user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
+              clickup_task_id, source, category
+       FROM payment_ledger
+       WHERE btrim(order_no) = ?`,
+    )
+    .all<StoredLedgerRow>(ORDER_12212_SAME_DAY_REPAIR);
+
+  const groups = new Map<string, { userId: number; drafts: PaymentLedgerDraft[] }>();
+  for (const row of rows) {
+    if (row.source !== 'comment' && row.source !== 'installment') continue;
+    const userId = Number(row.user_id);
+    const taskId = row.clickup_task_id || '';
+    const key = `${userId}\0${taskId}`;
+    const group = groups.get(key) || { userId, drafts: [] };
+    group.drafts.push({
+      dedupe_key: row.dedupe_key,
+      paid_date: row.paid_date,
+      amount: finiteAmount(row.amount),
+      order_no: (row.order_no || '').trim(),
+      notes: row.notes || '',
+      link: row.link || '',
+      attachments: parseAttachments(row.attachments_json),
+      clickup_task_id: taskId,
+      source: row.source,
+      category: isPaymentLedgerCategory(row.category) ? row.category : DEFAULT_PAYMENT_LEDGER_CATEGORY,
+    });
+    groups.set(key, group);
+  }
+
+  let merged = 0;
+  await db.transaction(async () => {
+    for (const group of Array.from(groups.values())) {
+      const plan = planOrder12212SameDayRepair(group.drafts);
+      for (const update of plan.updates) {
+        await db
+          .prepare(
+            `UPDATE payment_ledger
+             SET notes = ?, attachments_json = ?, amount = ?,
+                 updated_at = to_char(NOW() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD HH24:MI:SS')
+             WHERE user_id = ? AND dedupe_key = ? AND source = 'installment'`,
+          )
+          .run(
+            update.notes || null,
+            JSON.stringify(update.attachments || []),
+            update.amount,
+            group.userId,
+            update.dedupe_key,
+          );
+      }
+      for (const dedupeKey of plan.delete_keys) {
+        const result = await db
+          .prepare(
+            `DELETE FROM payment_ledger
+             WHERE user_id = ? AND dedupe_key = ? AND source = 'comment' AND btrim(order_no) = ?`,
+          )
+          .run(group.userId, dedupeKey, ORDER_12212_SAME_DAY_REPAIR);
+        merged += result.changes || 0;
+      }
+    }
+  });
+  return merged;
+}
+
+/** Runs the order 12212 fold once per database. Later syncs leave every ledger row alone. */
+export async function repairOrder12212SameDayFoldOnce(): Promise<{ merged: number; applied: boolean }> {
+  const done = await db
+    .prepare(`SELECT key FROM app_migrations WHERE key = ?`)
+    .get(ORDER_12212_SAME_DAY_FOLD_MIGRATION);
+  if (done) return { merged: 0, applied: false };
+  const merged = await repairOrder12212SameDayFold();
+  await db
+    .prepare(`INSERT INTO app_migrations (key) VALUES (?) ON CONFLICT DO NOTHING`)
+    .run(ORDER_12212_SAME_DAY_FOLD_MIGRATION);
+  return { merged, applied: true };
+}
+
 /** Replace installment rows for a task. Comment rows are replaced only when comments were fetched. */
 export async function saveTaskPaymentRows(
   userId: number,
@@ -425,6 +535,15 @@ export async function syncPaymentLedger(
 ): Promise<PaymentLedgerSyncResult> {
   const listId = clickUpPaymentListId();
   const result = emptyResult(userId, listId);
+  try {
+    const repair = await repairOrder12212SameDayFoldOnce();
+    if (repair.applied) result.order_12212_folded = repair.merged;
+  } catch (err) {
+    pushError(
+      result,
+      `Order 12212 same-day fold: ${err instanceof Error ? err.message : 'repair failed'}`,
+    );
+  }
   const creds = await getClickUpCredentials(userId);
   const token = creds.api_token.trim();
   if (!token && !client) {

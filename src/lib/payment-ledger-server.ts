@@ -13,8 +13,11 @@ import {
   isPaymentLedgerCategory,
   isPaymentLedgerMethod,
   paymentMethodFromText,
+  ORDER_12194_SAME_DAY_REPAIR,
   ORDER_12212_SAME_DAY_REPAIR,
+  planOrder12194SameDayRepair,
   planOrder12212SameDayRepair,
+  SAME_DAY_UNCERTAIN_NOTE,
   type PaymentLedgerAttachment,
   type PaymentLedgerCategory,
   type PaymentLedgerDraft,
@@ -22,6 +25,14 @@ import {
 
 /** One-shot key. Set after order 12212 uncertain same-day rows have been folded once. */
 export const ORDER_12212_SAME_DAY_FOLD_MIGRATION = 'payment_ledger_order_12212_same_day_fold_v1';
+
+/**
+ * One-shot key for order 12194.
+ * Written only after a merge, or when no uncertain 12194 comment rows remain.
+ * An empty pass that still sees the uncertain pair does not record the key
+ * (order 12212 v1 recorded the key even when the pair was still stored).
+ */
+export const ORDER_12194_SAME_DAY_FOLD_MIGRATION = 'payment_ledger_order_12194_same_day_fold_v1';
 
 const PROVIDER = 'clickup';
 const COMMENT_BUDGET = 40;
@@ -65,6 +76,11 @@ export type PaymentLedgerSyncResult = {
   skipped?: string;
   /** Set on the sync that runs the order 12212 one-shot, including when nothing needed folding. */
   order_12212_folded?: number;
+  /**
+   * Set on the sync that records the order 12194 one-shot.
+   * Omitted when the uncertain pair is still stored and nothing was merged, so the next sync retries.
+   */
+  order_12194_folded?: number;
 };
 
 export type PaymentLedgerClickUpClient = {
@@ -351,11 +367,10 @@ function finiteAmount(value: number | string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Merge already-stored order 12212 same-day duplicates that the corrected rule calls one payment.
- * Does not delete uncertain rows for any other order, and does not touch a 12212 comment the rule still calls two or uncertain.
- */
-export async function repairOrder12212SameDayFold(): Promise<number> {
+async function repairStoredSameDayFold(
+  orderNo: string,
+  planRows: (rows: PaymentLedgerDraft[]) => { updates: PaymentLedgerDraft[]; delete_keys: string[] },
+): Promise<number> {
   const rows = await db
     .prepare(
       `SELECT user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
@@ -363,7 +378,7 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
        FROM payment_ledger
        WHERE btrim(order_no) = ?`,
     )
-    .all<StoredLedgerRow>(ORDER_12212_SAME_DAY_REPAIR);
+    .all<StoredLedgerRow>(orderNo);
 
   const groups = new Map<string, { userId: number; drafts: PaymentLedgerDraft[] }>();
   for (const row of rows) {
@@ -391,7 +406,7 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
   let merged = 0;
   await db.transaction(async () => {
     for (const group of Array.from(groups.values())) {
-      const plan = planOrder12212SameDayRepair(group.drafts);
+      const plan = planRows(group.drafts);
       for (const update of plan.updates) {
         await db
           .prepare(
@@ -416,12 +431,41 @@ export async function repairOrder12212SameDayFold(): Promise<number> {
             `DELETE FROM payment_ledger
              WHERE user_id = ? AND dedupe_key = ? AND source = 'comment' AND btrim(order_no) = ?`,
           )
-          .run(group.userId, dedupeKey, ORDER_12212_SAME_DAY_REPAIR);
+          .run(group.userId, dedupeKey, orderNo);
         merged += result.changes || 0;
       }
     }
   });
   return merged;
+}
+
+/**
+ * Merge already-stored order 12212 same-day duplicates that the corrected rule calls one payment.
+ * Does not delete uncertain rows for any other order, and does not touch a 12212 comment the rule still calls two or uncertain.
+ */
+export async function repairOrder12212SameDayFold(): Promise<number> {
+  return repairStoredSameDayFold(ORDER_12212_SAME_DAY_REPAIR, planOrder12212SameDayRepair);
+}
+
+/**
+ * Merge already-stored order 12194 partial-payment duplicates that the corrected rule calls one payment.
+ * Does not delete uncertain rows for any other order, and does not touch a 12194 comment the rule still calls two or uncertain.
+ */
+export async function repairOrder12194SameDayFold(): Promise<number> {
+  return repairStoredSameDayFold(ORDER_12194_SAME_DAY_REPAIR, planOrder12194SameDayRepair);
+}
+
+async function uncertainCommentCount(orderNo: string): Promise<number> {
+  const row = (await db
+    .prepare(
+      `SELECT COUNT(*)::int AS n
+       FROM payment_ledger
+       WHERE btrim(order_no) = ?
+         AND source = 'comment'
+         AND COALESCE(notes, '') LIKE ?`,
+    )
+    .get(orderNo, `%${SAME_DAY_UNCERTAIN_NOTE}%`)) as { n: number | string } | undefined;
+  return Number(row?.n || 0);
 }
 
 /** Runs the order 12212 fold once per database. Later syncs leave every ledger row alone. */
@@ -434,6 +478,24 @@ export async function repairOrder12212SameDayFoldOnce(): Promise<{ merged: numbe
   await db
     .prepare(`INSERT INTO app_migrations (key) VALUES (?) ON CONFLICT DO NOTHING`)
     .run(ORDER_12212_SAME_DAY_FOLD_MIGRATION);
+  return { merged, applied: true };
+}
+
+/**
+ * Runs the order 12194 fold until it merges a row or no uncertain 12194 comment remains.
+ * Does not record the migration on an empty pass while that uncertain pair is still stored.
+ */
+export async function repairOrder12194SameDayFoldOnce(): Promise<{ merged: number; applied: boolean }> {
+  const done = await db
+    .prepare(`SELECT key FROM app_migrations WHERE key = ?`)
+    .get(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+  if (done) return { merged: 0, applied: false };
+  const merged = await repairOrder12194SameDayFold();
+  const remaining = await uncertainCommentCount(ORDER_12194_SAME_DAY_REPAIR);
+  if (merged <= 0 && remaining > 0) return { merged: 0, applied: false };
+  await db
+    .prepare(`INSERT INTO app_migrations (key) VALUES (?) ON CONFLICT DO NOTHING`)
+    .run(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
   return { merged, applied: true };
 }
 
@@ -600,6 +662,15 @@ export async function syncPaymentLedger(
     pushError(
       result,
       `Order 12212 same-day fold: ${err instanceof Error ? err.message : 'repair failed'}`,
+    );
+  }
+  try {
+    const repair = await repairOrder12194SameDayFoldOnce();
+    if (repair.applied) result.order_12194_folded = repair.merged;
+  } catch (err) {
+    pushError(
+      result,
+      `Order 12194 same-day fold: ${err instanceof Error ? err.message : 'repair failed'}`,
     );
   }
   try {

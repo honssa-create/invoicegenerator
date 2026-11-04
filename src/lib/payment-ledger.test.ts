@@ -10,6 +10,7 @@ import {
   parsePaymentAmounts,
   paymentMethodFromLabels,
   paymentMethodFromText,
+  planOrder12194SameDayRepair,
   planOrder12212SameDayRepair,
   reviewSameDayPayments,
   SAME_DAY_UNCERTAIN_NOTE,
@@ -947,6 +948,228 @@ describe('planOrder12212SameDayRepair', () => {
   });
 });
 
+describe('order 12194 partial same-day fold', () => {
+  const day = '2026-11-02';
+  const receipt = { name: 'receipt.png', url: 'https://cdn.example/12194.png' };
+  const installment = () =>
+    draft({
+      dedupe_key: 'installment:t12194:1',
+      paid_date: day,
+      amount: 2000,
+      order_no: '12194',
+      notes: '已付部分 · 第一次付款',
+      clickup_task_id: 't12194',
+      source: 'installment',
+    });
+  const partialComment = (notes: string, extra: Partial<PaymentLedgerDraft> = {}) =>
+    draft({
+      dedupe_key: 'comment:t12194:c',
+      paid_date: day,
+      amount: null,
+      order_no: '12194',
+      notes,
+      attachments: [receipt],
+      clickup_task_id: 't12194',
+      source: 'comment',
+      ...extra,
+    });
+
+  it('folds partial-payment wording onto the only same-day installment', () => {
+    for (const notes of ['已支付部份金額', '已付部分', '已付部份', '部份金額', '部分']) {
+      expect(reviewSameDayPayments(partialComment(notes), [installment()])).toEqual({
+        decision: 'one',
+        dedupe_key: 'installment:t12194:1',
+      });
+    }
+    expect(
+      reviewSameDayPayments(partialComment(`已支付部份金額 · ${SAME_DAY_UNCERTAIN_NOTE}`), [installment()]),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t12194:1' });
+    expect(
+      reviewSameDayPayments(partialComment('已付部份', { attachments: [] }), [
+        draft({
+          dedupe_key: 'installment:t12194:2',
+          paid_date: day,
+          amount: 2000,
+          order_no: '12194',
+          notes: '2nd payment',
+          source: 'installment',
+        }),
+      ]),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t12194:2' });
+    const later = draft({
+      dedupe_key: 'installment:t12194:2',
+      paid_date: '2026-11-03',
+      amount: 1735,
+      order_no: '12194',
+      notes: '第二次付款',
+      source: 'installment',
+    });
+    expect(reviewSameDayPayments(partialComment('已支付部份金額'), [installment(), later])).toEqual({
+      decision: 'one',
+      dedupe_key: 'installment:t12194:1',
+    });
+    expect(
+      reviewSameDayPayments(partialComment('已支付部份金額 $2001', { amount: 2001 }), [installment()]),
+    ).toEqual({ decision: 'one', dedupe_key: 'installment:t12194:1' });
+  });
+
+  it('keeps 加單, 尾數, and a conflicting amount as two payments', () => {
+    expect(
+      reviewSameDayPayments(
+        partialComment('已支付部份金額 · 加單金額：$2,000', { amount: 2000 }),
+        [installment()],
+      ),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(partialComment('已付部分 · 尾數', { amount: 2000 }), [installment()]),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(partialComment('已支付部份金額 $3735', { amount: 3735 }), [installment()]),
+    ).toEqual({ decision: 'two' });
+    expect(
+      reviewSameDayPayments(partialComment('已支付部份金額 $3735'), [installment()]),
+    ).toEqual({ decision: 'two' });
+  });
+
+  it('stays uncertain for two same-day installments, a vague transfer, or an installment with no slot or amount', () => {
+    const second = draft({
+      dedupe_key: 'installment:t12194:2',
+      paid_date: day,
+      amount: 1735,
+      order_no: '12194',
+      notes: '第二次付款',
+      source: 'installment',
+    });
+    expect(reviewSameDayPayments(partialComment('已支付部份金額'), [installment(), second])).toEqual({
+      decision: 'uncertain',
+    });
+    expect(
+      reviewSameDayPayments(
+        partialComment('銀行轉帳', {
+          attachments: [{ name: 'image.png', url: 'https://cdn.example/bank.png' }],
+        }),
+        [installment()],
+      ),
+    ).toEqual({ decision: 'uncertain' });
+    expect(
+      reviewSameDayPayments(partialComment('已支付部份金額'), [
+        draft({ ...installment(), notes: '已付部分' }),
+      ]),
+    ).toEqual({ decision: 'uncertain' });
+    expect(
+      reviewSameDayPayments(partialComment('已支付部份金額'), [
+        draft({ ...installment(), amount: null }),
+      ]),
+    ).toEqual({ decision: 'uncertain' });
+  });
+
+  it('folds the ClickUp comment into the installment and keeps the receipt', () => {
+    const rows = extractPaymentLedgerRows(
+      task({
+        id: 't12194',
+        name: '12194',
+        custom_fields: [
+          labels(['已付部分']),
+          { id: 'd1', name: '第一次Payment日期', type: 'date', value: '1793548800000' },
+          { id: 'a1', name: '第一次Payment ($)', type: 'number', value: '2000' },
+        ],
+      }),
+      [
+        {
+          id: 'c12194',
+          comment_text: '已支付部份金額\nimage.png',
+          date: '1793548800000',
+          comment: [
+            {
+              type: 'image',
+              text: 'image.png',
+              image: { id: 'r12194', name: 'image.png', url: 'https://cdn.example/12194.png' },
+            },
+          ],
+        },
+      ],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      dedupe_key: 'installment:t12194:1',
+      paid_date: day,
+      amount: 2000,
+      order_no: '12194',
+      source: 'installment',
+    });
+    expect(rows[0].notes).toContain('已支付部份金額');
+    expect(rows[0].notes).toContain('已付部分');
+    expect(rows[0].notes).toContain('第一次付款');
+    expect(rows[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(rows[0].attachments.map((item) => item.url)).toEqual(['https://cdn.example/12194.png']);
+  });
+
+  it('merges the stored uncertain pair and leaves 加單 and other orders', () => {
+    const plan = planOrder12194SameDayRepair([
+      draft({
+        dedupe_key: 'installment:t12194:1',
+        paid_date: day,
+        amount: 2000,
+        order_no: '12194',
+        notes: `已付部分 · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        clickup_task_id: 't12194',
+        source: 'installment',
+        category: '回禮',
+      }),
+      draft({
+        dedupe_key: 'comment:t12194:c',
+        paid_date: day,
+        amount: null,
+        order_no: '12194',
+        notes: `已支付部份金額 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        attachments: [receipt],
+        clickup_task_id: 't12194',
+        source: 'comment',
+        link: 'https://app.clickup.com/t/t12194?comment=c',
+      }),
+      draft({
+        dedupe_key: 'comment:t12194:addon',
+        paid_date: '2026-11-03',
+        amount: 200,
+        order_no: '12194',
+        notes: `加單金額：$200 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        clickup_task_id: 't12194',
+        source: 'comment',
+      }),
+      draft({
+        dedupe_key: 'comment:other:c',
+        paid_date: day,
+        amount: null,
+        order_no: '12012',
+        notes: `已支付部份金額 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        attachments: [receipt],
+        clickup_task_id: 'other',
+        source: 'comment',
+      }),
+      draft({
+        dedupe_key: 'installment:other:1',
+        paid_date: day,
+        amount: 2000,
+        order_no: '12012',
+        notes: `已付部分 · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+        clickup_task_id: 'other',
+        source: 'installment',
+      }),
+    ]);
+    expect(plan.delete_keys).toEqual(['comment:t12194:c']);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0]).toMatchObject({
+      dedupe_key: 'installment:t12194:1',
+      amount: 2000,
+      source: 'installment',
+    });
+    expect(plan.updates[0].notes).toContain('已支付部份金額');
+    expect(plan.updates[0].notes).toContain('第一次付款');
+    expect(plan.updates[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(plan.updates[0].attachments).toEqual([receipt]);
+  });
+});
+
 const hasDb = Boolean(process.env.DATABASE_URL?.trim());
 const TEST_USER_ID = 99941;
 
@@ -1117,5 +1340,198 @@ describe.skipIf(!hasDb)('repairOrder12212SameDayFold', () => {
     const second = await repairOrder12212SameDayFoldOnce();
     expect(second).toEqual({ merged: 0, applied: false });
     expect((await listPaymentLedger(REPAIR_USER_ID)).filter((row) => row.order_no === '12212')).toHaveLength(1);
+  });
+});
+
+const REPAIR_12194_USER_ID = 99943;
+
+describe.skipIf(!hasDb)('repairOrder12194SameDayFold', () => {
+  beforeEach(async () => {
+    const db = (await import('./db')).default;
+    const { ORDER_12194_SAME_DAY_FOLD_MIGRATION } = await import('./payment-ledger-server');
+    await db.prepare('DELETE FROM payment_ledger WHERE user_id = ?').run(REPAIR_12194_USER_ID);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(REPAIR_12194_USER_ID);
+    await db.prepare('DELETE FROM app_migrations WHERE key = ?').run(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+    await db.prepare('INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)').run(
+      REPAIR_12194_USER_ID,
+      `ledger-${REPAIR_12194_USER_ID}@example.com`,
+      'hash',
+      'Ledger 12194',
+    );
+  });
+
+  async function insertRow(
+    dedupe: string,
+    amount: number | null,
+    orderNo: string,
+    notes: string,
+    source: 'installment' | 'comment',
+    attachments = '[]',
+    taskId = 't12194',
+  ) {
+    const db = (await import('./db')).default;
+    await db
+      .prepare(
+        `INSERT INTO payment_ledger (
+           user_id, dedupe_key, paid_date, amount, order_no, notes, link, attachments_json,
+           clickup_task_id, source, category
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        REPAIR_12194_USER_ID,
+        dedupe,
+        '2026-11-02',
+        amount,
+        orderNo,
+        notes,
+        'https://app.clickup.com/t/t12194',
+        attachments,
+        taskId,
+        source,
+        '回禮',
+      );
+  }
+
+  it('folds the stored order 12194 pair once and leaves a different order alone', async () => {
+    const db = (await import('./db')).default;
+    const { repairOrder12194SameDayFoldOnce, listPaymentLedger, ORDER_12194_SAME_DAY_FOLD_MIGRATION } =
+      await import('./payment-ledger-server');
+    await insertRow(
+      'installment:t12194:1',
+      2000,
+      '12194',
+      `已付部分 · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'installment',
+    );
+    await insertRow(
+      'comment:t12194:c',
+      null,
+      '12194',
+      `已支付部份金額 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'comment',
+      JSON.stringify([{ name: 'receipt.png', url: 'https://cdn.example/12194.png' }]),
+    );
+    await insertRow(
+      'installment:other:1',
+      2000,
+      '12012',
+      `已付部分 · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'installment',
+      '[]',
+      'other',
+    );
+    await insertRow(
+      'comment:other:c',
+      null,
+      '12012',
+      `已支付部份金額 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'comment',
+      JSON.stringify([{ name: 'other.png', url: 'https://cdn.example/other.png' }]),
+      'other',
+    );
+
+    const first = await repairOrder12194SameDayFoldOnce();
+    expect(first).toEqual({ merged: 1, applied: true });
+    const rows = await listPaymentLedger(REPAIR_12194_USER_ID);
+    const order12194 = rows.filter((row) => row.order_no === '12194');
+    const order12012 = rows.filter((row) => row.order_no === '12012');
+    expect(order12194).toHaveLength(1);
+    expect(order12194[0]).toMatchObject({ amount: 2000, source: 'installment' });
+    expect(order12194[0].notes).toContain('已支付部份金額');
+    expect(order12194[0].notes).toContain('第一次付款');
+    expect(order12194[0].notes).not.toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(order12194[0].attachments.map((item) => item.url)).toEqual(['https://cdn.example/12194.png']);
+    expect(order12012).toHaveLength(2);
+    expect(order12012.every((row) => (row.notes || '').includes(SAME_DAY_UNCERTAIN_NOTE))).toBe(true);
+    const key = await db.prepare('SELECT key FROM app_migrations WHERE key = ?').get(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+    expect(key).toBeTruthy();
+
+    const second = await repairOrder12194SameDayFoldOnce();
+    expect(second).toEqual({ merged: 0, applied: false });
+  });
+
+  it('does not record the migration while an uncertain 12194 comment is still stored', async () => {
+    const db = (await import('./db')).default;
+    const { repairOrder12194SameDayFoldOnce, listPaymentLedger, ORDER_12194_SAME_DAY_FOLD_MIGRATION } =
+      await import('./payment-ledger-server');
+    await insertRow(
+      'installment:t12194:1',
+      2000,
+      '12194',
+      `已付部分 · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'installment',
+    );
+    await insertRow(
+      'comment:t12194:vague',
+      null,
+      '12194',
+      `銀行轉帳 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'comment',
+      JSON.stringify([{ name: 'image.png', url: 'https://cdn.example/bank.png' }]),
+    );
+
+    const first = await repairOrder12194SameDayFoldOnce();
+    expect(first).toEqual({ merged: 0, applied: false });
+    const key = await db.prepare('SELECT key FROM app_migrations WHERE key = ?').get(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+    expect(key).toBeFalsy();
+    const rows = await listPaymentLedger(REPAIR_12194_USER_ID);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => (row.notes || '').includes(SAME_DAY_UNCERTAIN_NOTE))).toBe(true);
+
+    const second = await repairOrder12194SameDayFoldOnce();
+    expect(second).toEqual({ merged: 0, applied: false });
+    const keyAfter = await db
+      .prepare('SELECT key FROM app_migrations WHERE key = ?')
+      .get(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+    expect(keyAfter).toBeFalsy();
+  });
+
+  it('records the migration after a merge even if another uncertain 12194 comment remains', async () => {
+    const db = (await import('./db')).default;
+    const { repairOrder12194SameDayFoldOnce, listPaymentLedger, ORDER_12194_SAME_DAY_FOLD_MIGRATION } =
+      await import('./payment-ledger-server');
+    await insertRow(
+      'installment:t12194:1',
+      2000,
+      '12194',
+      `已付部分 · 第一次付款 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'installment',
+    );
+    await insertRow(
+      'comment:t12194:c',
+      null,
+      '12194',
+      `已支付部份金額 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'comment',
+      JSON.stringify([{ name: 'receipt.png', url: 'https://cdn.example/12194.png' }]),
+    );
+    await insertRow(
+      'comment:t12194:vague',
+      null,
+      '12194',
+      `銀行轉帳 · ${SAME_DAY_UNCERTAIN_NOTE}`,
+      'comment',
+      JSON.stringify([{ name: 'image.png', url: 'https://cdn.example/bank.png' }]),
+    );
+
+    const first = await repairOrder12194SameDayFoldOnce();
+    expect(first).toEqual({ merged: 1, applied: true });
+    const rows = await listPaymentLedger(REPAIR_12194_USER_ID);
+    const vague = rows.find((row) => row.notes?.includes('銀行轉帳'));
+    expect(vague?.notes).toContain(SAME_DAY_UNCERTAIN_NOTE);
+    expect(rows.find((row) => row.dedupe_key === 'comment:t12194:c')).toBeUndefined();
+    const key = await db.prepare('SELECT key FROM app_migrations WHERE key = ?').get(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+    expect(key).toBeTruthy();
+  });
+
+  it('records the migration when no uncertain 12194 comment remains', async () => {
+    const db = (await import('./db')).default;
+    const { repairOrder12194SameDayFoldOnce, ORDER_12194_SAME_DAY_FOLD_MIGRATION } = await import(
+      './payment-ledger-server'
+    );
+    const first = await repairOrder12194SameDayFoldOnce();
+    expect(first).toEqual({ merged: 0, applied: true });
+    const key = await db.prepare('SELECT key FROM app_migrations WHERE key = ?').get(ORDER_12194_SAME_DAY_FOLD_MIGRATION);
+    expect(key).toBeTruthy();
   });
 });

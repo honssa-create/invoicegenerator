@@ -558,6 +558,12 @@ const FULL_OR_HALF_RECEIPT = /full\s*paid|full\s*payment|(?<!\d)50\s*%|(?<!\d)10
 const SLOT_ONE = /第一次|(?<![A-Za-z0-9])(?:1st|first)(?![A-Za-z0-9])/i;
 const SLOT_TWO = /第二次|第2次|(?<![A-Za-z0-9])(?:2nd|second)(?![A-Za-z0-9])/i;
 const BALANCE_PAYMENT = /尾[數数]/;
+/**
+ * Partial-payment wording (Vanessa 2026-11-04, order 12194).
+ * Anchors on 已付 / 已支付 / 部份金額, and accepts both 部份 and 部分.
+ * `已付` also matches 已支付 and 已付部分.
+ */
+const PARTIAL_PAYMENT = /已支付|已付|部份|部分/;
 
 export type SameDayPaymentReview =
   | { decision: 'one'; dedupe_key: string }
@@ -640,6 +646,13 @@ function sameDayAmount(comment: PaymentLedgerDraft, sameDay: PaymentLedgerDraft[
   return echoedInstallmentAmount(commentBlob(comment), sameDay);
 }
 
+/** Installment already names 第一次／第二次 (or 1st/first/2nd/second) and has an amount. */
+function partialPaymentInstallment(row: PaymentLedgerDraft): boolean {
+  if (row.amount == null) return false;
+  const named = namedInstallmentSlot(row.notes || '');
+  return named === 1 || named === 2;
+}
+
 /**
  * Same Hong Kong calendar day does not by itself mean one payment.
  * `paid_date` values are already `YYYY-MM-DD` in Asia/Hong_Kong.
@@ -651,7 +664,17 @@ function sameDayAmount(comment: PaymentLedgerDraft, sameDay: PaymentLedgerDraft[
  * One payment: amount within $1 of exactly one installment (including a bare
  * `1st payment 7866` with no HK$), or a Full/50%/100% receipt with no conflicting
  * separate amount, or the comment names 第一次/1st/first or 第二次/2nd/second and has a receipt file.
- * Two payments: a different amount, 加單, or 尾數. The receipt stays on the comment.
+ * Partial addendum (Vanessa 2026-11-04, order 12194): the comment uses partial-payment
+ * wording (已支付部份金額 / 已付部分 / 已付部份 / 部份 / 部分 — anchor 已付 / 已支付 / 部份金額,
+ * both 部份 and 部分) and states no conflicting dollar amount (Δ > $1), and that order
+ * has exactly one installment on the same Hong Kong day which already has a slot label
+ * (第一次付款／第二次付款 or 1st/first/2nd/second) and an amount. Fold the comment onto
+ * that installment (notes and attachments) and do not write the uncertain note.
+ * The slot label is read from the installment notes. A comment that never names 第一次
+ * still folds when the installment row does.
+ * Two payments: a different amount (Δ > $1), 加單, or 尾數. The receipt stays on the comment.
+ * Uncertain: two same-day installments without a clear match, a vague comment (for example
+ * only 銀行轉帳 plus an image), or amounts that do not identify one installment.
  */
 export function reviewSameDayPayments(
   comment: PaymentLedgerDraft,
@@ -686,6 +709,10 @@ export function reviewSameDayPayments(
     if (slot === 'both' || (slot && !slotRow)) return { decision: 'uncertain' };
     if (sameDay.length === 1) return { decision: 'one', dedupe_key: sameDay[0].dedupe_key };
     return { decision: 'uncertain' };
+  }
+
+  if (PARTIAL_PAYMENT.test(blob) && sameDay.length === 1 && partialPaymentInstallment(sameDay[0])) {
+    return { decision: 'one', dedupe_key: sameDay[0].dedupe_key };
   }
 
   return { decision: 'uncertain' };
@@ -832,6 +859,9 @@ export function extractPaymentLedgerRows(task: ClickUpTask, comments: ClickUpCom
 /** Live order Vanessa confirmed is one payment. The one-shot repair does not touch other orders. */
 export const ORDER_12212_SAME_DAY_REPAIR = '12212';
 
+/** Order 12194 partial first payment. The one-shot repair does not touch other orders. */
+export const ORDER_12194_SAME_DAY_REPAIR = '12194';
+
 export type SameDayRepairPlan = {
   updates: PaymentLedgerDraft[];
   delete_keys: string[];
@@ -907,14 +937,14 @@ function planOneTaskSameDayRepair(rows: PaymentLedgerDraft[]): SameDayRepairPlan
 }
 
 /**
- * Fold stored order 12212 rows that the corrected same-day rule now calls one payment.
- * Only a comment that already carries the uncertain note is eligible, and only when
- * `reviewSameDayPayments` returns `one`. Other orders are ignored.
+ * Fold stored rows for one order that `reviewSameDayPayments` now calls one payment.
+ * Only a comment that already carries the uncertain note is eligible. Other orders are ignored.
  */
-export function planOrder12212SameDayRepair(rows: PaymentLedgerDraft[]): SameDayRepairPlan {
+function planOrderSameDayRepair(rows: PaymentLedgerDraft[], orderNo: string): SameDayRepairPlan {
+  const want = orderNo.trim();
   const groups = new Map<string, PaymentLedgerDraft[]>();
   for (const row of rows) {
-    if ((row.order_no || '').trim() !== ORDER_12212_SAME_DAY_REPAIR) continue;
+    if ((row.order_no || '').trim() !== want) continue;
     const key = row.clickup_task_id || '';
     const list = groups.get(key) || [];
     list.push(row);
@@ -928,6 +958,24 @@ export function planOrder12212SameDayRepair(rows: PaymentLedgerDraft[]): SameDay
     delete_keys.push(...plan.delete_keys);
   }
   return { updates, delete_keys };
+}
+
+/**
+ * Fold stored order 12212 rows that the corrected same-day rule now calls one payment.
+ * Only a comment that already carries the uncertain note is eligible, and only when
+ * `reviewSameDayPayments` returns `one`. Other orders are ignored.
+ */
+export function planOrder12212SameDayRepair(rows: PaymentLedgerDraft[]): SameDayRepairPlan {
+  return planOrderSameDayRepair(rows, ORDER_12212_SAME_DAY_REPAIR);
+}
+
+/**
+ * Fold stored order 12194 rows that the partial-payment same-day rule now calls one payment.
+ * Only a comment that already carries the uncertain note is eligible, and only when
+ * `reviewSameDayPayments` returns `one`. Other orders are ignored.
+ */
+export function planOrder12194SameDayRepair(rows: PaymentLedgerDraft[]): SameDayRepairPlan {
+  return planOrderSameDayRepair(rows, ORDER_12194_SAME_DAY_REPAIR);
 }
 
 function fieldText(field: ClickUpCustomField | undefined): string {

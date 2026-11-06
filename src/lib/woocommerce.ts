@@ -13,6 +13,7 @@ export interface WooStoreConfig {
   storeUrl: string;
   consumerKey: string;
   consumerSecret: string;
+  webhookSecret: string;
 }
 
 export interface WooOrder {
@@ -136,6 +137,7 @@ export async function getWooStoreConfigs(userId: number): Promise<WooStoreConfig
         storeUrl: normalized.url,
         consumerKey: store.key,
         consumerSecret: store.secret,
+        webhookSecret: store.webhook_secret?.trim() || '',
       });
     }
   }

@@ -239,3 +239,58 @@ export function parseWeddingGiftConfirmation(text: string): WeddingGiftConfirmat
 
   return { fields, core, warnings };
 }
+
+/** ClickUp 包裝 label options (婚宴回禮). */
+export const WEDDING_PACKAGING_LABELS = ['網紗袋包裝(金色)', '自訂圓形心意卡'] as const;
+
+/** ClickUp Gift label options (婚宴回禮). */
+export const WEDDING_GIFT_LABEL_OPTIONS = ['完婚後甜蜜滋潤套裝 x1'] as const;
+
+export function looksLikeWeddingConfirmation(text: string): boolean {
+  return /即食燕窩回禮|confirmation/i.test(text || '');
+}
+
+/** Map confirmation / notes copy onto the ClickUp 包裝 label. */
+export function inferWeddingPackagingLabel(text: string): string {
+  const raw = text || '';
+  if (/圓形心意卡/.test(raw)) return '自訂圓形心意卡';
+  if (/紗袋|蝴蝶結/.test(raw)) return '網紗袋包裝(金色)';
+  return '';
+}
+
+/** Stored confirmation, else a description/notes blob that is the message itself. */
+export function resolveWeddingConfirmationText(input: {
+  confirmationText?: string | null;
+  description?: string | null;
+  notes?: string | null;
+}): string {
+  const stored = String(input.confirmationText || '').trim();
+  if (stored) return stored;
+  const description = String(input.description || '').trim();
+  if (looksLikeWeddingConfirmation(description)) return description;
+  const notes = String(input.notes || '').trim();
+  if (looksLikeWeddingConfirmation(notes) && !notes.startsWith('【從確認訊息】')) return notes;
+  return '';
+}
+
+export function resolveWeddingPackagingLabel(input: {
+  packagingLabel?: string | null;
+  confirmationText?: string | null;
+  notes?: string | null;
+}): string {
+  const stored = String(input.packagingLabel || '').trim();
+  if ((WEDDING_PACKAGING_LABELS as readonly string[]).includes(stored)) return stored;
+  return inferWeddingPackagingLabel(`${input.confirmationText || ''}\n${input.notes || ''}`);
+}
+
+export function resolveWeddingGiftLabel(input: {
+  giftLabel?: string | null;
+  confirmationText?: string | null;
+  notes?: string | null;
+}): string {
+  const stored = String(input.giftLabel || '').trim();
+  if ((WEDDING_GIFT_LABEL_OPTIONS as readonly string[]).includes(stored)) return stored;
+  const blob = `${input.confirmationText || ''}\n${input.notes || ''}`;
+  if (blob.includes('完婚後甜蜜滋潤套裝')) return '完婚後甜蜜滋潤套裝 x1';
+  return '';
+}

@@ -54,8 +54,12 @@ export interface WeddingGiftOrderDetailProps {
   bigDayPersistedRef: React.MutableRefObject<string>;
   bigDaySavedOnChangeRef: React.MutableRefObject<string | null>;
   onOpenConfirmPaste: () => void;
+  onPreviewImage: (url: string) => void;
   syncWeddingGiftDerived: (fieldsPatch?: Record<string, string>) => void;
   syncWeddingGiftTotalAmount: (fieldsPatch?: Record<string, string>) => void;
+  setCoreLocal: (col: string, value: unknown) => void;
+  setLinkedDeliveryDatesLocal: (next: string) => void;
+  commitLinkedDeliveryDates: (next: string) => void;
   form: OrderDetailFormHelpers;
 }
 
@@ -90,8 +94,12 @@ export interface OrderDetailTypePanelProps {
   bigDayPersistedRef: React.MutableRefObject<string>;
   bigDaySavedOnChangeRef: React.MutableRefObject<string | null>;
   onOpenConfirmPaste: () => void;
+  onPreviewImage: (url: string) => void;
   syncWeddingGiftDerived: (fieldsPatch?: Record<string, string>) => void;
   syncWeddingGiftTotalAmount: (fieldsPatch?: Record<string, string>) => void;
+  setCoreLocal: (col: string, value: unknown) => void;
+  setLinkedDeliveryDatesLocal: (next: string) => void;
+  commitLinkedDeliveryDates: (next: string) => void;
   nestieeGiftBoxes: NestieeGiftBoxOption[];
   commitCupmokaLines: (lines: CupmokaLineItem[]) => void;
 }

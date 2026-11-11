@@ -25,6 +25,8 @@ type Props = {
   onDueDateChange: (dueDate: string) => void;
   onAssigneesChange: (ids: number[]) => void;
   onTagsChange: (tags: string[]) => void;
+  /** Wedding-gift detail uses a compact ClickUp property row. */
+  variant?: 'default' | 'clickup';
 };
 
 function IconTarget({ className = '' }: { className?: string }) {
@@ -73,9 +75,9 @@ function IconPayment({ className = '' }: { className?: string }) {
   );
 }
 
-function PropertyLabel({ icon, label }: { icon: ReactNode; label: string }) {
+function PropertyLabel({ icon, label, muted = false }: { icon: ReactNode; label: string; muted?: boolean }) {
   return (
-    <div className="flex items-center gap-2 min-w-[7.5rem] shrink-0 text-gray-900">
+    <div className={`flex items-center gap-2 shrink-0 ${muted ? 'w-[108px] text-[#7c828d]' : 'min-w-[7.5rem] text-gray-900'}`}>
       {icon}
       <span className="text-sm">{label}</span>
     </div>
@@ -102,7 +104,10 @@ export default function OrderPropertyBar({
   onDueDateChange,
   onAssigneesChange,
   onTagsChange,
+  variant = 'default',
 }: Props) {
+  const clickup = variant === 'clickup';
+  const iconTone = clickup ? 'text-[#87909e]' : 'text-gray-900';
   const statusOptions = statusesForOrderType(orderType);
   const statusList = statusOptions.includes(status) ? statusOptions : [status, ...statusOptions];
 
@@ -153,15 +158,15 @@ export default function OrderPropertyBar({
   };
 
   return (
-    <div className="mt-3 space-y-2.5">
-      <div className="grid sm:grid-cols-2 gap-x-8 gap-y-2.5">
-        <div className="flex items-center gap-3 min-w-0">
-          <PropertyLabel icon={<IconTarget className="text-gray-900" />} label={bi('Status', '狀態')} />
+    <div className={clickup ? 'mt-1' : 'mt-3 space-y-2.5'}>
+      <div className={`grid sm:grid-cols-2 ${clickup ? 'max-w-[720px] gap-x-12 gap-y-1.5' : 'gap-x-8 gap-y-2.5'}`}>
+        <div className={`flex items-center gap-3 min-w-0 ${clickup ? 'order-1' : ''}`}>
+          <PropertyLabel muted={clickup} icon={<IconTarget className={iconTone} />} label={bi('Status', '狀態')} />
           <div className="relative min-w-0">
             <select
               value={status}
               onChange={(e) => onStatusChange(e.target.value)}
-              className={`appearance-none text-xs font-semibold rounded-md pl-2.5 pr-7 py-1.5 border-0 cursor-pointer outline-none ${STATUS_COLORS[status] || 'bg-gray-100 text-gray-700'}`}
+              className={`appearance-none text-xs font-semibold rounded-md pl-2.5 pr-7 py-1.5 cursor-pointer outline-none ${clickup ? 'border border-[#e4e6ea]' : 'border-0'} ${clickup && /^[A-Za-z0-9 ]+$/.test(status) ? 'uppercase tracking-wide' : ''} ${STATUS_COLORS[status] || 'bg-gray-100 text-gray-700'}`}
             >
               {statusList.map((s) => (
                 <option key={s} value={s}>{s}</option>
@@ -171,7 +176,7 @@ export default function OrderPropertyBar({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 min-w-0">
+        {!clickup && <div className="flex items-center gap-3 min-w-0">
           <PropertyLabel icon={<IconPayment className="text-gray-900" />} label={bi('Payment status', '付款狀態')} />
           <span
             className={`inline-flex text-xs font-semibold rounded-md px-2.5 py-1.5 ${PAYMENT_STATUS_COLORS[paymentStatusLabel] || 'bg-gray-100 text-gray-700'}`}
@@ -179,22 +184,37 @@ export default function OrderPropertyBar({
           >
             {paymentStatusLabel}
           </span>
+        </div>}
+
+        <div className={`flex items-center gap-3 min-w-0 ${clickup ? 'order-3' : ''}`}>
+          <PropertyLabel muted={clickup} icon={<IconCalendar className={iconTone} />} label={clickup ? bi('Dates', '日期') : bi('Receipt date', '收貨日')} />
+          {clickup ? (
+            <span className="inline-flex items-center gap-1.5 text-sm min-w-0">
+              <span className="text-[#87909e]">{bi('Start', '開始')}</span>
+              <span className="text-[#87909e]">→</span>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => onDueDateChange(e.target.value)}
+                className={`text-sm rounded-md px-1 py-1 outline-none border border-transparent hover:border-gray-200 focus:border-brand-400 bg-transparent ${
+                  dueDate ? 'text-gray-900' : 'text-[#87909e]'
+                }`}
+              />
+            </span>
+          ) : (
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => onDueDateChange(e.target.value)}
+              className={`text-sm rounded-md px-2 py-1 outline-none border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${
+                dueDate ? 'text-gray-900' : 'text-gray-400'
+              }`}
+            />
+          )}
         </div>
 
-        <div className="flex items-center gap-3 min-w-0">
-          <PropertyLabel icon={<IconCalendar className="text-gray-900" />} label={bi('Receipt date', '收貨日')} />
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => onDueDateChange(e.target.value)}
-            className={`text-sm rounded-md px-2 py-1 outline-none border border-transparent hover:border-gray-200 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${
-              dueDate ? 'text-gray-900' : 'text-gray-400'
-            }`}
-          />
-        </div>
-
-        <div className="flex items-center gap-3 min-w-0" ref={assigneesRef}>
-          <PropertyLabel icon={<IconPerson className="text-gray-900" />} label={bi('Assignees', '負責人')} />
+        <div className={`flex items-center gap-3 min-w-0 ${clickup ? 'order-2' : ''}`} ref={assigneesRef}>
+          <PropertyLabel muted={clickup} icon={<IconPerson className={iconTone} />} label={bi('Assignees', '負責人')} />
           <div className="relative min-w-0 flex-1">
             <button
               type="button"
@@ -202,7 +222,16 @@ export default function OrderPropertyBar({
               className="flex items-center gap-1.5 flex-wrap text-left min-h-[28px]"
             >
               {selectedUsers.length === 0 ? (
-                <span className="text-sm text-gray-400">{bi('Empty', '空白')}</span>
+                <span className={`text-sm ${clickup ? 'text-[#87909e]' : 'text-gray-400'}`}>{bi('Empty', '空白')}</span>
+              ) : clickup ? (
+                selectedUsers.map((u) => (
+                  <span key={u.id} title={u.email} className="inline-flex items-center gap-1.5 text-sm text-[#292d34]">
+                    <span className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[#7c6bc4] text-white text-[10px] font-bold">
+                      {initials(u.name)}
+                    </span>
+                    <span className="truncate max-w-[140px]">{u.name}</span>
+                  </span>
+                ))
               ) : (
                 selectedUsers.map((u) => (
                   <span
@@ -243,8 +272,8 @@ export default function OrderPropertyBar({
           </div>
         </div>
 
-        <div className="flex items-start gap-3 min-w-0 sm:col-span-1" ref={tagsRef}>
-          <PropertyLabel icon={<IconTag className="text-gray-900 mt-1" />} label={bi('Tags', '標籤')} />
+        <div className={`flex items-start gap-3 min-w-0 sm:col-span-1 ${clickup ? 'order-4' : ''}`} ref={tagsRef}>
+          <PropertyLabel muted={clickup} icon={<IconTag className={`${iconTone} mt-1`} />} label={bi('Tags', '標籤')} />
           <div className="relative min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               {tags.map((tag) => (

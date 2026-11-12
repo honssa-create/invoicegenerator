@@ -895,7 +895,7 @@ export default function OrderDetailPage() {
             entityId={order.id}
             initialActivities={initialActivities}
             variant={weddingLayout ? 'rail' : 'card'}
-            heading={weddingLayout ? bi('Comments', '留言') : undefined}
+            heading={weddingLayout ? 'Comments' : undefined}
             subtitle={weddingLayout ? formatCreatedSubtitle(order.created_at) : undefined}
             className="lg:h-full max-h-[75vh] lg:max-h-none"
           />

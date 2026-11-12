@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ClickUpCommentsRail from '@/components/ClickUpCommentsRail';
 import { KITCHEN_COMPLETION_ACTIVITY_PREFIX } from '@/lib/kitchen-prep';
 import { BTN, bi } from '@/lib/ui-labels';
 
@@ -94,12 +95,23 @@ export default function ActivityFeed({
     );
   };
 
-  const shell = variant === 'rail'
-    ? 'bg-white flex flex-col h-full'
-    : 'bg-white rounded-xl border border-gray-200 flex flex-col';
+  if (variant === 'rail') {
+    return (
+      <ClickUpCommentsRail
+        className={className}
+        heading={heading || 'Comments'}
+        subtitle={subtitle}
+        activities={activities}
+        comment={comment}
+        posting={posting}
+        onCommentChange={setComment}
+        onPost={post}
+      />
+    );
+  }
 
   return (
-    <div className={`${shell} ${className}`}>
+    <div className={`bg-white rounded-xl border border-gray-200 flex flex-col ${className}`}>
       <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-baseline gap-2 min-w-0">
           <h2 className="font-semibold text-gray-900">{heading || bi('Activity', '動態')}</h2>

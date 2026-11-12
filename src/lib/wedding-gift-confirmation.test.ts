@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { WEDDING_CLICKUP_FIELDS } from './wedding-gift-clickup-fields';
 import {
   addCalendarDays,
+  inferWeddingPackagingLabel,
   parseChineseDate,
   parseWeddingGiftConfirmation,
+  resolveWeddingConfirmationText,
+  resolveWeddingGiftLabel,
+  resolveWeddingPackagingLabel,
+  splitWeddingConfirmationPreview,
 } from './wedding-gift-confirmation';
 
 const SAMPLE = `【📩*即食燕窩回禮 𝑪𝒐𝒏𝒇𝒊𝒓𝒎𝒂𝒕𝒊𝒐𝒏*】
@@ -123,5 +129,93 @@ Jxxxxxx Cxxx & Jxx Vxxxxx (6123 4567)
     const result = parseWeddingGiftConfirmation(text);
     expect(result.core.name).toBe('Jxxxxxx Cxxx & Jxx Vxxxxx');
     expect(result.core.phone).toBe('6123 4567');
+  });
+});
+
+describe('wedding clickup confirmation display', () => {
+  it('keeps the approved ClickUp field order', () => {
+    expect(WEDDING_CLICKUP_FIELDS.map((f) => f.label)).toEqual([
+      'Order #',
+      'Image preview',
+      '客人送貨日期',
+      '客人收件時間',
+      '聯絡方式',
+      '送貨地址',
+      '到期日 (Big day後4星期)',
+      '生產日期',
+      '即食燕窩容量',
+      '客人訂冰糖味 (樽)',
+      '客人訂桂花味 (樽)',
+      '客人訂紅棗味 (樽)',
+      '客人訂總數量',
+      'Gift',
+      '包裝',
+      '實際生產樽數-冰糖味',
+      '實際生產樽數-桂花味',
+      '實際生產樽數-紅棗味',
+      '燕碎 (0.8g)',
+      '玻璃樽 (25ml)',
+      '玻璃樽 (45ml)',
+      '桂花 (0.13g)',
+      '紅棗 (1.8g)',
+      '冰糖 (3.57g)',
+      '片糖 (5.03g)',
+      '圓形tag - 冰糖 (個)',
+      '圓形tag - 桂花 (個)',
+      '圓形tag - 紅棗 (個)',
+      '長方形燙金貼紙 - 冰糖 (個)',
+      '長方形燙金貼紙 - 桂花 (個)',
+      '長方形燙金貼紙 - 紅棗 (個)',
+      '蝴蝶結絲帶袋 (個)',
+      '金繩 (條)',
+      '客人 Wedding Logo Tag (個)',
+      '細紙箱 (個) 17x29x9.5cm',
+      '大紙箱 (個)',
+      'Big Day',
+      '總生產樽數',
+      'action',
+      'Order Creator',
+      '燉製進度',
+      '訂單來源',
+    ]);
+  });
+
+  it('prefers stored confirmation text over notes', () => {
+    expect(resolveWeddingConfirmationText({
+      confirmationText: '【即食燕窩回禮 Confirmation】\n數量：70樽',
+      notes: '【從確認訊息】\n總額：$3,025',
+    })).toContain('70樽');
+  });
+
+  it('does not treat pricing extracts as the confirmation message', () => {
+    expect(resolveWeddingConfirmationText({
+      notes: '【從確認訊息】\n總額：$3,025',
+    })).toBe('');
+  });
+
+  it('collapses the confirmation after the first product line', () => {
+    const text = `【即食燕窩回禮 Confirmation】
+
+日期 The Big Day：
+2026年11月28日 (Saturday)
+
+45ml 即食燕窩回禮
+數量：70樽
+包裝：金色蝴蝶結紗袋包裝 x 70`;
+    const split = splitWeddingConfirmationPreview(text);
+    expect(split.preview).toContain('【即食燕窩回禮 Confirmation】');
+    expect(split.preview).toContain('The Big Day');
+    expect(split.preview.trim().endsWith('45ml 即食燕窩回禮')).toBe(true);
+    expect(split.rest).toContain('數量：70樽');
+  });
+
+  it('infers gold gauze packaging from the confirmation copy', () => {
+    expect(inferWeddingPackagingLabel('包裝：金色蝴蝶結紗袋包裝 x 70')).toBe('網紗袋包裝(金色)');
+    expect(resolveWeddingPackagingLabel({
+      notes: '網紗袋包裝(金色)',
+    })).toBe('網紗袋包裝(金色)');
+    expect(resolveWeddingGiftLabel({
+      notes: '完婚後甜蜜滋潤套裝 x1',
+    })).toBe('完婚後甜蜜滋潤套裝 x1');
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ClickUpCommentsRail from '@/components/ClickUpCommentsRail';
 import { KITCHEN_COMPLETION_ACTIVITY_PREFIX } from '@/lib/kitchen-prep';
 import { BTN, bi } from '@/lib/ui-labels';
 
@@ -18,6 +19,10 @@ interface ActivityFeedProps {
   className?: string;
   /** Preloaded from order bootstrap — skips initial fetch when set. */
   initialActivities?: Activity[] | null;
+  /** card: boxed feed. rail: full-height comments column. */
+  variant?: 'card' | 'rail';
+  heading?: string;
+  subtitle?: string;
 }
 
 export default function ActivityFeed({
@@ -25,6 +30,9 @@ export default function ActivityFeed({
   entityId,
   className = '',
   initialActivities = null,
+  variant = 'card',
+  heading,
+  subtitle,
 }: ActivityFeedProps) {
   const [activities, setActivities] = useState<Activity[]>(initialActivities ?? []);
   const [comment, setComment] = useState('');
@@ -87,10 +95,28 @@ export default function ActivityFeed({
     );
   };
 
+  if (variant === 'rail') {
+    return (
+      <ClickUpCommentsRail
+        className={className}
+        heading={heading || 'Comments'}
+        subtitle={subtitle}
+        activities={activities}
+        comment={comment}
+        posting={posting}
+        onCommentChange={setComment}
+        onPost={post}
+      />
+    );
+  }
+
   return (
     <div className={`bg-white rounded-xl border border-gray-200 flex flex-col ${className}`}>
       <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="font-semibold text-gray-900">{bi('Activity', '動態')}</h2>
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h2 className="font-semibold text-gray-900">{heading || bi('Activity', '動態')}</h2>
+          {subtitle ? <span className="text-xs font-normal text-gray-400 truncate">{subtitle}</span> : null}
+        </div>
         <span className="text-xs text-gray-400">{activities.length}</span>
       </div>
 

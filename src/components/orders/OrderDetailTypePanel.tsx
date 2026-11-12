@@ -56,8 +56,12 @@ export default function OrderDetailTypePanel(props: OrderDetailTypePanelProps) {
         bigDayPersistedRef={props.bigDayPersistedRef}
         bigDaySavedOnChangeRef={props.bigDaySavedOnChangeRef}
         onOpenConfirmPaste={props.onOpenConfirmPaste}
+        onPreviewImage={props.onPreviewImage}
         syncWeddingGiftDerived={props.syncWeddingGiftDerived}
         syncWeddingGiftTotalAmount={props.syncWeddingGiftTotalAmount}
+        setCoreLocal={props.setCoreLocal}
+        setLinkedDeliveryDatesLocal={props.setLinkedDeliveryDatesLocal}
+        commitLinkedDeliveryDates={props.commitLinkedDeliveryDates}
         form={props.form}
       />
     );

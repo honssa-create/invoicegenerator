@@ -8,6 +8,7 @@ import AppLayout from '@/components/AppLayout';
 import ActivityFeed from '@/components/ActivityFeed';
 import CustomerSelect from '@/components/CustomerSelect';
 import OrderDetailTypePanel from '@/components/orders/OrderDetailTypePanel';
+import WeddingGiftOrderExtras from '@/components/orders/order-types/WeddingGiftOrderExtras';
 import PaymentDetailSection from '@/components/orders/sections/PaymentDetailSection';
 import { labeled, nonNeg, readOnly, ORDER_DETAIL_SOFT_INPUT } from '@/components/orders/order-detail-ui';
 import OrderPropertyBar from '@/components/OrderPropertyBar';
@@ -46,8 +47,18 @@ import {
 } from '@/lib/orders';
 import { displayInvoiceNumber, displayQuotationNumber } from '@/lib/record-numbering-core';
 import type { Customer } from '@/lib/types';
-import { parseWeddingGiftConfirmation, addCalendarDays } from '@/lib/wedding-gift-confirmation';
+import { parseWeddingGiftConfirmation, addCalendarDays, inferWeddingPackagingLabel } from '@/lib/wedding-gift-confirmation';
 import { BTN, bi } from '@/lib/ui-labels';
+
+const CREATED_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatCreatedSubtitle(createdAt: string | null | undefined): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(createdAt || '').trim());
+  if (!match) return '';
+  const month = CREATED_MONTHS[Number(match[2]) - 1];
+  if (!month) return '';
+  return `Created ${Number(match[3])} ${month}`;
+}
 
 const SfExpressShipmentModal = dynamic(
   () => import('@/components/SfExpressShipmentModal'),
@@ -396,6 +407,12 @@ export default function OrderDetailPage() {
       if (k === 'expiry_date' || k === 'production_date') continue;
       fieldsPatch[k] = v;
     }
+    const pastedConfirmation = confirmPasteText.trim();
+    if (pastedConfirmation) {
+      fieldsPatch.confirmation_text = pastedConfirmation;
+      const packagingLabel = inferWeddingPackagingLabel(pastedConfirmation);
+      if (packagingLabel) fieldsPatch.packaging_label = packagingLabel;
+    }
     if (fieldsPatch.big_day && fieldsPatch.big_day !== fVal('big_day')) {
       // Big Day change always refreshes derived dates (overrides prior edits).
       fieldsPatch.expiry_date = addCalendarDays(fieldsPatch.big_day, 28);
@@ -452,6 +469,44 @@ export default function OrderDetailPage() {
     setConfirmPasteOpen(true);
   };
 
+  const weddingLayout = isWeddingGiftOrderType(orderType);
+  const formHelpers = { softInput, fVal, fInput, labeled, readOnly, nonNeg, setFieldLocal, patch, setOrder };
+  const typePanel = (
+    <OrderDetailTypePanel
+      orderType={orderType}
+      order={order}
+      form={formHelpers}
+      honourLines={honourLines}
+      honourTotals={honourTotals}
+      honourSuppliers={honourSuppliers}
+      supplierOptions={supplierOptions}
+      setSupplierOptions={setSupplierOptions}
+      commitHonourLines={commitHonourLines}
+      applyHonourSuppliers={applyHonourSuppliers}
+      weddingGiftTotal={weddingGiftTotal}
+      birdNestTotals={bn}
+      bigDayPersistedRef={bigDayPersistedRef}
+      bigDaySavedOnChangeRef={bigDaySavedOnChangeRef}
+      onOpenConfirmPaste={openConfirmPaste}
+      onPreviewImage={setLightbox}
+      syncWeddingGiftDerived={syncWeddingGiftDerived}
+      syncWeddingGiftTotalAmount={syncWeddingGiftTotalAmount}
+      setCoreLocal={setCoreLocal}
+      setLinkedDeliveryDatesLocal={setLinkedDeliveryDatesLocal}
+      commitLinkedDeliveryDates={commitLinkedDeliveryDates}
+      nestieeGiftBoxes={nestieeGiftBoxes}
+      commitCupmokaLines={commitCupmokaLines}
+    />
+  );
+  const paymentSection = (
+    <PaymentDetailSection
+      order={order}
+      dueTotal={dueTotal}
+      form={formHelpers}
+      onReceiptPreview={setLightbox}
+    />
+  );
+
   return (
     <AppLayout>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
@@ -504,9 +559,69 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row gap-6 lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)]">
+      <div className={weddingLayout
+        ? 'flex flex-col lg:flex-row lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)] -mx-4 sm:-mx-6 lg:-mx-8 bg-white border-y border-[#e4e6ea]'
+        : 'flex flex-col lg:flex-row gap-6 lg:items-stretch lg:min-h-0 lg:h-[calc(100vh-7rem)]'}>
         {/* LEFT COLUMN — 70% (scrolls independently on desktop) */}
-        <div className="w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2">
+        <div className={weddingLayout
+          ? 'w-full lg:flex-1 lg:h-full lg:overflow-y-auto px-5 sm:px-8 py-5'
+          : 'w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2'}>
+          {weddingLayout ? (
+            <>
+              <h1 className="mb-3.5 text-[22px] font-bold leading-tight tracking-[-0.01em] text-[#292d34]">{orderTitle(order)}</h1>
+              <OrderPropertyBar
+                variant="clickup"
+                orderType={orderType}
+                status={order.status}
+                paymentStatusLabel={autoStatus}
+                dueDate={parseOrderDueDateField(order.fields)}
+                assigneeIds={parseAssigneeIds(order.fields)}
+                tags={parseOrderTags(order.fields)}
+                users={accountUsers}
+                tagSuggestions={tagSuggestions}
+                onStatusChange={(next) => {
+                  const prev = order.status;
+                  setCoreLocal('status', next);
+                  patch({ core: { status: next } }, { revertStatusTo: prev });
+                }}
+                onDueDateChange={(next) => {
+                  commitLinkedDeliveryDates(next);
+                }}
+                onAssigneesChange={(ids) => {
+                  const serialized = serializeAssigneeIds(ids);
+                  setFieldLocal('assignee_ids', serialized);
+                  patch({ fields: { assignee_ids: serialized } });
+                }}
+                onTagsChange={(nextTags) => {
+                  const serialized = serializeOrderTags(nextTags);
+                  setFieldLocal('tags', serialized);
+                  patch({ fields: { tags: serialized } });
+                  setTagSuggestions((prev) => {
+                    const merged = new Set([...prev, ...nextTags]);
+                    return Array.from(merged).sort((a, b) => a.localeCompare(b, 'zh'));
+                  });
+                }}
+              />
+              <div className="mt-5">
+                {typePanel}
+              </div>
+              <div className="mt-8">
+                {paymentSection}
+              </div>
+              <WeddingGiftOrderExtras
+                order={order}
+                orderType={orderType}
+                invoices={invoices}
+                quotations={quotations}
+                form={formHelpers}
+                setCoreLocal={setCoreLocal}
+                applyCustomerFromList={applyCustomerFromList}
+                syncWeddingGiftTotalAmount={syncWeddingGiftTotalAmount}
+                weddingGiftTotal={weddingGiftTotal}
+              />
+            </>
+          ) : (
+          <>
           {/* Header */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-start justify-between gap-4">
@@ -737,36 +852,11 @@ export default function OrderDetailPage() {
               )}
             </div>
 
-            <OrderDetailTypePanel
-              orderType={orderType}
-              order={order}
-              form={{ softInput, fVal, fInput, labeled, readOnly, nonNeg, setFieldLocal, patch, setOrder }}
-              honourLines={honourLines}
-              honourTotals={honourTotals}
-              honourSuppliers={honourSuppliers}
-              supplierOptions={supplierOptions}
-              setSupplierOptions={setSupplierOptions}
-              commitHonourLines={commitHonourLines}
-              applyHonourSuppliers={applyHonourSuppliers}
-              weddingGiftTotal={weddingGiftTotal}
-              birdNestTotals={bn}
-              bigDayPersistedRef={bigDayPersistedRef}
-              bigDaySavedOnChangeRef={bigDaySavedOnChangeRef}
-              onOpenConfirmPaste={openConfirmPaste}
-              syncWeddingGiftDerived={syncWeddingGiftDerived}
-              syncWeddingGiftTotalAmount={syncWeddingGiftTotalAmount}
-              nestieeGiftBoxes={nestieeGiftBoxes}
-              commitCupmokaLines={commitCupmokaLines}
-            />
+            {typePanel}
 
           </section>
 
-          <PaymentDetailSection
-            order={order}
-            dueTotal={dueTotal}
-            form={{ softInput, fVal, fInput, labeled, readOnly, nonNeg, setFieldLocal, patch, setOrder }}
-            onReceiptPreview={setLightbox}
-          />
+          {paymentSection}
 
                     <EntityAttachments
             className="bg-white rounded-xl border border-gray-200 p-6"
@@ -792,14 +882,21 @@ export default function OrderDetailPage() {
               patch({ fields: { thumbnail_file_id: fileId ? String(fileId) : '' } });
             }}
           />
+          </>
+          )}
         </div>
 
-        {/* RIGHT COLUMN — 30% activity feed (fixed sidebar, feed scrolls) */}
-        <div className="w-full lg:w-[30%] lg:h-full">
+        {/* RIGHT COLUMN — activity feed (fixed sidebar, feed scrolls) */}
+        <div className={weddingLayout
+          ? 'w-full lg:w-[380px] lg:shrink-0 lg:h-full border-t lg:border-t-0 lg:border-l border-[#e4e6ea]'
+          : 'w-full lg:w-[30%] lg:h-full'}>
           <ActivityFeed
             entityType="order"
             entityId={order.id}
             initialActivities={initialActivities}
+            variant={weddingLayout ? 'rail' : 'card'}
+            heading={weddingLayout ? 'Comments' : undefined}
+            subtitle={weddingLayout ? formatCreatedSubtitle(order.created_at) : undefined}
             className="lg:h-full max-h-[75vh] lg:max-h-none"
           />
         </div>

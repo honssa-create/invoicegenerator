@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { orderFileUrl } from '@/lib/image-url';
 import {
   computeBirdNestActualTotal,
@@ -18,6 +19,7 @@ import {
   resolveWeddingConfirmationText,
   resolveWeddingGiftLabel,
   resolveWeddingPackagingLabel,
+  splitWeddingConfirmationPreview,
 } from '@/lib/wedding-gift-confirmation';
 import {
   WEDDING_CLICKUP_FIELDS,
@@ -25,7 +27,6 @@ import {
   WEDDING_STEW_PROGRESS,
   type WeddingClickUpField,
 } from '@/lib/wedding-gift-clickup-fields';
-import { bi } from '@/lib/ui-labels';
 import type { WeddingGiftOrderDetailProps } from '../order-detail-types';
 import { CLICKUP_PLAIN_INPUT, ClickUpDash, ClickUpFieldRow, ClickUpReadValue } from './clickup-field-row';
 
@@ -51,6 +52,78 @@ const EXTRA_CAPACITIES = [
 function capacityPillLabel(value: string): string {
   const normalized = normalizeWeddingGiftBottleCapacity(value);
   return CAPACITY_PILL[normalized] || value;
+}
+
+function ExpandChevron({ up = false }: { up?: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden className={up ? 'rotate-180' : ''}>
+      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ConfirmationDescription({
+  text,
+  onPaste,
+}: {
+  text: string;
+  onPaste: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!text.trim()) {
+    return (
+      <button type="button" onClick={onPaste} className="text-[13px] text-[#87909e] hover:text-[#292d34]">
+        Paste confirmation
+      </button>
+    );
+  }
+  const { preview, rest } = splitWeddingConfirmationPreview(text);
+  const canToggle = Boolean(rest);
+  const shown = !canToggle || expanded ? text : preview;
+  const lines = shown.split('\n');
+  const lastContent = lines.reduce((found, line, index) => (line.trim() ? index : found), 0);
+
+  return (
+    <div className="max-w-[640px] text-[13px] leading-[1.45] text-[#292d34]">
+      {lines.map((line, index) => {
+        const heading = index === 0 && /confirmation|即食燕窩回禮/i.test(line);
+        const showExpand = canToggle && !expanded && index === lastContent;
+        if (!line.trim() && !showExpand) {
+          return <div key={index} className="h-2" />;
+        }
+        return (
+          <div key={index} className="flex items-start gap-4">
+            <p className={`min-w-0 flex-1 whitespace-pre-wrap ${heading ? 'font-semibold' : ''}`}>{line || '\u00a0'}</p>
+            {showExpand ? (
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-[13px] text-[#7c828d] hover:text-[#292d34]"
+              >
+                <ExpandChevron />
+                Expand
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+      {canToggle && expanded ? (
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <button type="button" onClick={onPaste} className="text-[13px] text-[#87909e] hover:text-[#292d34]">
+            Paste confirmation
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="inline-flex shrink-0 items-center gap-1 text-[13px] text-[#7c828d] hover:text-[#292d34]"
+          >
+            <ExpandChevron up />
+            Collapse
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function WeddingGiftOrderDetail({
@@ -434,27 +507,9 @@ export default function WeddingGiftOrderDetail({
 
   return (
     <div>
-      <div className="mb-4 max-w-[640px]">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="text-[13px] text-[#7c828d]">
-            {confirmation
-              ? bi('Confirmation', '確認訊息')
-              : bi('Paste a confirmation message to autofill fields', '貼上確認訊息以自動填入欄位')}
-          </p>
-          <button
-            type="button"
-            onClick={onOpenConfirmPaste}
-            className="shrink-0 text-[13px] font-semibold text-brand-700 hover:underline"
-          >
-            {bi('Paste confirmation', '貼上確認訊息')}
-          </button>
-        </div>
-        {confirmation ? (
-          <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#292d34]">{confirmation}</div>
-        ) : null}
-      </div>
+      <ConfirmationDescription text={confirmation} onPaste={onOpenConfirmPaste} />
 
-      <div className="mb-1 mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-[#292d34]">
+      <div className="mb-1 mt-5 flex items-center gap-1.5 text-[13px] font-semibold text-[#292d34]">
         <span className="text-[10px] text-[#7c828d]" aria-hidden>▾</span>
         Fields
       </div>

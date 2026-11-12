@@ -568,7 +568,7 @@ export default function OrderDetailPage() {
           : 'w-full lg:w-[70%] space-y-6 lg:h-full lg:overflow-y-auto lg:pr-2'}>
           {weddingLayout ? (
             <>
-              <h1 className="text-[22px] font-bold tracking-tight text-[#292d34] mb-3">{orderTitle(order)}</h1>
+              <h1 className="mb-3.5 text-[22px] font-bold leading-tight tracking-[-0.01em] text-[#292d34]">{orderTitle(order)}</h1>
               <OrderPropertyBar
                 variant="clickup"
                 orderType={orderType}
@@ -602,7 +602,7 @@ export default function OrderDetailPage() {
                   });
                 }}
               />
-              <div className="mt-4">
+              <div className="mt-5">
                 {typePanel}
               </div>
               <div className="mt-8">

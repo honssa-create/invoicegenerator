@@ -283,6 +283,44 @@ export function resolveWeddingPackagingLabel(input: {
   return inferWeddingPackagingLabel(`${input.confirmationText || ''}\n${input.notes || ''}`);
 }
 
+/**
+ * Collapsed ClickUp description: heading, Big Day lines, and the first product
+ * line (for example 45ml). Everything after that stays behind Expand.
+ */
+export function splitWeddingConfirmationPreview(text: string): { preview: string; rest: string } {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
+  if (!normalized) return { preview: '', rest: '' };
+  const lines = normalized.split('\n');
+  let content = 0;
+  let cut = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    content += 1;
+    const heading = content === 1 && /confirmation|即食燕窩回禮/i.test(line);
+    const product = !heading && /(?:\d+\s*ml|燕窩回禮)/i.test(line);
+    if (product) {
+      cut = i;
+      break;
+    }
+  }
+  if (cut < 0) {
+    let seen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      seen += 1;
+      if (seen >= 4) {
+        cut = i;
+        break;
+      }
+    }
+  }
+  if (cut < 0) return { preview: normalized, rest: '' };
+  const rest = lines.slice(cut + 1).join('\n').trim();
+  if (!rest) return { preview: normalized, rest: '' };
+  return { preview: lines.slice(0, cut + 1).join('\n').replace(/\n+$/g, ''), rest };
+}
+
 export function resolveWeddingGiftLabel(input: {
   giftLabel?: string | null;
   confirmationText?: string | null;

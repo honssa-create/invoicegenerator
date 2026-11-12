@@ -57,6 +57,24 @@ function IconTag({ className = '' }: { className?: string }) {
   );
 }
 
+function IconFlag({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
+      <path d="M6 4v16" strokeLinecap="round" />
+      <path d="M6 5h10l-2 3.5L16 12H6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconClock({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconCalendar({ className = '' }: { className?: string }) {
   return (
     <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
@@ -156,6 +174,169 @@ export default function OrderPropertyBar({
   const removeTag = (tag: string) => {
     onTagsChange(tags.filter((t) => t !== tag));
   };
+
+  if (clickup) {
+    const dayLabel = (() => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dueDate.trim());
+      if (!match) return '';
+      return `${Number(match[3])}/${Number(match[2])}`;
+    })();
+    const meta = (icon: ReactNode, label: string, value: ReactNode) => (
+      <div className="flex min-h-[28px] min-w-0 items-center gap-2.5">
+        <div className="flex w-[108px] shrink-0 items-center gap-[7px] text-[13px] text-[#7c828d]">
+          <span className="text-[#87909e]">{icon}</span>
+          <span>{label}</span>
+        </div>
+        <div className="min-w-0 text-[13px] text-[#292d34]">{value}</div>
+      </div>
+    );
+    const empty = <span className="text-[13px] text-[#87909e]">Empty</span>;
+
+    return (
+      <div className="grid max-w-[720px] grid-cols-1 gap-x-12 gap-y-2 sm:grid-cols-2">
+        {meta(
+          <IconTarget className="text-[#87909e]" />,
+          'Status',
+          <div className="relative inline-flex">
+            <select
+              aria-label="Status"
+              value={status}
+              onChange={(e) => onStatusChange(e.target.value)}
+              className="cursor-pointer appearance-none rounded-[6px] border border-[#e4e6ea] bg-white py-0.5 pl-2 pr-5 text-[12px] font-semibold uppercase tracking-[0.03em] text-[#5c6370] outline-none"
+            >
+              {statusList.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-[#87909e]">▾</span>
+          </div>,
+        )}
+        {meta(
+          <IconPerson className="text-[#87909e]" />,
+          'Assignees',
+          <div className="relative min-w-0" ref={assigneesRef}>
+            <button
+              type="button"
+              onClick={() => setAssigneesOpen((open) => !open)}
+              className="flex min-h-[28px] flex-wrap items-center gap-1.5 text-left"
+            >
+              {selectedUsers.length === 0 ? empty : selectedUsers.map((user) => (
+                <span key={user.id} title={user.email} className="inline-flex items-center gap-1.5 text-[13px] text-[#292d34]">
+                  <span className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[#7c6bc4] text-[10px] font-bold text-white">
+                    {initials(user.name)}
+                  </span>
+                  <span className="max-w-[160px] truncate">{user.name}</span>
+                </span>
+              ))}
+            </button>
+            {assigneesOpen && (
+              <div className="absolute left-0 z-30 mt-1 max-h-56 w-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                {users.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-gray-400">{bi('No users', '沒有用戶')}</p>
+                ) : (
+                  users.map((user) => {
+                    const checked = assigneeIds.includes(user.id);
+                    return (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => toggleAssignee(user.id)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      >
+                        <span className={`inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] ${checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-gray-300 text-transparent'}`}>
+                          ✓
+                        </span>
+                        <span className="truncate font-medium text-gray-900">{user.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>,
+        )}
+        {meta(
+          <IconCalendar className="text-[#87909e]" />,
+          'Dates',
+          <label className="relative inline-flex cursor-pointer items-center gap-1.5 text-[13px]">
+            <span className="text-[#87909e]">Start</span>
+            <span className="text-[#b0b6c0]">→</span>
+            <span className={dayLabel ? 'text-[#292d34]' : 'text-[#87909e]'}>{dayLabel || 'Empty'}</span>
+            <input
+              type="date"
+              aria-label="Dates"
+              value={dueDate}
+              onChange={(e) => onDueDateChange(e.target.value)}
+              className="absolute inset-0 cursor-pointer opacity-0"
+            />
+          </label>,
+        )}
+        {meta(<IconFlag className="text-[#87909e]" />, 'Priority', empty)}
+        {meta(<IconClock className="text-[#87909e]" />, 'Time estimate', empty)}
+        {meta(<IconClock className="text-[#87909e]" />, 'Track time', <span className="text-[13px] text-[#87909e]">Start</span>)}
+        {meta(
+          <IconTag className="text-[#87909e]" />,
+          'Tags',
+          <div className="relative min-w-0" ref={tagsRef}>
+            <div className="flex min-h-[28px] flex-wrap items-center gap-1.5">
+              {tags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => removeTag(tag)}
+                  title={bi('Remove tag', '移除標籤')}
+                  className="inline-flex items-center gap-1 rounded-md bg-[#C23A8A] px-2 py-0.5 text-xs font-medium text-white hover:bg-[#A02D6C]"
+                >
+                  {tag}
+                  <span className="opacity-80">×</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setTagsOpen((open) => !open)}
+                className="px-1 text-[13px] text-[#87909e] hover:text-[#292d34]"
+              >
+                {tags.length ? '+' : 'Empty'}
+              </button>
+            </div>
+            {tagsOpen && (
+              <div className="absolute left-0 z-30 mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg">
+                <div className="border-b border-gray-100 p-2">
+                  <input
+                    autoFocus
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (q && !exactTag) addTag(q);
+                        else if (filteredTags[0]) addTag(filteredTags[0]);
+                        else if (q) addTag(q);
+                      }
+                    }}
+                    placeholder={bi('Search or add tag…', '搜尋或新增標籤…')}
+                    className="w-full rounded border border-gray-200 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div className="max-h-48 overflow-y-auto py-1">
+                  {filteredTags.map((tag) => (
+                    <button key={tag} type="button" onClick={() => addTag(tag)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50">
+                      {tag}
+                    </button>
+                  ))}
+                  {q && !exactTag && (
+                    <button type="button" onClick={() => addTag(q)} className="w-full px-3 py-2 text-left text-sm font-medium text-brand-700 hover:bg-brand-50">
+                      {bi('Add', '新增')} “{q}”
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>,
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={clickup ? 'mt-1' : 'mt-3 space-y-2.5'}>

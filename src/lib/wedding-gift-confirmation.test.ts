@@ -8,6 +8,7 @@ import {
   resolveWeddingConfirmationText,
   resolveWeddingGiftLabel,
   resolveWeddingPackagingLabel,
+  splitWeddingConfirmationPreview,
 } from './wedding-gift-confirmation';
 
 const SAMPLE = `【📩*即食燕窩回禮 𝑪𝒐𝒏𝒇𝒊𝒓𝒎𝒂𝒕𝒊𝒐𝒏*】
@@ -190,6 +191,22 @@ describe('wedding clickup confirmation display', () => {
     expect(resolveWeddingConfirmationText({
       notes: '【從確認訊息】\n總額：$3,025',
     })).toBe('');
+  });
+
+  it('collapses the confirmation after the first product line', () => {
+    const text = `【即食燕窩回禮 Confirmation】
+
+日期 The Big Day：
+2026年11月28日 (Saturday)
+
+45ml 即食燕窩回禮
+數量：70樽
+包裝：金色蝴蝶結紗袋包裝 x 70`;
+    const split = splitWeddingConfirmationPreview(text);
+    expect(split.preview).toContain('【即食燕窩回禮 Confirmation】');
+    expect(split.preview).toContain('The Big Day');
+    expect(split.preview.trim().endsWith('45ml 即食燕窩回禮')).toBe(true);
+    expect(split.rest).toContain('數量：70樽');
   });
 
   it('infers gold gauze packaging from the confirmation copy', () => {
